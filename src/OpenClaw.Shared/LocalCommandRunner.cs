@@ -14,6 +14,8 @@ public class LocalCommandRunner : ICommandRunner
 {
     private readonly IOpenClawLogger _logger;
     
+    private const int OutputDrainTimeoutMs = 500;
+    
     public string Name => "local";
     
     public LocalCommandRunner(IOpenClawLogger? logger = null)
@@ -61,6 +63,15 @@ public class LocalCommandRunner : ICommandRunner
         process.OutputDataReceived += (_, e) => { if (e.Data != null) stdoutBuilder.AppendLine(e.Data); };
         process.ErrorDataReceived += (_, e) => { if (e.Data != null) stderrBuilder.AppendLine(e.Data); };
         
+        // Use the Exited event rather than WaitForExitAsync to detect process exit.
+        // WaitForExitAsync (.NET 6+) internally calls WaitForExit() which blocks until
+        // async stream reads reach EOF. When CLI tools communicate via local IPC (e.g.
+        // Obsidian.com, docker), child processes may inherit the stdout pipe write handle,
+        // preventing EOF and causing WaitForExitAsync to hang indefinitely.
+        var exitTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        process.EnableRaisingEvents = true;
+        process.Exited += (_, _) => exitTcs.TrySetResult(true);
+        
         try
         {
             process.Start();
@@ -78,6 +89,10 @@ public class LocalCommandRunner : ICommandRunner
             };
         }
         
+        // Handle the race where the process exits before or during Start()
+        if (process.HasExited)
+            exitTcs.TrySetResult(true);
+        
         var timedOut = false;
         
         try
@@ -89,7 +104,7 @@ public class LocalCommandRunner : ICommandRunner
                 
                 try
                 {
-                    await process.WaitForExitAsync(timeoutCts.Token);
+                    await exitTcs.Task.WaitAsync(timeoutCts.Token);
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                 {
@@ -100,13 +115,27 @@ public class LocalCommandRunner : ICommandRunner
             }
             else
             {
-                await process.WaitForExitAsync(ct);
+                await exitTcs.Task.WaitAsync(ct);
             }
         }
         catch (OperationCanceledException)
         {
             KillProcess(process);
             throw;
+        }
+        
+        // Drain remaining buffered output. After the process exits its data is already in
+        // the pipe buffer; the async reader delivers it nearly instantly. We run WaitForExit()
+        // on a background thread with a 500 ms deadline so we don't block forever if orphaned
+        // child processes have inherited the pipe write handle and are still running.
+        var drainTask = Task.Run(() =>
+        {
+            try { process.WaitForExit(); }
+            catch { /* process may already be gone */ }
+        });
+        if (await Task.WhenAny(drainTask, Task.Delay(OutputDrainTimeoutMs, CancellationToken.None)) != drainTask)
+        {
+            _logger.Warn("[EXEC] Output drain timed out; child processes may hold the pipe open");
         }
         
         sw.Stop();
