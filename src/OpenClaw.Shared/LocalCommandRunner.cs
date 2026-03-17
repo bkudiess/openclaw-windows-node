@@ -60,9 +60,10 @@ public class LocalCommandRunner : ICommandRunner
         
         var stdoutBuilder = new StringBuilder();
         var stderrBuilder = new StringBuilder();
+        var outputLock = new object();
         
-        process.OutputDataReceived += (_, e) => { if (e.Data != null) stdoutBuilder.AppendLine(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data != null) stderrBuilder.AppendLine(e.Data); };
+        process.OutputDataReceived += (_, e) => { if (e.Data != null) { lock (outputLock) { stdoutBuilder.AppendLine(e.Data); } } };
+        process.ErrorDataReceived += (_, e) => { if (e.Data != null) { lock (outputLock) { stderrBuilder.AppendLine(e.Data); } } };
         
         // Use the Exited event rather than WaitForExitAsync to detect process exit.
         // WaitForExitAsync (.NET 6+) internally calls WaitForExit() which blocks until
@@ -141,10 +142,17 @@ public class LocalCommandRunner : ICommandRunner
         
         sw.Stop();
         
+        string stdout, stderr;
+        lock (outputLock)
+        {
+            stdout = stdoutBuilder.ToString().TrimEnd();
+            stderr = stderrBuilder.ToString().TrimEnd();
+        }
+        
         var result = new CommandResult
         {
-            Stdout = stdoutBuilder.ToString().TrimEnd(),
-            Stderr = stderrBuilder.ToString().TrimEnd(),
+            Stdout = stdout,
+            Stderr = stderr,
             ExitCode = timedOut ? -1 : process.ExitCode,
             TimedOut = timedOut,
             DurationMs = sw.ElapsedMilliseconds
@@ -175,9 +183,9 @@ public class LocalCommandRunner : ICommandRunner
     }
     
     /// <summary>
-    /// Wraps an argument to prevent shell splitting. Uses shell-appropriate
-    /// quoting: double quotes for cmd.exe, single quotes for PowerShell.
-    /// PowerShell requires single quotes because double quotes in
+    /// Wraps an argument to prevent shell splitting and metacharacter interpretation.
+    /// Uses shell-appropriate quoting: double quotes for cmd.exe, single quotes for
+    /// PowerShell. PowerShell requires single quotes because double quotes in
     /// ProcessStartInfo.Arguments are stripped by the Windows CRT argv parser
     /// before PowerShell receives the -Command string.
     /// </summary>
@@ -186,13 +194,15 @@ public class LocalCommandRunner : ICommandRunner
         if (string.IsNullOrEmpty(arg))
             return isCmd ? "\"\""  : "''";
         
-        if (!arg.Contains(' ') && !arg.Contains('"') && !arg.Contains('\'') && !arg.Contains('\t'))
+        // Quote when the arg contains whitespace, quotes, or any shell metacharacters
+        // that could cause splitting or unintended interpretation.
+        if (!NeedsQuoting(arg))
             return arg;
         
         if (isCmd)
         {
-            // cmd.exe: wrap in double quotes, escape inner double quotes with backslash
-            return "\"" + arg.Replace("\"", "\\\"") + "\"";
+            // cmd.exe: wrap in double quotes, escape inner double quotes by doubling
+            return "\"" + arg.Replace("\"", "\"\"") + "\"";
         }
         else
         {
@@ -200,6 +210,24 @@ public class LocalCommandRunner : ICommandRunner
             // by doubling them (PowerShell's single-quote escape convention)
             return "'" + arg.Replace("'", "''") + "'";
         }
+    }
+    
+    private static bool NeedsQuoting(string arg)
+    {
+        foreach (var c in arg)
+        {
+            switch (c)
+            {
+                case ' ': case '\t': case '"': case '\'':
+                case '&': case '|': case ';': case '<': case '>':
+                case '(': case ')': case '^': case '%': case '!':
+                case '$': case '`': case '*': case '?': case '[':
+                case ']': case '{': case '}': case '~': case '\n':
+                case '\r':
+                    return true;
+            }
+        }
+        return false;
     }
     
     private void KillProcess(Process process)
