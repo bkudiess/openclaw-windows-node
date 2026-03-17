@@ -1265,6 +1265,13 @@ public partial class App : Application
     private void OnChannelHealthUpdated(object? sender, ChannelHealth[] channels)
     {
         _lastChannels = channels;
+
+        _dispatcherQueue?.TryEnqueue(() =>
+        {
+            if (_statusDetailWindow != null && !_statusDetailWindow.IsClosed)
+                _statusDetailWindow.UpdateStatus(
+                    _currentStatus, _lastChannels, _lastSessions, _lastUsage, _lastCheckTime);
+        });
     }
 
     private void OnSessionsUpdated(object? sender, SessionInfo[] sessions)

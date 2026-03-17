@@ -1086,11 +1086,10 @@ public class OpenClawGatewayClient : IDisposable
             healthList.Add(ch);
         }
 
-        if (healthList.Count > 0)
-        {
-            _logger.Info($"Channel health: {string.Join(", ", healthList.ConvertAll(c => $"{c.Name}={c.Status}"))}");
-            ChannelHealthUpdated?.Invoke(this, healthList.ToArray());
-        }
+        _logger.Info(healthList.Count > 0
+            ? $"Channel health: {string.Join(", ", healthList.ConvertAll(c => $"{c.Name}={c.Status}"))}"
+            : "Channel health: no channels");
+        ChannelHealthUpdated?.Invoke(this, healthList.ToArray());
     }
 
     private void ParseSessions(JsonElement sessions)
