@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Xunit;
 using OpenClaw.Shared;
@@ -336,5 +338,47 @@ public class LocalCommandRunnerIntegrationTests
         });
 
         Assert.NotEqual(0, result.ExitCode);
+    }
+
+    /// <summary>
+    /// Regression test for: system.run hangs indefinitely for CLI tools that connect to a
+    /// running process via local IPC (e.g. Obsidian.com, docker version).
+    ///
+    /// Root cause: WaitForExitAsync (.NET 6+) internally calls WaitForExit() which blocks
+    /// until async stream reads reach EOF. When a CLI tool spawns a background child process
+    /// (as IPC clients often do), that child inherits the stdout pipe write handle. The outer
+    /// process exits, but the pipe stays open because the child still holds the write end —
+    /// so WaitForExitAsync never returns.
+    ///
+    /// Fix: Use process.Exited event (fires on process exit only, not stream EOF) then drain
+    /// remaining buffered output with a 500 ms deadline.
+    /// </summary>
+    [IntegrationFact]
+    public async Task Run_CompletesPromptly_WhenOrphanChildProcessHoldsStdoutHandle()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return; // cmd.exe / start / timeout are Windows-only
+
+        // Start a cmd that echoes output and then spawns a long-running background child.
+        // The background child inherits the Hub's stdout pipe write handle, so EOF never
+        // arrives on the pipe after the outer cmd exits.
+        // Before the fix: WaitForExitAsync hangs for up to 30 s (the background child's lifetime).
+        // After the fix: returns within the ~500 ms drain window.
+        var runner = new LocalCommandRunner();
+        var sw = Stopwatch.StartNew();
+        var result = await runner.RunAsync(new CommandRequest
+        {
+            Command = @"echo hello& start """" /B cmd.exe /C timeout /T 30 /NOBREAK >nul",
+            Shell = "cmd",
+            TimeoutMs = 5000
+        });
+        sw.Stop();
+
+        Assert.Contains("hello", result.Stdout, StringComparison.OrdinalIgnoreCase);
+        Assert.False(result.TimedOut, "Command should not have timed out");
+        // Allow 3 s: 500 ms drain deadline + generous margin for CI environment variability.
+        // Without the fix this would block for ~30 s (the background child's lifetime).
+        Assert.True(sw.ElapsedMilliseconds < 3000,
+            $"Command took {sw.ElapsedMilliseconds}ms — expected < 3000ms (possible WaitForExitAsync hang regression)");
     }
 }

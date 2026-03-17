@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,6 +14,8 @@ namespace OpenClaw.Shared;
 public class LocalCommandRunner : ICommandRunner
 {
     private readonly IOpenClawLogger _logger;
+    
+    private const int OutputDrainTimeoutMs = 500;
     
     public string Name => "local";
     
@@ -57,9 +60,19 @@ public class LocalCommandRunner : ICommandRunner
         
         var stdoutBuilder = new StringBuilder();
         var stderrBuilder = new StringBuilder();
+        var outputLock = new object();
         
-        process.OutputDataReceived += (_, e) => { if (e.Data != null) stdoutBuilder.AppendLine(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data != null) stderrBuilder.AppendLine(e.Data); };
+        process.OutputDataReceived += (_, e) => { if (e.Data != null) { lock (outputLock) { stdoutBuilder.AppendLine(e.Data); } } };
+        process.ErrorDataReceived += (_, e) => { if (e.Data != null) { lock (outputLock) { stderrBuilder.AppendLine(e.Data); } } };
+        
+        // Use the Exited event rather than WaitForExitAsync to detect process exit.
+        // WaitForExitAsync (.NET 6+) internally calls WaitForExit() which blocks until
+        // async stream reads reach EOF. When CLI tools communicate via local IPC (e.g.
+        // Obsidian.com, docker), child processes may inherit the stdout pipe write handle,
+        // preventing EOF and causing WaitForExitAsync to hang indefinitely.
+        var exitTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        process.EnableRaisingEvents = true;
+        process.Exited += (_, _) => exitTcs.TrySetResult(true);
         
         try
         {
@@ -78,6 +91,10 @@ public class LocalCommandRunner : ICommandRunner
             };
         }
         
+        // Handle the race where the process exits before or during Start()
+        if (process.HasExited)
+            exitTcs.TrySetResult(true);
+        
         var timedOut = false;
         
         try
@@ -89,7 +106,7 @@ public class LocalCommandRunner : ICommandRunner
                 
                 try
                 {
-                    await process.WaitForExitAsync(timeoutCts.Token);
+                    await exitTcs.Task.WaitAsync(timeoutCts.Token);
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                 {
@@ -100,7 +117,7 @@ public class LocalCommandRunner : ICommandRunner
             }
             else
             {
-                await process.WaitForExitAsync(ct);
+                await exitTcs.Task.WaitAsync(ct);
             }
         }
         catch (OperationCanceledException)
@@ -109,12 +126,33 @@ public class LocalCommandRunner : ICommandRunner
             throw;
         }
         
+        // Drain remaining buffered output. After the process exits its data is already in
+        // the pipe buffer; the async reader delivers it nearly instantly. We run WaitForExit()
+        // on a background thread with a 500 ms deadline so we don't block forever if orphaned
+        // child processes have inherited the pipe write handle and are still running.
+        var drainTask = Task.Run(() =>
+        {
+            try { process.WaitForExit(); }
+            catch { /* process may already be gone */ }
+        });
+        if (await Task.WhenAny(drainTask, Task.Delay(OutputDrainTimeoutMs, CancellationToken.None)) != drainTask)
+        {
+            _logger.Warn("[EXEC] Output drain timed out; child processes may hold the pipe open");
+        }
+        
         sw.Stop();
+        
+        string stdout, stderr;
+        lock (outputLock)
+        {
+            stdout = stdoutBuilder.ToString().TrimEnd();
+            stderr = stderrBuilder.ToString().TrimEnd();
+        }
         
         var result = new CommandResult
         {
-            Stdout = stdoutBuilder.ToString().TrimEnd(),
-            Stderr = stderrBuilder.ToString().TrimEnd(),
+            Stdout = stdout,
+            Stderr = stderr,
             ExitCode = timedOut ? -1 : process.ExitCode,
             TimedOut = timedOut,
             DurationMs = sw.ElapsedMilliseconds
@@ -129,10 +167,11 @@ public class LocalCommandRunner : ICommandRunner
     {
         var shell = (request.Shell ?? "powershell").ToLowerInvariant();
         var command = request.Command;
+        var isCmd = shell == "cmd";
         
         if (request.Args is { Length: > 0 })
         {
-            command = command + " " + string.Join(" ", request.Args);
+            command = command + " " + string.Join(" ", request.Args.Select(a => ShellQuoting.QuoteForShell(a, isCmd)));
         }
         
         return shell switch
