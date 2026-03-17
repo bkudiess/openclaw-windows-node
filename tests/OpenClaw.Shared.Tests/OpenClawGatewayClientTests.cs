@@ -140,6 +140,24 @@ public class OpenClawGatewayClientTests
             return parsed;
         }
 
+        public (ChannelHealth[] channels, bool eventFired) ParseChannelHealthPayload(string payloadJson)
+        {
+            ChannelHealth[]? parsed = null;
+            EventHandler<ChannelHealth[]> handler = (_, ch) => parsed = ch;
+            _client.ChannelHealthUpdated += handler;
+
+            try
+            {
+                InvokePrivatePayloadParser("ParseChannelHealth", payloadJson);
+            }
+            finally
+            {
+                _client.ChannelHealthUpdated -= handler;
+            }
+
+            return (parsed ?? Array.Empty<ChannelHealth>(), parsed != null);
+        }
+
         private void InvokePrivatePayloadParser(string methodName, string payloadJson)
         {
             using var doc = JsonDocument.Parse(payloadJson);
@@ -593,5 +611,44 @@ public class OpenClawGatewayClientTests
         Assert.False(flags.UsageCost);
         Assert.False(flags.SessionPreview);
         Assert.False(flags.NodeList);
+    }
+
+    [Fact]
+    public void ParseChannelHealth_WithChannels_FiresEventWithCorrectNames()
+    {
+        var helper = new GatewayClientTestHelper();
+        var json = """{"discord":{"status":"running","running":true},"telegram":{"status":"ready","configured":true}}""";
+
+        var (channels, fired) = helper.ParseChannelHealthPayload(json);
+
+        Assert.True(fired);
+        Assert.Equal(2, channels.Length);
+        Assert.Contains(channels, c => c.Name == "discord");
+        Assert.Contains(channels, c => c.Name == "telegram");
+    }
+
+    [Fact]
+    public void ParseChannelHealth_EmptyObject_FiresEventWithEmptyArray()
+    {
+        var helper = new GatewayClientTestHelper();
+        var json = "{}";
+
+        var (channels, fired) = helper.ParseChannelHealthPayload(json);
+
+        // Event must fire even when there are no channels so removed channels are cleared
+        Assert.True(fired, "ChannelHealthUpdated should fire even when channels is empty");
+        Assert.Empty(channels);
+    }
+
+    [Fact]
+    public void ParseChannelHealth_StatusField_TakesPriorityOverDerivedStatus()
+    {
+        var helper = new GatewayClientTestHelper();
+        var json = """{"discord":{"status":"degraded","running":true}}""";
+
+        var (channels, _) = helper.ParseChannelHealthPayload(json);
+
+        Assert.Single(channels);
+        Assert.Equal("degraded", channels[0].Status);
     }
 }
