@@ -569,8 +569,8 @@ public partial class App : Application
             
             // Show toast confirming copy
             new ToastContentBuilder()
-                .AddText("📋 Device ID Copied")
-                .AddText($"Run: openclaw devices approve {_nodeService.ShortDeviceId}...")
+                .AddText(LocalizationHelper.GetString("Toast_DeviceIdCopied"))
+                .AddText(string.Format(LocalizationHelper.GetString("Toast_DeviceIdCopiedDetail"), _nodeService.ShortDeviceId))
                 .Show();
         }
         catch (Exception ex)
@@ -598,8 +598,8 @@ public partial class App : Application
             global::Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
 
             new ToastContentBuilder()
-                .AddText("📋 Node summary copied")
-                .AddText($"{_lastNodes.Length} node(s) copied to clipboard")
+                .AddText(LocalizationHelper.GetString("Toast_NodeSummaryCopied"))
+                .AddText(string.Format(LocalizationHelper.GetString("Toast_NodeSummaryCopiedDetail"), _lastNodes.Length))
                 .Show();
         }
         catch (Exception ex)
@@ -655,8 +655,8 @@ public partial class App : Application
             if (!sent)
             {
                 new ToastContentBuilder()
-                    .AddText("❌ Session action failed")
-                    .AddText("Could not send request to gateway.")
+                    .AddText(LocalizationHelper.GetString("Toast_SessionActionFailed"))
+                    .AddText(LocalizationHelper.GetString("Toast_SessionActionFailedDetail"))
                     .Show();
                 return;
             }
@@ -672,7 +672,7 @@ public partial class App : Application
             try
             {
                 new ToastContentBuilder()
-                    .AddText("❌ Session action failed")
+                    .AddText(LocalizationHelper.GetString("Toast_SessionActionFailed"))
                     .AddText(ex.Message)
                     .Show();
             }
@@ -1158,8 +1158,8 @@ public partial class App : Application
             try
             {
                 new ToastContentBuilder()
-                    .AddText("🔌 Node Mode Active")
-                    .AddText("This PC can now receive commands from the agent (canvas, screenshots)")
+                    .AddText(LocalizationHelper.GetString("Toast_NodeModeActive"))
+                    .AddText(LocalizationHelper.GetString("Toast_NodeModeActiveDetail"))
                     .Show();
             }
             catch { /* ignore */ }
@@ -1177,16 +1177,16 @@ public partial class App : Application
                 AddRecentActivity("Node pairing pending", category: "node", dashboardPath: "nodes", nodeId: args.DeviceId);
                 // Show toast with approval instructions
                 new ToastContentBuilder()
-                    .AddText("⏳ Awaiting Pairing Approval")
-                    .AddText($"Run on gateway: openclaw devices approve {args.DeviceId.Substring(0, 16)}...")
+                    .AddText(LocalizationHelper.GetString("Toast_PairingPending"))
+                    .AddText(string.Format(LocalizationHelper.GetString("Toast_PairingPendingDetail"), args.DeviceId.Substring(0, 16)))
                     .Show();
             }
             else if (args.Status == OpenClaw.Shared.PairingStatus.Paired)
             {
                 AddRecentActivity("Node paired", category: "node", dashboardPath: "nodes", nodeId: args.DeviceId);
                 new ToastContentBuilder()
-                    .AddText("✅ Node Paired!")
-                    .AddText("This PC can now receive commands from the agent")
+                    .AddText(LocalizationHelper.GetString("Toast_NodePaired"))
+                    .AddText(LocalizationHelper.GetString("Toast_NodePairedDetail"))
                     .Show();
             }
         }
@@ -1499,8 +1499,8 @@ public partial class App : Application
             if (userInitiated)
             {
                 new ToastContentBuilder()
-                    .AddText("Health Check")
-                    .AddText("Gateway is not connected yet.")
+                    .AddText(LocalizationHelper.GetString("Toast_HealthCheck"))
+                    .AddText(LocalizationHelper.GetString("Toast_HealthCheckNotConnected"))
                     .Show();
             }
             return;
@@ -1513,8 +1513,8 @@ public partial class App : Application
             if (userInitiated)
             {
                 new ToastContentBuilder()
-                    .AddText("Health Check")
-                    .AddText("Health check request sent.")
+                    .AddText(LocalizationHelper.GetString("Toast_HealthCheck"))
+                    .AddText(LocalizationHelper.GetString("Toast_HealthCheckSent"))
                     .Show();
             }
         }
@@ -1524,7 +1524,7 @@ public partial class App : Application
             if (userInitiated)
             {
                 new ToastContentBuilder()
-                    .AddText("Health Check Failed")
+                    .AddText(LocalizationHelper.GetString("Toast_HealthCheckFailed"))
                     .AddText(ex.Message)
                     .Show();
             }
@@ -1744,10 +1744,10 @@ public partial class App : Application
         try
         {
             new ToastContentBuilder()
-                .AddText("⚡ New: Activity Stream")
-                .AddText("Open the tray menu to view live sessions, usage, and node activity in one flyout.")
+                .AddText(LocalizationHelper.GetString("Toast_ActivityStreamTip"))
+                .AddText(LocalizationHelper.GetString("Toast_ActivityStreamTipDetail"))
                 .AddButton(new ToastButton()
-                    .SetContent("Open Activity Stream")
+                    .SetContent(LocalizationHelper.GetString("Toast_ActivityStreamTipButton"))
                     .AddArgument("action", "open_activity"))
                 .Show();
         }
