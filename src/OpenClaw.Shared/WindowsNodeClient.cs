@@ -4,6 +4,8 @@ using System.Linq;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -26,6 +28,13 @@ public class WindowsNodeClient : IDisposable
     private bool _disposed;
     private int _reconnectAttempts;
     private static readonly int[] BackoffMs = { 1000, 2000, 4000, 8000, 15000, 30000, 60000 };
+
+    // Compiled regex for command format validation — reused on every node.invoke message.
+    private static readonly Regex _commandFormatRegex = new(@"^[a-zA-Z0-9._-]+$", RegexOptions.Compiled);
+
+    // Cached JsonSerializerOptions — expensive to construct; reuse across all serialization calls.
+    private static readonly JsonSerializerOptions _jsonOptionsIgnoreNull = new() { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
+    private static readonly JsonSerializerOptions _jsonOptionsIndented = new() { WriteIndented = true };
     
     // Node capabilities registry
     private readonly List<INodeCapability> _capabilities = new();
@@ -345,7 +354,7 @@ public class WindowsNodeClient : IDisposable
         
         // Validate command format
         if (string.IsNullOrEmpty(command) || command.Length > 100 || 
-            !System.Text.RegularExpressions.Regex.IsMatch(command, @"^[a-zA-Z0-9._-]+$"))
+            !_commandFormatRegex.IsMatch(command))
         {
             _logger.Warn($"[NODE] Invalid command format: {command}");
             await SendNodeInvokeResultAsync(requestId, false, null, "Invalid command format");
@@ -432,10 +441,7 @@ public class WindowsNodeClient : IDisposable
             }
         };
         
-        var json = JsonSerializer.Serialize(response, new JsonSerializerOptions 
-        { 
-            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull 
-        });
+        var json = JsonSerializer.Serialize(response, _jsonOptionsIgnoreNull);
         _logger.Info($"[NODE] Sending invoke result for {requestId}: ok={success}");
         await SendRawAsync(json);
     }
@@ -541,7 +547,7 @@ public class WindowsNodeClient : IDisposable
             }
         };
         
-        var json = JsonSerializer.Serialize(msg, new JsonSerializerOptions { WriteIndented = true });
+        var json = JsonSerializer.Serialize(msg, _jsonOptionsIndented);
         _logger.Debug($"[NODE TX FULL JSON]:\n{json}");
         await SendRawAsync(JsonSerializer.Serialize(msg));  // Send compact version
         _logger.Info($"Sent node registration with device ID: {_deviceIdentity.DeviceId.Substring(0, 16)}..., paired: {isPaired}");
@@ -558,7 +564,8 @@ public class WindowsNodeClient : IDisposable
             return;
         }
         
-        _logger.Debug($"[NODE] Response payload: {payload.ToString().Substring(0, Math.Min(200, payload.ToString().Length))}...");
+        var payloadText = payload.ToString();
+        _logger.Debug($"[NODE] Response payload: {payloadText.Substring(0, Math.Min(200, payloadText.Length))}...");
         
         // Handle hello-ok (successful registration)
         if (payload.TryGetProperty("type", out var t) && t.GetString() == "hello-ok")
@@ -695,7 +702,7 @@ public class WindowsNodeClient : IDisposable
         
         // Validate command format - only allow alphanumeric, dots, underscores, hyphens
         if (string.IsNullOrEmpty(command) || command.Length > 100 || 
-            !System.Text.RegularExpressions.Regex.IsMatch(command, @"^[a-zA-Z0-9._-]+$"))
+            !_commandFormatRegex.IsMatch(command))
         {
             _logger.Warn($"Invalid command format: {(command.Length > 50 ? command.Substring(0, 50) + "..." : command)}");
             await SendErrorResponseAsync(requestId, "Invalid command format");
@@ -754,10 +761,7 @@ public class WindowsNodeClient : IDisposable
             error = response.Ok ? null : new { message = response.Error }
         };
         
-        await SendRawAsync(JsonSerializer.Serialize(msg, new JsonSerializerOptions 
-        { 
-            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull 
-        }));
+        await SendRawAsync(JsonSerializer.Serialize(msg, _jsonOptionsIgnoreNull));
         
         _logger.Info($"Sent invoke response: ok={response.Ok}");
     }
