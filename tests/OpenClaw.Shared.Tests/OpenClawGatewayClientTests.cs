@@ -609,7 +609,7 @@ public class OpenClawGatewayClientTests
     {
         var client = new OpenClawGatewayClient(inputUrl, "test-token");
 
-        var field = typeof(OpenClawGatewayClient).GetField(
+        var field = typeof(OpenClawGatewayClient).BaseType?.GetField(
             "_gatewayUrl",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
         var actualUrl = field?.GetValue(client) as string;

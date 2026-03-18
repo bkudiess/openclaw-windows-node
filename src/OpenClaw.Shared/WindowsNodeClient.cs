@@ -1,10 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Net.WebSockets;
-using System.Text;
 using System.Text.Json;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace OpenClaw.Shared;
@@ -13,19 +10,9 @@ namespace OpenClaw.Shared;
 /// Windows Node client - extends gateway connection to act as a node
 /// Supports both operator (existing) and node (new) roles
 /// </summary>
-public class WindowsNodeClient : IDisposable
+public class WindowsNodeClient : WebSocketClientBase
 {
-    private ClientWebSocket? _webSocket;
-    private readonly string _gatewayUrl;
-    private readonly string _gatewayUrlForDisplay;
-    private readonly string _token;
-    private readonly string? _credentials;
-    private readonly IOpenClawLogger _logger;
     private readonly DeviceIdentity _deviceIdentity;
-    private CancellationTokenSource _cts;
-    private bool _disposed;
-    private int _reconnectAttempts;
-    private static readonly int[] BackoffMs = { 1000, 2000, 4000, 8000, 15000, 30000, 60000 };
     
     // Node capabilities registry
     private readonly List<INodeCapability> _capabilities = new();
@@ -38,13 +25,12 @@ public class WindowsNodeClient : IDisposable
     private bool _isPendingApproval;  // True when connected but awaiting pairing approval
     
     // Events
-    public event EventHandler<ConnectionStatus>? StatusChanged;
     public event EventHandler<NodeInvokeRequest>? InvokeReceived;
     public event EventHandler<PairingStatusEventArgs>? PairingStatusChanged;
     
-    public bool IsConnected => _isConnected;
+    public new bool IsConnected => _isConnected;
     public string? NodeId => _nodeId;
-    public string GatewayUrl => _gatewayUrlForDisplay;
+    public string GatewayUrl => GatewayUrlForDisplay;
     public IReadOnlyList<INodeCapability> Capabilities => _capabilities;
     
     /// <summary>True if connected but waiting for pairing approval on gateway</summary>
@@ -61,15 +47,12 @@ public class WindowsNodeClient : IDisposable
     /// <summary>Full device ID for approval command</summary>
     public string FullDeviceId => _deviceIdentity.DeviceId;
     
+    protected override int ReceiveBufferSize => 65536;
+    protected override string ClientRole => "node";
+    
     public WindowsNodeClient(string gatewayUrl, string token, string dataPath, IOpenClawLogger? logger = null)
+        : base(gatewayUrl, token, logger)
     {
-        _gatewayUrl = GatewayUrlHelper.NormalizeForWebSocket(gatewayUrl);
-        _gatewayUrlForDisplay = GatewayUrlHelper.SanitizeForDisplay(_gatewayUrl);
-        _token = token;
-        _credentials = GatewayUrlHelper.ExtractCredentials(gatewayUrl);
-        _logger = logger ?? NullLogger.Instance;
-        _cts = new CancellationTokenSource();
-        
         // Initialize device identity
         _deviceIdentity = new DeviceIdentity(dataPath, _logger);
         _deviceIdentity.Initialize();
@@ -77,7 +60,7 @@ public class WindowsNodeClient : IDisposable
         // Initialize registration
         _registration = new NodeRegistration
         {
-            Id = _deviceIdentity.DeviceId,  // Use device ID from keypair
+            Id = _deviceIdentity.DeviceId,
             Version = "1.0.0",
             Platform = "windows",
             DisplayName = $"Windows Node ({Environment.MachineName})"
@@ -116,131 +99,20 @@ public class WindowsNodeClient : IDisposable
     }
     
     /// <summary>
-    /// Connect to gateway as a node
-    /// </summary>
-    public async Task ConnectAsync()
-    {
-        try
-        {
-            StatusChanged?.Invoke(this, ConnectionStatus.Connecting);
-            _logger.Info($"Connecting to gateway as node: {_gatewayUrlForDisplay}");
-            
-            _webSocket = new ClientWebSocket();
-            _webSocket.Options.KeepAliveInterval = TimeSpan.FromSeconds(30);
-            
-            // Set Origin header
-            var uri = new Uri(_gatewayUrl);
-            var originScheme = uri.Scheme == "wss" ? "https" : "http";
-            var origin = $"{originScheme}://{uri.Host}:{uri.Port}";
-            _webSocket.Options.SetRequestHeader("Origin", origin);
-
-            if (!string.IsNullOrEmpty(_credentials))
-            {
-                var authCredentials = GatewayUrlHelper.DecodeCredentials(_credentials);
-
-                _webSocket.Options.SetRequestHeader(
-                    "Authorization",
-                    $"Basic {Convert.ToBase64String(Encoding.UTF8.GetBytes(authCredentials))}");
-            }
-
-            await _webSocket.ConnectAsync(uri, _cts.Token);
-            
-            _reconnectAttempts = 0;
-            _logger.Info("Node connected, waiting for challenge...");
-            
-            // Start message loop
-            _ = Task.Run(() => ListenForMessagesAsync(), _cts.Token);
-        }
-        catch (Exception ex)
-        {
-            _logger.Error("Node connection failed", ex);
-            StatusChanged?.Invoke(this, ConnectionStatus.Error);
-        }
-    }
-    
-    /// <summary>
     /// Disconnect from gateway
     /// </summary>
-    public async Task DisconnectAsync()
+    public Task DisconnectAsync()
     {
         _isConnected = false;
-        if (_webSocket?.State == WebSocketState.Open)
-        {
-            try
-            {
-                await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Disconnecting", CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn($"Error during disconnect: {ex.Message}");
-            }
-        }
-        StatusChanged?.Invoke(this, ConnectionStatus.Disconnected);
+        Dispose();
+        RaiseStatusChanged(ConnectionStatus.Disconnected);
         _logger.Info("Node disconnected");
+        return Task.CompletedTask;
     }
     
     // --- Message handling ---
     
-    private async Task ListenForMessagesAsync()
-    {
-        var buffer = new byte[65536]; // Large buffer for image data
-        var sb = new StringBuilder();
-        
-        try
-        {
-            while (_webSocket?.State == WebSocketState.Open && !_cts.Token.IsCancellationRequested)
-            {
-                var result = await _webSocket.ReceiveAsync(
-                    new ArraySegment<byte>(buffer), _cts.Token);
-                
-                if (result.MessageType == WebSocketMessageType.Text)
-                {
-                    sb.Append(Encoding.UTF8.GetString(buffer, 0, result.Count));
-                    if (result.EndOfMessage)
-                    {
-                        await ProcessMessageAsync(sb.ToString());
-                        sb.Clear();
-                    }
-                }
-                else if (result.MessageType == WebSocketMessageType.Close)
-                {
-                    _logger.Info("Server closed connection");
-                    _isConnected = false;
-                    StatusChanged?.Invoke(this, ConnectionStatus.Disconnected);
-                    break;
-                }
-            }
-        }
-        catch (WebSocketException ex) when (ex.WebSocketErrorCode == WebSocketError.ConnectionClosedPrematurely)
-        {
-            _logger.Warn("Connection closed prematurely");
-            _isConnected = false;
-            StatusChanged?.Invoke(this, ConnectionStatus.Disconnected);
-        }
-        catch (OperationCanceledException) { }
-        catch (ObjectDisposedException) { /* CTS was disposed */ }
-        catch (Exception ex)
-        {
-            _logger.Error("Node listen error", ex);
-            _isConnected = false;
-            StatusChanged?.Invoke(this, ConnectionStatus.Error);
-        }
-        
-        // Auto-reconnect (with extra safety checks)
-        if (!_disposed)
-        {
-            try
-            {
-                if (!_cts.Token.IsCancellationRequested)
-                {
-                    await ReconnectWithBackoffAsync();
-                }
-            }
-            catch (ObjectDisposedException) { /* CTS was disposed during check */ }
-        }
-    }
-    
-    private async Task ProcessMessageAsync(string json)
+    protected override async Task ProcessMessageAsync(string json)
     {
         try
         {
@@ -618,7 +490,7 @@ public class WindowsNodeClient : IDisposable
                     _deviceIdentity.DeviceId));
             }
             
-            StatusChanged?.Invoke(this, ConnectionStatus.Connected);
+            RaiseStatusChanged(ConnectionStatus.Connected);
         }
         
         // Handle errors
@@ -638,7 +510,7 @@ public class WindowsNodeClient : IDisposable
                 }
             }
             _logger.Error($"Node registration failed: {error} (code: {errorCode})");
-            StatusChanged?.Invoke(this, ConnectionStatus.Error);
+            RaiseStatusChanged(ConnectionStatus.Error);
         }
     }
     
@@ -790,70 +662,13 @@ public class WindowsNodeClient : IDisposable
         await SendRawAsync(JsonSerializer.Serialize(msg));
     }
     
-    private async Task SendRawAsync(string message)
+    protected override void OnDisconnected()
     {
-        // Capture local reference to avoid race conditions
-        var ws = _webSocket;
-        if (ws?.State != WebSocketState.Open) return;
-        
-        try
-        {
-            var bytes = Encoding.UTF8.GetBytes(message);
-            await ws.SendAsync(new ArraySegment<byte>(bytes),
-                WebSocketMessageType.Text, true, _cts.Token);
-        }
-        catch (ObjectDisposedException)
-        {
-            // WebSocket was disposed between check and send - ignore
-        }
-        catch (WebSocketException ex) when (ex.WebSocketErrorCode == WebSocketError.InvalidState)
-        {
-            // WebSocket state changed - ignore
-            _logger.Warn($"WebSocket send failed (state changed): {ex.Message}");
-        }
+        _isConnected = false;
     }
-    
-    private async Task ReconnectWithBackoffAsync()
+
+    protected override void OnError(Exception ex)
     {
-        var delay = BackoffMs[Math.Min(_reconnectAttempts, BackoffMs.Length - 1)];
-        _reconnectAttempts++;
-        _logger.Warn($"Node reconnecting in {delay}ms (attempt {_reconnectAttempts})");
-        StatusChanged?.Invoke(this, ConnectionStatus.Connecting);
-        
-        try
-        {
-            await Task.Delay(delay, _cts.Token);
-            
-            // Check cancellation after delay
-            if (_cts.Token.IsCancellationRequested) return;
-            
-            // Safely dispose old socket
-            var oldSocket = _webSocket;
-            _webSocket = null;
-            try { oldSocket?.Dispose(); } catch { /* ignore dispose errors */ }
-            
-            await ConnectAsync();
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            _logger.Error("Node reconnect failed", ex);
-            StatusChanged?.Invoke(this, ConnectionStatus.Error);
-        }
-    }
-    
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        
-        try { _cts.Cancel(); } catch { /* ignore */ }
-        
-        var ws = _webSocket;
-        _webSocket = null;
-        try { ws?.Dispose(); } catch { /* ignore */ }
-        
-        // Don't dispose _cts immediately — reconnect loop may still reference it.
-        // It will be GC'd after all pending tasks complete.
+        _isConnected = false;
     }
 }

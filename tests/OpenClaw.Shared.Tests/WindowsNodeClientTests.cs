@@ -19,7 +19,7 @@ public class WindowsNodeClientTests
         try
         {
             using var client = new WindowsNodeClient(inputUrl, "test-token", dataPath);
-            var field = typeof(WindowsNodeClient).GetField(
+            var field = typeof(WindowsNodeClient).BaseType?.GetField(
                 "_gatewayUrl",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             var actualUrl = field?.GetValue(client) as string;
