@@ -39,10 +39,14 @@ jobs:
       run: dotnet build src/OpenClaw.Tray.WinUI -c Debug -r win-x64
 
     - name: Build Tests
-      run: dotnet build tests/OpenClaw.Shared.Tests -c Debug
+      run: |
+        dotnet build tests/OpenClaw.Shared.Tests -c Debug
+        dotnet build tests/OpenClaw.Tray.Tests -c Debug
 
     - name: Run Tests
-      run: dotnet test tests/OpenClaw.Shared.Tests --no-build -c Debug --verbosity normal
+      run: |
+        dotnet test tests/OpenClaw.Shared.Tests --no-build -c Debug --verbosity normal
+        dotnet test tests/OpenClaw.Tray.Tests --no-build -c Debug --verbosity normal
 
     outputs:
       semVer: ${{ steps.gitversion.outputs.semVer }}
