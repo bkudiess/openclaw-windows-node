@@ -79,7 +79,7 @@ public static class VoiceProviderCatalogService
         }
 
         var provider = ResolveTextToSpeechProvider(providerId);
-        return provider.TextToSpeechHttp != null;
+        return provider.TextToSpeechHttp != null || provider.TextToSpeechWebSocket != null;
     }
 
     private static VoiceProviderCatalog NormalizeCatalog(VoiceProviderCatalog catalog)
@@ -134,7 +134,8 @@ public static class VoiceProviderCatalogService
             Enabled = source.Enabled,
             Description = source.Description,
             Settings = source.Settings.Select(Clone).ToList(),
-            TextToSpeechHttp = Clone(source.TextToSpeechHttp)
+            TextToSpeechHttp = Clone(source.TextToSpeechHttp),
+            TextToSpeechWebSocket = Clone(source.TextToSpeechWebSocket)
         };
     }
 
@@ -174,6 +175,35 @@ public static class VoiceProviderCatalogService
             ResponseAudioJsonPath = source.ResponseAudioJsonPath,
             ResponseStatusCodeJsonPath = source.ResponseStatusCodeJsonPath,
             ResponseStatusMessageJsonPath = source.ResponseStatusMessageJsonPath,
+            SuccessStatusValue = source.SuccessStatusValue,
+            OutputContentType = source.OutputContentType
+        };
+    }
+
+    private static VoiceTextToSpeechWebSocketContract? Clone(VoiceTextToSpeechWebSocketContract? source)
+    {
+        if (source == null)
+        {
+            return null;
+        }
+
+        return new VoiceTextToSpeechWebSocketContract
+        {
+            EndpointTemplate = source.EndpointTemplate,
+            AuthenticationHeaderName = source.AuthenticationHeaderName,
+            AuthenticationScheme = source.AuthenticationScheme,
+            ApiKeySettingKey = source.ApiKeySettingKey,
+            ConnectSuccessEventName = source.ConnectSuccessEventName,
+            StartMessageTemplate = source.StartMessageTemplate,
+            StartSuccessEventName = source.StartSuccessEventName,
+            ContinueMessageTemplate = source.ContinueMessageTemplate,
+            FinishMessageTemplate = source.FinishMessageTemplate,
+            ResponseAudioMode = source.ResponseAudioMode,
+            ResponseAudioJsonPath = source.ResponseAudioJsonPath,
+            ResponseStatusCodeJsonPath = source.ResponseStatusCodeJsonPath,
+            ResponseStatusMessageJsonPath = source.ResponseStatusMessageJsonPath,
+            FinalFlagJsonPath = source.FinalFlagJsonPath,
+            TaskFailedEventName = source.TaskFailedEventName,
             SuccessStatusValue = source.SuccessStatusValue,
             OutputContentType = source.OutputContentType
         };

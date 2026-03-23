@@ -76,7 +76,7 @@ The current Windows implementation already follows the guidance where it maps cl
 The main remaining gap is streaming playback from the first audio chunk. The Azure guidance recommends chunked playback as soon as the first audio arrives, but the current Windows implementation still waits for a complete playable stream before starting output:
 
 - Windows `SpeechSynthesizer` is used through `SynthesizeTextToStreamAsync`, which returns a complete stream for playback
-- MiniMax currently returns audio inside a JSON body, so playback cannot begin until the full response is available
+- MiniMax now uses the provider catalog's WebSocket TTS contract, but the current player still waits for a complete playable stream before output starts
 - ElevenLabs is currently integrated through the non-streaming convert contract in the provider catalog
 
 So the current design minimizes avoidable setup and connection latency, but does not yet implement first-chunk playback streaming.
@@ -156,6 +156,7 @@ Runtime behavior in the current phase:
 - `windows` is implemented for both STT and TTS
 - built-in catalog entries exist for both `minimax` and `elevenlabs` TTS
 - `minimax` defaults to `speech-2.8-turbo` and `English_MatureBoss`
+- `minimax` now uses a catalog-driven WebSocket contract for synchronous TTS
 - `elevenlabs` defaults to `eleven_multilingual_v2` and a user-supplied voice id
 - non-Windows providers can be selected and persisted now
 - unsupported providers fall back to Windows at runtime with a status warning
@@ -192,7 +193,7 @@ Example:
       "name": "MiniMax",
       "runtime": "cloud",
       "enabled": true,
-      "description": "Cloud TTS using the MiniMax HTTP text-to-speech API.",
+      "description": "Cloud TTS using the MiniMax WebSocket text-to-speech API.",
       "settings": [
         { "key": "apiKey", "label": "API key", "secret": true },
         {
@@ -217,18 +218,22 @@ Example:
           "placeholder": "\"voice_setting\": { \"voice_id\": \"English_MatureBoss\", \"speed\": 1, \"vol\": 1, \"pitch\": 0 }"
         }
       ],
-      "textToSpeechHttp": {
-        "endpointTemplate": "https://api.minimax.io/v1/t2a_v2",
-        "httpMethod": "POST",
+      "textToSpeechWebSocket": {
+        "endpointTemplate": "wss://api.minimax.io/ws/v1/t2a_v2",
         "authenticationHeaderName": "Authorization",
         "authenticationScheme": "Bearer",
         "apiKeySettingKey": "apiKey",
-        "requestContentType": "application/json",
-        "requestBodyTemplate": "{ \"model\": {{model}}, \"text\": {{text}}, \"stream\": false, \"language_boost\": \"English\", \"output_format\": \"hex\", {{voiceSettingsJson}}, \"audio_setting\": { \"sample_rate\": 32000, \"bitrate\": 128000, \"format\": \"mp3\", \"channel\": 1 } }",
+        "connectSuccessEventName": "connected_success",
+        "startMessageTemplate": "{ \"event\": \"task_start\", \"model\": {{model}}, \"language_boost\": \"English\", {{voiceSettingsJson}}, \"audio_setting\": { \"sample_rate\": 32000, \"bitrate\": 128000, \"format\": \"mp3\", \"channel\": 1 } }",
+        "startSuccessEventName": "task_started",
+        "continueMessageTemplate": "{ \"event\": \"task_continue\", \"text\": {{text}} }",
+        "finishMessageTemplate": "{ \"event\": \"task_finish\" }",
         "responseAudioMode": "hexJsonString",
         "responseAudioJsonPath": "data.audio",
         "responseStatusCodeJsonPath": "base_resp.status_code",
         "responseStatusMessageJsonPath": "base_resp.status_msg",
+        "finalFlagJsonPath": "is_final",
+        "taskFailedEventName": "task_failed",
         "successStatusValue": "0",
         "outputContentType": "audio/mpeg"
       }
@@ -275,9 +280,9 @@ Example:
 }
 ```
 
-For HTTP-backed TTS providers, the catalog carries the request/response contract. That allows a new provider to be added by shipping an updated catalog file with the app, as long as it follows the same general HTTP template approach.
+For cloud-backed TTS providers, the catalog carries either an HTTP or WebSocket request/response contract. That allows a new provider to be added by shipping an updated catalog file with the app, as long as it follows the same general templated transport approach.
 
-This file defines provider metadata and HTTP contracts. It does not carry API keys.
+This file defines provider metadata and transport contracts. It does not carry API keys.
 
 ### Local Provider Configuration
 
@@ -312,6 +317,11 @@ If a provider setting definition is marked as JSON, the value is inserted into t
 - or a full keyed fragment such as `"voice_setting": { ... }`
 
 without hard-coding provider-specific wrapper keys into the runtime.
+
+The current cloud TTS transports are:
+
+- `MiniMax`: catalog-driven WebSocket synthesis
+- `ElevenLabs`: catalog-driven HTTP synthesis
 
 For `VoiceWake`, trigger words are gateway-owned global state. The Windows node should eventually consume the same shared trigger list and keep only a local enabled/disabled toggle plus device/runtime settings.
 
@@ -578,7 +588,7 @@ Coord-->>VoiceCap: VoiceStatusInfo(state=ListeningForVoiceWake)
 Provider support is now part of the Windows voice subsystem roadmap, not a hypothetical extension:
 
 - `MiniMax` and `ElevenLabs` TTS are both expressed through built-in catalog contracts
-- additional HTTP TTS providers can be added by extending the shipped catalog without recompiling the tray app itself
+- additional HTTP or WebSocket TTS providers can be added by extending the shipped catalog without recompiling the tray app itself
 - Windows STT remains the active speech-recognition baseline until a non-Windows STT provider is deliberately added
 
 The Windows node still keeps provider choice bounded:

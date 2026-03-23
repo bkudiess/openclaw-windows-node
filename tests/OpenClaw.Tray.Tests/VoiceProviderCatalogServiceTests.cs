@@ -40,10 +40,12 @@ public class VoiceProviderCatalogServiceTests
 
         var minimax = Assert.Single(catalog.TextToSpeechProviders, p => p.Id == VoiceProviderIds.MiniMax);
         Assert.Equal("MiniMax", minimax.Name);
-        Assert.NotNull(minimax.TextToSpeechHttp);
-        Assert.Equal("https://api-uw.minimax.io/v1/t2a_v2", minimax.TextToSpeechHttp!.EndpointTemplate);
-        Assert.Equal("Authorization", minimax.TextToSpeechHttp.AuthenticationHeaderName);
-        Assert.Equal(VoiceTextToSpeechResponseModes.HexJsonString, minimax.TextToSpeechHttp.ResponseAudioMode);
+        Assert.NotNull(minimax.TextToSpeechWebSocket);
+        Assert.Equal("wss://api.minimax.io/ws/v1/t2a_v2", minimax.TextToSpeechWebSocket!.EndpointTemplate);
+        Assert.Equal("Authorization", minimax.TextToSpeechWebSocket.AuthenticationHeaderName);
+        Assert.Equal(VoiceTextToSpeechResponseModes.HexJsonString, minimax.TextToSpeechWebSocket.ResponseAudioMode);
+        Assert.Contains("\"event\": \"task_start\"", minimax.TextToSpeechWebSocket.StartMessageTemplate);
+        Assert.Contains("\"event\": \"task_continue\"", minimax.TextToSpeechWebSocket.ContinueMessageTemplate);
         var minimaxModelSetting = minimax.Settings.Single(s => s.Key == VoiceProviderSettingKeys.Model);
         Assert.Equal("speech-2.8-turbo", minimaxModelSetting.DefaultValue);
         Assert.Contains("speech-2.8-turbo", minimaxModelSetting.Options);

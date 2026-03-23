@@ -58,18 +58,22 @@
           "description": "Optional full MiniMax request fragment. If present, it controls the full voice_setting payload."
         }
       ],
-      "textToSpeechHttp": {
-        "endpointTemplate": "https://api-uw.minimax.io/v1/t2a_v2",
-        "httpMethod": "POST",
+      "textToSpeechWebSocket": {
+        "endpointTemplate": "wss://api.minimax.io/ws/v1/t2a_v2",
         "authenticationHeaderName": "Authorization",
         "authenticationScheme": "Bearer",
         "apiKeySettingKey": "apiKey",
-        "requestContentType": "application/json",
-        "requestBodyTemplate": "{ \"model\": {{model}}, \"text\": {{text}}, \"stream\": false, \"language_boost\": \"English\", \"output_format\": \"hex\", {{voiceSettingsJson}}, \"audio_setting\": { \"sample_rate\": 32000, \"bitrate\": 128000, \"format\": \"mp3\", \"channel\": 1 } }",
+        "connectSuccessEventName": "connected_success",
+        "startMessageTemplate": "{ \"event\": \"task_start\", \"model\": {{model}}, \"language_boost\": \"English\", {{voiceSettingsJson}}, \"audio_setting\": { \"sample_rate\": 32000, \"bitrate\": 128000, \"format\": \"mp3\", \"channel\": 1 } }",
+        "startSuccessEventName": "task_started",
+        "continueMessageTemplate": "{ \"event\": \"task_continue\", \"text\": {{text}} }",
+        "finishMessageTemplate": "{ \"event\": \"task_finish\" }",
         "responseAudioMode": "hexJsonString",
         "responseAudioJsonPath": "data.audio",
         "responseStatusCodeJsonPath": "base_resp.status_code",
         "responseStatusMessageJsonPath": "base_resp.status_msg",
+        "finalFlagJsonPath": "is_final",
+        "taskFailedEventName": "task_failed",
         "successStatusValue": "0",
         "outputContentType": "audio/mpeg"
       }

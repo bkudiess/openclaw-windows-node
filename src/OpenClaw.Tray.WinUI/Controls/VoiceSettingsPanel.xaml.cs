@@ -446,6 +446,28 @@ public sealed partial class VoiceSettingsPanel : UserControl
                     ResponseStatusMessageJsonPath = source.TextToSpeechHttp.ResponseStatusMessageJsonPath,
                     SuccessStatusValue = source.TextToSpeechHttp.SuccessStatusValue,
                     OutputContentType = source.TextToSpeechHttp.OutputContentType
+                },
+            TextToSpeechWebSocket = source.TextToSpeechWebSocket == null
+                ? null
+                : new VoiceTextToSpeechWebSocketContract
+                {
+                    EndpointTemplate = source.TextToSpeechWebSocket.EndpointTemplate,
+                    AuthenticationHeaderName = source.TextToSpeechWebSocket.AuthenticationHeaderName,
+                    AuthenticationScheme = source.TextToSpeechWebSocket.AuthenticationScheme,
+                    ApiKeySettingKey = source.TextToSpeechWebSocket.ApiKeySettingKey,
+                    ConnectSuccessEventName = source.TextToSpeechWebSocket.ConnectSuccessEventName,
+                    StartMessageTemplate = source.TextToSpeechWebSocket.StartMessageTemplate,
+                    StartSuccessEventName = source.TextToSpeechWebSocket.StartSuccessEventName,
+                    ContinueMessageTemplate = source.TextToSpeechWebSocket.ContinueMessageTemplate,
+                    FinishMessageTemplate = source.TextToSpeechWebSocket.FinishMessageTemplate,
+                    ResponseAudioMode = source.TextToSpeechWebSocket.ResponseAudioMode,
+                    ResponseAudioJsonPath = source.TextToSpeechWebSocket.ResponseAudioJsonPath,
+                    ResponseStatusCodeJsonPath = source.TextToSpeechWebSocket.ResponseStatusCodeJsonPath,
+                    ResponseStatusMessageJsonPath = source.TextToSpeechWebSocket.ResponseStatusMessageJsonPath,
+                    FinalFlagJsonPath = source.TextToSpeechWebSocket.FinalFlagJsonPath,
+                    TaskFailedEventName = source.TextToSpeechWebSocket.TaskFailedEventName,
+                    SuccessStatusValue = source.TextToSpeechWebSocket.SuccessStatusValue,
+                    OutputContentType = source.TextToSpeechWebSocket.OutputContentType
                 }
         };
     }

@@ -208,6 +208,27 @@ public sealed class VoiceTextToSpeechHttpContract
     public string OutputContentType { get; set; } = "audio/mpeg";
 }
 
+public sealed class VoiceTextToSpeechWebSocketContract
+{
+    public string EndpointTemplate { get; set; } = "";
+    public string AuthenticationHeaderName { get; set; } = "Authorization";
+    public string? AuthenticationScheme { get; set; } = "Bearer";
+    public string ApiKeySettingKey { get; set; } = VoiceProviderSettingKeys.ApiKey;
+    public string ConnectSuccessEventName { get; set; } = "connected_success";
+    public string StartMessageTemplate { get; set; } = "";
+    public string StartSuccessEventName { get; set; } = "task_started";
+    public string ContinueMessageTemplate { get; set; } = "";
+    public string FinishMessageTemplate { get; set; } = "{ \"event\": \"task_finish\" }";
+    public string ResponseAudioMode { get; set; } = VoiceTextToSpeechResponseModes.Binary;
+    public string? ResponseAudioJsonPath { get; set; } = "data.audio";
+    public string? ResponseStatusCodeJsonPath { get; set; } = "base_resp.status_code";
+    public string? ResponseStatusMessageJsonPath { get; set; } = "base_resp.status_msg";
+    public string? FinalFlagJsonPath { get; set; } = "is_final";
+    public string TaskFailedEventName { get; set; } = "task_failed";
+    public string? SuccessStatusValue { get; set; } = "0";
+    public string OutputContentType { get; set; } = "audio/mpeg";
+}
+
 public sealed class VoiceProviderOption
 {
     public string Id { get; set; } = "";
@@ -217,6 +238,7 @@ public sealed class VoiceProviderOption
     public string? Description { get; set; }
     public List<VoiceProviderSettingDefinition> Settings { get; set; } = [];
     public VoiceTextToSpeechHttpContract? TextToSpeechHttp { get; set; }
+    public VoiceTextToSpeechWebSocketContract? TextToSpeechWebSocket { get; set; }
 }
 
 public sealed class VoiceProviderCatalog
