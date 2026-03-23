@@ -706,6 +706,11 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
     {
         CancellationToken cancellationToken;
         string sessionKey;
+        var pipelineStopwatch = Stopwatch.StartNew();
+        long recognitionStopElapsedMs = 0;
+        long transportReadyElapsedMs = 0;
+        long traySubmitElapsedMs = 0;
+        long directSendElapsedMs = 0;
 
         lock (_gate)
         {
@@ -735,10 +740,12 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
         RaiseTranscriptDraft(text, sessionKey, clear: false);
 
         await StopRecognitionSessionAsync();
+        recognitionStopElapsedMs = pipelineStopwatch.ElapsedMilliseconds;
 
         try
         {
             await EnsureChatTransportAsync(cancellationToken);
+            transportReadyElapsedMs = pipelineStopwatch.ElapsedMilliseconds - recognitionStopElapsedMs;
 
             OpenClawGatewayClient? client;
             Func<string, string?, Task<VoiceTranscriptSubmitOutcome>>? transcriptSubmitter;
@@ -757,17 +764,25 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
             var submitOutcome = VoiceTranscriptSubmitOutcome.Unavailable;
             if (transcriptSubmitter != null)
             {
+                var submitStopwatch = Stopwatch.StartNew();
                 submitOutcome = await transcriptSubmitter(text, sessionKey);
+                traySubmitElapsedMs = submitStopwatch.ElapsedMilliseconds;
+                _logger.Info($"Voice tray submit path: outcome={submitOutcome} elapsed={traySubmitElapsedMs}ms");
             }
 
             if (submitOutcome == VoiceTranscriptSubmitOutcome.Unavailable)
             {
+                var directSendStopwatch = Stopwatch.StartNew();
                 await client.SendChatMessageAsync(text, sessionKey);
+                directSendElapsedMs = directSendStopwatch.ElapsedMilliseconds;
                 submitOutcome = VoiceTranscriptSubmitOutcome.Submitted;
+                _logger.Info($"Voice direct send path: elapsed={directSendElapsedMs}ms");
             }
 
             if (submitOutcome == VoiceTranscriptSubmitOutcome.DeferredToUser)
             {
+                _logger.Info(
+                    $"Voice pre-response latency: recognitionStop={recognitionStopElapsedMs}ms transportReady={transportReadyElapsedMs}ms traySubmit={traySubmitElapsedMs}ms total={pipelineStopwatch.ElapsedMilliseconds}ms (deferred to user)");
                 lock (_gate)
                 {
                     _awaitingReply = false;
@@ -784,6 +799,8 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
                 return;
             }
 
+            _logger.Info(
+                $"Voice pre-response latency: recognitionStop={recognitionStopElapsedMs}ms transportReady={transportReadyElapsedMs}ms traySubmit={traySubmitElapsedMs}ms directSend={directSendElapsedMs}ms total={pipelineStopwatch.ElapsedMilliseconds}ms");
             lock (_gate)
             {
                 _awaitingReply = true;
@@ -796,6 +813,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
                 _status.LastUtteranceUtc = DateTime.UtcNow;
             }
 
+            _logger.Info("Voice response wait started");
             RaiseConversationTurn(VoiceConversationDirection.Outgoing, text, sessionKey);
             RaiseTranscriptDraft(string.Empty, sessionKey, clear: true);
             _ = MonitorReplyTimeoutAsync(text, cancellationToken);
@@ -842,6 +860,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
             _status.LastUtteranceUtc = DateTime.UtcNow;
         }
 
+        _logger.Info("Voice response wait started (manual submit)");
         RaiseConversationTurn(VoiceConversationDirection.Outgoing, text, effectiveSessionKey);
         RaiseTranscriptDraft(string.Empty, effectiveSessionKey, clear: true);
         _ = MonitorReplyTimeoutAsync(text, cancellationToken);

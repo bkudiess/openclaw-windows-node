@@ -569,10 +569,13 @@ public sealed partial class WebChatWindow : WindowEx
 
         try
         {
+            var stopwatch = Stopwatch.StartNew();
             var textJson = JsonSerializer.Serialize(text ?? string.Empty);
             var result = await WebView.CoreWebView2.ExecuteScriptAsync(
                 $"window.__openClawTrayVoice?.submitDraft?.({textJson}) ?? false;");
-            return string.Equals(result, "true", StringComparison.OrdinalIgnoreCase);
+            var submitted = string.Equals(result, "true", StringComparison.OrdinalIgnoreCase);
+            Logger.Info($"WebChatWindow: Voice draft submit via chat UI {(submitted ? "succeeded" : "failed")} in {stopwatch.ElapsedMilliseconds}ms");
+            return submitted;
         }
         catch (Exception ex)
         {
