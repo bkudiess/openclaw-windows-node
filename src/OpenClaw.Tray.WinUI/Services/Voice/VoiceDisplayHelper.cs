@@ -8,8 +8,8 @@ public static class VoiceDisplayHelper
     {
         return mode switch
         {
-            VoiceActivationMode.WakeWord => "Voice Wake",
-            VoiceActivationMode.AlwaysOn => "Talk Mode",
+            VoiceActivationMode.VoiceWake => "Voice Wake",
+            VoiceActivationMode.TalkMode => "Talk Mode",
             _ => "Off"
         };
     }
@@ -19,7 +19,7 @@ public static class VoiceDisplayHelper
         return state switch
         {
             VoiceRuntimeState.Arming => "Starting",
-            VoiceRuntimeState.ListeningForWakeWord => "Listening",
+            VoiceRuntimeState.ListeningForVoiceWake => "Listening",
             VoiceRuntimeState.ListeningContinuously => "Listening",
             VoiceRuntimeState.RecordingUtterance => "Recording",
             VoiceRuntimeState.SubmittingAudio => "Sending",

@@ -56,14 +56,14 @@ public sealed partial class VoiceModeWindow : WindowEx
             new("Text to speech", ResolveProviderName(catalog.TextToSpeechProviders, _settings.Voice.TextToSpeechProviderId, "Windows Speech Synthesis")),
             new("Listen device", DescribeDevice(_settings.Voice.InputDeviceId, "System default microphone")),
             new("Talk device", DescribeDevice(_settings.Voice.OutputDeviceId, "System default speaker")),
-            new("Chat window", DescribeChatWindowSubmitMode(_settings.Voice.AlwaysOn.ChatWindowSubmitMode)),
+            new("Chat window", DescribeChatWindowSubmitMode(_settings.Voice.TalkMode.ChatWindowSubmitMode)),
             new("Voice toasts", _settings.Voice.ShowConversationToasts ? "Enabled" : "Disabled")
         };
 
         RecentItemsControl.ItemsSource = new List<DetailRow>
         {
             new("Last utterance", FormatTimestamp(running.LastUtteranceUtc)),
-            new("Last wake", FormatTimestamp(running.LastWakeWordUtc)),
+            new("Last wake", FormatTimestamp(running.LastVoiceWakeUtc)),
             new("Last issue", string.IsNullOrWhiteSpace(running.LastError) ? "None" : running.LastError!)
         };
 

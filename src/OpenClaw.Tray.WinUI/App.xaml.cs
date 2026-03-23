@@ -257,7 +257,7 @@ public partial class App : Application
         _voiceService = new VoiceService(new AppLogger(), _settings);
         _voiceChatCoordinator = new VoiceChatCoordinator(
             _voiceService,
-            () => _settings.Voice.AlwaysOn.ChatWindowSubmitMode,
+            () => _settings.Voice.TalkMode.ChatWindowSubmitMode,
             new DispatcherQueueAdapter(_dispatcherQueue!));
         _voiceChatCoordinator.ConversationTurnAvailable += OnVoiceConversationTurnAvailable;
 

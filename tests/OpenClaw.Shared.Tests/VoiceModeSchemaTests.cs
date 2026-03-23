@@ -36,11 +36,11 @@ public class VoiceSchemaDefaultsTests
         Assert.Equal(16000, settings.SampleRateHz);
         Assert.Equal(80, settings.CaptureChunkMs);
         Assert.True(settings.BargeInEnabled);
-        Assert.Equal("NanoWakeWord", settings.WakeWord.Engine);
-        Assert.Equal("hey_openclaw", settings.WakeWord.ModelId);
-        Assert.Equal(0.65f, settings.WakeWord.TriggerThreshold);
-        Assert.Equal(250, settings.AlwaysOn.MinSpeechMs);
-        Assert.Equal(VoiceChatWindowSubmitMode.AutoSend, settings.AlwaysOn.ChatWindowSubmitMode);
+        Assert.Equal("NanoWakeWord", settings.VoiceWake.Engine);
+        Assert.Equal("hey_openclaw", settings.VoiceWake.ModelId);
+        Assert.Equal(0.65f, settings.VoiceWake.TriggerThreshold);
+        Assert.Equal(250, settings.TalkMode.MinSpeechMs);
+        Assert.Equal(VoiceChatWindowSubmitMode.AutoSend, settings.TalkMode.ChatWindowSubmitMode);
     }
 
     [Fact]
@@ -52,7 +52,7 @@ public class VoiceSchemaDefaultsTests
         Assert.False(status.Running);
         Assert.Equal(VoiceActivationMode.Off, status.Mode);
         Assert.Equal(VoiceRuntimeState.Stopped, status.State);
-        Assert.False(status.WakeWordLoaded);
+        Assert.False(status.VoiceWakeLoaded);
         Assert.Null(status.LastError);
     }
 
@@ -61,10 +61,10 @@ public class VoiceSchemaDefaultsTests
     {
         var json = JsonSerializer.Serialize(new VoiceStartArgs
         {
-            Mode = VoiceActivationMode.WakeWord
+            Mode = VoiceActivationMode.VoiceWake
         });
 
-        Assert.Contains("\"WakeWord\"", json);
+        Assert.Contains("\"VoiceWake\"", json);
     }
 
     [Fact]

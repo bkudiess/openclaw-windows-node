@@ -52,20 +52,20 @@ public sealed partial class VoiceSettingsPanel : UserControl
             SampleRateHz = settings.Voice.SampleRateHz,
             CaptureChunkMs = settings.Voice.CaptureChunkMs,
             BargeInEnabled = settings.Voice.BargeInEnabled,
-            WakeWord = new VoiceWakeWordSettings
+            VoiceWake = new VoiceWakeSettings
             {
-                Engine = settings.Voice.WakeWord.Engine,
-                ModelId = settings.Voice.WakeWord.ModelId,
-                TriggerThreshold = settings.Voice.WakeWord.TriggerThreshold,
-                TriggerCooldownMs = settings.Voice.WakeWord.TriggerCooldownMs,
-                PreRollMs = settings.Voice.WakeWord.PreRollMs,
-                EndSilenceMs = settings.Voice.WakeWord.EndSilenceMs
+                Engine = settings.Voice.VoiceWake.Engine,
+                ModelId = settings.Voice.VoiceWake.ModelId,
+                TriggerThreshold = settings.Voice.VoiceWake.TriggerThreshold,
+                TriggerCooldownMs = settings.Voice.VoiceWake.TriggerCooldownMs,
+                PreRollMs = settings.Voice.VoiceWake.PreRollMs,
+                EndSilenceMs = settings.Voice.VoiceWake.EndSilenceMs
             },
-            AlwaysOn = new VoiceAlwaysOnSettings
+            TalkMode = new TalkModeSettings
             {
-                MinSpeechMs = settings.Voice.AlwaysOn.MinSpeechMs,
-                EndSilenceMs = settings.Voice.AlwaysOn.EndSilenceMs,
-                MaxUtteranceMs = settings.Voice.AlwaysOn.MaxUtteranceMs,
+                MinSpeechMs = settings.Voice.TalkMode.MinSpeechMs,
+                EndSilenceMs = settings.Voice.TalkMode.EndSilenceMs,
+                MaxUtteranceMs = settings.Voice.TalkMode.MaxUtteranceMs,
                 ChatWindowSubmitMode = GetSelectedChatWindowSubmitMode()
             }
         };
@@ -82,7 +82,7 @@ public sealed partial class VoiceSettingsPanel : UserControl
         _voiceProviderConfigurationDraft = _settings.VoiceProviderConfiguration.Clone();
         LoadVoiceProviders();
         SelectVoiceMode(_settings.Voice.Mode);
-        SelectChatWindowSubmitMode(_settings.Voice.AlwaysOn.ChatWindowSubmitMode);
+        SelectChatWindowSubmitMode(_settings.Voice.TalkMode.ChatWindowSubmitMode);
         VoiceConversationToastsCheckBox.IsChecked = _settings.Voice.ShowConversationToasts;
         UpdateVoiceProviderSettingsEditor();
         UpdateVoiceSettingsInfo();
@@ -156,8 +156,8 @@ public sealed partial class VoiceSettingsPanel : UserControl
     {
         var target = mode switch
         {
-            VoiceActivationMode.WakeWord => "WakeWord",
-            VoiceActivationMode.AlwaysOn => "AlwaysOn",
+            VoiceActivationMode.VoiceWake => "VoiceWake",
+            VoiceActivationMode.TalkMode => "TalkMode",
             _ => "Off"
         };
 
@@ -178,8 +178,8 @@ public sealed partial class VoiceSettingsPanel : UserControl
         var tag = (VoiceModeComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString();
         return tag switch
         {
-            "WakeWord" => VoiceActivationMode.WakeWord,
-            "AlwaysOn" => VoiceActivationMode.AlwaysOn,
+            "VoiceWake" => VoiceActivationMode.VoiceWake,
+            "TalkMode" => VoiceActivationMode.TalkMode,
             _ => VoiceActivationMode.Off
         };
     }

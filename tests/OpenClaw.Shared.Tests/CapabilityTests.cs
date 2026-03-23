@@ -990,7 +990,7 @@ public class VoiceCapabilityTests
         cap.SettingsRequested += () => Task.FromResult(new VoiceSettings
         {
             Enabled = true,
-            Mode = VoiceActivationMode.WakeWord
+            Mode = VoiceActivationMode.VoiceWake
         });
 
         var res = await cap.ExecuteAsync(new NodeInvokeRequest
@@ -1004,7 +1004,7 @@ public class VoiceCapabilityTests
         var json = JsonSerializer.Serialize(res.Payload);
         using var doc = JsonDocument.Parse(json);
         Assert.True(doc.RootElement.GetProperty("Enabled").GetBoolean());
-        Assert.Equal("WakeWord", doc.RootElement.GetProperty("Mode").GetString());
+        Assert.Equal("VoiceWake", doc.RootElement.GetProperty("Mode").GetString());
     }
 
     [Fact]
@@ -1022,13 +1022,13 @@ public class VoiceCapabilityTests
         {
             Id = "voice3",
             Command = VoiceCommands.SetSettings,
-            Args = Parse("""{"update":{"persist":false,"settings":{"enabled":true,"mode":"AlwaysOn"}}}""")
+            Args = Parse("""{"update":{"persist":false,"settings":{"enabled":true,"mode":"TalkMode"}}}""")
         });
 
         Assert.True(res.Ok);
         Assert.NotNull(received);
         Assert.False(received!.Persist);
-        Assert.Equal(VoiceActivationMode.AlwaysOn, received.Settings.Mode);
+        Assert.Equal(VoiceActivationMode.TalkMode, received.Settings.Mode);
     }
 
     [Fact]
@@ -1039,7 +1039,7 @@ public class VoiceCapabilityTests
         {
             Available = true,
             Running = true,
-            Mode = VoiceActivationMode.AlwaysOn,
+            Mode = VoiceActivationMode.TalkMode,
             State = VoiceRuntimeState.ListeningContinuously
         });
 
@@ -1070,7 +1070,7 @@ public class VoiceCapabilityTests
                 Available = true,
                 Running = true,
                 Mode = args.Mode ?? VoiceActivationMode.Off,
-                State = VoiceRuntimeState.ListeningForWakeWord,
+                State = VoiceRuntimeState.ListeningForVoiceWake,
                 SessionKey = args.SessionKey
             });
         };
@@ -1079,12 +1079,12 @@ public class VoiceCapabilityTests
         {
             Id = "voice5",
             Command = VoiceCommands.Start,
-            Args = Parse("""{"mode":"WakeWord","sessionKey":"session-123"}""")
+            Args = Parse("""{"mode":"VoiceWake","sessionKey":"session-123"}""")
         });
 
         Assert.True(res.Ok);
         Assert.NotNull(received);
-        Assert.Equal(VoiceActivationMode.WakeWord, received!.Mode);
+        Assert.Equal(VoiceActivationMode.VoiceWake, received!.Mode);
         Assert.Equal("session-123", received.SessionKey);
     }
 

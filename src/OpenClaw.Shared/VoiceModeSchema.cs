@@ -1,4 +1,6 @@
+using System;
 using System.Collections.ObjectModel;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace OpenClaw.Shared;
@@ -25,22 +27,22 @@ public static class VoiceCommands
     public static IReadOnlyList<string> All => s_all;
 }
 
-[JsonConverter(typeof(JsonStringEnumConverter<VoiceActivationMode>))]
+[JsonConverter(typeof(VoiceActivationModeJsonConverter))]
 public enum VoiceActivationMode
 {
     Off,
-    WakeWord,
-    AlwaysOn
+    VoiceWake,
+    TalkMode
 }
 
-[JsonConverter(typeof(JsonStringEnumConverter<VoiceRuntimeState>))]
+[JsonConverter(typeof(VoiceRuntimeStateJsonConverter))]
 public enum VoiceRuntimeState
 {
     Stopped,
     Paused,
     Idle,
     Arming,
-    ListeningForWakeWord,
+    ListeningForVoiceWake,
     ListeningContinuously,
     RecordingUtterance,
     SubmittingAudio,
@@ -69,11 +71,11 @@ public sealed class VoiceSettings
     public int SampleRateHz { get; set; } = 16000;
     public int CaptureChunkMs { get; set; } = 80;
     public bool BargeInEnabled { get; set; } = true;
-    public VoiceWakeWordSettings WakeWord { get; set; } = new();
-    public VoiceAlwaysOnSettings AlwaysOn { get; set; } = new();
+    public VoiceWakeSettings VoiceWake { get; set; } = new();
+    public TalkModeSettings TalkMode { get; set; } = new();
 }
 
-public sealed class VoiceWakeWordSettings
+public sealed class VoiceWakeSettings
 {
     public string Engine { get; set; } = "NanoWakeWord";
     public string ModelId { get; set; } = "hey_openclaw";
@@ -83,7 +85,7 @@ public sealed class VoiceWakeWordSettings
     public int EndSilenceMs { get; set; } = 900;
 }
 
-public sealed class VoiceAlwaysOnSettings
+public sealed class TalkModeSettings
 {
     public int MinSpeechMs { get; set; } = 250;
     public int EndSilenceMs { get; set; } = 900;
@@ -109,9 +111,9 @@ public sealed class VoiceStatusInfo
     public string? SessionKey { get; set; }
     public string? InputDeviceId { get; set; }
     public string? OutputDeviceId { get; set; }
-    public string? WakeWordModelId { get; set; }
-    public bool WakeWordLoaded { get; set; }
-    public DateTime? LastWakeWordUtc { get; set; }
+    public string? VoiceWakeModelId { get; set; }
+    public bool VoiceWakeLoaded { get; set; }
+    public DateTime? LastVoiceWakeUtc { get; set; }
     public DateTime? LastUtteranceUtc { get; set; }
     public string? LastError { get; set; }
 }
@@ -217,4 +219,72 @@ public sealed class VoiceProviderCatalog
 {
     public List<VoiceProviderOption> SpeechToTextProviders { get; set; } = [];
     public List<VoiceProviderOption> TextToSpeechProviders { get; set; } = [];
+}
+
+public sealed class VoiceActivationModeJsonConverter : JsonConverter<VoiceActivationMode>
+{
+    public override VoiceActivationMode Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        var value = reader.GetString();
+        return value switch
+        {
+            "VoiceWake" or "WakeWord" => VoiceActivationMode.VoiceWake,
+            "TalkMode" or "AlwaysOn" => VoiceActivationMode.TalkMode,
+            _ => VoiceActivationMode.Off
+        };
+    }
+
+    public override void Write(Utf8JsonWriter writer, VoiceActivationMode value, JsonSerializerOptions options)
+    {
+        writer.WriteStringValue(value switch
+        {
+            VoiceActivationMode.VoiceWake => "VoiceWake",
+            VoiceActivationMode.TalkMode => "TalkMode",
+            _ => "Off"
+        });
+    }
+}
+
+public sealed class VoiceRuntimeStateJsonConverter : JsonConverter<VoiceRuntimeState>
+{
+    public override VoiceRuntimeState Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        var value = reader.GetString();
+        return value switch
+        {
+            "ListeningForVoiceWake" or "ListeningForWakeWord" => VoiceRuntimeState.ListeningForVoiceWake,
+            "Stopped" => VoiceRuntimeState.Stopped,
+            "Paused" => VoiceRuntimeState.Paused,
+            "Idle" => VoiceRuntimeState.Idle,
+            "Arming" => VoiceRuntimeState.Arming,
+            "ListeningContinuously" => VoiceRuntimeState.ListeningContinuously,
+            "RecordingUtterance" => VoiceRuntimeState.RecordingUtterance,
+            "SubmittingAudio" => VoiceRuntimeState.SubmittingAudio,
+            "PendingManualSend" => VoiceRuntimeState.PendingManualSend,
+            "AwaitingResponse" => VoiceRuntimeState.AwaitingResponse,
+            "PlayingResponse" => VoiceRuntimeState.PlayingResponse,
+            "Error" => VoiceRuntimeState.Error,
+            _ => VoiceRuntimeState.Stopped
+        };
+    }
+
+    public override void Write(Utf8JsonWriter writer, VoiceRuntimeState value, JsonSerializerOptions options)
+    {
+        writer.WriteStringValue(value switch
+        {
+            VoiceRuntimeState.ListeningForVoiceWake => "ListeningForVoiceWake",
+            VoiceRuntimeState.Stopped => "Stopped",
+            VoiceRuntimeState.Paused => "Paused",
+            VoiceRuntimeState.Idle => "Idle",
+            VoiceRuntimeState.Arming => "Arming",
+            VoiceRuntimeState.ListeningContinuously => "ListeningContinuously",
+            VoiceRuntimeState.RecordingUtterance => "RecordingUtterance",
+            VoiceRuntimeState.SubmittingAudio => "SubmittingAudio",
+            VoiceRuntimeState.PendingManualSend => "PendingManualSend",
+            VoiceRuntimeState.AwaitingResponse => "AwaitingResponse",
+            VoiceRuntimeState.PlayingResponse => "PlayingResponse",
+            VoiceRuntimeState.Error => "Error",
+            _ => "Stopped"
+        });
+    }
 }

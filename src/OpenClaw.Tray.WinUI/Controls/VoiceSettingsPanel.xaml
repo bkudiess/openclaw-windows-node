@@ -10,8 +10,8 @@
 
         <ComboBox x:Name="VoiceModeComboBox" Header="Mode" SelectionChanged="OnVoiceModeChanged">
             <ComboBoxItem Content="Off" Tag="Off"/>
-            <ComboBoxItem Content="Voice Wake" Tag="WakeWord" IsEnabled="False"/>
-            <ComboBoxItem Content="Talk Mode" Tag="AlwaysOn"/>
+            <ComboBoxItem Content="Voice Wake" Tag="VoiceWake" IsEnabled="False"/>
+            <ComboBoxItem Content="Talk Mode" Tag="TalkMode"/>
         </ComboBox>
 
         <ComboBox x:Name="VoiceSpeechToTextProviderComboBox"

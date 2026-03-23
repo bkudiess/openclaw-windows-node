@@ -4,7 +4,7 @@ This document defines the voice subsystem for the Windows node only. It introduc
 
 ## Goals
 
-- Add a node-local voice mode with two activation modes: `wakeword` and `alwaysOn`
+- Add a node-local voice mode with two activation modes: `VoiceWake` and `TalkMode`
 - Utilise minimal touch points to the existing app to reduce the potential for screw-ups.
 - Use NanoWakeWord for wakeword detection on-device
 - Present the user-facing mode names as `Voice Wake` and `Talk Mode`
@@ -39,14 +39,14 @@ The tray app now uses user-facing names rather than exposing the internal enum n
 | Internal Mode | Visible Name | Availability |
 |---|---|---|
 | `Off` | Off | available |
-| `WakeWord` | Voice Wake | visible but disabled for now |
-| `AlwaysOn` | Talk Mode | available |
+| `VoiceWake` | Voice Wake | visible but disabled for now |
+| `TalkMode` | Talk Mode | available |
 
-Internally the contracts and persisted settings still use `WakeWord` and `AlwaysOn`.
+The contracts and persisted settings now use `VoiceWake` and `TalkMode` as well.
 
 ## Transport Boundary
 
-`AlwaysOn` follows a talk-mode style control flow:
+`TalkMode` follows the current talk-mode style control flow:
 
 - the node captures audio locally
 - local speech recognition turns that audio into transcript text
@@ -57,7 +57,7 @@ Internally the contracts and persisted settings still use `WakeWord` and `Always
 
 That means the first Windows target is transcript transport, not raw audio upload. Streaming audio frames in or out of OpenClaw remains a future protocol extension, not part of this design.
 
-The current Windows implementation uses a voice-local operator connection inside the tray app while node mode is active. That sidecar connection exists to carry assistant chat events for `AlwaysOn`, and to provide a fallback direct `chat.send` path when the tray chat window is not open.
+The current Windows implementation uses a voice-local operator connection inside the tray app while node mode is active. That sidecar connection exists to carry assistant chat events for `TalkMode`, and to provide a fallback direct `chat.send` path when the tray chat window is not open.
 
 ## Tray Chat Integration Decision
 
@@ -69,7 +69,7 @@ Voice mode and typed chat must remain part of the same user-visible conversation
 
 ### Problem Encountered
 
-When `AlwaysOn` sends transcript text to the main OpenClaw session, the upstream session can include scaffolding such as `<relevant-memories>...</relevant-memories>` in the rendered user message body shown in the tray chat window.
+When `TalkMode` sends transcript text to the main OpenClaw session, the upstream session can include scaffolding such as `<relevant-memories>...</relevant-memories>` in the rendered user message body shown in the tray chat window.
 
 That produced two UX problems:
 
@@ -104,7 +104,7 @@ The embedded [WebChatWindow.xaml.cs](../src/OpenClaw.Tray.WinUI/Windows/WebChatW
 - interim STT hypotheses from Windows speech recognition are injected into the tray chat compose box while the user is speaking
 - if the chat window opens during an utterance, the current buffered transcript is copied into the compose box immediately
 - if the chat window closes during an utterance, voice continues windowless and the final utterance still submits
-- if the chat window is open and ready when the utterance finalizes, the tray app either auto-submits through the page's own send path or leaves the draft for manual send, depending on `Voice.AlwaysOn.ChatWindowSubmitMode`
+- if the chat window is open and ready when the utterance finalizes, the tray app either auto-submits through the page's own send path or leaves the draft for manual send, depending on `Voice.TalkMode.ChatWindowSubmitMode`
 - in `WaitForUser` mode, voice capture pauses after finalizing the draft so the next utterance does not overwrite the unsent message
 - if the chat window is not open or not ready, the voice service falls back to direct `chat.send`
 - rendered chat content inside the tray window is still sanitized to remove `<relevant-memories>...</relevant-memories>` blocks as a fallback for messages that were sent while windowless
@@ -245,7 +245,7 @@ When the selected TTS provider in the Voice Mode window is not `windows`, the tr
 - model
 - voice id
 
-For `WakeWord`, trigger words are gateway-owned global state. The Windows node should eventually consume the same shared trigger list and keep only a local enabled/disabled toggle plus device/runtime settings.
+For `VoiceWake`, trigger words are gateway-owned global state. The Windows node should eventually consume the same shared trigger list and keep only a local enabled/disabled toggle plus device/runtime settings.
 
 ## Command Surface
 
@@ -265,8 +265,8 @@ The voice subsystem is introduced as a new node capability category: `voice`.
 ### Payload Types
 
 - `VoiceSettings`
-- `VoiceWakeWordSettings`
-- `VoiceAlwaysOnSettings`
+- `VoiceWakeSettings`
+- `TalkModeSettings`
 - `VoiceAudioDeviceInfo`
 - `VoiceStatusInfo`
 - `VoiceStartArgs`
@@ -288,7 +288,7 @@ The tray `Voice Mode` window is a read-only runtime status/detail surface with a
 ```json
 {
   "Voice": {
-    "Mode": "WakeWord",
+    "Mode": "VoiceWake",
     "Enabled": true,
     "SpeechToTextProviderId": "windows",
     "TextToSpeechProviderId": "windows",
@@ -297,7 +297,7 @@ The tray `Voice Mode` window is a read-only runtime status/detail surface with a
     "SampleRateHz": 16000,
     "CaptureChunkMs": 80,
     "BargeInEnabled": true,
-    "WakeWord": {
+    "VoiceWake": {
       "Engine": "NanoWakeWord",
       "ModelId": "hey_openclaw",
       "TriggerThreshold": 0.65,
@@ -305,7 +305,7 @@ The tray `Voice Mode` window is a read-only runtime status/detail surface with a
       "PreRollMs": 1200,
       "EndSilenceMs": 900
     },
-    "AlwaysOn": {
+    "TalkMode": {
       "MinSpeechMs": 250,
       "EndSilenceMs": 900,
       "MaxUtteranceMs": 15000,
@@ -339,7 +339,7 @@ The tray `Voice Mode` window is a read-only runtime status/detail surface with a
 
 | Field | Purpose |
 |---|---|
-| `Mode` | Top-level activation mode: `Off`, `WakeWord`, `AlwaysOn` |
+| `Mode` | Top-level activation mode: `Off`, `VoiceWake`, `TalkMode` |
 | `Enabled` | Global feature kill-switch independent of mode |
 | `SpeechToTextProviderId` | Selected STT provider id from the local provider catalog |
 | `TextToSpeechProviderId` | Selected TTS provider id from the local provider catalog |
@@ -347,14 +347,14 @@ The tray `Voice Mode` window is a read-only runtime status/detail surface with a
 | `SampleRateHz` | Shared capture sample rate, fixed to a speech-friendly default |
 | `CaptureChunkMs` | Frame size for capture, VAD, and wakeword processing |
 | `BargeInEnabled` | Allows microphone capture while audio playback is active |
-| `WakeWord.*` | NanoWakeWord and post-trigger utterance capture tuning |
-| `AlwaysOn.*` | Continuous-listening segmentation tuning |
+| `VoiceWake.*` | NanoWakeWord and post-trigger utterance capture tuning |
+| `TalkMode.*` | Continuous-listening segmentation tuning |
 
 ### Complete Settings Definition
 
 | Setting | Type | Default | Applies To | Meaning |
 |---|---|---|---|---|
-| `Voice.Mode` | enum | `Off` | all | Activation mode: `Off`, `WakeWord`, `AlwaysOn` |
+| `Voice.Mode` | enum | `Off` | all | Activation mode: `Off`, `VoiceWake`, `TalkMode` |
 | `Voice.Enabled` | bool | `false` | all | Master enable/disable flag for voice mode |
 | `Voice.SpeechToTextProviderId` | string | `windows` | all | Preferred speech-to-text provider id |
 | `Voice.TextToSpeechProviderId` | string | `windows` | all | Preferred text-to-speech provider id |
@@ -363,22 +363,22 @@ The tray `Voice Mode` window is a read-only runtime status/detail surface with a
 | `Voice.SampleRateHz` | int | `16000` | all | Internal capture rate used for wakeword, VAD, and utterance assembly |
 | `Voice.CaptureChunkMs` | int | `80` | all | Audio frame duration used by the capture loop |
 | `Voice.BargeInEnabled` | bool | `true` | all | If `true`, microphone capture may continue while response audio is playing |
-| `Voice.WakeWord.Engine` | string | `NanoWakeWord` | wakeword | Wakeword engine identifier |
-| `Voice.WakeWord.ModelId` | string | `hey_openclaw` | wakeword | Wakeword model/profile identifier |
-| `Voice.WakeWord.TriggerThreshold` | float | `0.65` | wakeword | Minimum score required to trigger wakeword activation |
-| `Voice.WakeWord.TriggerCooldownMs` | int | `2000` | wakeword | Minimum delay before another wakeword trigger is accepted |
-| `Voice.WakeWord.PreRollMs` | int | `1200` | wakeword | Buffered audio retained before the trigger point |
-| `Voice.WakeWord.EndSilenceMs` | int | `900` | wakeword | Silence timeout used to finalize the post-trigger utterance |
-| `Voice.AlwaysOn.MinSpeechMs` | int | `250` | always-on | Minimum detected speech duration before an utterance is treated as real input |
-| `Voice.AlwaysOn.EndSilenceMs` | int | `900` | always-on | Silence timeout used to finalize an utterance |
-| `Voice.AlwaysOn.MaxUtteranceMs` | int | `15000` | always-on | Hard cap on utterance length before forced submission/finalization |
-| `Voice.AlwaysOn.ChatWindowSubmitMode` | enum | `AutoSend` | always-on | When the tray chat window is open, either auto-send the finalized utterance or leave it in the compose box for manual send |
+| `Voice.VoiceWake.Engine` | string | `NanoWakeWord` | voice wake | Voice Wake engine identifier |
+| `Voice.VoiceWake.ModelId` | string | `hey_openclaw` | voice wake | Voice Wake model/profile identifier |
+| `Voice.VoiceWake.TriggerThreshold` | float | `0.65` | voice wake | Minimum score required to trigger Voice Wake activation |
+| `Voice.VoiceWake.TriggerCooldownMs` | int | `2000` | voice wake | Minimum delay before another Voice Wake trigger is accepted |
+| `Voice.VoiceWake.PreRollMs` | int | `1200` | voice wake | Buffered audio retained before the trigger point |
+| `Voice.VoiceWake.EndSilenceMs` | int | `900` | voice wake | Silence timeout used to finalize the post-trigger utterance |
+| `Voice.TalkMode.MinSpeechMs` | int | `250` | talk mode | Minimum detected speech duration before an utterance is treated as real input |
+| `Voice.TalkMode.EndSilenceMs` | int | `900` | talk mode | Silence timeout used to finalize an utterance |
+| `Voice.TalkMode.MaxUtteranceMs` | int | `15000` | talk mode | Hard cap on utterance length before forced submission/finalization |
+| `Voice.TalkMode.ChatWindowSubmitMode` | enum | `AutoSend` | talk mode | When the tray chat window is open, either auto-send the finalized utterance or leave it in the compose box for manual send |
 | `VoiceProviderConfiguration.Providers[].ProviderId` | string | none | cloud providers | Provider id matching a `voice-providers.json` entry |
 | `VoiceProviderConfiguration.Providers[].Values["apiKey"]` | string? | `null` | cloud providers | API key sent using the provider contract's configured auth header |
 | `VoiceProviderConfiguration.Providers[].Values["model"]` | string? | provider default | cloud providers | Model identifier inserted into the configured request template |
 | `VoiceProviderConfiguration.Providers[].Values["voiceId"]` | string? | provider default | cloud providers | Voice id inserted into the configured request template or URL |
 
-At runtime today, those device ids are persisted and surfaced in the UI, but the v1 `AlwaysOn` path still uses the Windows system speech stack defaults for capture and playback.
+At runtime today, those device ids are persisted and surfaced in the UI, but the v1 `TalkMode` path still uses the Windows system speech stack defaults for capture and playback.
 
 ## Component Architecture
 
@@ -387,7 +387,7 @@ flowchart LR
     A["NodeService<br/>control + lifecycle"] --> B["VoiceCapability<br/>command surface"]
     B --> C["VoiceCoordinator<br/>runtime state machine"]
     C --> D["SpeechRecognizer<br/>Windows continuous dictation"]
-    C --> E["WakeWordService<br/>NanoWakeWord scores"]
+    C --> E["VoiceWakeService<br/>NanoWakeWord scores"]
     C --> F["VoiceActivityDetector<br/>speech/silence segments"]
     C --> G["VoiceTransport<br/>operator sidecar + chat.send exchange"]
     C --> H["SpeechSynthesizer + MediaPlayer<br/>reply playback"]
@@ -396,16 +396,16 @@ flowchart LR
 
 ## Runtime Data Flow
 
-### Wakeword Mode
+### Voice Wake Mode
 
 ```mermaid
 flowchart TD
     A["Microphone device<br/>float/PCM hardware frames"] --> B["AudioCaptureService<br/>PCM16 mono 16kHz chunks"]
     B --> C["Ring Buffer<br/>bounded pre-roll PCM16 frames"]
-    B --> D["WakeWordService (NanoWakeWord)<br/>wake score per chunk"]
+B --> D["VoiceWakeService (NanoWakeWord)<br/>wake score per chunk"]
     D --> E{"score >= trigger threshold?"}
     E -- "no" --> B
-    E -- "yes" --> F["VoiceCoordinator<br/>WakeWordDetected(session state change)"]
+E -- "yes" --> F["VoiceCoordinator<br/>VoiceWakeDetected(session state change)"]
     F --> G["UtteranceAssembler<br/>seed with pre-roll PCM16 from Ring Buffer"]
     C --> G
     B --> G
@@ -445,7 +445,7 @@ flowchart TD
 | Stage | Component | Input | Output |
 |---|---|---|---|
 | 1 | `SpeechRecognizer` | Windows microphone capture | recognized transcript text |
-| 2a | `WakeWordService` | PCM16 chunk | wake score / trigger decision |
+| 2a | `VoiceWakeService` | PCM16 chunk | wake score / trigger decision |
 | 2b | `VoiceActivityDetector` | PCM16 chunk | speech/silence state |
 | 3 | `Ring Buffer` | PCM16 chunk stream | bounded pre-roll PCM16 window |
 | 4 | `UtteranceAssembler` | pre-roll + live PCM16 chunks | utterance PCM16 buffer |
@@ -469,9 +469,9 @@ sequenceDiagram
     VoiceCap->>Store: save VoiceSettings
     VoiceCap-->>Gateway: VoiceSettings
 
-    Gateway->>VoiceCap: voice.start(mode=WakeWord, sessionKey=...)
+Gateway->>VoiceCap: voice.start(mode=VoiceWake, sessionKey=...)
     VoiceCap->>Coord: Start(VoiceStartArgs)
-    Coord-->>VoiceCap: VoiceStatusInfo(state=ListeningForWakeWord)
+Coord-->>VoiceCap: VoiceStatusInfo(state=ListeningForVoiceWake)
     VoiceCap-->>Gateway: VoiceStatusInfo
 
     Gateway->>VoiceCap: voice.status.get
@@ -492,13 +492,13 @@ sequenceDiagram
 - `WindowsNodeClient` remains the gateway/node transport
 - existing node capability registration remains the integration pattern
 - current request/response transport remains the v1 control plane
-- `AlwaysOn` should reuse existing `chat.send` message flow instead of inventing an audio-upload protocol
+- `TalkMode` should reuse existing `chat.send` message flow instead of inventing an audio-upload protocol
 
 ### New Components Expected Later
 
 - `VoiceCapability` in `OpenClaw.Shared.Capabilities`
 - `AudioCaptureService` in `OpenClaw.Tray.WinUI.Services`
-- `WakeWordService` in `OpenClaw.Tray.WinUI.Services`
+- `VoiceWakeService` in `OpenClaw.Tray.WinUI.Services`
 - `VoiceCoordinator` in `OpenClaw.Tray.WinUI.Services`
 - `AudioPlaybackService` in `OpenClaw.Tray.WinUI.Services`
 

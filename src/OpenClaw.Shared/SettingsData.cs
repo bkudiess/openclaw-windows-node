@@ -1,3 +1,4 @@
+using System;
 using System.Text.Json.Serialization;
 using System.Text.Json;
 
@@ -40,11 +41,27 @@ public class SettingsData
     {
         try
         {
-            return JsonSerializer.Deserialize<SettingsData>(json);
+            return JsonSerializer.Deserialize<SettingsData>(MigrateLegacyVoiceJson(json));
         }
         catch
         {
             return null;
         }
+    }
+
+    private static string MigrateLegacyVoiceJson(string json)
+    {
+        return json
+            .Replace("\"WakeWord\":", "\"VoiceWake\":", StringComparison.Ordinal)
+            .Replace("\"AlwaysOn\":", "\"TalkMode\":", StringComparison.Ordinal)
+            .Replace("\"WakeWordModelId\":", "\"VoiceWakeModelId\":", StringComparison.Ordinal)
+            .Replace("\"WakeWordLoaded\":", "\"VoiceWakeLoaded\":", StringComparison.Ordinal)
+            .Replace("\"LastWakeWordUtc\":", "\"LastVoiceWakeUtc\":", StringComparison.Ordinal)
+            .Replace("\"Mode\":\"WakeWord\"", "\"Mode\":\"VoiceWake\"", StringComparison.Ordinal)
+            .Replace("\"Mode\": \"WakeWord\"", "\"Mode\": \"VoiceWake\"", StringComparison.Ordinal)
+            .Replace("\"Mode\":\"AlwaysOn\"", "\"Mode\":\"TalkMode\"", StringComparison.Ordinal)
+            .Replace("\"Mode\": \"AlwaysOn\"", "\"Mode\": \"TalkMode\"", StringComparison.Ordinal)
+            .Replace("\"State\":\"ListeningForWakeWord\"", "\"State\":\"ListeningForVoiceWake\"", StringComparison.Ordinal)
+            .Replace("\"State\": \"ListeningForWakeWord\"", "\"State\": \"ListeningForVoiceWake\"", StringComparison.Ordinal);
     }
 }

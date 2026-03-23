@@ -233,19 +233,19 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
         {
             switch (requestedMode)
             {
-                case VoiceActivationMode.AlwaysOn:
-                    await StartAlwaysOnRuntimeAsync(effectiveSettings, sessionKey);
+                case VoiceActivationMode.TalkMode:
+                    await StartTalkModeRuntimeAsync(effectiveSettings, sessionKey);
                     break;
-                case VoiceActivationMode.WakeWord:
+                case VoiceActivationMode.VoiceWake:
                     lock (_gate)
                     {
                         _status = BuildRunningStatus(
-                            VoiceActivationMode.WakeWord,
+                            VoiceActivationMode.VoiceWake,
                             sessionKey,
-                            VoiceRuntimeState.ListeningForWakeWord,
-                            "WakeWord capture is not implemented yet");
+                            VoiceRuntimeState.ListeningForVoiceWake,
+                            "Voice Wake capture is not implemented yet");
                     }
-                    _logger.Info("Voice runtime started in mode WakeWord");
+                    _logger.Info("Voice runtime started in mode VoiceWake");
                     break;
                 default:
                     lock (_gate)
@@ -367,7 +367,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
         }
     }
 
-    private async Task StartAlwaysOnRuntimeAsync(VoiceSettings settings, string? sessionKey)
+    private async Task StartTalkModeRuntimeAsync(VoiceSettings settings, string? sessionKey)
     {
         var effectiveSessionKey = string.IsNullOrWhiteSpace(sessionKey) ? DefaultSessionKey : sessionKey;
         var selectedSpeechToText = VoiceProviderCatalogService.ResolveSpeechToTextProvider(
@@ -394,12 +394,12 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
 
             if (!string.IsNullOrWhiteSpace(settings.InputDeviceId))
             {
-                _logger.Warn("Selected input device is saved, but AlwaysOn currently uses the system speech input device.");
+                _logger.Warn("Selected input device is saved, but Talk Mode currently uses the system speech input device.");
             }
 
             if (!string.IsNullOrWhiteSpace(settings.OutputDeviceId))
             {
-                _logger.Warn("Selected output device is saved, but AlwaysOn currently uses the default speech output device.");
+                _logger.Warn("Selected output device is saved, but Talk Mode currently uses the default speech output device.");
             }
 
             recognizer.HypothesisGenerated += OnSpeechHypothesisGenerated;
@@ -413,7 +413,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
                 _speechSynthesizer = synthesizer;
                 _mediaPlayer = player;
                 _status = BuildRunningStatus(
-                    VoiceActivationMode.AlwaysOn,
+                    VoiceActivationMode.TalkMode,
                     effectiveSessionKey,
                     VoiceRuntimeState.Arming,
                     fallbackMessage);
@@ -427,14 +427,14 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
                 if (_status.Running)
                 {
                     _status = BuildRunningStatus(
-                        VoiceActivationMode.AlwaysOn,
+                        VoiceActivationMode.TalkMode,
                         effectiveSessionKey,
                         VoiceRuntimeState.ListeningContinuously,
                         fallbackMessage);
                 }
             }
 
-            _logger.Info("Voice runtime started in mode AlwaysOn");
+            _logger.Info("Voice runtime started in mode TalkMode");
         }
         catch
         {
@@ -470,7 +470,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
     private async Task<SpeechRecognizer> CreateSpeechRecognizerAsync(VoiceSettings settings)
     {
         var recognizer = new SpeechRecognizer();
-        recognizer.Timeouts.EndSilenceTimeout = TimeSpan.FromMilliseconds(settings.AlwaysOn.EndSilenceMs);
+        recognizer.Timeouts.EndSilenceTimeout = TimeSpan.FromMilliseconds(settings.TalkMode.EndSilenceMs);
         recognizer.Timeouts.InitialSilenceTimeout = TimeSpan.FromSeconds(10);
         recognizer.Timeouts.BabbleTimeout = TimeSpan.FromSeconds(4);
         recognizer.Constraints.Add(new SpeechRecognitionTopicConstraint(SpeechRecognitionScenario.Dictation, "always-on-dictation"));
@@ -590,7 +590,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
             if (_status.Running && !_awaitingReply && !_isSpeaking)
             {
                 _status = BuildRunningStatus(
-                    VoiceActivationMode.AlwaysOn,
+                    VoiceActivationMode.TalkMode,
                     _status.SessionKey,
                     VoiceRuntimeState.ListeningContinuously,
                     null);
@@ -651,7 +651,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
             {
                 if (_status.Running)
                 {
-                    _status = BuildErrorStatus(VoiceActivationMode.AlwaysOn, _status.SessionKey, GetUserFacingErrorMessage(ex));
+                    _status = BuildErrorStatus(VoiceActivationMode.TalkMode, _status.SessionKey, GetUserFacingErrorMessage(ex));
                 }
             }
         }
@@ -665,7 +665,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
         lock (_gate)
         {
             if (_runtimeCts == null ||
-                _status.Mode != VoiceActivationMode.AlwaysOn ||
+                _status.Mode != VoiceActivationMode.TalkMode ||
                 !_status.Running ||
                 _awaitingReply ||
                 _isSpeaking)
@@ -687,12 +687,12 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
 
     private async Task HandleRecognizedTextAsync(string text)
     {
-            CancellationToken cancellationToken;
-            string sessionKey;
+        CancellationToken cancellationToken;
+        string sessionKey;
 
-            lock (_gate)
-            {
-            if (_runtimeCts == null || _status.Mode != VoiceActivationMode.AlwaysOn || !_status.Running)
+        lock (_gate)
+        {
+            if (_runtimeCts == null || _status.Mode != VoiceActivationMode.TalkMode || !_status.Running)
             {
                 return;
             }
@@ -712,7 +712,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
             _lastTranscriptUtc = DateTime.UtcNow;
             cancellationToken = _runtimeCts.Token;
             sessionKey = GetCurrentVoiceSessionKey();
-            }
+        }
 
         RaiseTranscriptDraft(text, sessionKey, clear: false);
 
@@ -755,7 +755,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
                     _awaitingReply = false;
                     _pendingManualTranscript = text;
                     _status = BuildRunningStatus(
-                        VoiceActivationMode.AlwaysOn,
+                        VoiceActivationMode.TalkMode,
                         _status.SessionKey,
                         VoiceRuntimeState.PendingManualSend,
                         "Draft ready in tray chat window. Send it manually to continue.");
@@ -771,7 +771,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
                 _awaitingReply = true;
                 _pendingManualTranscript = null;
                 _status = BuildRunningStatus(
-                    VoiceActivationMode.AlwaysOn,
+                    VoiceActivationMode.TalkMode,
                     _status.SessionKey,
                     VoiceRuntimeState.AwaitingResponse,
                     _status.LastError);
@@ -790,7 +790,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
             {
                 _awaitingReply = false;
                 _status = BuildRunningStatus(
-                    VoiceActivationMode.AlwaysOn,
+                    VoiceActivationMode.TalkMode,
                     _status.SessionKey,
                     VoiceRuntimeState.ListeningContinuously,
                     GetUserFacingErrorMessage(ex));
@@ -807,7 +807,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
 
         lock (_gate)
         {
-            if (_runtimeCts == null || _status.Mode != VoiceActivationMode.AlwaysOn || !_status.Running)
+            if (_runtimeCts == null || _status.Mode != VoiceActivationMode.TalkMode || !_status.Running)
             {
                 return;
             }
@@ -817,7 +817,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
             _pendingManualTranscript = null;
             _awaitingReply = true;
             _status = BuildRunningStatus(
-                VoiceActivationMode.AlwaysOn,
+                VoiceActivationMode.TalkMode,
                 _status.SessionKey,
                 VoiceRuntimeState.AwaitingResponse,
                 _status.LastError);
@@ -843,7 +843,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
                 {
                     _awaitingReply = false;
                     _status = BuildRunningStatus(
-                        VoiceActivationMode.AlwaysOn,
+                        VoiceActivationMode.TalkMode,
                         _status.SessionKey,
                         VoiceRuntimeState.ListeningContinuously,
                         "Timed out waiting for an assistant reply.");
@@ -876,7 +876,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
 
             lock (_gate)
             {
-                if (!_awaitingReply || !_status.Running || _status.Mode != VoiceActivationMode.AlwaysOn)
+                if (!_awaitingReply || !_status.Running || _status.Mode != VoiceActivationMode.TalkMode)
                 {
                     return;
                 }
@@ -889,7 +889,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
                 _awaitingReply = false;
                 _isSpeaking = true;
                 _status = BuildRunningStatus(
-                    VoiceActivationMode.AlwaysOn,
+                    VoiceActivationMode.TalkMode,
                     _status.SessionKey,
                     VoiceRuntimeState.PlayingResponse,
                     _status.LastError);
@@ -904,7 +904,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
                     if (_status.Running)
                     {
                         _status = BuildRunningStatus(
-                            VoiceActivationMode.AlwaysOn,
+                            VoiceActivationMode.TalkMode,
                             _status.SessionKey,
                             VoiceRuntimeState.ListeningContinuously,
                             _status.LastError);
@@ -926,7 +926,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
                 lock (_gate)
                 {
                     _status = BuildRunningStatus(
-                        VoiceActivationMode.AlwaysOn,
+                        VoiceActivationMode.TalkMode,
                         _status.SessionKey,
                         VoiceRuntimeState.ListeningContinuously,
                         GetUserFacingErrorMessage(ex));
@@ -940,7 +940,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
                     if (_status.Running)
                     {
                         _status = BuildRunningStatus(
-                            VoiceActivationMode.AlwaysOn,
+                            VoiceActivationMode.TalkMode,
                             _status.SessionKey,
                             VoiceRuntimeState.ListeningContinuously,
                             _status.LastError);
@@ -1053,7 +1053,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
                 _recognitionActive = false;
                 token = _runtimeCts.Token;
                 shouldRestart = _status.Running &&
-                                _status.Mode == VoiceActivationMode.AlwaysOn &&
+                                _status.Mode == VoiceActivationMode.TalkMode &&
                                 !_awaitingReply &&
                                 !_isSpeaking;
             }
@@ -1084,26 +1084,26 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
                 _transportReadyTcs?.TrySetResult(true);
 
                 if (_status.Running &&
-                    _status.Mode == VoiceActivationMode.AlwaysOn &&
+                    _status.Mode == VoiceActivationMode.TalkMode &&
                     !_awaitingReply &&
                     !_isSpeaking)
                 {
-                _status = BuildRunningStatus(
-                    VoiceActivationMode.AlwaysOn,
-                    _status.SessionKey,
-                    VoiceRuntimeState.ListeningContinuously,
-                    _status.LastError);
-            }
+                    _status = BuildRunningStatus(
+                        VoiceActivationMode.TalkMode,
+                        _status.SessionKey,
+                        VoiceRuntimeState.ListeningContinuously,
+                        _status.LastError);
+                }
             }
             else if (status == ConnectionStatus.Error)
             {
                 _transportReadyTcs?.TrySetException(
                     new InvalidOperationException("Voice chat transport failed to connect."));
 
-                if (_status.Running && _status.Mode == VoiceActivationMode.AlwaysOn)
+                if (_status.Running && _status.Mode == VoiceActivationMode.TalkMode)
                 {
                     _status = BuildRunningStatus(
-                        VoiceActivationMode.AlwaysOn,
+                        VoiceActivationMode.TalkMode,
                         _status.SessionKey,
                         VoiceRuntimeState.Arming,
                         "Voice chat transport failed.");
@@ -1111,10 +1111,10 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
             }
             else if (status == ConnectionStatus.Disconnected)
             {
-                if (_status.Running && _status.Mode == VoiceActivationMode.AlwaysOn)
+                if (_status.Running && _status.Mode == VoiceActivationMode.TalkMode)
                 {
                     _status = BuildRunningStatus(
-                        VoiceActivationMode.AlwaysOn,
+                        VoiceActivationMode.TalkMode,
                         _status.SessionKey,
                         VoiceRuntimeState.Arming,
                         "Voice chat transport disconnected.");
@@ -1277,9 +1277,9 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
             SessionKey = sessionKey,
             InputDeviceId = settings.InputDeviceId,
             OutputDeviceId = settings.OutputDeviceId,
-            WakeWordModelId = settings.WakeWord.ModelId,
-            WakeWordLoaded = mode == VoiceActivationMode.WakeWord,
-            LastWakeWordUtc = _status.LastWakeWordUtc,
+            VoiceWakeModelId = settings.VoiceWake.ModelId,
+            VoiceWakeLoaded = mode == VoiceActivationMode.VoiceWake,
+            LastVoiceWakeUtc = _status.LastVoiceWakeUtc,
             LastUtteranceUtc = _status.LastUtteranceUtc,
             LastError = lastError
         };
@@ -1297,9 +1297,9 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
             SessionKey = sessionKey,
             InputDeviceId = settings.InputDeviceId,
             OutputDeviceId = settings.OutputDeviceId,
-            WakeWordModelId = settings.WakeWord.ModelId,
-            WakeWordLoaded = false,
-            LastWakeWordUtc = _status.LastWakeWordUtc,
+            VoiceWakeModelId = settings.VoiceWake.ModelId,
+            VoiceWakeLoaded = false,
+            LastVoiceWakeUtc = _status.LastVoiceWakeUtc,
             LastUtteranceUtc = _status.LastUtteranceUtc,
             LastError = reason
         };
@@ -1317,9 +1317,9 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
             SessionKey = sessionKey,
             InputDeviceId = settings.InputDeviceId,
             OutputDeviceId = settings.OutputDeviceId,
-            WakeWordModelId = settings.WakeWord.ModelId,
-            WakeWordLoaded = false,
-            LastWakeWordUtc = _status.LastWakeWordUtc,
+            VoiceWakeModelId = settings.VoiceWake.ModelId,
+            VoiceWakeLoaded = false,
+            LastVoiceWakeUtc = _status.LastVoiceWakeUtc,
             LastUtteranceUtc = _status.LastUtteranceUtc,
             LastError = reason
         };
@@ -1346,21 +1346,21 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
             SampleRateHz = source.SampleRateHz,
             CaptureChunkMs = source.CaptureChunkMs,
             BargeInEnabled = source.BargeInEnabled,
-            WakeWord = new VoiceWakeWordSettings
+            VoiceWake = new VoiceWakeSettings
             {
-                Engine = source.WakeWord.Engine,
-                ModelId = source.WakeWord.ModelId,
-                TriggerThreshold = source.WakeWord.TriggerThreshold,
-                TriggerCooldownMs = source.WakeWord.TriggerCooldownMs,
-                PreRollMs = source.WakeWord.PreRollMs,
-                EndSilenceMs = source.WakeWord.EndSilenceMs
+                Engine = source.VoiceWake.Engine,
+                ModelId = source.VoiceWake.ModelId,
+                TriggerThreshold = source.VoiceWake.TriggerThreshold,
+                TriggerCooldownMs = source.VoiceWake.TriggerCooldownMs,
+                PreRollMs = source.VoiceWake.PreRollMs,
+                EndSilenceMs = source.VoiceWake.EndSilenceMs
             },
-            AlwaysOn = new VoiceAlwaysOnSettings
+            TalkMode = new TalkModeSettings
             {
-                MinSpeechMs = source.AlwaysOn.MinSpeechMs,
-                EndSilenceMs = source.AlwaysOn.EndSilenceMs,
-                MaxUtteranceMs = source.AlwaysOn.MaxUtteranceMs,
-                ChatWindowSubmitMode = source.AlwaysOn.ChatWindowSubmitMode
+                MinSpeechMs = source.TalkMode.MinSpeechMs,
+                EndSilenceMs = source.TalkMode.EndSilenceMs,
+                MaxUtteranceMs = source.TalkMode.MaxUtteranceMs,
+                ChatWindowSubmitMode = source.TalkMode.ChatWindowSubmitMode
             }
         };
     }
@@ -1376,9 +1376,9 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
             SessionKey = source.SessionKey,
             InputDeviceId = source.InputDeviceId,
             OutputDeviceId = source.OutputDeviceId,
-            WakeWordModelId = source.WakeWordModelId,
-            WakeWordLoaded = source.WakeWordLoaded,
-            LastWakeWordUtc = source.LastWakeWordUtc,
+            VoiceWakeModelId = source.VoiceWakeModelId,
+            VoiceWakeLoaded = source.VoiceWakeLoaded,
+            LastVoiceWakeUtc = source.LastVoiceWakeUtc,
             LastUtteranceUtc = source.LastUtteranceUtc,
             LastError = source.LastError
         };
