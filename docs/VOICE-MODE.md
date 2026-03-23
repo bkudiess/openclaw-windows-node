@@ -50,10 +50,13 @@ The contracts and persisted settings now use `VoiceWake` and `TalkMode` as well.
 
 - the node captures audio locally
 - local speech recognition turns that audio into transcript text
+- interim hypotheses are surfaced live, but only final `Medium` or `High` confidence recognizer results are submitted
 - if the tray chat window is open and ready, the final transcript is submitted through the tray chat window's own compose/send path
 - otherwise, the transcript is sent to OpenClaw via direct `chat.send` on the main session
 - OpenClaw returns the assistant reply as normal chat output
 - the node performs local TTS playback of that reply
+
+To avoid obvious duplicate sends from the Windows recognizer, exact duplicate final transcripts are suppressed within a short 750 ms window.
 
 That means the first Windows target is transcript transport, not raw audio upload. Streaming audio frames in or out of OpenClaw remains a future protocol extension, not part of this design.
 

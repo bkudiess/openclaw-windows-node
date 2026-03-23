@@ -28,7 +28,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
     private const int HResultSpeechPrivacyDeclined = unchecked((int)0x80045509);
     private static readonly TimeSpan TransportConnectTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ReplyTimeout = TimeSpan.FromSeconds(45);
-    private static readonly TimeSpan DuplicateTranscriptWindow = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan DuplicateTranscriptWindow = TimeSpan.FromMilliseconds(750);
 
     private readonly IOpenClawLogger _logger;
     private readonly SettingsManager _settings;
@@ -638,11 +638,14 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
             }
 
             if (result.Status != SpeechRecognitionResultStatus.Success ||
-                result.Confidence == SpeechRecognitionConfidence.Rejected)
+                result.Confidence == SpeechRecognitionConfidence.Rejected ||
+                result.Confidence == SpeechRecognitionConfidence.Low)
             {
+                _logger.Info($"Voice recognition ignored result with confidence {result.Confidence}: {text}");
                 return;
             }
 
+            _logger.Info($"Voice recognition result ({result.Confidence}): {text}");
             await HandleRecognizedTextAsync(text);
         }
         catch (Exception ex)
@@ -706,6 +709,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
             if (string.Equals(text, _lastTranscript, StringComparison.OrdinalIgnoreCase) &&
                 DateTime.UtcNow - _lastTranscriptUtc < DuplicateTranscriptWindow)
             {
+                _logger.Info($"Voice recognition suppressed duplicate transcript: {text}");
                 return;
             }
 
