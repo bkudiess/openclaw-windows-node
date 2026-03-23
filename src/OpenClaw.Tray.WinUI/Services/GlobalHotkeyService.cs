@@ -109,6 +109,7 @@ public class GlobalHotkeyService : IDisposable
     private IntPtr _hwnd;
     private bool _registered;
     private bool _disposed;
+    private readonly object _sync = new();
     private Thread? _messageThread;
     private WndProcDelegate? _wndProcDelegate; // prevent GC collection
     private volatile bool _running;
@@ -126,12 +127,15 @@ public class GlobalHotkeyService : IDisposable
 
     public bool Register()
     {
-        if (_registered) return true;
-
         try
         {
-            // Create message window on a dedicated thread with message loop
-            EnsureMessageLoop();
+            lock (_sync)
+            {
+                if (_registered) return true;
+
+                // Create message window on a dedicated thread with message loop
+                EnsureMessageLoop();
+            }
 
             if (!_windowReady.Wait(TimeSpan.FromSeconds(2)))
             {
@@ -139,18 +143,21 @@ public class GlobalHotkeyService : IDisposable
                 return false;
             }
 
-            if (_hwnd == IntPtr.Zero)
+            lock (_sync)
             {
-                Logger.Warn("Failed to create hotkey message window");
-                return false;
-            }
+                if (_hwnd == IntPtr.Zero)
+                {
+                    Logger.Warn("Failed to create hotkey message window");
+                    return false;
+                }
 
-            _opCompleted.Reset();
-            if (!PostMessage(_hwnd, WM_APP_REGISTER, IntPtr.Zero, IntPtr.Zero))
-            {
-                Logger.Warn("Failed to post WM_APP_REGISTER message for hotkey registration");
-                _registered = false;
-                return false;
+                _opCompleted.Reset();
+                if (!PostMessage(_hwnd, WM_APP_REGISTER, IntPtr.Zero, IntPtr.Zero))
+                {
+                    Logger.Warn("Failed to post WM_APP_REGISTER message for hotkey registration");
+                    _registered = false;
+                    return false;
+                }
             }
 
             if (!_opCompleted.Wait(TimeSpan.FromSeconds(2)))

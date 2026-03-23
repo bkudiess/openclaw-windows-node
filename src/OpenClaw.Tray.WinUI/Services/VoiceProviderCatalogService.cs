@@ -9,6 +9,8 @@ namespace OpenClawTray.Services;
 
 public static class VoiceProviderCatalogService
 {
+    private const long MaxCatalogBytes = 256 * 1024;
+    private const int MaxProviderEntriesPerList = 64;
     private static readonly string s_catalogFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "OpenClawTray",
@@ -30,6 +32,13 @@ public static class VoiceProviderCatalogService
         {
             if (!File.Exists(s_catalogFilePath))
             {
+                return merged;
+            }
+
+            var fileInfo = new FileInfo(s_catalogFilePath);
+            if (fileInfo.Length > MaxCatalogBytes)
+            {
+                logger?.Warn($"Voice provider catalog exceeds {MaxCatalogBytes} bytes and will be ignored.");
                 return merged;
             }
 
@@ -107,7 +116,9 @@ public static class VoiceProviderCatalogService
             .Select(Clone)
             .ToDictionary(p => p.Id, StringComparer.OrdinalIgnoreCase);
 
-        foreach (var provider in configured.Where(p => !string.IsNullOrWhiteSpace(p.Id)))
+        foreach (var provider in configured
+            .Where(p => !string.IsNullOrWhiteSpace(p.Id))
+            .Take(MaxProviderEntriesPerList))
         {
             merged[provider.Id] = Clone(provider);
         }

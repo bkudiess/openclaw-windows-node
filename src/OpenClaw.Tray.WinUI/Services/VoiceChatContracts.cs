@@ -44,5 +44,5 @@ public interface IVoiceChatWindow
 public sealed class VoiceTranscriptSubmittedEventArgs : EventArgs
 {
     public string Text { get; set; } = "";
-    public string SessionKey { get; set; } = "main";
+    public string? SessionKey { get; set; }
 }

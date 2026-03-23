@@ -126,26 +126,33 @@ public sealed class VoiceChatCoordinator : IDisposable
 
     private async Task<VoiceTranscriptSubmitOutcome> SubmitVoiceTranscriptAsync(string text, string? sessionKey)
     {
-        IVoiceChatWindow? window;
-        lock (_gate)
+        try
         {
-            window = _webChatWindow;
-        }
+            IVoiceChatWindow? window;
+            lock (_gate)
+            {
+                window = _webChatWindow;
+            }
 
-        if (window == null || window.IsClosed)
+            if (window == null || window.IsClosed)
+            {
+                return VoiceTranscriptSubmitOutcome.Unavailable;
+            }
+
+            if (_getSubmitMode() == VoiceChatWindowSubmitMode.WaitForUser)
+            {
+                return await window.PrepareVoiceTranscriptForManualSendAsync(text)
+                    ? VoiceTranscriptSubmitOutcome.DeferredToUser
+                    : VoiceTranscriptSubmitOutcome.Unavailable;
+            }
+
+            return await window.TrySubmitVoiceTranscriptAsync(text)
+                ? VoiceTranscriptSubmitOutcome.Submitted
+                : VoiceTranscriptSubmitOutcome.Unavailable;
+        }
+        catch
         {
             return VoiceTranscriptSubmitOutcome.Unavailable;
         }
-
-        if (_getSubmitMode() == VoiceChatWindowSubmitMode.WaitForUser)
-        {
-            return await window.PrepareVoiceTranscriptForManualSendAsync(text)
-                ? VoiceTranscriptSubmitOutcome.DeferredToUser
-                : VoiceTranscriptSubmitOutcome.Unavailable;
-        }
-
-        return await window.TrySubmitVoiceTranscriptAsync(text)
-            ? VoiceTranscriptSubmitOutcome.Submitted
-            : VoiceTranscriptSubmitOutcome.Unavailable;
     }
 }

@@ -19,6 +19,7 @@ namespace OpenClawTray.Services;
 
 public sealed class VoiceService : IVoiceRuntime, IDisposable
 {
+    private const string DefaultSessionKey = "main";
     private const int HResultSpeechPrivacyDeclined = unchecked((int)0x80045509);
     private static readonly TimeSpan TransportConnectTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ReplyTimeout = TimeSpan.FromSeconds(45);
@@ -108,8 +109,6 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
                     _status.SessionKey,
                     _status.State,
                     _status.LastError);
-                _status.LastUtteranceUtc = _status.LastUtteranceUtc;
-                _status.LastWakeWordUtc = _status.LastWakeWordUtc;
             }
             else
             {
@@ -352,12 +351,19 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
         }
 
         _disposed = true;
-        _ = StopRuntimeResourcesAsync(updateStoppedStatus: true);
+        try
+        {
+            Task.Run(() => StopRuntimeResourcesAsync(updateStoppedStatus: true)).GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"Voice runtime dispose cleanup failed: {ex.Message}");
+        }
     }
 
     private async Task StartAlwaysOnRuntimeAsync(VoiceSettings settings, string? sessionKey)
     {
-        var effectiveSessionKey = string.IsNullOrWhiteSpace(sessionKey) ? "main" : sessionKey;
+        var effectiveSessionKey = string.IsNullOrWhiteSpace(sessionKey) ? DefaultSessionKey : sessionKey;
         var selectedSpeechToText = VoiceProviderCatalogService.ResolveSpeechToTextProvider(
             settings.SpeechToTextProviderId,
             _logger);
@@ -368,54 +374,91 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
 
         await EnsureMicrophoneConsentAsync();
 
-        var runtimeCts = new CancellationTokenSource();
-        var recognizer = await CreateSpeechRecognizerAsync(settings);
-        var synthesizer = new SpeechSynthesizer();
-        var player = new MediaPlayer();
+        CancellationTokenSource? runtimeCts = null;
+        SpeechRecognizer? recognizer = null;
+        SpeechSynthesizer? synthesizer = null;
+        MediaPlayer? player = null;
 
-        if (!string.IsNullOrWhiteSpace(settings.InputDeviceId))
+        try
         {
-            _logger.Warn("Selected input device is saved, but AlwaysOn currently uses the system speech input device.");
-        }
+            runtimeCts = new CancellationTokenSource();
+            recognizer = await CreateSpeechRecognizerAsync(settings);
+            synthesizer = new SpeechSynthesizer();
+            player = new MediaPlayer();
 
-        if (!string.IsNullOrWhiteSpace(settings.OutputDeviceId))
-        {
-            _logger.Warn("Selected output device is saved, but AlwaysOn currently uses the default speech output device.");
-        }
-
-        recognizer.HypothesisGenerated += OnSpeechHypothesisGenerated;
-        recognizer.ContinuousRecognitionSession.ResultGenerated += OnSpeechResultGenerated;
-        recognizer.ContinuousRecognitionSession.Completed += OnSpeechRecognitionCompleted;
-
-        lock (_gate)
-        {
-            _runtimeCts = runtimeCts;
-            _speechRecognizer = recognizer;
-            _speechSynthesizer = synthesizer;
-            _mediaPlayer = player;
-            _status = BuildRunningStatus(
-                VoiceActivationMode.AlwaysOn,
-                effectiveSessionKey,
-                VoiceRuntimeState.Arming,
-                fallbackMessage);
-        }
-
-        await EnsureChatTransportAsync(runtimeCts.Token);
-        await StartRecognitionSessionAsync();
-
-        lock (_gate)
-        {
-            if (_status.Running)
+            if (!string.IsNullOrWhiteSpace(settings.InputDeviceId))
             {
+                _logger.Warn("Selected input device is saved, but AlwaysOn currently uses the system speech input device.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(settings.OutputDeviceId))
+            {
+                _logger.Warn("Selected output device is saved, but AlwaysOn currently uses the default speech output device.");
+            }
+
+            recognizer.HypothesisGenerated += OnSpeechHypothesisGenerated;
+            recognizer.ContinuousRecognitionSession.ResultGenerated += OnSpeechResultGenerated;
+            recognizer.ContinuousRecognitionSession.Completed += OnSpeechRecognitionCompleted;
+
+            lock (_gate)
+            {
+                _runtimeCts = runtimeCts;
+                _speechRecognizer = recognizer;
+                _speechSynthesizer = synthesizer;
+                _mediaPlayer = player;
                 _status = BuildRunningStatus(
                     VoiceActivationMode.AlwaysOn,
                     effectiveSessionKey,
-                    VoiceRuntimeState.ListeningContinuously,
+                    VoiceRuntimeState.Arming,
                     fallbackMessage);
             }
-        }
 
-        _logger.Info("Voice runtime started in mode AlwaysOn");
+            await EnsureChatTransportAsync(runtimeCts.Token);
+            await StartRecognitionSessionAsync();
+
+            lock (_gate)
+            {
+                if (_status.Running)
+                {
+                    _status = BuildRunningStatus(
+                        VoiceActivationMode.AlwaysOn,
+                        effectiveSessionKey,
+                        VoiceRuntimeState.ListeningContinuously,
+                        fallbackMessage);
+                }
+            }
+
+            _logger.Info("Voice runtime started in mode AlwaysOn");
+        }
+        catch
+        {
+            var cleanupStoredState = false;
+            lock (_gate)
+            {
+                cleanupStoredState = ReferenceEquals(_runtimeCts, runtimeCts);
+            }
+
+            if (cleanupStoredState)
+            {
+                await StopRuntimeResourcesAsync(updateStoppedStatus: false);
+            }
+            else
+            {
+                if (recognizer != null)
+                {
+                    try { recognizer.HypothesisGenerated -= OnSpeechHypothesisGenerated; } catch { }
+                    try { recognizer.ContinuousRecognitionSession.ResultGenerated -= OnSpeechResultGenerated; } catch { }
+                    try { recognizer.ContinuousRecognitionSession.Completed -= OnSpeechRecognitionCompleted; } catch { }
+                    try { recognizer.Dispose(); } catch { }
+                }
+
+                try { player?.Dispose(); } catch { }
+                try { synthesizer?.Dispose(); } catch { }
+                try { runtimeCts?.Dispose(); } catch { }
+            }
+
+            throw;
+        }
     }
 
     private async Task<SpeechRecognizer> CreateSpeechRecognizerAsync(VoiceSettings settings)
@@ -491,12 +534,11 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
             readyTask = _transportReadyTcs?.Task ?? Task.CompletedTask;
         }
 
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(TransportConnectTimeout);
-
-        var completed = await Task.WhenAny(readyTask, Task.Delay(Timeout.InfiniteTimeSpan, timeoutCts.Token));
+        var timeoutTask = Task.Delay(TransportConnectTimeout, cancellationToken);
+        var completed = await Task.WhenAny(readyTask, timeoutTask);
         if (completed != readyTask)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             throw new TimeoutException("Timed out connecting voice chat transport.");
         }
 
@@ -528,7 +570,6 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
                     _status.SessionKey,
                     VoiceRuntimeState.ListeningContinuously,
                     null);
-                _status.LastUtteranceUtc = _status.LastUtteranceUtc;
             }
         }
     }
@@ -782,7 +823,6 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
                         _status.SessionKey,
                         VoiceRuntimeState.ListeningContinuously,
                         "Timed out waiting for an assistant reply.");
-                    _status.LastUtteranceUtc = _status.LastUtteranceUtc;
                     shouldResume = true;
                 }
             }
@@ -799,97 +839,103 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
 
     private async void OnChatMessageReceived(object? sender, ChatMessageEventArgs args)
     {
-        if (!args.IsFinal ||
-            !string.Equals(args.Role, "assistant", StringComparison.OrdinalIgnoreCase) ||
-            string.IsNullOrWhiteSpace(args.Message))
-        {
-            return;
-        }
-
-        string text;
-
-        lock (_gate)
-        {
-            if (!_awaitingReply || !_status.Running || _status.Mode != VoiceActivationMode.AlwaysOn)
-            {
-                return;
-            }
-
-            if (!IsMatchingSessionKey(args.SessionKey, GetCurrentVoiceSessionKey()))
-            {
-                return;
-            }
-
-            _awaitingReply = false;
-            _isSpeaking = true;
-            _status = BuildRunningStatus(
-                VoiceActivationMode.AlwaysOn,
-                _status.SessionKey,
-                VoiceRuntimeState.PlayingResponse,
-                _status.LastError);
-            text = PrepareReplyForSpeech(args.Message);
-        }
-
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            lock (_gate)
-            {
-                _isSpeaking = false;
-                if (_status.Running)
-                {
-                    _status = BuildRunningStatus(
-                        VoiceActivationMode.AlwaysOn,
-                        _status.SessionKey,
-                        VoiceRuntimeState.ListeningContinuously,
-                        _status.LastError);
-                }
-            }
-
-            await StartRecognitionSessionAsync();
-            return;
-        }
-
         try
         {
-            RaiseConversationTurn(VoiceConversationDirection.Incoming, text, args.SessionKey);
-            await SpeakTextAsync(text);
-        }
-        catch (Exception ex)
-        {
-            _logger.Error("Voice reply playback failed", ex);
+            if (!args.IsFinal ||
+                !string.Equals(args.Role, "assistant", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(args.Message))
+            {
+                return;
+            }
+
+            string text;
+
             lock (_gate)
             {
+                if (!_awaitingReply || !_status.Running || _status.Mode != VoiceActivationMode.AlwaysOn)
+                {
+                    return;
+                }
+
+                if (!IsMatchingSessionKey(args.SessionKey, GetCurrentVoiceSessionKey()))
+                {
+                    return;
+                }
+
+                _awaitingReply = false;
+                _isSpeaking = true;
                 _status = BuildRunningStatus(
                     VoiceActivationMode.AlwaysOn,
                     _status.SessionKey,
-                    VoiceRuntimeState.ListeningContinuously,
-                    GetUserFacingErrorMessage(ex));
+                    VoiceRuntimeState.PlayingResponse,
+                    _status.LastError);
+                text = PrepareReplyForSpeech(args.Message);
             }
-        }
-        finally
-        {
-            lock (_gate)
+
+            if (string.IsNullOrWhiteSpace(text))
             {
-                _isSpeaking = false;
-                if (_status.Running)
+                lock (_gate)
                 {
-                    _status = BuildRunningStatus(
-                        VoiceActivationMode.AlwaysOn,
-                        _status.SessionKey,
-                        VoiceRuntimeState.ListeningContinuously,
-                        _status.LastError);
-                    _status.LastUtteranceUtc = _status.LastUtteranceUtc;
+                    _isSpeaking = false;
+                    if (_status.Running)
+                    {
+                        _status = BuildRunningStatus(
+                            VoiceActivationMode.AlwaysOn,
+                            _status.SessionKey,
+                            VoiceRuntimeState.ListeningContinuously,
+                            _status.LastError);
+                    }
                 }
+
+                await StartRecognitionSessionAsync();
+                return;
             }
 
             try
             {
-                await StartRecognitionSessionAsync();
+                RaiseConversationTurn(VoiceConversationDirection.Incoming, text, args.SessionKey);
+                await SpeakTextAsync(text);
             }
             catch (Exception ex)
             {
-                _logger.Warn($"Voice recognition resume failed: {ex.Message}");
+                _logger.Error("Voice reply playback failed", ex);
+                lock (_gate)
+                {
+                    _status = BuildRunningStatus(
+                        VoiceActivationMode.AlwaysOn,
+                        _status.SessionKey,
+                        VoiceRuntimeState.ListeningContinuously,
+                        GetUserFacingErrorMessage(ex));
+                }
             }
+            finally
+            {
+                lock (_gate)
+                {
+                    _isSpeaking = false;
+                    if (_status.Running)
+                    {
+                        _status = BuildRunningStatus(
+                            VoiceActivationMode.AlwaysOn,
+                            _status.SessionKey,
+                            VoiceRuntimeState.ListeningContinuously,
+                            _status.LastError);
+                    }
+                }
+
+                try
+                {
+                    await StartRecognitionSessionAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn($"Voice recognition resume failed: {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"Voice chat message handler failed: {ex.Message}");
         }
     }
 
@@ -994,7 +1040,6 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
                     _status.SessionKey,
                     VoiceRuntimeState.ListeningContinuously,
                     _status.LastError);
-                _status.LastUtteranceUtc = _status.LastUtteranceUtc;
             }
             }
             else if (status == ConnectionStatus.Error)
@@ -1009,7 +1054,6 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
                         _status.SessionKey,
                         VoiceRuntimeState.Arming,
                         "Voice chat transport failed.");
-                    _status.LastUtteranceUtc = _status.LastUtteranceUtc;
                 }
             }
             else if (status == ConnectionStatus.Disconnected)
@@ -1021,7 +1065,6 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
                         _status.SessionKey,
                         VoiceRuntimeState.Arming,
                         "Voice chat transport disconnected.");
-                    _status.LastUtteranceUtc = _status.LastUtteranceUtc;
                 }
             }
         }
@@ -1105,13 +1148,13 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
 
     private string GetCurrentVoiceSessionKey()
     {
-        return string.IsNullOrWhiteSpace(_status.SessionKey) ? "main" : _status.SessionKey!;
+        return string.IsNullOrWhiteSpace(_status.SessionKey) ? DefaultSessionKey : _status.SessionKey!;
     }
 
     private static bool IsMatchingSessionKey(string? actualSessionKey, string? expectedSessionKey)
     {
-        actualSessionKey = string.IsNullOrWhiteSpace(actualSessionKey) ? "main" : actualSessionKey;
-        expectedSessionKey = string.IsNullOrWhiteSpace(expectedSessionKey) ? "main" : expectedSessionKey;
+        actualSessionKey = string.IsNullOrWhiteSpace(actualSessionKey) ? DefaultSessionKey : actualSessionKey;
+        expectedSessionKey = string.IsNullOrWhiteSpace(expectedSessionKey) ? DefaultSessionKey : expectedSessionKey;
 
         if (string.Equals(actualSessionKey, expectedSessionKey, StringComparison.Ordinal))
         {
@@ -1123,7 +1166,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
 
     private static bool IsMainSessionKey(string sessionKey)
     {
-        return sessionKey == "main" || sessionKey.Contains(":main:", StringComparison.Ordinal);
+        return sessionKey == DefaultSessionKey || sessionKey.Contains(":main:", StringComparison.Ordinal);
     }
 
     private static string PrepareReplyForSpeech(string text)
@@ -1344,7 +1387,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
         {
             Direction = direction,
             Message = text,
-            SessionKey = string.IsNullOrWhiteSpace(sessionKey) ? "main" : sessionKey,
+            SessionKey = string.IsNullOrWhiteSpace(sessionKey) ? DefaultSessionKey : sessionKey,
             Mode = _runtimeModeOverride ?? _settings.Voice.Mode
         });
     }
@@ -1353,7 +1396,7 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
     {
         TranscriptDraftUpdated?.Invoke(this, new VoiceTranscriptDraftEventArgs
         {
-            SessionKey = string.IsNullOrWhiteSpace(sessionKey) ? "main" : sessionKey,
+            SessionKey = string.IsNullOrWhiteSpace(sessionKey) ? DefaultSessionKey : sessionKey,
             Text = clear ? string.Empty : text,
             Clear = clear,
             Mode = _runtimeModeOverride ?? _settings.Voice.Mode

@@ -100,7 +100,7 @@ That produced two UX problems:
 
 The tray app keeps a tray-local interim transcript buffer for the current utterance, independent of whether the chat window is open.
 
-The embedded [WebChatWindow.xaml.cs](C:/dev/openclaw-windows-node/src/OpenClaw.Tray.WinUI/Windows/WebChatWindow.xaml.cs) owns the tray-local chat integration layer:
+The embedded [WebChatWindow.xaml.cs](../src/OpenClaw.Tray.WinUI/Windows/WebChatWindow.xaml.cs) owns the tray-local chat integration layer:
 
 - interim STT hypotheses from Windows speech recognition are injected into the tray chat compose box while the user is speaking
 - if the chat window opens during an utterance, the current buffered transcript is copied into the compose box immediately
@@ -221,11 +221,11 @@ The voice subsystem is introduced as a new node capability category: `voice`.
 - `VoiceStopArgs`
 - `VoiceSettingsUpdateArgs`
 
-These contracts are defined in [VoiceModeSchema.cs](C:/dev/openclaw-windows-node/src/OpenClaw.Shared/VoiceModeSchema.cs).
+These contracts are defined in [VoiceModeSchema.cs](../src/OpenClaw.Shared/VoiceModeSchema.cs).
 
 ## Settings Schema
 
-Voice settings are persisted as `SettingsData.Voice` in [SettingsData.cs](C:/dev/openclaw-windows-node/src/OpenClaw.Shared/SettingsData.cs).
+Voice settings are persisted as `SettingsData.Voice` in [SettingsData.cs](../src/OpenClaw.Shared/SettingsData.cs).
 
 ### Effective Schema
 

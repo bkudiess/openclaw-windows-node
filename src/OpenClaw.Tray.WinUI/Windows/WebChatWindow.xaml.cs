@@ -340,7 +340,7 @@ public sealed partial class WebChatWindow : WindowEx
                     VoiceTranscriptSubmitted?.Invoke(this, new VoiceTranscriptSubmittedEventArgs
                     {
                         Text = text,
-                        SessionKey = "main"
+                        SessionKey = null
                     });
                 }
                 catch (Exception ex)

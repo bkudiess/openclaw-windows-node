@@ -89,6 +89,20 @@ public class VoiceChatCoordinatorTests
     }
 
     [Fact]
+    public void ManualSubmit_AllowsRuntimeToUseCurrentSession_WhenWindowDoesNotSpecifyOne()
+    {
+        var runtime = new FakeVoiceRuntime();
+        using var coordinator = new VoiceChatCoordinator(runtime, () => VoiceChatWindowSubmitMode.WaitForUser, new ImmediateDispatcher());
+        var window = new FakeVoiceChatWindow();
+        coordinator.AttachWindow(window);
+
+        window.RaiseSubmitted("follow up", null);
+
+        Assert.Equal("follow up", runtime.LastManualSubmitText);
+        Assert.Null(runtime.LastManualSubmitSessionKey);
+    }
+
+    [Fact]
     public void ConversationTurn_IsForwarded()
     {
         var runtime = new FakeVoiceRuntime();
@@ -183,7 +197,7 @@ public class VoiceChatCoordinatorTests
             return Task.FromResult(PrepareResult);
         }
 
-        public void RaiseSubmitted(string text, string sessionKey)
+        public void RaiseSubmitted(string text, string? sessionKey)
         {
             VoiceTranscriptSubmitted?.Invoke(this, new VoiceTranscriptSubmittedEventArgs
             {
