@@ -15,6 +15,7 @@ using Windows.Foundation;
 namespace OpenClawTray.Windows;
 
 public sealed partial class WebChatWindow : WindowEx
+    , IVoiceChatWindow
 {
     private readonly string _gatewayUrl;
     private readonly string _token;
@@ -564,10 +565,4 @@ public sealed partial class WebChatWindow : WindowEx
             Logger.Warn($"WebChatWindow: Failed to apply voice DOM state: {ex.Message}");
         }
     }
-}
-
-public sealed class VoiceTranscriptSubmittedEventArgs : EventArgs
-{
-    public string Text { get; set; } = "";
-    public string SessionKey { get; set; } = "main";
 }

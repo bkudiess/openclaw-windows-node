@@ -254,7 +254,10 @@ public partial class App : Application
         // Initialize settings
         _settings = new SettingsManager();
         _voiceService = new VoiceService(new AppLogger(), _settings);
-        _voiceChatCoordinator = new VoiceChatCoordinator(_voiceService, _settings, _dispatcherQueue!);
+        _voiceChatCoordinator = new VoiceChatCoordinator(
+            _voiceService,
+            () => _settings.Voice.AlwaysOn.ChatWindowSubmitMode,
+            new DispatcherQueueAdapter(_dispatcherQueue!));
         _voiceChatCoordinator.ConversationTurnAvailable += OnVoiceConversationTurnAvailable;
 
         // First-run check

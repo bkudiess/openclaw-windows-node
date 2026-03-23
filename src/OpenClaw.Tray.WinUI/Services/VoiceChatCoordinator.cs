@@ -1,6 +1,4 @@
-using Microsoft.UI.Dispatching;
 using OpenClaw.Shared;
-using OpenClawTray.Windows;
 using System;
 using System.Threading.Tasks;
 
@@ -8,32 +6,32 @@ namespace OpenClawTray.Services;
 
 public sealed class VoiceChatCoordinator : IDisposable
 {
-    private readonly VoiceService _voiceService;
-    private readonly SettingsManager _settings;
-    private readonly DispatcherQueue _dispatcherQueue;
+    private readonly IVoiceRuntime _voiceService;
+    private readonly Func<VoiceChatWindowSubmitMode> _getSubmitMode;
+    private readonly IUiDispatcher _dispatcher;
     private readonly object _gate = new();
 
-    private WebChatWindow? _webChatWindow;
+    private IVoiceChatWindow? _webChatWindow;
     private string _voiceTranscriptDraftText = string.Empty;
     private bool _disposed;
 
     public event EventHandler<VoiceConversationTurnEventArgs>? ConversationTurnAvailable;
 
     public VoiceChatCoordinator(
-        VoiceService voiceService,
-        SettingsManager settings,
-        DispatcherQueue dispatcherQueue)
+        IVoiceRuntime voiceService,
+        Func<VoiceChatWindowSubmitMode> getSubmitMode,
+        IUiDispatcher dispatcher)
     {
         _voiceService = voiceService;
-        _settings = settings;
-        _dispatcherQueue = dispatcherQueue;
+        _getSubmitMode = getSubmitMode;
+        _dispatcher = dispatcher;
 
         _voiceService.ConversationTurnAvailable += OnVoiceConversationTurnAvailable;
         _voiceService.TranscriptDraftUpdated += OnVoiceTranscriptDraftUpdated;
         _voiceService.TranscriptSubmitter = SubmitVoiceTranscriptAsync;
     }
 
-    public void AttachWindow(WebChatWindow window)
+    public void AttachWindow(IVoiceChatWindow window)
     {
         ArgumentNullException.ThrowIfNull(window);
 
@@ -58,7 +56,7 @@ public sealed class VoiceChatCoordinator : IDisposable
             clear: string.IsNullOrWhiteSpace(_voiceTranscriptDraftText));
     }
 
-    public void DetachWindow(WebChatWindow? window)
+    public void DetachWindow(IVoiceChatWindow? window)
     {
         lock (_gate)
         {
@@ -93,7 +91,7 @@ public sealed class VoiceChatCoordinator : IDisposable
 
     private void OnVoiceConversationTurnAvailable(object? sender, VoiceConversationTurnEventArgs args)
     {
-        _dispatcherQueue.TryEnqueue(() =>
+        _dispatcher.TryEnqueue(() =>
         {
             ConversationTurnAvailable?.Invoke(this, args);
         });
@@ -101,11 +99,11 @@ public sealed class VoiceChatCoordinator : IDisposable
 
     private void OnVoiceTranscriptDraftUpdated(object? sender, VoiceTranscriptDraftEventArgs args)
     {
-        _dispatcherQueue.TryEnqueue(() =>
+        _dispatcher.TryEnqueue(() =>
         {
             _voiceTranscriptDraftText = args.Clear ? string.Empty : (args.Text ?? string.Empty);
 
-            WebChatWindow? window;
+            IVoiceChatWindow? window;
             lock (_gate)
             {
                 window = _webChatWindow;
@@ -128,7 +126,7 @@ public sealed class VoiceChatCoordinator : IDisposable
 
     private async Task<VoiceTranscriptSubmitOutcome> SubmitVoiceTranscriptAsync(string text, string? sessionKey)
     {
-        WebChatWindow? window;
+        IVoiceChatWindow? window;
         lock (_gate)
         {
             window = _webChatWindow;
@@ -139,7 +137,7 @@ public sealed class VoiceChatCoordinator : IDisposable
             return VoiceTranscriptSubmitOutcome.Unavailable;
         }
 
-        if (_settings.Voice.AlwaysOn.ChatWindowSubmitMode == VoiceChatWindowSubmitMode.WaitForUser)
+        if (_getSubmitMode() == VoiceChatWindowSubmitMode.WaitForUser)
         {
             return await window.PrepareVoiceTranscriptForManualSendAsync(text)
                 ? VoiceTranscriptSubmitOutcome.DeferredToUser

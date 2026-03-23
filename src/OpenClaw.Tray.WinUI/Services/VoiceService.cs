@@ -17,7 +17,7 @@ using Windows.Media.SpeechSynthesis;
 
 namespace OpenClawTray.Services;
 
-public sealed class VoiceService : IDisposable
+public sealed class VoiceService : IVoiceRuntime, IDisposable
 {
     private const int HResultSpeechPrivacyDeclined = unchecked((int)0x80045509);
     private static readonly TimeSpan TransportConnectTimeout = TimeSpan.FromSeconds(10);
