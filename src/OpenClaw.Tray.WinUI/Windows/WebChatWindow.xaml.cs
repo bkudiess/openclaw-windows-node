@@ -33,10 +33,18 @@ public sealed partial class WebChatWindow : WindowEx
   const memoryPattern = /<relevant-memories>[\s\S]*?<\/relevant-memories>\s*/gi;
   const sanitize = (value) => typeof value === 'string' ? value.replace(memoryPattern, '').trimStart() : value;
   const isVisible = (el) => !!el && !(el.disabled === true) && el.getClientRects().length > 0;
+  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   let desiredDraft = '';
   const findComposer = () => {
     const candidates = Array.from(document.querySelectorAll('textarea, input[type="text"], [contenteditable="true"], [contenteditable="plaintext-only"]'));
     return candidates.find(isVisible) || null;
+  };
+  const getComposerValue = (composer) => sanitize(('value' in composer ? composer.value : composer.textContent) || '');
+  const isSendLike = (button) => {
+    if (!button || !isVisible(button)) return false;
+    if (button.disabled === true || button.getAttribute('aria-disabled') === 'true') return false;
+    const text = ((button.innerText || button.textContent || '') + ' ' + (button.getAttribute('aria-label') || '')).trim().toLowerCase();
+    return text === 'send' || text.startsWith('send ') || text.includes('send ↵') || text.includes('send');
   };
   const setElementValue = (el, value) => {
     if ('value' in el) {
@@ -47,13 +55,13 @@ public sealed partial class WebChatWindow : WindowEx
       } else {
         el.value = value;
       }
-      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, data: value, inputType: 'insertText' }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
       return;
     }
     if (el.isContentEditable) {
       el.textContent = value;
-      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, data: value, inputType: 'insertText' }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
     }
   };
@@ -65,29 +73,44 @@ public sealed partial class WebChatWindow : WindowEx
   };
   const findSendButton = () => {
     const buttons = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"]'));
-    return buttons.find((button) => {
-      if (!isVisible(button)) return false;
-      if (button.disabled === true || button.getAttribute('aria-disabled') === 'true') return false;
-      const text = ((button.innerText || button.textContent || '') + ' ' + (button.getAttribute('aria-label') || '')).trim().toLowerCase();
-      return text === 'send' || text.startsWith('send ') || text.includes('send ↵') || text.includes('send');
-    }) || null;
+    return buttons.find(isSendLike) || null;
   };
-  const submitDraft = (text) => {
+  const waitForDraftToLeaveComposer = async (expectedText) => {
+    for (let i = 0; i < 20; i++) {
+      await delay(75);
+      const composer = findComposer();
+      if (!composer) return true;
+      const current = getComposerValue(composer);
+      if (!current || current !== sanitize(expectedText || '')) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const submitDraft = async (text) => {
     desiredDraft = sanitize(text || '');
     pendingManual = false;
     const composer = findComposer();
     if (!composer) return false;
     setElementValue(composer, desiredDraft);
+    await delay(0);
     const sendButton = findSendButton();
     if (sendButton) {
       sendButton.click();
-      desiredDraft = '';
-      return true;
+      const sent = await waitForDraftToLeaveComposer(desiredDraft);
+      if (sent) {
+        desiredDraft = '';
+      }
+      return sent;
     }
     composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true }));
+    composer.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true }));
     composer.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true }));
-    desiredDraft = '';
-    return true;
+    const sent = await waitForDraftToLeaveComposer(desiredDraft);
+    if (sent) {
+      desiredDraft = '';
+    }
+    return sent;
   };
   let pendingManual = false;
   const emitManualSubmit = () => {
@@ -138,8 +161,15 @@ public sealed partial class WebChatWindow : WindowEx
     document.addEventListener('click', (event) => {
       const target = event.target instanceof Element ? event.target.closest('button, [role="button"], input[type="submit"]') : null;
       if (!target) return;
-      const sendButton = findSendButton();
-      if (sendButton && target === sendButton) {
+      if (isSendLike(target)) {
+        emitManualSubmit();
+      }
+    }, true);
+    document.addEventListener('submit', (event) => {
+      const form = event.target instanceof HTMLFormElement ? event.target : null;
+      const composer = findComposer();
+      if (!form || !composer) return;
+      if (form.contains(composer)) {
         emitManualSubmit();
       }
     }, true);

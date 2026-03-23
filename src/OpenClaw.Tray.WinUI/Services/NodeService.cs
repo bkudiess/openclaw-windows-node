@@ -88,7 +88,26 @@ public class NodeService : IDisposable
             var settings = await _voiceService.GetSettingsAsync();
             if (settings.Enabled && settings.Mode != VoiceActivationMode.Off)
             {
-                await _voiceService.StartAsync(new VoiceStartArgs { Mode = settings.Mode });
+                var startTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var enqueued = _dispatcherQueue.TryEnqueue(async () =>
+                {
+                    try
+                    {
+                        await _voiceService.StartAsync(new VoiceStartArgs { Mode = settings.Mode });
+                        startTcs.TrySetResult(true);
+                    }
+                    catch (Exception ex)
+                    {
+                        startTcs.TrySetException(ex);
+                    }
+                });
+
+                if (!enqueued)
+                {
+                    throw new InvalidOperationException("Dispatcher queue unavailable for voice startup.");
+                }
+
+                await startTcs.Task;
             }
         }
     }
@@ -107,7 +126,26 @@ public class NodeService : IDisposable
 
         if (_voiceService != null)
         {
-            await _voiceService.StopAsync(new VoiceStopArgs { Reason = "Node disconnected" });
+            var stopTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var enqueued = _dispatcherQueue.TryEnqueue(async () =>
+            {
+                try
+                {
+                    await _voiceService.StopAsync(new VoiceStopArgs { Reason = "Node disconnected" });
+                    stopTcs.TrySetResult(true);
+                }
+                catch (Exception ex)
+                {
+                    stopTcs.TrySetException(ex);
+                }
+            });
+
+            if (!enqueued)
+            {
+                throw new InvalidOperationException("Dispatcher queue unavailable for voice shutdown.");
+            }
+
+            await stopTcs.Task;
         }
         
         // Close canvas window
