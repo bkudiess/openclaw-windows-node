@@ -3,6 +3,7 @@
     x:Class="OpenClawTray.Windows.SettingsWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:OpenClawTray.Controls"
     xmlns:winex="using:WinUIEx"
     Title="Settings — OpenClaw Tray"
     MinWidth="400" MinHeight="500">
@@ -84,58 +85,7 @@
                 <Button x:Name="TestNotificationButton" x:Uid="SettingsTestNotificationButton" Content="Send Test Notification" 
                         Click="OnTestNotification"/>
 
-                <StackPanel Spacing="8">
-                    <TextBlock Text="VOICE" Style="{StaticResource CaptionTextBlockStyle}"
-                               Foreground="#E74C3C" FontWeight="Bold"/>
-
-                    <ComboBox x:Name="VoiceModeComboBox" Header="Mode" SelectionChanged="OnVoiceModeChanged">
-                        <ComboBoxItem Content="Off" Tag="Off"/>
-                        <ComboBoxItem Content="Voice Wake" Tag="WakeWord" IsEnabled="False"/>
-                        <ComboBoxItem Content="Talk Mode" Tag="AlwaysOn"/>
-                    </ComboBox>
-
-                    <ComboBox x:Name="VoiceSpeechToTextProviderComboBox"
-                              Header="Speech to text provider"
-                              DisplayMemberPath="Name"
-                              SelectionChanged="OnVoiceProviderChanged"/>
-                    <ComboBox x:Name="VoiceTextToSpeechProviderComboBox"
-                              Header="Text to speech provider"
-                              DisplayMemberPath="Name"
-                              SelectionChanged="OnVoiceProviderChanged"/>
-
-                    <StackPanel x:Name="VoiceTtsProviderSettingsPanel" Spacing="8" Visibility="Collapsed">
-                        <TextBlock x:Name="VoiceTtsProviderSettingsTitleTextBlock"
-                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                   Foreground="#E74C3C"
-                                   FontWeight="Bold"/>
-                        <PasswordBox x:Name="VoiceTtsApiKeyPasswordBox"
-                                     Header="API key"
-                                     PasswordChanged="OnVoiceProviderSettingsChanged"/>
-                        <TextBox x:Name="VoiceTtsModelTextBox"
-                                 Header="Model"
-                                 TextChanged="OnVoiceProviderSettingsChanged"/>
-                        <TextBox x:Name="VoiceTtsVoiceIdTextBox"
-                                 Header="Voice ID"
-                                 TextChanged="OnVoiceProviderSettingsChanged"/>
-                    </StackPanel>
-
-                    <ComboBox x:Name="VoiceInputDeviceComboBox" Header="Listen device (microphone)" DisplayMemberPath="Name"/>
-                    <ComboBox x:Name="VoiceOutputDeviceComboBox" Header="Talk device (speaker)" DisplayMemberPath="Name"/>
-                    <Button Content="Refresh voice devices" HorizontalAlignment="Left" Click="OnRefreshVoiceDevices"/>
-
-                    <CheckBox x:Name="VoiceConversationToastsCheckBox"
-                              Content="Show voice transcripts and replies as toasts"/>
-
-                    <ComboBox x:Name="VoiceChatWindowSubmitModeComboBox" Header="When the tray chat window is open">
-                        <ComboBoxItem Content="Send automatically" Tag="AutoSend"/>
-                        <ComboBoxItem Content="Fill message box and wait for me to send" Tag="WaitForUser"/>
-                    </ComboBox>
-
-                    <TextBlock x:Name="VoiceSettingsInfoTextBlock"
-                               Style="{StaticResource CaptionTextBlockStyle}"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                               TextWrapping="Wrap"/>
-                </StackPanel>
+                <controls:VoiceSettingsPanel x:Name="VoiceSettingsPanel"/>
                 
                 <!-- Advanced Section -->
                 <StackPanel Spacing="8">
