@@ -500,40 +500,43 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
     private async Task EnsureChatTransportAsync(CancellationToken cancellationToken)
     {
         OpenClawGatewayClient? existingClient;
-        ConnectionStatus existingStatus;
+        TaskCompletionSource<bool> readySource;
+        bool shouldStartConnection;
 
         lock (_gate)
         {
             existingClient = _chatClient;
-            existingStatus = _chatTransportStatus;
-            if (existingStatus == ConnectionStatus.Connected)
+            if (_chatTransportStatus == ConnectionStatus.Connected)
             {
                 return;
             }
 
-            _transportReadyTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            readySource = GetOrCreateTransportReadySource(
+                _chatTransportStatus,
+                _transportReadyTcs,
+                out shouldStartConnection);
+            _transportReadyTcs = readySource;
 
-            if (existingClient == null)
+            if (shouldStartConnection)
             {
-                _chatClient = new OpenClawGatewayClient(_settings.GatewayUrl, _settings.Token, _logger);
-                _chatClient.StatusChanged += OnChatTransportStatusChanged;
-                _chatClient.ChatMessageReceived += OnChatMessageReceived;
-                existingClient = _chatClient;
                 _chatTransportStatus = ConnectionStatus.Connecting;
+
+                if (existingClient == null)
+                {
+                    _chatClient = new OpenClawGatewayClient(_settings.GatewayUrl, _settings.Token, _logger);
+                    _chatClient.StatusChanged += OnChatTransportStatusChanged;
+                    _chatClient.ChatMessageReceived += OnChatMessageReceived;
+                    existingClient = _chatClient;
+                }
             }
         }
 
-        if (existingStatus == ConnectionStatus.Disconnected || existingClient != _chatClient)
+        if (shouldStartConnection)
         {
             await existingClient!.ConnectAsync();
         }
 
-        Task readyTask;
-        lock (_gate)
-        {
-            readyTask = _transportReadyTcs?.Task ?? Task.CompletedTask;
-        }
-
+        var readyTask = readySource.Task;
         var timeoutTask = Task.Delay(TransportConnectTimeout, cancellationToken);
         var completed = await Task.WhenAny(readyTask, timeoutTask);
         if (completed != readyTask)
@@ -543,6 +546,21 @@ public sealed class VoiceService : IVoiceRuntime, IDisposable
         }
 
         await readyTask;
+    }
+
+    private static TaskCompletionSource<bool> GetOrCreateTransportReadySource(
+        ConnectionStatus transportStatus,
+        TaskCompletionSource<bool>? existingReadySource,
+        out bool shouldStartConnection)
+    {
+        if (transportStatus == ConnectionStatus.Connecting && existingReadySource != null)
+        {
+            shouldStartConnection = false;
+            return existingReadySource;
+        }
+
+        shouldStartConnection = true;
+        return new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     private async Task StartRecognitionSessionAsync()
