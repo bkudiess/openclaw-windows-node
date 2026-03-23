@@ -10,11 +10,7 @@ namespace OpenClawTray.Services.Voice;
 public static class VoiceProviderCatalogService
 {
     private const long MaxCatalogBytes = 256 * 1024;
-    private const int MaxProviderEntriesPerList = 64;
-    private static readonly string s_catalogFilePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "OpenClawTray",
-        "voice-providers.json");
+    private const string CatalogRelativePath = "Assets\\voice-providers.json";
 
     private static readonly JsonSerializerOptions s_jsonOptions = new()
     {
@@ -22,46 +18,40 @@ public static class VoiceProviderCatalogService
         WriteIndented = true
     };
 
-    public static string CatalogFilePath => s_catalogFilePath;
+    public static string CatalogFilePath => ResolveCatalogFilePath();
 
     public static VoiceProviderCatalog LoadCatalog(IOpenClawLogger? logger = null)
     {
-        var merged = CreateBuiltInCatalog();
+        var catalogFilePath = ResolveCatalogFilePath();
 
         try
         {
-            if (!File.Exists(s_catalogFilePath))
+            if (!File.Exists(catalogFilePath))
             {
-                return merged;
+                throw new FileNotFoundException("Voice provider catalog asset not found.", catalogFilePath);
             }
 
-            var fileInfo = new FileInfo(s_catalogFilePath);
+            var fileInfo = new FileInfo(catalogFilePath);
             if (fileInfo.Length > MaxCatalogBytes)
             {
-                logger?.Warn($"Voice provider catalog exceeds {MaxCatalogBytes} bytes and will be ignored.");
-                return merged;
+                throw new InvalidOperationException($"Voice provider catalog exceeds {MaxCatalogBytes} bytes.");
             }
 
-            var json = File.ReadAllText(s_catalogFilePath);
-            var configured = JsonSerializer.Deserialize<VoiceProviderCatalog>(json, s_jsonOptions);
-            if (configured == null)
+            var json = File.ReadAllText(catalogFilePath);
+            var catalog = JsonSerializer.Deserialize<VoiceProviderCatalog>(json, s_jsonOptions);
+            if (catalog == null)
             {
-                return merged;
+                throw new InvalidOperationException("Voice provider catalog asset is empty or invalid.");
             }
 
-            merged.SpeechToTextProviders = MergeProviders(
-                merged.SpeechToTextProviders,
-                configured.SpeechToTextProviders);
-            merged.TextToSpeechProviders = MergeProviders(
-                merged.TextToSpeechProviders,
-                configured.TextToSpeechProviders);
+            return NormalizeCatalog(catalog);
         }
         catch (Exception ex)
         {
-            logger?.Warn($"Failed to load voice provider catalog: {ex.Message}");
+            throw new InvalidOperationException(
+                $"Failed to load voice provider catalog from '{catalogFilePath}': {ex.Message}",
+                ex);
         }
-
-        return merged;
     }
 
     public static VoiceProviderOption ResolveSpeechToTextProvider(string? providerId, IOpenClawLogger? logger = null)
@@ -92,191 +82,20 @@ public static class VoiceProviderCatalogService
         return provider.TextToSpeechHttp != null;
     }
 
-    private static VoiceProviderCatalog CreateBuiltInCatalog()
+    private static VoiceProviderCatalog NormalizeCatalog(VoiceProviderCatalog catalog)
     {
         return new VoiceProviderCatalog
         {
-            SpeechToTextProviders =
-            [
-                new VoiceProviderOption
-                {
-                    Id = VoiceProviderIds.Windows,
-                    Name = "Windows Speech Recognition",
-                    Runtime = "windows",
-                    Description = "Built-in Windows dictation and speech recognition."
-                }
-            ],
-            TextToSpeechProviders =
-            [
-                new VoiceProviderOption
-                {
-                    Id = VoiceProviderIds.Windows,
-                    Name = "Windows Speech Synthesis",
-                    Runtime = "windows",
-                    Description = "Built-in Windows text-to-speech playback."
-                },
-                new VoiceProviderOption
-                {
-                    Id = VoiceProviderIds.MiniMax,
-                    Name = "MiniMax",
-                    Runtime = "cloud",
-                    Description = "Cloud TTS using the MiniMax HTTP text-to-speech API.",
-                    Settings =
-                    [
-                        new VoiceProviderSettingDefinition
-                        {
-                            Key = VoiceProviderSettingKeys.ApiKey,
-                            Label = "API key",
-                            Secret = true
-                        },
-                        new VoiceProviderSettingDefinition
-                        {
-                            Key = VoiceProviderSettingKeys.Model,
-                            Label = "Model",
-                            DefaultValue = "speech-2.8-turbo",
-                            Options =
-                            [
-                                "speech-2.5-turbo-preview",
-                                "speech-02-turbo",
-                                "speech-02-hd",
-                                "speech-2.6-turbo",
-                                "speech-2.6-hd",
-                                "speech-2.8-turbo",
-                                "speech-2.8-hd"
-                            ]
-                        },
-                        new VoiceProviderSettingDefinition
-                        {
-                            Key = VoiceProviderSettingKeys.VoiceId,
-                            Label = "Voice ID",
-                            Required = false,
-                            DefaultValue = "English_MatureBoss"
-                        },
-                        new VoiceProviderSettingDefinition
-                        {
-                            Key = VoiceProviderSettingKeys.VoiceSettingsJson,
-                            Label = "Voice settings JSON",
-                            Required = false,
-                            JsonValue = true,
-                            DefaultValue = "\"voice_setting\": { \"voice_id\": {{voiceId}}, \"speed\": 1, \"vol\": 1, \"pitch\": 0 }",
-                            Placeholder = "\"voice_setting\": { \"voice_id\": \"English_MatureBoss\", \"speed\": 1, \"vol\": 1, \"pitch\": 0 }",
-                            Description = "Optional full MiniMax request fragment. If present, it controls the full voice_setting payload."
-                        }
-                    ],
-                    TextToSpeechHttp = new VoiceTextToSpeechHttpContract
-                    {
-                        EndpointTemplate = "https://api.minimax.io/v1/t2a_v2",
-                        AuthenticationHeaderName = "Authorization",
-                        AuthenticationScheme = "Bearer",
-                        ApiKeySettingKey = VoiceProviderSettingKeys.ApiKey,
-                        RequestContentType = "application/json",
-                        RequestBodyTemplate = """
-                        {
-                          "model": {{model}},
-                          "text": {{text}},
-                          "stream": false,
-                          "language_boost": "English",
-                          "output_format": "hex",
-                          {{voiceSettingsJson}},
-                          "audio_setting": {
-                            "sample_rate": 32000,
-                            "bitrate": 128000,
-                            "format": "mp3",
-                            "channel": 1
-                          }
-                        }
-                        """,
-                        ResponseAudioMode = VoiceTextToSpeechResponseModes.HexJsonString,
-                        ResponseAudioJsonPath = "data.audio",
-                        ResponseStatusCodeJsonPath = "base_resp.status_code",
-                        ResponseStatusMessageJsonPath = "base_resp.status_msg",
-                        SuccessStatusValue = "0",
-                        OutputContentType = "audio/mpeg"
-                    }
-                },
-                new VoiceProviderOption
-                {
-                    Id = VoiceProviderIds.ElevenLabs,
-                    Name = "ElevenLabs",
-                    Runtime = "cloud",
-                    Description = "Cloud TTS using the ElevenLabs create speech API.",
-                    Settings =
-                    [
-                        new VoiceProviderSettingDefinition
-                        {
-                            Key = VoiceProviderSettingKeys.ApiKey,
-                            Label = "API key",
-                            Secret = true
-                        },
-                        new VoiceProviderSettingDefinition
-                        {
-                            Key = VoiceProviderSettingKeys.Model,
-                            Label = "Model",
-                            DefaultValue = "eleven_multilingual_v2",
-                            Options =
-                            [
-                                "eleven_flash_v2_5",
-                                "eleven_turbo_v2_5",
-                                "eleven_multilingual_v2",
-                                "eleven_monolingual_v1"
-                            ]
-                        },
-                        new VoiceProviderSettingDefinition
-                        {
-                            Key = VoiceProviderSettingKeys.VoiceId,
-                            Required = false,
-                            Label = "Voice ID",
-                            Placeholder = "Enter an ElevenLabs voice ID"
-                        },
-                        new VoiceProviderSettingDefinition
-                        {
-                            Key = VoiceProviderSettingKeys.VoiceSettingsJson,
-                            Label = "Voice settings JSON",
-                            Required = false,
-                            JsonValue = true,
-                            DefaultValue = "\"voice_settings\": null",
-                            Placeholder = "\"voice_settings\": { \"stability\": 0.5, \"similarity_boost\": 0.8 }",
-                            Description = "Optional full ElevenLabs request fragment. If present, it controls the full voice_settings payload."
-                        }
-                    ],
-                    TextToSpeechHttp = new VoiceTextToSpeechHttpContract
-                    {
-                        EndpointTemplate = "https://api.elevenlabs.io/v1/text-to-speech/{{voiceId}}?output_format=mp3_44100_128",
-                        AuthenticationHeaderName = "xi-api-key",
-                        AuthenticationScheme = null,
-                        ApiKeySettingKey = VoiceProviderSettingKeys.ApiKey,
-                        RequestContentType = "application/json",
-                        RequestBodyTemplate = """
-                        {
-                          "text": {{text}},
-                          "model_id": {{model}},
-                          {{voiceSettingsJson}}
-                        }
-                        """,
-                        ResponseAudioMode = VoiceTextToSpeechResponseModes.Binary,
-                        OutputContentType = "audio/mpeg"
-                    }
-                }
-            ]
+            SpeechToTextProviders = NormalizeProviders(catalog.SpeechToTextProviders),
+            TextToSpeechProviders = NormalizeProviders(catalog.TextToSpeechProviders)
         };
     }
 
-    private static List<VoiceProviderOption> MergeProviders(
-        List<VoiceProviderOption> builtIn,
-        List<VoiceProviderOption> configured)
+    private static List<VoiceProviderOption> NormalizeProviders(List<VoiceProviderOption> providers)
     {
-        var merged = builtIn
-            .Select(Clone)
-            .ToDictionary(p => p.Id, StringComparer.OrdinalIgnoreCase);
-
-        foreach (var provider in configured
+        return providers
             .Where(p => !string.IsNullOrWhiteSpace(p.Id))
-            .Take(MaxProviderEntriesPerList))
-        {
-            merged[provider.Id] = Clone(provider);
-        }
-
-        return merged.Values
+            .Select(Clone)
             .Where(p => p.Enabled)
             .OrderByDescending(p => string.Equals(p.Id, VoiceProviderIds.Windows, StringComparison.OrdinalIgnoreCase))
             .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
@@ -358,5 +177,28 @@ public static class VoiceProviderCatalogService
             SuccessStatusValue = source.SuccessStatusValue,
             OutputContentType = source.OutputContentType
         };
+    }
+
+    private static string ResolveCatalogFilePath()
+    {
+        var bundledPath = Path.Combine(AppContext.BaseDirectory, CatalogRelativePath);
+        if (File.Exists(bundledPath))
+        {
+            return bundledPath;
+        }
+
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current != null)
+        {
+            var sourcePath = Path.Combine(current.FullName, "src", "OpenClaw.Tray.WinUI", CatalogRelativePath);
+            if (File.Exists(sourcePath))
+            {
+                return sourcePath;
+            }
+
+            current = current.Parent;
+        }
+
+        return bundledPath;
     }
 }

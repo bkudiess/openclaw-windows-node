@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using OpenClaw.Shared;
 using OpenClawTray.Services.Voice;
 using System.Linq;
@@ -6,6 +8,13 @@ namespace OpenClaw.Tray.Tests;
 
 public class VoiceProviderCatalogServiceTests
 {
+    [Fact]
+    public void CatalogFilePath_ResolvesToExistingBundledAsset()
+    {
+        Assert.EndsWith("voice-providers.json", VoiceProviderCatalogService.CatalogFilePath, StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(VoiceProviderCatalogService.CatalogFilePath));
+    }
+
     [Fact]
     public void LoadCatalog_IncludesBuiltInMiniMaxAndElevenLabsTtsProviders()
     {

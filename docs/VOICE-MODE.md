@@ -138,11 +138,11 @@ Runtime behavior in the current phase:
 - non-Windows providers can be selected and persisted now
 - unsupported providers fall back to Windows at runtime with a status warning
 
-### Local Provider Catalog
+### Provider Catalog
 
-Additional provider entries are supplied through a local catalog file:
+The provider catalog now ships with the tray app as a bundled asset:
 
-- `%APPDATA%\\OpenClawTray\\voice-providers.json`
+- `Assets\\voice-providers.json`
 
 Example:
 
@@ -253,7 +253,7 @@ Example:
 }
 ```
 
-For HTTP-backed TTS providers, the catalog carries the request/response contract. That allows a new provider to be added without recompilation, as long as it follows the same general HTTP template approach.
+For HTTP-backed TTS providers, the catalog carries the request/response contract. That allows a new provider to be added by shipping an updated catalog file with the app, as long as it follows the same general HTTP template approach.
 
 This file defines provider metadata and HTTP contracts. It does not carry API keys.
 
@@ -264,7 +264,7 @@ That means the current design is:
 - local tray settings choose the preferred STT/TTS provider ids
 - provider API keys and editable values are stored in `%APPDATA%\\OpenClawTray\\settings.json` under `VoiceProviderConfiguration`
 - OpenClaw remains the conversation endpoint for `chat.send`
-- the local provider catalog remains metadata-only and must not contain secrets
+- the shipped provider catalog remains metadata-only and must not contain secrets
 
 This is an intentional short-term design choice so the Windows tray app can use cloud TTS providers without inventing a second catalog file for secrets. It can be revisited later if provider ownership is split differently.
 
@@ -421,7 +421,7 @@ The tray `Voice Mode` window is a read-only runtime status/detail surface with a
 | `Voice.TalkMode.EndSilenceMs` | int | `900` | talk mode | Silence timeout used to finalize an utterance |
 | `Voice.TalkMode.MaxUtteranceMs` | int | `15000` | talk mode | Hard cap on utterance length before forced submission/finalization |
 | `Voice.TalkMode.ChatWindowSubmitMode` | enum | `AutoSend` | talk mode | When the tray chat window is open, either auto-send the finalized utterance or leave it in the compose box for manual send |
-| `VoiceProviderConfiguration.Providers[].ProviderId` | string | none | cloud providers | Provider id matching a `voice-providers.json` entry |
+| `VoiceProviderConfiguration.Providers[].ProviderId` | string | none | cloud providers | Provider id matching an `Assets\\voice-providers.json` entry |
 | `VoiceProviderConfiguration.Providers[].Values["apiKey"]` | string? | `null` | cloud providers | API key sent using the provider contract's configured auth header |
 | `VoiceProviderConfiguration.Providers[].Values["model"]` | string? | provider default | cloud providers | Model identifier inserted into the configured request template |
 | `VoiceProviderConfiguration.Providers[].Values["voiceId"]` | string? | provider default | cloud providers | Voice id inserted into the configured request template or URL |
@@ -556,7 +556,7 @@ Coord-->>VoiceCap: VoiceStatusInfo(state=ListeningForVoiceWake)
 Provider support is now part of the Windows voice subsystem roadmap, not a hypothetical extension:
 
 - `MiniMax` and `ElevenLabs` TTS are both expressed through built-in catalog contracts
-- additional HTTP TTS providers can be added through the local catalog without recompiling the tray app
+- additional HTTP TTS providers can be added by extending the shipped catalog without recompiling the tray app itself
 - Windows STT remains the active speech-recognition baseline until a non-Windows STT provider is deliberately added
 
 The Windows node still keeps provider choice bounded:
