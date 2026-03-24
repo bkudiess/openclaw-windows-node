@@ -798,7 +798,8 @@ public class OpenClawGatewayClient : WebSocketClientBase
 
     private void HandleChatEvent(JsonElement root)
     {
-        _logger.Debug($"Chat event received: {root.GetRawText().Substring(0, Math.Min(200, root.GetRawText().Length))}");
+        var rawText = root.GetRawText();
+        _logger.Debug($"Chat event received: {rawText.Substring(0, Math.Min(200, rawText.Length))}");
         
         if (!root.TryGetProperty("payload", out var payload)) return;
 
