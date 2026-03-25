@@ -1415,31 +1415,43 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
         CancellationToken cancellationToken)
     {
         stream.Seek(0);
+        var mediaOpened = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var playbackEnded = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        TypedEventHandler<MediaPlayer, object>? openedHandler = null;
         TypedEventHandler<MediaPlayer, object>? endedHandler = null;
         TypedEventHandler<MediaPlayer, MediaPlayerFailedEventArgs>? failedHandler = null;
 
+        openedHandler = (sender, _) => mediaOpened.TrySetResult(true);
         endedHandler = (sender, _) => playbackEnded.TrySetResult(true);
-        failedHandler = (sender, args) => playbackEnded.TrySetException(new InvalidOperationException(args.ErrorMessage));
+        failedHandler = (sender, args) =>
+        {
+            var exception = new InvalidOperationException(args.ErrorMessage);
+            mediaOpened.TrySetException(exception);
+            playbackEnded.TrySetException(exception);
+        };
 
+        player.MediaOpened += openedHandler;
         player.MediaEnded += endedHandler;
         player.MediaFailed += failedHandler;
         using var registration = cancellationToken.Register(() =>
         {
             try { player.Pause(); } catch { }
             try { player.Source = null; } catch { }
+            mediaOpened.TrySetCanceled(cancellationToken);
             playbackEnded.TrySetCanceled(cancellationToken);
         });
 
         try
         {
             player.Source = MediaSource.CreateFromStream(stream, contentType);
+            await mediaOpened.Task;
             player.Play();
             await playbackEnded.Task;
         }
         finally
         {
+            player.MediaOpened -= openedHandler;
             player.MediaEnded -= endedHandler;
             player.MediaFailed -= failedHandler;
             player.Source = null;

@@ -119,7 +119,7 @@ private const string TrayVoiceIntegrationScript = """
     },
     clearDraft() {
       desiredDraft = '';
-      return true;
+      return applyDraftIfPossible();
     }
   };
 })();

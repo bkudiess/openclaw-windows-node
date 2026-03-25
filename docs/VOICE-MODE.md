@@ -755,3 +755,4 @@ Append one new line to this timeline for every future voice-mode commit.
 - `2026-03-25` Added a configurable tray-chat display filter for injected `<relevant-memories>` blocks.
 - `2026-03-25` Fixed the recognizer watchdog so a stalled Talk Mode session is actually canceled and restarted instead of logging a recycle and then remaining deaf.
 - `2026-03-25` Rebuilt the Windows speech recognizer after repeated deaf `UserCanceled` and watchdog-recycle failures instead of repeatedly restarting the same broken recognizer instance.
+- `2026-03-25` Fixed the tray-chat draft mirror so it clears immediately after direct send, and primed media playback before `Play()` so spoken replies stop clipping their opening syllables.
