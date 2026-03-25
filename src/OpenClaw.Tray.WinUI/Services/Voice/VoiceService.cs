@@ -30,7 +30,7 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
     private static readonly TimeSpan ReplyTimeout = TimeSpan.FromSeconds(45);
     private static readonly TimeSpan LateReplyGraceWindow = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan InitialRecognitionReadyDelay = TimeSpan.FromMilliseconds(500);
-    private static readonly TimeSpan RecognitionSpeechMismatchDelay = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan RecognitionSpeechMismatchDelay = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan RecognitionPostSpeechSilenceBeforeRecycle = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan DuplicateTranscriptWindow = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan HypothesisPromotionWindow = TimeSpan.FromSeconds(2);
@@ -777,7 +777,6 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
             _ = MonitorListeningReadyAsync(generation, runtimeToken);
         }
 
-        _ = MonitorRecognitionSessionHealthAsync(generation, runtimeToken);
     }
 
     private async Task MonitorListeningReadyAsync(int generation, CancellationToken cancellationToken)
@@ -2275,6 +2274,7 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
                     return;
                 }
 
+                _recognitionHealthCheckArmed = false;
                 _recognitionRestartInProgress = true;
                 _status = BuildRunningStatus(
                     VoiceActivationMode.TalkMode,
