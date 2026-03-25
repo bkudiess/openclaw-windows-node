@@ -58,7 +58,6 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
     private bool _quickPaused;
     private string? _lastTranscript;
     private DateTime _lastTranscriptUtc;
-    private string? _pendingManualTranscript;
     private readonly Queue<(string Text, string? SessionKey)> _pendingAssistantReplies = new();
     private CancellationTokenSource? _playbackSkipCts;
     private string? _currentReplyPreview;
@@ -68,7 +67,6 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
 
     public event EventHandler<VoiceConversationTurnEventArgs>? ConversationTurnAvailable;
     public event EventHandler<VoiceTranscriptDraftEventArgs>? TranscriptDraftUpdated;
-    public Func<string, string?, Task<VoiceTranscriptSubmitOutcome>>? TranscriptSubmitter { get; set; }
 
     public VoiceService(IOpenClawLogger logger, SettingsManager settings)
     {
@@ -921,7 +919,6 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
         var pipelineStopwatch = Stopwatch.StartNew();
         long recognitionStopElapsedMs = 0;
         long transportReadyElapsedMs = 0;
-        long traySubmitElapsedMs = 0;
         long directSendElapsedMs = 0;
 
         lock (_gate)
@@ -961,11 +958,9 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
             transportReadyElapsedMs = pipelineStopwatch.ElapsedMilliseconds - recognitionStopElapsedMs;
 
             OpenClawGatewayClient? client;
-            Func<string, string?, Task<VoiceTranscriptSubmitOutcome>>? transcriptSubmitter;
             lock (_gate)
             {
                 client = _chatClient;
-                transcriptSubmitter = TranscriptSubmitter;
             }
 
             if (client == null)
@@ -974,52 +969,18 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
             }
 
             _logger.Info($"Voice transcript captured: {text}");
-            var submitOutcome = VoiceTranscriptSubmitOutcome.Unavailable;
-            if (transcriptSubmitter != null)
-            {
-                var submitStopwatch = Stopwatch.StartNew();
-                submitOutcome = await transcriptSubmitter(text, sessionKey);
-                traySubmitElapsedMs = submitStopwatch.ElapsedMilliseconds;
-                _logger.Info($"Voice tray submit path: outcome={submitOutcome} elapsed={traySubmitElapsedMs}ms");
-            }
-
-            if (submitOutcome == VoiceTranscriptSubmitOutcome.Unavailable)
-            {
-                var directSendStopwatch = Stopwatch.StartNew();
-                await client.SendChatMessageAsync(text, sessionKey);
-                directSendElapsedMs = directSendStopwatch.ElapsedMilliseconds;
-                submitOutcome = VoiceTranscriptSubmitOutcome.Submitted;
-                _logger.Info($"Voice direct send path: elapsed={directSendElapsedMs}ms");
-            }
-
-            if (submitOutcome == VoiceTranscriptSubmitOutcome.DeferredToUser)
-            {
-                _logger.Info(
-                    $"Voice pre-response latency: recognitionStop={recognitionStopElapsedMs}ms transportReady={transportReadyElapsedMs}ms traySubmit={traySubmitElapsedMs}ms total={pipelineStopwatch.ElapsedMilliseconds}ms (deferred to user)");
-                lock (_gate)
-                {
-                    _awaitingReply = false;
-                    _pendingManualTranscript = text;
-                    _status = BuildRunningStatus(
-                        VoiceActivationMode.TalkMode,
-                        _status.SessionKey,
-                        VoiceRuntimeState.PendingManualSend,
-                        "Draft ready in tray chat window. Send it manually to continue.");
-                    _status.LastUtteranceUtc = DateTime.UtcNow;
-                }
-
-                RaiseTranscriptDraft(text, sessionKey, clear: false);
-                return;
-            }
+            var directSendStopwatch = Stopwatch.StartNew();
+            await client.SendChatMessageAsync(text, sessionKey);
+            directSendElapsedMs = directSendStopwatch.ElapsedMilliseconds;
+            _logger.Info($"Voice direct send path: elapsed={directSendElapsedMs}ms");
 
             _logger.Info(
-                $"Voice pre-response latency: recognitionStop={recognitionStopElapsedMs}ms transportReady={transportReadyElapsedMs}ms traySubmit={traySubmitElapsedMs}ms directSend={directSendElapsedMs}ms total={pipelineStopwatch.ElapsedMilliseconds}ms");
+                $"Voice pre-response latency: recognitionStop={recognitionStopElapsedMs}ms transportReady={transportReadyElapsedMs}ms directSend={directSendElapsedMs}ms total={pipelineStopwatch.ElapsedMilliseconds}ms");
             lock (_gate)
             {
                 _awaitingReply = true;
                 _lateReplySessionKey = null;
                 _lateReplyGraceUntilUtc = null;
-                _pendingManualTranscript = null;
                 _status = BuildRunningStatus(
                     VoiceActivationMode.TalkMode,
                     _status.SessionKey,
@@ -1050,38 +1011,6 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
 
             await ResumeRecognitionSessionAsync(cancellationToken, "transcript submit failure", userMessage);
         }
-    }
-
-    public void NotifyManualTranscriptSubmitted(string text, string? sessionKey = null)
-    {
-        CancellationToken cancellationToken;
-        string effectiveSessionKey;
-
-        lock (_gate)
-        {
-            if (_runtimeCts == null || _status.Mode != VoiceActivationMode.TalkMode || !_status.Running)
-            {
-                return;
-            }
-
-            cancellationToken = _runtimeCts.Token;
-            effectiveSessionKey = string.IsNullOrWhiteSpace(sessionKey) ? GetCurrentVoiceSessionKey() : sessionKey!;
-            _pendingManualTranscript = null;
-            _awaitingReply = true;
-            _lateReplySessionKey = null;
-            _lateReplyGraceUntilUtc = null;
-            _status = BuildRunningStatus(
-                VoiceActivationMode.TalkMode,
-                _status.SessionKey,
-                VoiceRuntimeState.AwaitingResponse,
-                _status.LastError);
-            _status.LastUtteranceUtc = DateTime.UtcNow;
-        }
-
-        _logger.Info("Voice response wait started (manual submit)");
-        RaiseConversationTurn(VoiceConversationDirection.Outgoing, text, effectiveSessionKey);
-        RaiseTranscriptDraft(string.Empty, effectiveSessionKey, clear: true);
-        _ = MonitorReplyTimeoutAsync(text, cancellationToken);
     }
 
     private async Task MonitorReplyTimeoutAsync(string transcript, CancellationToken cancellationToken)
@@ -1602,7 +1531,6 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
             _awaitingReply = false;
             _isSpeaking = false;
             _replyPlaybackLoopActive = false;
-            _pendingManualTranscript = null;
             _pendingAssistantReplies.Clear();
             _currentReplyPreview = null;
             _lateReplySessionKey = null;
@@ -1880,8 +1808,7 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
             {
                 MinSpeechMs = source.TalkMode.MinSpeechMs,
                 EndSilenceMs = source.TalkMode.EndSilenceMs,
-                MaxUtteranceMs = source.TalkMode.MaxUtteranceMs,
-                ChatWindowSubmitMode = source.TalkMode.ChatWindowSubmitMode
+                MaxUtteranceMs = source.TalkMode.MaxUtteranceMs
             }
         };
     }
@@ -2003,9 +1930,3 @@ public sealed class VoiceTranscriptDraftEventArgs : EventArgs
     public VoiceActivationMode Mode { get; set; } = VoiceActivationMode.Off;
 }
 
-public enum VoiceTranscriptSubmitOutcome
-{
-    Unavailable,
-    Submitted,
-    DeferredToUser
-}

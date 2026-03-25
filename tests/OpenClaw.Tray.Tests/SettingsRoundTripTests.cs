@@ -54,8 +54,7 @@ public class SettingsRoundTripTests
                 {
                     MinSpeechMs = 300,
                     EndSilenceMs = 1100,
-                    MaxUtteranceMs = 18000,
-                    ChatWindowSubmitMode = VoiceChatWindowSubmitMode.WaitForUser
+                    MaxUtteranceMs = 18000
                 }
             },
             VoiceProviderConfiguration = new VoiceProviderConfigurationStore
@@ -125,7 +124,6 @@ public class SettingsRoundTripTests
         Assert.Equal("hey_openclaw", restored.Voice.VoiceWake.ModelId);
         Assert.Equal(0.72f, restored.Voice.VoiceWake.TriggerThreshold);
         Assert.Equal(300, restored.Voice.TalkMode.MinSpeechMs);
-        Assert.Equal(VoiceChatWindowSubmitMode.WaitForUser, restored.Voice.TalkMode.ChatWindowSubmitMode);
         Assert.NotNull(restored.VoiceProviderConfiguration);
         Assert.Equal("minimax-key", restored.VoiceProviderConfiguration.GetValue(VoiceProviderIds.MiniMax, VoiceProviderSettingKeys.ApiKey));
         Assert.Equal("speech-2.8-turbo", restored.VoiceProviderConfiguration.GetValue(VoiceProviderIds.MiniMax, VoiceProviderSettingKeys.Model));

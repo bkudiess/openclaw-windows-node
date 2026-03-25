@@ -58,11 +58,6 @@
         <CheckBox x:Name="VoiceConversationToastsCheckBox"
                   Content="Show voice transcripts and replies as toasts"/>
 
-        <ComboBox x:Name="VoiceChatWindowSubmitModeComboBox" Header="When the tray chat window is open">
-            <ComboBoxItem Content="Send automatically" Tag="AutoSend"/>
-            <ComboBoxItem Content="Fill message box and wait for me to send" Tag="WaitForUser"/>
-        </ComboBox>
-
         <TextBlock x:Name="VoiceSettingsInfoTextBlock"
                    Style="{StaticResource CaptionTextBlockStyle}"
                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"

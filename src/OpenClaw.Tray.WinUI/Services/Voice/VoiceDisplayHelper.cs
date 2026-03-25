@@ -23,7 +23,6 @@ public static class VoiceDisplayHelper
             VoiceRuntimeState.ListeningContinuously => "Listening",
             VoiceRuntimeState.RecordingUtterance => "Recording",
             VoiceRuntimeState.SubmittingAudio => "Sending",
-            VoiceRuntimeState.PendingManualSend => "Waiting for send",
             VoiceRuntimeState.AwaitingResponse => "Waiting for reply",
             VoiceRuntimeState.PlayingResponse => "Speaking",
             VoiceRuntimeState.Paused => "Paused",

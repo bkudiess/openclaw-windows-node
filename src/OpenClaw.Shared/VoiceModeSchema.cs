@@ -52,17 +52,9 @@ public enum VoiceRuntimeState
     ListeningContinuously,
     RecordingUtterance,
     SubmittingAudio,
-    PendingManualSend,
     AwaitingResponse,
     PlayingResponse,
     Error
-}
-
-[JsonConverter(typeof(JsonStringEnumConverter<VoiceChatWindowSubmitMode>))]
-public enum VoiceChatWindowSubmitMode
-{
-    AutoSend,
-    WaitForUser
 }
 
 public sealed class VoiceSettings
@@ -96,7 +88,6 @@ public sealed class TalkModeSettings
     public int MinSpeechMs { get; set; } = 250;
     public int EndSilenceMs { get; set; } = 900;
     public int MaxUtteranceMs { get; set; } = 15000;
-    public VoiceChatWindowSubmitMode ChatWindowSubmitMode { get; set; } = VoiceChatWindowSubmitMode.AutoSend;
 }
 
 public sealed class VoiceAudioDeviceInfo
@@ -310,7 +301,6 @@ public sealed class VoiceRuntimeStateJsonConverter : JsonConverter<VoiceRuntimeS
             "ListeningContinuously" => VoiceRuntimeState.ListeningContinuously,
             "RecordingUtterance" => VoiceRuntimeState.RecordingUtterance,
             "SubmittingAudio" => VoiceRuntimeState.SubmittingAudio,
-            "PendingManualSend" => VoiceRuntimeState.PendingManualSend,
             "AwaitingResponse" => VoiceRuntimeState.AwaitingResponse,
             "PlayingResponse" => VoiceRuntimeState.PlayingResponse,
             "Error" => VoiceRuntimeState.Error,
@@ -330,7 +320,6 @@ public sealed class VoiceRuntimeStateJsonConverter : JsonConverter<VoiceRuntimeS
             VoiceRuntimeState.ListeningContinuously => "ListeningContinuously",
             VoiceRuntimeState.RecordingUtterance => "RecordingUtterance",
             VoiceRuntimeState.SubmittingAudio => "SubmittingAudio",
-            VoiceRuntimeState.PendingManualSend => "PendingManualSend",
             VoiceRuntimeState.AwaitingResponse => "AwaitingResponse",
             VoiceRuntimeState.PlayingResponse => "PlayingResponse",
             VoiceRuntimeState.Error => "Error",

@@ -62,7 +62,6 @@ public sealed partial class VoiceModeWindow : WindowEx
             new("Text to speech", ResolveProviderName(catalog.TextToSpeechProviders, _settings.Voice.TextToSpeechProviderId, "Windows Speech Synthesis")),
             new("Listen device", DescribeDevice(_settings.Voice.InputDeviceId, "System default microphone")),
             new("Talk device", DescribeDevice(_settings.Voice.OutputDeviceId, "System default speaker")),
-            new("Chat window", DescribeChatWindowSubmitMode(_settings.Voice.TalkMode.ChatWindowSubmitMode)),
             new("Voice toasts", _settings.Voice.ShowConversationToasts ? "Enabled" : "Disabled")
         };
 
@@ -95,13 +94,6 @@ public sealed partial class VoiceModeWindow : WindowEx
     private static string DescribeDevice(string? deviceId, string defaultLabel)
     {
         return string.IsNullOrWhiteSpace(deviceId) ? defaultLabel : "Selected device";
-    }
-
-    private static string DescribeChatWindowSubmitMode(VoiceChatWindowSubmitMode mode)
-    {
-        return mode == VoiceChatWindowSubmitMode.WaitForUser
-            ? "Fill message box and wait for send"
-            : "Send automatically";
     }
 
     private static string FormatTimestamp(DateTime? value)

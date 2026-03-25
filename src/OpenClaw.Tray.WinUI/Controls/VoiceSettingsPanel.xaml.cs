@@ -66,8 +66,7 @@ public sealed partial class VoiceSettingsPanel : UserControl
             {
                 MinSpeechMs = settings.Voice.TalkMode.MinSpeechMs,
                 EndSilenceMs = settings.Voice.TalkMode.EndSilenceMs,
-                MaxUtteranceMs = settings.Voice.TalkMode.MaxUtteranceMs,
-                ChatWindowSubmitMode = GetSelectedChatWindowSubmitMode()
+                MaxUtteranceMs = settings.Voice.TalkMode.MaxUtteranceMs
             }
         };
         settings.Voice = voiceSettings;
@@ -94,7 +93,6 @@ public sealed partial class VoiceSettingsPanel : UserControl
         _voiceProviderConfigurationDraft = _settings.VoiceProviderConfiguration.Clone();
         LoadVoiceProviders();
         SelectVoiceMode(_settings.Voice.Mode);
-        SelectChatWindowSubmitMode(_settings.Voice.TalkMode.ChatWindowSubmitMode);
         VoiceConversationToastsCheckBox.IsChecked = _settings.Voice.ShowConversationToasts;
         UpdateVoiceProviderSettingsEditor();
         UpdateVoiceSettingsInfo();
@@ -194,30 +192,6 @@ public sealed partial class VoiceSettingsPanel : UserControl
             "TalkMode" => VoiceActivationMode.TalkMode,
             _ => VoiceActivationMode.Off
         };
-    }
-
-    private void SelectChatWindowSubmitMode(VoiceChatWindowSubmitMode mode)
-    {
-        var target = mode == VoiceChatWindowSubmitMode.WaitForUser ? "WaitForUser" : "AutoSend";
-
-        foreach (var item in VoiceChatWindowSubmitModeComboBox.Items.OfType<ComboBoxItem>())
-        {
-            if (string.Equals(item.Tag?.ToString(), target, StringComparison.Ordinal))
-            {
-                VoiceChatWindowSubmitModeComboBox.SelectedItem = item;
-                return;
-            }
-        }
-
-        VoiceChatWindowSubmitModeComboBox.SelectedIndex = 0;
-    }
-
-    private VoiceChatWindowSubmitMode GetSelectedChatWindowSubmitMode()
-    {
-        var tag = (VoiceChatWindowSubmitModeComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString();
-        return tag == "WaitForUser"
-            ? VoiceChatWindowSubmitMode.WaitForUser
-            : VoiceChatWindowSubmitMode.AutoSend;
     }
 
     private void UpdateVoiceSettingsInfo()

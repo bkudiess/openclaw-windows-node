@@ -259,7 +259,6 @@ public partial class App : Application
         _voiceService = new VoiceService(new AppLogger(), _settings);
         _voiceChatCoordinator = new VoiceChatCoordinator(
             _voiceService,
-            () => _settings.Voice.TalkMode.ChatWindowSubmitMode,
             new DispatcherQueueAdapter(_dispatcherQueue!));
         _voiceChatCoordinator.ConversationTurnAvailable += OnVoiceConversationTurnAvailable;
 
@@ -2398,10 +2397,6 @@ public partial class App : Application
         {
             _voiceChatCoordinator.ConversationTurnAvailable -= OnVoiceConversationTurnAvailable;
             _voiceChatCoordinator.Dispose();
-        }
-        if (_voiceService != null)
-        {
-            _voiceService.TranscriptSubmitter = null;
         }
         _voiceService?.Dispose();
         

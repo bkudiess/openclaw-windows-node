@@ -7,7 +7,6 @@ namespace OpenClawTray.Services.Voice;
 public sealed class VoiceChatCoordinator : IDisposable
 {
     private readonly IVoiceRuntime _voiceService;
-    private readonly Func<VoiceChatWindowSubmitMode> _getSubmitMode;
     private readonly IUiDispatcher _dispatcher;
     private readonly object _gate = new();
 
@@ -19,16 +18,13 @@ public sealed class VoiceChatCoordinator : IDisposable
 
     public VoiceChatCoordinator(
         IVoiceRuntime voiceService,
-        Func<VoiceChatWindowSubmitMode> getSubmitMode,
         IUiDispatcher dispatcher)
     {
         _voiceService = voiceService;
-        _getSubmitMode = getSubmitMode;
         _dispatcher = dispatcher;
 
         _voiceService.ConversationTurnAvailable += OnVoiceConversationTurnAvailable;
         _voiceService.TranscriptDraftUpdated += OnVoiceTranscriptDraftUpdated;
-        _voiceService.TranscriptSubmitter = SubmitVoiceTranscriptAsync;
     }
 
     public void AttachWindow(IVoiceChatWindow window)
@@ -42,13 +38,7 @@ public sealed class VoiceChatCoordinator : IDisposable
                 return;
             }
 
-            if (_webChatWindow != null)
-            {
-                _webChatWindow.VoiceTranscriptSubmitted -= OnWebChatVoiceTranscriptSubmitted;
-            }
-
             _webChatWindow = window;
-            _webChatWindow.VoiceTranscriptSubmitted += OnWebChatVoiceTranscriptSubmitted;
         }
 
         _ = window.UpdateVoiceTranscriptDraftAsync(
@@ -70,7 +60,6 @@ public sealed class VoiceChatCoordinator : IDisposable
                 return;
             }
 
-            _webChatWindow.VoiceTranscriptSubmitted -= OnWebChatVoiceTranscriptSubmitted;
             _webChatWindow = null;
         }
     }
@@ -86,7 +75,6 @@ public sealed class VoiceChatCoordinator : IDisposable
         DetachWindow(null);
         _voiceService.ConversationTurnAvailable -= OnVoiceConversationTurnAvailable;
         _voiceService.TranscriptDraftUpdated -= OnVoiceTranscriptDraftUpdated;
-        _voiceService.TranscriptSubmitter = null;
     }
 
     private void OnVoiceConversationTurnAvailable(object? sender, VoiceConversationTurnEventArgs args)
@@ -116,43 +104,5 @@ public sealed class VoiceChatCoordinator : IDisposable
 
             _ = window.UpdateVoiceTranscriptDraftAsync(_voiceTranscriptDraftText, args.Clear);
         });
-    }
-
-    private void OnWebChatVoiceTranscriptSubmitted(object? sender, VoiceTranscriptSubmittedEventArgs args)
-    {
-        _voiceTranscriptDraftText = string.Empty;
-        _voiceService.NotifyManualTranscriptSubmitted(args.Text, args.SessionKey);
-    }
-
-    private async Task<VoiceTranscriptSubmitOutcome> SubmitVoiceTranscriptAsync(string text, string? sessionKey)
-    {
-        try
-        {
-            IVoiceChatWindow? window;
-            lock (_gate)
-            {
-                window = _webChatWindow;
-            }
-
-            if (window == null || window.IsClosed)
-            {
-                return VoiceTranscriptSubmitOutcome.Unavailable;
-            }
-
-            if (_getSubmitMode() == VoiceChatWindowSubmitMode.WaitForUser)
-            {
-                return await window.PrepareVoiceTranscriptForManualSendAsync(text)
-                    ? VoiceTranscriptSubmitOutcome.DeferredToUser
-                    : VoiceTranscriptSubmitOutcome.Unavailable;
-            }
-
-            return await window.TrySubmitVoiceTranscriptAsync(text)
-                ? VoiceTranscriptSubmitOutcome.Submitted
-                : VoiceTranscriptSubmitOutcome.Unavailable;
-        }
-        catch
-        {
-            return VoiceTranscriptSubmitOutcome.Unavailable;
-        }
     }
 }

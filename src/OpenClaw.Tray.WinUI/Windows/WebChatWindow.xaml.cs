@@ -18,39 +18,23 @@ namespace OpenClawTray.Windows;
 public sealed partial class WebChatWindow : WindowEx
     , IVoiceChatWindow
 {
-    private const string VoiceManualSubmitMessageType = "voice-manual-submit";
     private readonly string _gatewayUrl;
     private readonly string _token;
-    private readonly string _voiceMessageNonce = Guid.NewGuid().ToString("N");
     private string _pendingVoiceDraft = string.Empty;
-    private string? _trustedVoiceMessageOrigin;
     
     // Store event handlers for cleanup
     private TypedEventHandler<CoreWebView2, CoreWebView2NavigationCompletedEventArgs>? _navigationCompletedHandler;
     private TypedEventHandler<CoreWebView2, CoreWebView2NavigationStartingEventArgs>? _navigationStartingHandler;
-    private TypedEventHandler<CoreWebView2, CoreWebView2WebMessageReceivedEventArgs>? _webMessageReceivedHandler;
     
     public bool IsClosed { get; private set; }
-    public event EventHandler<VoiceTranscriptSubmittedEventArgs>? VoiceTranscriptSubmitted;
 
-    private const string TrayVoiceIntegrationScriptTemplate = """
+    private const string TrayVoiceIntegrationScript = """
 (() => {
-  const submitNonce = __VOICE_NONCE__;
-  const memoryPattern = /<relevant-memories>[\s\S]*?<\/relevant-memories>\s*/gi;
-  const sanitize = (value) => typeof value === 'string' ? value.replace(memoryPattern, '').trimStart() : value;
   const isVisible = (el) => !!el && !(el.disabled === true) && el.getClientRects().length > 0;
-  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   let desiredDraft = '';
   const findComposer = () => {
     const candidates = Array.from(document.querySelectorAll('textarea, input[type="text"], [contenteditable="true"], [contenteditable="plaintext-only"]'));
     return candidates.find(isVisible) || null;
-  };
-  const getComposerValue = (composer) => sanitize(('value' in composer ? composer.value : composer.textContent) || '');
-  const isSendLike = (button) => {
-    if (!button || !isVisible(button)) return false;
-    if (button.disabled === true || button.getAttribute('aria-disabled') === 'true') return false;
-    const text = ((button.innerText || button.textContent || '') + ' ' + (button.getAttribute('aria-label') || '')).trim().toLowerCase();
-    return text === 'send' || text.startsWith('send ') || text.includes('send ↵') || text.includes('send');
   };
   const setElementValue = (el, value) => {
     if ('value' in el) {
@@ -77,117 +61,11 @@ public sealed partial class WebChatWindow : WindowEx
     setElementValue(composer, desiredDraft);
     return true;
   };
-  const findSendButton = () => {
-    const buttons = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"]'));
-    return buttons.find(isSendLike) || null;
-  };
-  const waitForDraftToLeaveComposer = async (expectedText) => {
-    for (let i = 0; i < 20; i++) {
-      await delay(75);
-      const composer = findComposer();
-      if (!composer) return true;
-      const current = getComposerValue(composer);
-      if (!current || current !== sanitize(expectedText || '')) {
-        return true;
-      }
-    }
-    return false;
-  };
-  const submitDraft = async (text) => {
-    desiredDraft = sanitize(text || '');
-    pendingManual = false;
-    const composer = findComposer();
-    if (!composer) return false;
-    setElementValue(composer, desiredDraft);
-    await delay(0);
-    const sendButton = findSendButton();
-    if (sendButton) {
-      sendButton.click();
-      const sent = await waitForDraftToLeaveComposer(desiredDraft);
-      if (sent) {
-        desiredDraft = '';
-      }
-      return sent;
-    }
-    composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true }));
-    composer.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true }));
-    composer.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true }));
-    const sent = await waitForDraftToLeaveComposer(desiredDraft);
-    if (sent) {
-      desiredDraft = '';
-    }
-    return sent;
-  };
-  let pendingManual = false;
-  const emitManualSubmit = () => {
-    if (!pendingManual) return;
-    const composer = findComposer();
-    if (!composer) return;
-    const current = sanitize(('value' in composer ? composer.value : composer.textContent) || '');
-    if (!current) return;
-    pendingManual = false;
-    desiredDraft = '';
-    if (window.chrome?.webview?.postMessage) {
-      window.chrome.webview.postMessage(JSON.stringify({ type: 'voice-manual-submit', text: current, nonce: submitNonce }));
-    }
-  };
-  const cleanTextNodes = () => {
-    if (!document.body) return;
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    const nodes = [];
-    let current;
-    while ((current = walker.nextNode())) {
-      nodes.push(current);
-    }
-    for (const node of nodes) {
-      if (!node || !node.parentElement) continue;
-      const tag = node.parentElement.tagName;
-      if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEXTAREA') continue;
-      const original = node.textContent || '';
-      const cleaned = sanitize(original);
-      if (cleaned !== original) {
-        node.textContent = cleaned;
-      }
-    }
-  };
-  let cleanScheduled = false;
-  const scheduleClean = () => {
-    if (cleanScheduled) return;
-    cleanScheduled = true;
-    queueMicrotask(() => {
-      cleanScheduled = false;
-      cleanTextNodes();
-      applyDraftIfPossible();
-    });
-  };
-  const observer = new MutationObserver(() => scheduleClean());
+  const observer = new MutationObserver(() => applyDraftIfPossible());
   const start = () => {
     if (!document.body) return;
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-    document.addEventListener('click', (event) => {
-      const target = event.target instanceof Element ? event.target.closest('button, [role="button"], input[type="submit"]') : null;
-      if (!target) return;
-      if (isSendLike(target)) {
-        emitManualSubmit();
-      }
-    }, true);
-    document.addEventListener('submit', (event) => {
-      const form = event.target instanceof HTMLFormElement ? event.target : null;
-      const composer = findComposer();
-      if (!form || !composer) return;
-      if (form.contains(composer)) {
-        emitManualSubmit();
-      }
-    }, true);
-    document.addEventListener('keydown', (event) => {
-      if (event.key !== 'Enter' || event.shiftKey) return;
-      const composer = findComposer();
-      if (!composer) return;
-      if (event.target === composer) {
-        emitManualSubmit();
-      }
-    }, true);
-    scheduleClean();
+    observer.observe(document.body, { childList: true, subtree: true });
+    applyDraftIfPossible();
   };
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start, { once: true });
@@ -196,24 +74,11 @@ public sealed partial class WebChatWindow : WindowEx
   }
   window.__openClawTrayVoice = {
     setDraft(text) {
-      desiredDraft = sanitize(text || '');
-      return applyDraftIfPossible();
-    },
-    prepareManualDraft(text) {
-      desiredDraft = sanitize(text || '');
-      pendingManual = true;
+      desiredDraft = text || '';
       return applyDraftIfPossible();
     },
     clearDraft() {
       desiredDraft = '';
-      pendingManual = false;
-      return applyDraftIfPossible();
-    },
-    submitDraft(text) {
-      return submitDraft(text);
-    },
-    stripInjectedMemories() {
-      scheduleClean();
       return true;
     }
   };
@@ -252,8 +117,6 @@ public sealed partial class WebChatWindow : WindowEx
                 WebView.CoreWebView2.NavigationCompleted -= _navigationCompletedHandler;
             if (_navigationStartingHandler != null)
                 WebView.CoreWebView2.NavigationStarting -= _navigationStartingHandler;
-            if (_webMessageReceivedHandler != null)
-                WebView.CoreWebView2.WebMessageReceived -= _webMessageReceivedHandler;
         }
     }
 
@@ -282,8 +145,7 @@ public sealed partial class WebChatWindow : WindowEx
             WebView.CoreWebView2.Settings.IsStatusBarEnabled = false;
             WebView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
             WebView.CoreWebView2.Settings.IsZoomControlEnabled = true;
-            await WebView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
-                BuildTrayVoiceIntegrationScript(_voiceMessageNonce));
+            await WebView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(TrayVoiceIntegrationScript);
 
             // Handle navigation events (store for cleanup)
             _navigationCompletedHandler = (s, e) =>
@@ -323,33 +185,6 @@ public sealed partial class WebChatWindow : WindowEx
                 LoadingRing.Visibility = Visibility.Visible;
             };
             WebView.CoreWebView2.NavigationStarting += _navigationStartingHandler;
-
-            _webMessageReceivedHandler = (s, e) =>
-            {
-                try
-                {
-                    if (!TryExtractTrustedVoiceManualSubmit(
-                        e.TryGetWebMessageAsString(),
-                        e.Source,
-                        _trustedVoiceMessageOrigin,
-                        _voiceMessageNonce,
-                        out var text))
-                    {
-                        return;
-                    }
-
-                    VoiceTranscriptSubmitted?.Invoke(this, new VoiceTranscriptSubmittedEventArgs
-                    {
-                        Text = text,
-                        SessionKey = null
-                    });
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn($"WebChatWindow: Failed to process voice web message: {ex.Message}");
-                }
-            };
-            WebView.CoreWebView2.WebMessageReceived += _webMessageReceivedHandler;
 
             // Navigate to chat
             NavigateToChat();
@@ -445,7 +280,6 @@ public sealed partial class WebChatWindow : WindowEx
         if (!string.IsNullOrEmpty(DEBUG_TEST_URL))
         {
             Logger.Info($"WebChatWindow: DEBUG MODE - Navigating to test URL: {DEBUG_TEST_URL}");
-            _trustedVoiceMessageOrigin = TryGetOrigin(DEBUG_TEST_URL);
             WebView.CoreWebView2.Navigate(DEBUG_TEST_URL);
             return;
         }
@@ -459,65 +293,7 @@ public sealed partial class WebChatWindow : WindowEx
 
         var safeBaseUrl = url.Split('?')[0];
         Logger.Info($"WebChatWindow: Navigating to {safeBaseUrl} (token hidden)");
-        _trustedVoiceMessageOrigin = TryGetOrigin(url);
         WebView.CoreWebView2.Navigate(url);
-    }
-
-    private static string BuildTrayVoiceIntegrationScript(string nonce)
-    {
-        return TrayVoiceIntegrationScriptTemplate.Replace(
-            "__VOICE_NONCE__",
-            JsonSerializer.Serialize(nonce),
-            StringComparison.Ordinal);
-    }
-
-    private static bool TryExtractTrustedVoiceManualSubmit(
-        string payload,
-        string? source,
-        string? expectedOrigin,
-        string expectedNonce,
-        out string text)
-    {
-        text = string.Empty;
-
-        if (!IsTrustedVoiceMessageSource(source, expectedOrigin))
-        {
-            return false;
-        }
-
-        using var doc = JsonDocument.Parse(payload);
-        if (!doc.RootElement.TryGetProperty("type", out var typeProp) ||
-            !string.Equals(typeProp.GetString(), VoiceManualSubmitMessageType, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        if (!doc.RootElement.TryGetProperty("nonce", out var nonceProp) ||
-            !string.Equals(nonceProp.GetString(), expectedNonce, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        text = doc.RootElement.TryGetProperty("text", out var textProp)
-            ? textProp.GetString() ?? string.Empty
-            : string.Empty;
-
-        return !string.IsNullOrWhiteSpace(text);
-    }
-
-    private static bool IsTrustedVoiceMessageSource(string? source, string? expectedOrigin)
-    {
-        var actualOrigin = TryGetOrigin(source);
-        return !string.IsNullOrWhiteSpace(expectedOrigin) &&
-               !string.IsNullOrWhiteSpace(actualOrigin) &&
-               string.Equals(actualOrigin, expectedOrigin, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string? TryGetOrigin(string? url)
-    {
-        return Uri.TryCreate(url, UriKind.Absolute, out var uri)
-            ? uri.GetLeftPart(UriPartial.Authority)
-            : null;
     }
 
     private void OnHome(object sender, RoutedEventArgs e)
@@ -560,51 +336,6 @@ public sealed partial class WebChatWindow : WindowEx
         await RefreshTrayVoiceDomStateAsync();
     }
 
-    public async Task<bool> TrySubmitVoiceTranscriptAsync(string text)
-    {
-        if (WebView.CoreWebView2 == null)
-        {
-            return false;
-        }
-
-        try
-        {
-            var stopwatch = Stopwatch.StartNew();
-            var textJson = JsonSerializer.Serialize(text ?? string.Empty);
-            var result = await WebView.CoreWebView2.ExecuteScriptAsync(
-                $"window.__openClawTrayVoice?.submitDraft?.({textJson}) ?? false;");
-            var submitted = string.Equals(result, "true", StringComparison.OrdinalIgnoreCase);
-            Logger.Info($"WebChatWindow: Voice draft submit via chat UI {(submitted ? "succeeded" : "failed")} in {stopwatch.ElapsedMilliseconds}ms");
-            return submitted;
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"WebChatWindow: Failed to submit voice draft through chat UI: {ex.Message}");
-            return false;
-        }
-    }
-
-    public async Task<bool> PrepareVoiceTranscriptForManualSendAsync(string text)
-    {
-        if (WebView.CoreWebView2 == null)
-        {
-            return false;
-        }
-
-        try
-        {
-            var textJson = JsonSerializer.Serialize(text ?? string.Empty);
-            var result = await WebView.CoreWebView2.ExecuteScriptAsync(
-                $"window.__openClawTrayVoice?.prepareManualDraft?.({textJson}) ?? false;");
-            return string.Equals(result, "true", StringComparison.OrdinalIgnoreCase);
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"WebChatWindow: Failed to prepare manual voice draft: {ex.Message}");
-            return false;
-        }
-    }
-
     private async Task RefreshTrayVoiceDomStateAsync()
     {
         if (WebView.CoreWebView2 == null)
@@ -614,8 +345,6 @@ public sealed partial class WebChatWindow : WindowEx
 
         try
         {
-            await WebView.CoreWebView2.ExecuteScriptAsync("window.__openClawTrayVoice?.stripInjectedMemories?.();");
-
             var draftJson = JsonSerializer.Serialize(_pendingVoiceDraft ?? string.Empty);
             var script = string.IsNullOrWhiteSpace(_pendingVoiceDraft)
                 ? "window.__openClawTrayVoice?.clearDraft?.();"

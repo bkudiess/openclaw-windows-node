@@ -43,7 +43,6 @@ public class VoiceSchemaDefaultsTests
         Assert.Equal("hey_openclaw", settings.VoiceWake.ModelId);
         Assert.Equal(0.65f, settings.VoiceWake.TriggerThreshold);
         Assert.Equal(250, settings.TalkMode.MinSpeechMs);
-        Assert.Equal(VoiceChatWindowSubmitMode.AutoSend, settings.TalkMode.ChatWindowSubmitMode);
     }
 
     [Fact]

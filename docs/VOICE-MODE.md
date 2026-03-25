@@ -51,8 +51,8 @@ The contracts and persisted settings now use `VoiceWake` and `TalkMode` as well.
 - the node captures audio locally
 - local speech recognition turns that audio into transcript text
 - interim hypotheses are surfaced live, but only final `Medium` or `High` confidence recognizer results are submitted
-- if the tray chat window is open and ready, the final transcript is submitted through the tray chat window's own compose/send path
-- otherwise, the transcript is sent to OpenClaw via direct `chat.send` on the main session
+- the tray chat window, when open, mirrors the live transcript draft locally
+- the finalized transcript is always sent to OpenClaw via direct `chat.send` on the main session
 - OpenClaw returns the assistant reply as normal chat output
 - the node performs local TTS playback of that reply
 - assistant replies are queued locally and spoken sequentially, with a short 500 ms pause between queued replies so overlapping responses are not lost
@@ -185,12 +185,7 @@ That produced two UX problems:
    - chosen
    - keeps a single session and single tray chat history
    - allows interim hypotheses to appear in the tray compose box in near real time
-   - allows the tray app to submit through the same UI path as typed messages when the tray chat window is open
-4. Hybrid submission path
-   - chosen
-   - when the tray chat window is open, voice submits through the chat window DOM send path
-   - when the tray chat window is closed or unavailable, voice falls back to direct `chat.send`
-   - preserves windowless voice mode without forcing the transport layer to depend on WebView availability
+   - does not require the voice transport to depend on WebView DOM submission
 
 ### Chosen Approach
 
@@ -201,10 +196,8 @@ The embedded [WebChatWindow.xaml.cs](../src/OpenClaw.Tray.WinUI/Windows/WebChatW
 - interim STT hypotheses from Windows speech recognition are injected into the tray chat compose box while the user is speaking
 - if the chat window opens during an utterance, the current buffered transcript is copied into the compose box immediately
 - if the chat window closes during an utterance, voice continues windowless and the final utterance still submits
-- if the chat window is open and ready when the utterance finalizes, the tray app either auto-submits through the page's own send path or leaves the draft for manual send, depending on `Voice.TalkMode.ChatWindowSubmitMode`
-- in `WaitForUser` mode, voice capture pauses after finalizing the draft so the next utterance does not overwrite the unsent message
-- if the chat window is not open or not ready, the voice service falls back to direct `chat.send`
-- rendered chat content inside the tray window is still sanitized to remove `<relevant-memories>...</relevant-memories>` blocks as a fallback for messages that were sent while windowless
+- the final utterance always goes through the voice service's direct `chat.send` path
+- the tray chat window remains a draft/view surface rather than a transport dependency
 
 This is intentionally a tray-local integration decision, not a protocol-level rewrite of the stored upstream transcript.
 
@@ -212,9 +205,8 @@ This is intentionally a tray-local integration decision, not a protocol-level re
 
 - preserves a single visible conversation for the user
 - avoids a second voice-only session in the tray UI
-- when the tray chat window is open, voice follows the same send path as typed tray-chat messages
-- depends on DOM integration inside the embedded WebView chat surface because OpenClaw does not currently expose a dedicated draft/update or voice-submit API for the tray app
-- still requires a direct fallback path for windowless voice mode
+- uses only one send path for voice turns, which is simpler to reason about and debug
+- keeps a light DOM integration inside the embedded WebView chat surface for draft mirroring only
 - only affects the tray app chat window; other clients still render upstream content according to their own rules
 
 ## Provider Selection
@@ -461,8 +453,7 @@ The tray `Voice Mode` window is a read-only runtime status/detail surface with a
     "TalkMode": {
       "MinSpeechMs": 250,
       "EndSilenceMs": 900,
-      "MaxUtteranceMs": 15000,
-      "ChatWindowSubmitMode": "AutoSend"
+      "MaxUtteranceMs": 15000
     }
   },
   "VoiceProviderConfiguration": {
@@ -527,7 +518,6 @@ The tray `Voice Mode` window is a read-only runtime status/detail surface with a
 | `Voice.TalkMode.MinSpeechMs` | int | `250` | talk mode | Minimum detected speech duration before an utterance is treated as real input |
 | `Voice.TalkMode.EndSilenceMs` | int | `900` | talk mode | Silence timeout used to finalize an utterance |
 | `Voice.TalkMode.MaxUtteranceMs` | int | `15000` | talk mode | Hard cap on utterance length before forced submission/finalization |
-| `Voice.TalkMode.ChatWindowSubmitMode` | enum | `AutoSend` | talk mode | When the tray chat window is open, either auto-send the finalized utterance or leave it in the compose box for manual send |
 | `VoiceProviderConfiguration.Providers[].ProviderId` | string | none | cloud providers | Provider id matching an `Assets\\voice-providers.json` entry |
 | `VoiceProviderConfiguration.Providers[].Values["apiKey"]` | string? | `null` | cloud providers | API key sent using the provider contract's configured auth header |
 | `VoiceProviderConfiguration.Providers[].Values["model"]` | string? | provider default | cloud providers | Model identifier inserted into the configured request template |
@@ -759,3 +749,4 @@ Append one new line to this timeline for every future voice-mode commit.
 - `2026-03-25` `06d508f` Accepted late Talk Mode replies after timeout.
 - `2026-03-25` Delayed the Talk Mode ready state until recognizer warm-up completes, so the UI does not advertise listening before the first recognition session has settled.
 - `2026-03-25` Added a recognizer health-check watchdog so Talk Mode recycles a started-but-deaf recognition session instead of waiting minutes for Windows to cancel it.
+- `2026-03-25` Reverted Talk Mode to a single direct `chat.send` path and reduced the tray chat integration back to draft mirroring only.
