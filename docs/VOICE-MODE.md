@@ -885,3 +885,4 @@ Append one new line to this timeline for every future voice-mode commit.
 - `2026-03-25` Hardened the gateway preview fallback so a bare final chat event does not replay the previous assistant reply when `sessions.preview` lags behind the real session update.
 - `2026-03-25` Updated the voice-mode architecture document with an accurate current Talk Mode flow, the planned `AudioGraph` input design, the STT adapter seam, and the selected-device roadmap.
 - `2026-03-25` Added `VoiceCaptureService` on `AudioGraph`, wired it into Talk Mode lifecycle, and started using live capture signal as part of recognizer health and device-refresh handling while transcript generation still remains on the Windows speech recognizer.
+- `2026-03-25` Fixed `VoiceCaptureService` frame-buffer interop for the current WinRT projection so AudioGraph quantum processing can read frame data instead of throwing invalid-cast warnings on every capture quantum.

@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using OpenClaw.Shared;
+using WinRT;
 using Windows.Devices.Enumeration;
 using Windows.Media;
 using Windows.Media.Audio;
@@ -396,7 +397,7 @@ public sealed class VoiceCaptureService : IAsyncDisposable
 
         using var buffer = frame.LockBuffer(AudioBufferAccessMode.Read);
         using var reference = buffer.CreateReference();
-        var access = (IMemoryBufferByteAccess)reference;
+        var access = reference.As<IMemoryBufferByteAccess>();
         access.GetBuffer(out var data, out var capacity);
 
         if (data == IntPtr.Zero || capacity == 0)
