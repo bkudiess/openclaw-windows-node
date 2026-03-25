@@ -517,15 +517,11 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
             recognizer = await CreateSpeechRecognizerAsync(settings);
             synthesizer = new SpeechSynthesizer();
             player = new MediaPlayer();
+            await ConfigurePlaybackOutputDeviceAsync(player, settings);
 
             if (!string.IsNullOrWhiteSpace(settings.InputDeviceId))
             {
                 _logger.Warn("Selected input device is saved, but Talk Mode currently uses the system speech input device.");
-            }
-
-            if (!string.IsNullOrWhiteSpace(settings.OutputDeviceId))
-            {
-                _logger.Warn("Selected output device is saved, but Talk Mode currently uses the default speech output device.");
             }
 
             recognizer.HypothesisGenerated += OnSpeechHypothesisGenerated;
@@ -614,6 +610,36 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
         _logger.Info($"Speech recognizer compiled successfully ({compilation.Status})");
 
         return recognizer;
+    }
+
+    private async Task ConfigurePlaybackOutputDeviceAsync(MediaPlayer player, VoiceSettings settings)
+    {
+        if (string.IsNullOrWhiteSpace(settings.OutputDeviceId))
+        {
+            return;
+        }
+
+        try
+        {
+            var renderSelector = MediaDevice.GetAudioRenderSelector();
+            var renderDevices = await DeviceInformation.FindAllAsync(renderSelector);
+            var selectedRenderDevice = renderDevices.FirstOrDefault(device =>
+                string.Equals(device.Id, settings.OutputDeviceId, StringComparison.Ordinal));
+
+            if (selectedRenderDevice == null)
+            {
+                _logger.Warn(
+                    $"Selected output device '{settings.OutputDeviceId}' was not found; falling back to the system default speaker.");
+                return;
+            }
+
+            player.AudioDevice = selectedRenderDevice;
+            _logger.Info($"Voice playback output device set to {selectedRenderDevice.Name}");
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"Failed to configure selected output device: {ex.Message}");
+        }
     }
 
     private async Task EnsureMicrophoneConsentAsync()

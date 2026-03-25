@@ -490,7 +490,7 @@ The tray `Voice Mode` window is a read-only runtime status/detail surface with a
 | `Enabled` | Global feature kill-switch independent of mode |
 | `SpeechToTextProviderId` | Selected STT provider id from the local provider catalog |
 | `TextToSpeechProviderId` | Selected TTS provider id from the local provider catalog |
-| `InputDeviceId` / `OutputDeviceId` | Stable audio device binding |
+| `InputDeviceId` / `OutputDeviceId` | Preferred audio device binding, with selected-speaker support implemented first |
 | `SampleRateHz` | Shared capture sample rate, fixed to a speech-friendly default |
 | `CaptureChunkMs` | Frame size for capture, VAD, and wakeword processing |
 | `BargeInEnabled` | Allows microphone capture while audio playback is active |
@@ -519,6 +519,11 @@ The tray `Voice Mode` window is a read-only runtime status/detail surface with a
 | `Voice.VoiceWake.EndSilenceMs` | int | `900` | voice wake | Silence timeout used to finalize the post-trigger utterance |
 | `Voice.TalkMode.MinSpeechMs` | int | `250` | talk mode | Minimum detected speech duration before an utterance is treated as real input |
 | `Voice.TalkMode.EndSilenceMs` | int | `900` | talk mode | Silence timeout used to finalize an utterance |
+
+Current status:
+
+- `Voice.OutputDeviceId` is now applied to Talk Mode playback through `MediaPlayer.AudioDevice`
+- `Voice.InputDeviceId` is still persisted and shown in settings, but explicit non-default microphone binding is not implemented yet
 | `Voice.TalkMode.MaxUtteranceMs` | int | `15000` | talk mode | Hard cap on utterance length before forced submission/finalization |
 | `VoiceProviderConfiguration.Providers[].ProviderId` | string | none | cloud providers | Provider id matching an `Assets\\voice-providers.json` entry |
 | `VoiceProviderConfiguration.Providers[].Values["apiKey"]` | string? | `null` | cloud providers | API key sent using the provider contract's configured auth header |
@@ -772,3 +777,4 @@ Append one new line to this timeline for every future voice-mode commit.
 - `2026-03-25` Added a backlog story for true streaming TTS playback, including provider-catalog and latency-measurement notes.
 - `2026-03-25` Corrected the MiniMax WebSocket request sequence by sending `task_finish` before reading audio, and added a guarded fallback that promotes a recent longer hypothesis when Windows only finalizes the tail of an utterance.
 - `2026-03-25` Added live default-microphone change handling for Talk Mode, so using the system default capture device now refreshes the recognizer when Windows switches to a new default mic such as AirPods.
+- `2026-03-25` Applied `Voice.OutputDeviceId` to Talk Mode playback via `MediaPlayer.AudioDevice`, so selected non-default speaker devices now work even though explicit non-default microphone capture is still pending.
