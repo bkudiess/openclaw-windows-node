@@ -78,19 +78,26 @@ public class VoiceProviderCatalogServiceTests
 
         var elevenLabs = Assert.Single(catalog.TextToSpeechProviders, p => p.Id == VoiceProviderIds.ElevenLabs);
         Assert.Equal("ElevenLabs", elevenLabs.Name);
-        Assert.NotNull(elevenLabs.TextToSpeechHttp);
+        Assert.NotNull(elevenLabs.TextToSpeechWebSocket);
         Assert.Equal(
-            "https://api.elevenlabs.io/v1/text-to-speech/{{voiceId}}?output_format=mp3_44100_128",
-            elevenLabs.TextToSpeechHttp!.EndpointTemplate);
-        Assert.Equal("xi-api-key", elevenLabs.TextToSpeechHttp.AuthenticationHeaderName);
-        Assert.Equal(VoiceTextToSpeechResponseModes.Binary, elevenLabs.TextToSpeechHttp.ResponseAudioMode);
+            "wss://api.elevenlabs.io/v1/text-to-speech/{{voiceId}}/stream-input?model_id={{model}}&output_format=mp3_44100_128&auto_mode=true",
+            elevenLabs.TextToSpeechWebSocket!.EndpointTemplate);
+        Assert.Equal("xi-api-key", elevenLabs.TextToSpeechWebSocket.AuthenticationHeaderName);
+        Assert.Equal(string.Empty, elevenLabs.TextToSpeechWebSocket.AuthenticationScheme);
+        Assert.Equal(string.Empty, elevenLabs.TextToSpeechWebSocket.ConnectSuccessEventName);
+        Assert.Equal(string.Empty, elevenLabs.TextToSpeechWebSocket.StartSuccessEventName);
+        Assert.Equal(VoiceTextToSpeechResponseModes.Base64JsonString, elevenLabs.TextToSpeechWebSocket.ResponseAudioMode);
+        Assert.Equal("audio", elevenLabs.TextToSpeechWebSocket.ResponseAudioJsonPath);
+        Assert.Equal("isFinal", elevenLabs.TextToSpeechWebSocket.FinalFlagJsonPath);
         var elevenLabsModelSetting = elevenLabs.Settings.Single(s => s.Key == VoiceProviderSettingKeys.Model);
         Assert.Equal("eleven_multilingual_v2", elevenLabsModelSetting.DefaultValue);
         Assert.Contains("eleven_flash_v2_5", elevenLabsModelSetting.Options);
         Assert.Contains("eleven_turbo_v2_5", elevenLabsModelSetting.Options);
+        Assert.Equal("6aDn1KB0hjpdcocrUkmq", elevenLabs.Settings.Single(s => s.Key == VoiceProviderSettingKeys.VoiceId).DefaultValue);
         var elevenLabsVoiceSettingsJson = elevenLabs.Settings.Single(s => s.Key == VoiceProviderSettingKeys.VoiceSettingsJson);
         Assert.False(elevenLabsVoiceSettingsJson.Required);
         Assert.True(elevenLabsVoiceSettingsJson.JsonValue);
-        Assert.Equal("\"voice_settings\": null", elevenLabsVoiceSettingsJson.DefaultValue);
+        Assert.Contains("\"voice_settings\":", elevenLabsVoiceSettingsJson.DefaultValue);
+        Assert.Contains("\"speed\": 0.9", elevenLabsVoiceSettingsJson.DefaultValue);
     }
 }

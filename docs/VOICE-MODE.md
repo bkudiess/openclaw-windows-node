@@ -155,7 +155,7 @@ The main remaining gap is streaming playback from the first audio chunk. The Azu
 
 - Windows `SpeechSynthesizer` is used through `SynthesizeTextToStreamAsync`, which returns a complete stream for playback
 - MiniMax now uses the provider catalog's WebSocket TTS contract, but the current player still waits for a complete playable stream before output starts
-- ElevenLabs is currently integrated through the non-streaming convert contract in the provider catalog
+- ElevenLabs now uses the provider catalog's `stream-input` WebSocket contract, but the current player still waits for a complete playable stream before output starts
 
 So the current design minimizes avoidable setup and connection latency, but does not yet implement first-chunk playback streaming. This is, however, planned for an early release.
 
@@ -316,7 +316,7 @@ Example:
       "name": "ElevenLabs",
       "runtime": "cloud",
       "enabled": true,
-      "description": "Cloud TTS using the ElevenLabs create speech API.",
+      "description": "Cloud TTS using the ElevenLabs WebSocket stream-input API.",
       "settings": [
         { "key": "apiKey", "label": "API key", "secret": true },
         {
@@ -330,22 +330,28 @@ Example:
             "eleven_monolingual_v1"
           ]
         },
-        { "key": "voiceId", "label": "Voice ID", "placeholder": "Enter an ElevenLabs voice ID" },
+        { "key": "voiceId", "label": "Voice ID", "defaultValue": "6aDn1KB0hjpdcocrUkmq", "placeholder": "Enter an ElevenLabs voice ID" },
         {
           "key": "voiceSettingsJson",
           "label": "Voice settings JSON",
-          "defaultValue": "\"voice_settings\": null",
-          "placeholder": "\"voice_settings\": { \"stability\": 0.5, \"similarity_boost\": 0.8 }"
+          "defaultValue": "\"voice_settings\": { \"speed\": 0.9, \"stability\": 0.5, \"similarity_boost\": 0.75 }",
+          "placeholder": "\"voice_settings\": { \"speed\": 0.9, \"stability\": 0.5, \"similarity_boost\": 0.75 }"
         }
       ],
-      "textToSpeechHttp": {
-        "endpointTemplate": "https://api.elevenlabs.io/v1/text-to-speech/{{voiceId}}?output_format=mp3_44100_128",
-        "httpMethod": "POST",
+      "textToSpeechWebSocket": {
+        "endpointTemplate": "wss://api.elevenlabs.io/v1/text-to-speech/{{voiceId}}/stream-input?model_id={{model}}&output_format=mp3_44100_128&auto_mode=true",
         "authenticationHeaderName": "xi-api-key",
+        "authenticationScheme": "",
         "apiKeySettingKey": "apiKey",
-        "requestContentType": "application/json",
-        "requestBodyTemplate": "{ \"text\": {{text}}, \"model_id\": {{model}}, {{voiceSettingsJson}} }",
-        "responseAudioMode": "binary",
+        "connectSuccessEventName": "",
+        "startMessageTemplate": "{ \"text\": \" \", {{voiceSettingsJson}} }",
+        "startSuccessEventName": "",
+        "continueMessageTemplate": "{ \"text\": {{text}} }",
+        "finishMessageTemplate": "{ \"text\": \"\" }",
+        "responseAudioMode": "base64JsonString",
+        "responseAudioJsonPath": "audio",
+        "finalFlagJsonPath": "isFinal",
+        "taskFailedEventName": "error",
         "outputContentType": "audio/mpeg"
       }
     }
@@ -394,7 +400,7 @@ without hard-coding provider-specific wrapper keys into the runtime.
 The current cloud TTS transports are:
 
 - `MiniMax`: catalog-driven WebSocket synthesis
-- `ElevenLabs`: catalog-driven HTTP synthesis
+- `ElevenLabs`: catalog-driven WebSocket synthesis (`stream-input`)
 
 For `VoiceWake`, trigger words are gateway-owned global state. The Windows node should eventually consume the same shared trigger list and keep only a local enabled/disabled toggle plus device/runtime settings.
 
@@ -1064,3 +1070,4 @@ Append one new line to this timeline for every future voice-mode commit.
 - `2026-03-25` Delayed deaf-recognizer recovery until post-speech silence and added a completion fallback that submits the last recent hypothesis when Windows ends a session without ever producing a final result.
 - `2026-03-25` Fixed overlapping Talk Mode recovery watchdogs so a new recognition session no longer launches duplicate deaf-recognizer recycle loops.
 - `2026-03-25` Fixed Talk Mode media playback failure handling so a failed reply no longer leaks an unobserved task exception after the reply audio arrives.
+- `2026-03-25` Generalized the catalog-driven WebSocket TTS client to support providers without explicit connect/start acknowledgements and switched ElevenLabs to the `stream-input` WebSocket API with default voice settings.

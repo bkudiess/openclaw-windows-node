@@ -95,13 +95,21 @@ public sealed class VoiceCloudTextToSpeechClient
 
         var stopwatch = Stopwatch.StartNew();
         await socket.ConnectAsync(new Uri(endpoint), CancellationToken.None);
-        var connectedMessage = await ReceiveJsonMessageAsync(socket);
-        ValidateWebSocketEvent(provider.Name, contract.ConnectSuccessEventName, connectedMessage, contract);
+
+        if (!string.IsNullOrWhiteSpace(contract.ConnectSuccessEventName))
+        {
+            var connectedMessage = await ReceiveJsonMessageAsync(socket);
+            ValidateWebSocketEvent(provider.Name, contract.ConnectSuccessEventName, connectedMessage, contract);
+        }
 
         var startMessage = ApplyJsonTemplate(contract.StartMessageTemplate, templateValues);
         await SendTextMessageAsync(socket, startMessage);
-        var startedMessage = await ReceiveJsonMessageAsync(socket);
-        ValidateWebSocketEvent(provider.Name, contract.StartSuccessEventName, startedMessage, contract);
+
+        if (!string.IsNullOrWhiteSpace(contract.StartSuccessEventName))
+        {
+            var startedMessage = await ReceiveJsonMessageAsync(socket);
+            ValidateWebSocketEvent(provider.Name, contract.StartSuccessEventName, startedMessage, contract);
+        }
 
         var continueMessage = ApplyJsonTemplate(contract.ContinueMessageTemplate, templateValues);
         await SendTextMessageAsync(socket, continueMessage);

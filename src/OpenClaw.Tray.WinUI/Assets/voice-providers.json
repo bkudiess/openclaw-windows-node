@@ -83,7 +83,7 @@
       "name": "ElevenLabs",
       "runtime": "cloud",
       "enabled": true,
-      "description": "Cloud TTS using the ElevenLabs create speech API.",
+      "description": "Cloud TTS using the ElevenLabs WebSocket stream-input API.",
       "settings": [
         {
           "key": "apiKey",
@@ -105,6 +105,7 @@
           "key": "voiceId",
           "label": "Voice ID",
           "required": false,
+          "defaultValue": "6aDn1KB0hjpdcocrUkmq",
           "placeholder": "Enter an ElevenLabs voice ID"
         },
         {
@@ -112,19 +113,25 @@
           "label": "Voice settings JSON",
           "required": false,
           "jsonValue": true,
-          "defaultValue": "\"voice_settings\": null",
-          "placeholder": "\"voice_settings\": { \"stability\": 0.5, \"similarity_boost\": 0.8 }",
+          "defaultValue": "\"voice_settings\": { \"speed\": 0.9, \"stability\": 0.5, \"similarity_boost\": 0.75 }",
+          "placeholder": "\"voice_settings\": { \"speed\": 0.9, \"stability\": 0.5, \"similarity_boost\": 0.75 }",
           "description": "Optional full ElevenLabs request fragment. If present, it controls the full voice_settings payload."
         }
       ],
-      "textToSpeechHttp": {
-        "endpointTemplate": "https://api.elevenlabs.io/v1/text-to-speech/{{voiceId}}?output_format=mp3_44100_128",
-        "httpMethod": "POST",
+      "textToSpeechWebSocket": {
+        "endpointTemplate": "wss://api.elevenlabs.io/v1/text-to-speech/{{voiceId}}/stream-input?model_id={{model}}&output_format=mp3_44100_128&auto_mode=true",
         "authenticationHeaderName": "xi-api-key",
+        "authenticationScheme": "",
         "apiKeySettingKey": "apiKey",
-        "requestContentType": "application/json",
-        "requestBodyTemplate": "{ \"text\": {{text}}, \"model_id\": {{model}}, {{voiceSettingsJson}} }",
-        "responseAudioMode": "binary",
+        "connectSuccessEventName": "",
+        "startMessageTemplate": "{ \"text\": \" \", {{voiceSettingsJson}} }",
+        "startSuccessEventName": "",
+        "continueMessageTemplate": "{ \"text\": {{text}} }",
+        "finishMessageTemplate": "{ \"text\": \"\" }",
+        "responseAudioMode": "base64JsonString",
+        "responseAudioJsonPath": "audio",
+        "finalFlagJsonPath": "isFinal",
+        "taskFailedEventName": "error",
         "outputContentType": "audio/mpeg"
       }
     }
