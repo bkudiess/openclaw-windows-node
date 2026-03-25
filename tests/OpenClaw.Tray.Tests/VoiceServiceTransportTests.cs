@@ -67,20 +67,58 @@ public class VoiceServiceTransportTests
     }
 
     [Theory]
-    [InlineData(true, false, 0, true)]
-    [InlineData(false, true, 0, true)]
-    [InlineData(false, false, 1, true)]
-    [InlineData(false, false, 0, false)]
+    [InlineData(true, false, 0, false, true)]
+    [InlineData(false, true, 0, false, true)]
+    [InlineData(false, false, 1, false, true)]
+    [InlineData(false, false, 0, true, true)]
+    [InlineData(false, false, 0, false, false)]
     public void ShouldAcceptAssistantReply_MatchesPlaybackAndAwaitingState(
         bool awaitingReply,
         bool isSpeaking,
         int queuedReplyCount,
+        bool acceptedViaLateReplyGrace,
         bool expected)
     {
         var method = typeof(VoiceService).GetMethod(
             "ShouldAcceptAssistantReply",
             BindingFlags.NonPublic | BindingFlags.Static)!;
-        var result = (bool)method.Invoke(null, [awaitingReply, isSpeaking, queuedReplyCount])!;
+        var result = (bool)method.Invoke(null, [awaitingReply, isSpeaking, queuedReplyCount, acceptedViaLateReplyGrace])!;
+
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData(false, false, 0, "main", "main", 30, true)]
+    [InlineData(false, false, 0, "main", "main", 121, false)]
+    [InlineData(true, false, 0, "main", "main", 30, false)]
+    [InlineData(false, true, 0, "main", "main", 30, false)]
+    [InlineData(false, false, 1, "main", "main", 30, false)]
+    [InlineData(false, false, 0, "main", "other", 30, false)]
+    public void ShouldAcceptLateAssistantReply_OnlyMatchesBoundedGraceWindow(
+        bool awaitingReply,
+        bool isSpeaking,
+        int queuedReplyCount,
+        string lateReplySessionKey,
+        string incomingSessionKey,
+        int secondsAfterTimeout,
+        bool expected)
+    {
+        var method = typeof(VoiceService).GetMethod(
+            "ShouldAcceptLateAssistantReply",
+            BindingFlags.NonPublic | BindingFlags.Static)!;
+        var timeoutUtc = new DateTime(2026, 3, 25, 0, 0, 0, DateTimeKind.Utc);
+        var graceUntilUtc = timeoutUtc.AddMinutes(2);
+        var result = (bool)method.Invoke(
+            null,
+            [
+                awaitingReply,
+                isSpeaking,
+                queuedReplyCount,
+                lateReplySessionKey,
+                graceUntilUtc,
+                incomingSessionKey,
+                timeoutUtc.AddSeconds(secondsAfterTimeout)
+            ])!;
 
         Assert.Equal(expected, result);
     }

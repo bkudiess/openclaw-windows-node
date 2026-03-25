@@ -28,6 +28,7 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
     private const int HResultSpeechPrivacyDeclined = unchecked((int)0x80045509);
     private static readonly TimeSpan TransportConnectTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ReplyTimeout = TimeSpan.FromSeconds(45);
+    private static readonly TimeSpan LateReplyGraceWindow = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan DuplicateTranscriptWindow = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan RecognitionResumeRetryDelay = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan QueuedReplyPlaybackGap = TimeSpan.FromMilliseconds(500);
@@ -57,6 +58,8 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
     private readonly Queue<(string Text, string? SessionKey)> _pendingAssistantReplies = new();
     private CancellationTokenSource? _playbackSkipCts;
     private string? _currentReplyPreview;
+    private string? _lateReplySessionKey;
+    private DateTime? _lateReplyGraceUntilUtc;
     private bool _disposed;
 
     public event EventHandler<VoiceConversationTurnEventArgs>? ConversationTurnAvailable;
@@ -999,6 +1002,8 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
             lock (_gate)
             {
                 _awaitingReply = true;
+                _lateReplySessionKey = null;
+                _lateReplyGraceUntilUtc = null;
                 _pendingManualTranscript = null;
                 _status = BuildRunningStatus(
                     VoiceActivationMode.TalkMode,
@@ -1048,6 +1053,8 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
             effectiveSessionKey = string.IsNullOrWhiteSpace(sessionKey) ? GetCurrentVoiceSessionKey() : sessionKey!;
             _pendingManualTranscript = null;
             _awaitingReply = true;
+            _lateReplySessionKey = null;
+            _lateReplyGraceUntilUtc = null;
             _status = BuildRunningStatus(
                 VoiceActivationMode.TalkMode,
                 _status.SessionKey,
@@ -1069,12 +1076,16 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
             await Task.Delay(ReplyTimeout, cancellationToken);
 
             var shouldResume = false;
+            string? lateReplySessionKey = null;
             lock (_gate)
             {
                 if (_awaitingReply &&
                     string.Equals(_lastTranscript, transcript, StringComparison.OrdinalIgnoreCase))
                 {
                     _awaitingReply = false;
+                    lateReplySessionKey = GetCurrentVoiceSessionKey();
+                    _lateReplySessionKey = lateReplySessionKey;
+                    _lateReplyGraceUntilUtc = DateTime.UtcNow.Add(LateReplyGraceWindow);
                     _status = BuildRunningStatus(
                         VoiceActivationMode.TalkMode,
                         _status.SessionKey,
@@ -1086,6 +1097,8 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
 
             if (shouldResume)
             {
+                _logger.Warn(
+                    $"Voice reply wait timed out after {ReplyTimeout.TotalSeconds:0}s; accepting late replies for {LateReplyGraceWindow.TotalSeconds:0}s on session {lateReplySessionKey ?? "(none)"}");
                 await ResumeRecognitionSessionAsync(cancellationToken, "reply timeout");
             }
         }
@@ -1107,6 +1120,7 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
 
             string text;
             bool shouldStartPlaybackLoop = false;
+            bool acceptedViaLateReplyGrace = false;
 
             lock (_gate)
             {
@@ -1120,13 +1134,32 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
                     return;
                 }
 
-                if (!ShouldAcceptAssistantReply(_awaitingReply, _isSpeaking, _pendingAssistantReplies.Count))
+                acceptedViaLateReplyGrace = ShouldAcceptLateAssistantReply(
+                    _awaitingReply,
+                    _isSpeaking,
+                    _pendingAssistantReplies.Count,
+                    _lateReplySessionKey,
+                    _lateReplyGraceUntilUtc,
+                    args.SessionKey,
+                    DateTime.UtcNow);
+
+                if (!ShouldAcceptAssistantReply(_awaitingReply, _isSpeaking, _pendingAssistantReplies.Count, acceptedViaLateReplyGrace))
                 {
                     return;
                 }
 
                 _awaitingReply = false;
+                if (acceptedViaLateReplyGrace)
+                {
+                    _lateReplySessionKey = null;
+                    _lateReplyGraceUntilUtc = null;
+                }
                 text = PrepareReplyForSpeech(args.Message);
+            }
+
+            if (acceptedViaLateReplyGrace)
+            {
+                _logger.Warn($"Voice accepted late assistant reply after timeout for session {args.SessionKey}");
             }
 
             if (string.IsNullOrWhiteSpace(text))
@@ -1350,9 +1383,32 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
         return provider.TextToSpeechHttp != null || provider.TextToSpeechWebSocket != null;
     }
 
-    internal static bool ShouldAcceptAssistantReply(bool awaitingReply, bool isSpeaking, int queuedReplyCount)
+    internal static bool ShouldAcceptAssistantReply(
+        bool awaitingReply,
+        bool isSpeaking,
+        int queuedReplyCount,
+        bool acceptedViaLateReplyGrace = false)
     {
-        return awaitingReply || isSpeaking || queuedReplyCount > 0;
+        return awaitingReply || isSpeaking || queuedReplyCount > 0 || acceptedViaLateReplyGrace;
+    }
+
+    internal static bool ShouldAcceptLateAssistantReply(
+        bool awaitingReply,
+        bool isSpeaking,
+        int queuedReplyCount,
+        string? lateReplySessionKey,
+        DateTime? lateReplyGraceUntilUtc,
+        string? incomingSessionKey,
+        DateTime utcNow)
+    {
+        return !awaitingReply &&
+               !isSpeaking &&
+               queuedReplyCount == 0 &&
+               !string.IsNullOrWhiteSpace(lateReplySessionKey) &&
+               !string.IsNullOrWhiteSpace(incomingSessionKey) &&
+               string.Equals(lateReplySessionKey, incomingSessionKey, StringComparison.OrdinalIgnoreCase) &&
+               lateReplyGraceUntilUtc.HasValue &&
+               utcNow <= lateReplyGraceUntilUtc.Value;
     }
 
     private static string CreateReplyPreview(string text)
@@ -1531,6 +1587,8 @@ public sealed class VoiceService : IVoiceRuntime, IVoiceConfigurationApi, IVoice
             _pendingManualTranscript = null;
             _pendingAssistantReplies.Clear();
             _currentReplyPreview = null;
+            _lateReplySessionKey = null;
+            _lateReplyGraceUntilUtc = null;
             playbackSkipCts = _playbackSkipCts;
             _playbackSkipCts = null;
         }
