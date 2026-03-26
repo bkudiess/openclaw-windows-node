@@ -23,7 +23,8 @@ public sealed class VoiceCloudTextToSpeechClient
         string text,
         VoiceProviderOption provider,
         VoiceProviderConfigurationStore configurationStore,
-        IOpenClawLogger? logger = null)
+        IOpenClawLogger? logger = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
         ArgumentNullException.ThrowIfNull(provider);
@@ -31,7 +32,7 @@ public sealed class VoiceCloudTextToSpeechClient
 
         if (provider.TextToSpeechWebSocket != null)
         {
-            return await SynthesizeViaWebSocketAsync(text, provider, configurationStore, logger);
+            return await SynthesizeViaWebSocketAsync(text, provider, configurationStore, logger, cancellationToken);
         }
 
         var contract = provider.TextToSpeechHttp
@@ -83,7 +84,8 @@ public sealed class VoiceCloudTextToSpeechClient
         string text,
         VoiceProviderOption provider,
         VoiceProviderConfigurationStore configurationStore,
-        IOpenClawLogger? logger)
+        IOpenClawLogger? logger,
+        CancellationToken cancellationToken)
     {
         var contract = provider.TextToSpeechWebSocket
             ?? throw new InvalidOperationException($"TTS provider '{provider.Name}' does not expose a WebSocket contract.");
@@ -93,22 +95,26 @@ public sealed class VoiceCloudTextToSpeechClient
         using var socket = new ClientWebSocket();
         ApplyAuthenticationHeader(socket.Options, contract, templateValues);
 
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        var ct = linkedCts.Token;
+
         var stopwatch = Stopwatch.StartNew();
-        await socket.ConnectAsync(new Uri(endpoint), CancellationToken.None);
-        var connectedMessage = await ReceiveJsonMessageAsync(socket);
+        await socket.ConnectAsync(new Uri(endpoint), ct);
+        var connectedMessage = await ReceiveJsonMessageAsync(socket, ct);
         ValidateWebSocketEvent(provider.Name, contract.ConnectSuccessEventName, connectedMessage, contract);
 
         var startMessage = ApplyJsonTemplate(contract.StartMessageTemplate, templateValues);
-        await SendTextMessageAsync(socket, startMessage);
-        var startedMessage = await ReceiveJsonMessageAsync(socket);
+        await SendTextMessageAsync(socket, startMessage, ct);
+        var startedMessage = await ReceiveJsonMessageAsync(socket, ct);
         ValidateWebSocketEvent(provider.Name, contract.StartSuccessEventName, startedMessage, contract);
 
         var continueMessage = ApplyJsonTemplate(contract.ContinueMessageTemplate, templateValues);
-        await SendTextMessageAsync(socket, continueMessage);
+        await SendTextMessageAsync(socket, continueMessage, ct);
 
         if (!string.IsNullOrWhiteSpace(contract.FinishMessageTemplate))
         {
-            await SendTextMessageAsync(socket, ApplyJsonTemplate(contract.FinishMessageTemplate, templateValues));
+            await SendTextMessageAsync(socket, ApplyJsonTemplate(contract.FinishMessageTemplate, templateValues), ct);
         }
 
         var audioBytes = new List<byte>();
@@ -116,7 +122,7 @@ public sealed class VoiceCloudTextToSpeechClient
 
         while (true)
         {
-            var message = await ReceiveJsonMessageAsync(socket);
+            var message = await ReceiveJsonMessageAsync(socket, ct);
             EnsureWebSocketNotFailed(provider.Name, contract, message);
 
             if (TryGetJsonString(message, contract.ResponseAudioJsonPath, out var audioChunk) &&
@@ -138,7 +144,7 @@ public sealed class VoiceCloudTextToSpeechClient
 
         try
         {
-            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None);
+            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", ct);
         }
         catch
         {
@@ -470,13 +476,13 @@ public sealed class VoiceCloudTextToSpeechClient
         return new VoiceCloudTextToSpeechResult(stream, string.IsNullOrWhiteSpace(contentType) ? "audio/mpeg" : contentType);
     }
 
-    private static async Task SendTextMessageAsync(ClientWebSocket socket, string message)
+    private static async Task SendTextMessageAsync(ClientWebSocket socket, string message, CancellationToken cancellationToken)
     {
         var bytes = Encoding.UTF8.GetBytes(message);
-        await socket.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None);
+        await socket.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken);
     }
 
-    private static async Task<JsonElement> ReceiveJsonMessageAsync(ClientWebSocket socket)
+    private static async Task<JsonElement> ReceiveJsonMessageAsync(ClientWebSocket socket, CancellationToken cancellationToken)
     {
         using var buffer = new MemoryStream();
         var receiveBuffer = new byte[8192];
@@ -484,7 +490,7 @@ public sealed class VoiceCloudTextToSpeechClient
         while (true)
         {
             var segment = new ArraySegment<byte>(receiveBuffer);
-            var result = await socket.ReceiveAsync(segment, CancellationToken.None);
+            var result = await socket.ReceiveAsync(segment, cancellationToken);
 
             if (result.MessageType == WebSocketMessageType.Close)
             {
