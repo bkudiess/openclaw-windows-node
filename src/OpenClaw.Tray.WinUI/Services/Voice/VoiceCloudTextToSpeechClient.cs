@@ -95,9 +95,9 @@ public sealed class VoiceCloudTextToSpeechClient
         using var socket = new ClientWebSocket();
         ApplyAuthenticationHeader(socket.Options, contract, templateValues);
 
-        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
-        var ct = linkedCts.Token;
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(30));
+        var ct = cts.Token;
 
         var stopwatch = Stopwatch.StartNew();
         await socket.ConnectAsync(new Uri(endpoint), ct);
