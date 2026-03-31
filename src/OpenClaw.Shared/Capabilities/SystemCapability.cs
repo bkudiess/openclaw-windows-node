@@ -199,7 +199,7 @@ public class SystemCapability : NodeCapabilityBase
     private NodeInvokeResponse HandleRunPrepare(NodeInvokeRequest request)
     {
         var argv = TryParseArgv(request.Args);
-        if (argv == null || argv.Length == 0)
+        if (argv == null || argv.Length == 0 || string.IsNullOrWhiteSpace(argv[0]))
         {
             return Error("Missing command parameter");
         }
