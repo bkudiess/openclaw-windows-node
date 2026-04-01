@@ -1594,6 +1594,7 @@ public partial class App : Application
         // Reconnect with new settings — mirror the startup if/else pattern
         // to avoid dual connections that cause gateway conflicts.
         _gatewayClient?.Dispose();
+        _gatewayClient = null;
         var oldNodeService = _nodeService;
         _nodeService = null;
         try { oldNodeService?.Dispose(); } catch (Exception ex) { Logger.Warn($"Node dispose error: {ex.Message}"); }
