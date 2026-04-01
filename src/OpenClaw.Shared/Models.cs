@@ -106,19 +106,24 @@ public class ChannelHealth
     public string? AuthAge { get; set; }
     public string? Type { get; set; }
 
+    private static readonly HashSet<string> s_healthyStatuses =
+        new(StringComparer.OrdinalIgnoreCase) { "ok", "connected", "running", "active", "ready" };
+
+    private static readonly HashSet<string> s_intermediateStatuses =
+        new(StringComparer.OrdinalIgnoreCase) { "stopped", "idle", "paused", "configured", "pending", "connecting", "reconnecting" };
+
     /// <summary>
     /// Returns true if the given status string represents a healthy/running channel.
     /// Use this instead of inline status checks to keep the healthy-status set consistent.
     /// </summary>
     public static bool IsHealthyStatus(string? status) =>
-        status?.ToLowerInvariant() is "ok" or "connected" or "running" or "active" or "ready";
+        status is not null && s_healthyStatuses.Contains(status);
 
     /// <summary>
     /// Returns true if the given status string represents an intermediate (not yet healthy, not error) state.
     /// </summary>
     public static bool IsIntermediateStatus(string? status) =>
-        status?.ToLowerInvariant() is "stopped" or "idle" or "paused" or "configured" or "pending"
-            or "connecting" or "reconnecting";
+        status is not null && s_intermediateStatuses.Contains(status);
 
     public string DisplayText
     {

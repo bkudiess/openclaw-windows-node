@@ -883,18 +883,19 @@ public class OpenClawGatewayClient : WebSocketClientBase
         SessionInfo[] snapshot;
         lock (_sessionsLock)
         {
-            if (!_sessions.ContainsKey(sessionKey))
+            if (!_sessions.TryGetValue(sessionKey, out var session))
             {
-                _sessions[sessionKey] = new SessionInfo
+                session = new SessionInfo
                 {
                     Key = sessionKey,
                     IsMain = isMain,
                     Status = "active"
                 };
+                _sessions[sessionKey] = session;
             }
 
-            _sessions[sessionKey].CurrentActivity = currentActivity;
-            _sessions[sessionKey].LastSeen = DateTime.UtcNow;
+            session.CurrentActivity = currentActivity;
+            session.LastSeen = DateTime.UtcNow;
 
             snapshot = GetSessionListInternal();
         }
