@@ -9,6 +9,11 @@ public class SettingsData
 {
     public string? GatewayUrl { get; set; }
     public string? Token { get; set; }
+    public bool UseSshTunnel { get; set; } = false;
+    public string? SshTunnelUser { get; set; }
+    public string? SshTunnelHost { get; set; }
+    public int SshTunnelRemotePort { get; set; } = 18789;
+    public int SshTunnelLocalPort { get; set; } = 18789;
     public bool AutoStart { get; set; }
     public bool GlobalHotkeyEnabled { get; set; } = true;
     public bool ShowNotifications { get; set; } = true;
@@ -23,6 +28,7 @@ public class SettingsData
     public bool NotifyInfo { get; set; } = true;
     public bool EnableNodeMode { get; set; } = false;
     public bool HasSeenActivityStreamTip { get; set; } = false;
+    public string? SkippedUpdateTag { get; set; }
     public bool NotifyChatResponses { get; set; } = true;
     public bool PreferStructuredCategories { get; set; } = true;
     public List<UserNotificationRule>? UserRules { get; set; }

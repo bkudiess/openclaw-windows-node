@@ -19,6 +19,11 @@ public class SettingsManager
     // Connection
     public string GatewayUrl { get; set; } = "ws://localhost:18789";
     public string Token { get; set; } = "";
+    public bool UseSshTunnel { get; set; } = false;
+    public string SshTunnelUser { get; set; } = "";
+    public string SshTunnelHost { get; set; } = "";
+    public int SshTunnelRemotePort { get; set; } = 18789;
+    public int SshTunnelLocalPort { get; set; } = 18789;
 
     // Startup
     public bool AutoStart { get; set; } = false;
@@ -46,6 +51,7 @@ public class SettingsManager
     // Node mode (enables Windows as a node, not just operator)
     public bool EnableNodeMode { get; set; } = false;
     public bool HasSeenActivityStreamTip { get; set; } = false;
+    public string SkippedUpdateTag { get; set; } = "";
 
     public SettingsManager()
     {
@@ -64,6 +70,11 @@ public class SettingsManager
                 {
                     GatewayUrl = loaded.GatewayUrl ?? GatewayUrl;
                     Token = loaded.Token ?? Token;
+                    UseSshTunnel = loaded.UseSshTunnel;
+                    SshTunnelUser = loaded.SshTunnelUser ?? SshTunnelUser;
+                    SshTunnelHost = loaded.SshTunnelHost ?? SshTunnelHost;
+                    SshTunnelRemotePort = loaded.SshTunnelRemotePort <= 0 ? SshTunnelRemotePort : loaded.SshTunnelRemotePort;
+                    SshTunnelLocalPort = loaded.SshTunnelLocalPort <= 0 ? SshTunnelLocalPort : loaded.SshTunnelLocalPort;
                     AutoStart = loaded.AutoStart;
                     GlobalHotkeyEnabled = loaded.GlobalHotkeyEnabled;
                     ShowNotifications = loaded.ShowNotifications;
@@ -78,6 +89,7 @@ public class SettingsManager
                     NotifyInfo = loaded.NotifyInfo;
                     EnableNodeMode = loaded.EnableNodeMode;
                     HasSeenActivityStreamTip = loaded.HasSeenActivityStreamTip;
+                    SkippedUpdateTag = loaded.SkippedUpdateTag ?? SkippedUpdateTag;
                     NotifyChatResponses = loaded.NotifyChatResponses;
                     PreferStructuredCategories = loaded.PreferStructuredCategories;
                     if (loaded.UserRules != null)
@@ -101,6 +113,11 @@ public class SettingsManager
             {
                 GatewayUrl = GatewayUrl,
                 Token = Token,
+                UseSshTunnel = UseSshTunnel,
+                SshTunnelUser = SshTunnelUser,
+                SshTunnelHost = SshTunnelHost,
+                SshTunnelRemotePort = SshTunnelRemotePort,
+                SshTunnelLocalPort = SshTunnelLocalPort,
                 AutoStart = AutoStart,
                 GlobalHotkeyEnabled = GlobalHotkeyEnabled,
                 ShowNotifications = ShowNotifications,
@@ -115,6 +132,7 @@ public class SettingsManager
                 NotifyInfo = NotifyInfo,
                 EnableNodeMode = EnableNodeMode,
                 HasSeenActivityStreamTip = HasSeenActivityStreamTip,
+                SkippedUpdateTag = string.IsNullOrWhiteSpace(SkippedUpdateTag) ? null : SkippedUpdateTag,
                 NotifyChatResponses = NotifyChatResponses,
                 PreferStructuredCategories = PreferStructuredCategories,
                 UserRules = UserRules
@@ -129,5 +147,15 @@ public class SettingsManager
         {
             Logger.Error($"Failed to save settings: {ex.Message}");
         }
+    }
+
+    public string GetEffectiveGatewayUrl()
+    {
+        if (!UseSshTunnel)
+        {
+            return GatewayUrl;
+        }
+
+        return $"ws://127.0.0.1:{SshTunnelLocalPort}";
     }
 }

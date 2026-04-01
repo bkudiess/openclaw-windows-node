@@ -35,12 +35,14 @@ public partial class App : Application
     private TrayIcon? _trayIcon;
     private OpenClawGatewayClient? _gatewayClient;
     private SettingsManager? _settings;
+    private SshTunnelService? _sshTunnelService;
     private GlobalHotkeyService? _globalHotkey;
     private System.Timers.Timer? _healthCheckTimer;
     private System.Timers.Timer? _sessionPollTimer;
     private Mutex? _mutex;
     private Microsoft.UI.Dispatching.DispatcherQueue? _dispatcherQueue;
     private CancellationTokenSource? _deepLinkCts;
+    private bool _isExiting;
     
     private ConnectionStatus _currentStatus = ConnectionStatus.Disconnected;
     private AgentActivity? _currentActivity;
@@ -250,6 +252,9 @@ public partial class App : Application
         // Store protocol URI for processing after setup
         _pendingProtocolUri = protocolUri;
 
+        // Initialize settings before update check so skip selections can be remembered.
+        _settings = new SettingsManager();
+
         // Register URI scheme on first run
         DeepLinkHandler.RegisterUriScheme();
 
@@ -264,8 +269,7 @@ public partial class App : Application
         // Register toast activation handler
         ToastNotificationManagerCompat.OnActivated += OnToastActivated;
 
-        // Initialize settings
-        _settings = new SettingsManager();
+        _sshTunnelService = new SshTunnelService(new AppLogger());
 
         // First-run check
         if (string.IsNullOrWhiteSpace(_settings.Token))
@@ -1092,11 +1096,12 @@ public partial class App : Application
     private void InitializeGatewayClient()
     {
         if (_settings == null) return;
+        if (!EnsureSshTunnelConfigured()) return;
 
         // Unsubscribe from old client if exists
         UnsubscribeGatewayEvents();
 
-        _gatewayClient = new OpenClawGatewayClient(_settings.GatewayUrl, _settings.Token, new AppLogger());
+        _gatewayClient = new OpenClawGatewayClient(_settings.GetEffectiveGatewayUrl(), _settings.Token, new AppLogger());
         _gatewayClient.SetUserRules(_settings.UserRules.Count > 0 ? _settings.UserRules : null);
         _gatewayClient.StatusChanged += OnConnectionStatusChanged;
         _gatewayClient.ActivityChanged += OnActivityChanged;
@@ -1134,6 +1139,7 @@ public partial class App : Application
     {
         if (_settings == null || !_settings.EnableNodeMode) return;
         if (_dispatcherQueue == null) return;
+        if (!EnsureSshTunnelConfigured()) return;
         
         try
         {
@@ -1145,7 +1151,7 @@ public partial class App : Application
             _nodeService.PairingStatusChanged += OnPairingStatusChanged;
             
             // Connect to gateway as a node (separate connection from operator)
-            _ = _nodeService.ConnectAsync(_settings.GatewayUrl, _settings.Token);
+            _ = _nodeService.ConnectAsync(_settings.GetEffectiveGatewayUrl(), _settings.Token);
         }
         catch (Exception ex)
         {
@@ -1606,9 +1612,12 @@ public partial class App : Application
         var oldNodeService = _nodeService;
         _nodeService = null;
         try { oldNodeService?.Dispose(); } catch (Exception ex) { Logger.Warn($"Node dispose error: {ex.Message}"); }
+        if (_settings?.UseSshTunnel != true)
+        {
+            _sshTunnelService?.Stop();
+        }
 
         // Reset status so the tray doesn't show a stale "Connected" from the previous mode
-        // while the new connection is establishing.
         _currentStatus = ConnectionStatus.Disconnected;
         UpdateTrayIcon();
         
@@ -1640,9 +1649,12 @@ public partial class App : Application
 
     private void ShowWebChat()
     {
+        if (_settings == null) return;
+        if (!EnsureSshTunnelConfigured()) return;
+
         if (_webChatWindow == null || _webChatWindow.IsClosed)
         {
-            _webChatWindow = new WebChatWindow(_settings!.GatewayUrl, _settings.Token);
+            _webChatWindow = new WebChatWindow(_settings.GetEffectiveGatewayUrl(), _settings.Token);
             _webChatWindow.Closed += (s, e) => _webChatWindow = null;
         }
         _webChatWindow.Activate();
@@ -1671,7 +1683,7 @@ public partial class App : Application
                 else
                 {
                     Logger.Info("QuickSend dialog already open; activating");
-                    _quickSendDialog.Activate();
+                    _quickSendDialog.ShowAsync();
                     return;
                 }
             }
@@ -1686,7 +1698,7 @@ public partial class App : Application
                 }
             };
             _quickSendDialog = dialog;
-            dialog.Activate();
+            dialog.ShowAsync();
         }
         catch (Exception ex)
         {
@@ -1785,8 +1797,9 @@ public partial class App : Application
     private void OpenDashboard(string? path = null)
     {
         if (_settings == null) return;
+        if (!EnsureSshTunnelConfigured()) return;
         
-        var baseUrl = _settings.GatewayUrl
+        var baseUrl = _settings.GetEffectiveGatewayUrl()
             .Replace("ws://", "http://")
             .Replace("wss://", "https://")
             .TrimEnd('/');
@@ -1897,13 +1910,31 @@ public partial class App : Application
             var changelog = AppUpdater.GetChangelog(true) ?? "No release notes available.";
             Logger.Info($"Update available: {release.TagName}");
 
+            if (!string.IsNullOrWhiteSpace(_settings?.SkippedUpdateTag) &&
+                string.Equals(_settings.SkippedUpdateTag, release.TagName, StringComparison.OrdinalIgnoreCase))
+            {
+                Logger.Info($"Skipping update prompt for remembered version {release.TagName}");
+                return true;
+            }
+
             var dialog = new UpdateDialog(release.TagName, changelog);
             var result = await dialog.ShowAsync();
 
             if (result == UpdateDialogResult.Download)
             {
+                if (_settings != null)
+                {
+                    _settings.SkippedUpdateTag = string.Empty;
+                    _settings.Save();
+                }
                 var installed = await DownloadAndInstallUpdateAsync();
                 return !installed; // Don't launch if update succeeded
+            }
+
+            if (result == UpdateDialogResult.Skip && _settings != null)
+            {
+                _settings.SkippedUpdateTag = release.TagName ?? string.Empty;
+                _settings.Save();
             }
 
             return true; // RemindLater or Skip - continue
@@ -1972,6 +2003,7 @@ public partial class App : Application
                 }
                 catch (OperationCanceledException)
                 {
+                    Logger.Info("Deep link server stopping (canceled)");
                     break; // Normal shutdown
                 }
                 catch (Exception ex)
@@ -2061,32 +2093,172 @@ public partial class App : Application
 
     private void ExitApplication()
     {
+        if (_isExiting)
+        {
+            Logger.Info("Exit requested while shutdown already in progress");
+            return;
+        }
+
+        _isExiting = true;
         Logger.Info("Application exiting");
-        
+
         // Cancel background tasks
-        _deepLinkCts?.Cancel();
-        
+        if (_deepLinkCts != null)
+        {
+            Logger.Info("Shutdown: canceling deep link server");
+            try { _deepLinkCts.Cancel(); } catch (Exception ex) { Logger.Warn($"Shutdown: deep link cancel failed: {ex.Message}"); }
+        }
+
         // Stop timers
-        _healthCheckTimer?.Stop();
-        _healthCheckTimer?.Dispose();
-        _sessionPollTimer?.Stop();
-        _sessionPollTimer?.Dispose();
-        
+        SafeShutdownStep("health timer", () =>
+        {
+            _healthCheckTimer?.Stop();
+            _healthCheckTimer?.Dispose();
+            _healthCheckTimer = null;
+        });
+
+        SafeShutdownStep("session poll timer", () =>
+        {
+            _sessionPollTimer?.Stop();
+            _sessionPollTimer?.Dispose();
+            _sessionPollTimer = null;
+        });
+
         // Cleanup hotkey
-        _globalHotkey?.Dispose();
-        
-        // Unsubscribe and dispose gateway client
-        UnsubscribeGatewayEvents();
-        _gatewayClient?.Dispose();
-        
+        SafeShutdownStep("global hotkey", () =>
+        {
+            _globalHotkey?.Dispose();
+            _globalHotkey = null;
+        });
+
+        // Dispose runtime services
+        SafeShutdownStep("gateway client", () =>
+        {
+            UnsubscribeGatewayEvents();
+            _gatewayClient?.Dispose();
+            _gatewayClient = null;
+        });
+
+        SafeShutdownStep("node service", () =>
+        {
+            _nodeService?.Dispose();
+            _nodeService = null;
+        });
+
+        SafeShutdownStep("ssh tunnel service", () =>
+        {
+            _sshTunnelService?.Dispose();
+            _sshTunnelService = null;
+        });
+
+        // Close windows explicitly for deterministic shutdown tracing.
+        SafeShutdownStep("settings window", () => CloseWindow(_settingsWindow));
+        _settingsWindow = null;
+        SafeShutdownStep("web chat window", () => CloseWindow(_webChatWindow));
+        _webChatWindow = null;
+        SafeShutdownStep("status detail window", () => CloseWindow(_statusDetailWindow));
+        _statusDetailWindow = null;
+        SafeShutdownStep("notification history window", () => CloseWindow(_notificationHistoryWindow));
+        _notificationHistoryWindow = null;
+        SafeShutdownStep("activity stream window", () => CloseWindow(_activityStreamWindow));
+        _activityStreamWindow = null;
+        SafeShutdownStep("tray menu window", () => CloseWindow(_trayMenuWindow));
+        _trayMenuWindow = null;
+        SafeShutdownStep("quick send dialog", () => CloseWindow(_quickSendDialog));
+        _quickSendDialog = null;
+        SafeShutdownStep("keep alive window", () => CloseWindow(_keepAliveWindow));
+        _keepAliveWindow = null;
+
         // Dispose tray and mutex
-        _trayIcon?.Dispose();
-        _mutex?.Dispose();
-        
+        SafeShutdownStep("tray icon", () =>
+        {
+            _trayIcon?.Dispose();
+            _trayIcon = null;
+        });
+
+        SafeShutdownStep("single-instance mutex", () =>
+        {
+            _mutex?.Dispose();
+            _mutex = null;
+        });
+
         // Dispose cancellation token source
-        _deepLinkCts?.Dispose();
-        
+        SafeShutdownStep("deep link token source", () =>
+        {
+            _deepLinkCts?.Dispose();
+            _deepLinkCts = null;
+        });
+
+        Logger.Info("Shutdown complete; calling Exit() now");
         Exit();
+    }
+
+    private static void CloseWindow(Window? window)
+    {
+        try
+        {
+            window?.Close();
+        }
+        catch
+        {
+            // Let caller log specific failure context.
+            throw;
+        }
+    }
+
+    private static void SafeShutdownStep(string name, Action action)
+    {
+        try
+        {
+            Logger.Info($"Shutdown: disposing {name}");
+            action();
+            Logger.Info($"Shutdown: disposed {name}");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Shutdown: failed disposing {name}: {ex.Message}");
+        }
+    }
+
+    private bool EnsureSshTunnelConfigured()
+    {
+        if (_settings == null)
+        {
+            return false;
+        }
+
+        if (_settings.UseSshTunnel)
+        {
+            if (string.IsNullOrWhiteSpace(_settings.SshTunnelUser) ||
+                string.IsNullOrWhiteSpace(_settings.SshTunnelHost) ||
+                _settings.SshTunnelRemotePort is < 1 or > 65535 ||
+                _settings.SshTunnelLocalPort is < 1 or > 65535)
+            {
+                Logger.Warn("SSH tunnel is enabled but settings are incomplete");
+                _currentStatus = ConnectionStatus.Error;
+                UpdateTrayIcon();
+                return false;
+            }
+
+            try
+            {
+                _sshTunnelService ??= new SshTunnelService(new AppLogger());
+                _sshTunnelService.EnsureStarted(_settings);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"Failed to start SSH tunnel: {ex.Message}");
+                _currentStatus = ConnectionStatus.Error;
+                UpdateTrayIcon();
+                return false;
+            }
+        }
+        else
+        {
+            _sshTunnelService?.Stop();
+        }
+
+        return true;
     }
 
     #endregion
