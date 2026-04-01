@@ -1562,11 +1562,6 @@ public class OpenClawGatewayClient : WebSocketClientBase
         NotificationReceived?.Invoke(this, notification);
     }
 
-    private static (string title, string type) ClassifyNotification(string text)
-    {
-        return NotificationCategorizer.ClassifyByKeywords(text);
-    }
-
     // --- Utility ---
 
     private static ActivityKind ClassifyTool(string toolName)
