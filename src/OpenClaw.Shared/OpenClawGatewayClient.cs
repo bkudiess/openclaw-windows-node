@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading;
@@ -1576,23 +1577,25 @@ public class OpenClawGatewayClient : WebSocketClientBase
 
     // --- Utility ---
 
-    private static ActivityKind ClassifyTool(string toolName)
-    {
-        return toolName.ToLowerInvariant() switch
+    // FrozenDictionary gives O(1) case-insensitive lookup without allocating a
+    // lowercased copy of toolName on every call.
+    private static readonly FrozenDictionary<string, ActivityKind> s_toolKindMap =
+        new Dictionary<string, ActivityKind>(StringComparer.OrdinalIgnoreCase)
         {
-            "exec" => ActivityKind.Exec,
-            "read" => ActivityKind.Read,
-            "write" => ActivityKind.Write,
-            "edit" => ActivityKind.Edit,
-            "web_search" => ActivityKind.Search,
-            "web_fetch" => ActivityKind.Search,
-            "browser" => ActivityKind.Browser,
-            "message" => ActivityKind.Message,
-            "tts" => ActivityKind.Tool,
-            "image" => ActivityKind.Tool,
-            _ => ActivityKind.Tool
-        };
-    }
+            ["exec"]       = ActivityKind.Exec,
+            ["read"]       = ActivityKind.Read,
+            ["write"]      = ActivityKind.Write,
+            ["edit"]       = ActivityKind.Edit,
+            ["web_search"] = ActivityKind.Search,
+            ["web_fetch"]  = ActivityKind.Search,
+            ["browser"]    = ActivityKind.Browser,
+            ["message"]    = ActivityKind.Message,
+            ["tts"]        = ActivityKind.Tool,
+            ["image"]      = ActivityKind.Tool,
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+
+    private static ActivityKind ClassifyTool(string toolName) =>
+        s_toolKindMap.TryGetValue(toolName, out var kind) ? kind : ActivityKind.Tool;
 
     private static string ShortenPath(string path)
     {
