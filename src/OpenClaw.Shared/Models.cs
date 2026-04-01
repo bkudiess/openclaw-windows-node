@@ -241,7 +241,7 @@ public class SessionInfo
         get
         {
             if (TotalTokens <= 0 || ContextTokens <= 0) return "";
-            return $"{FormatTokenCount(TotalTokens)}/{FormatTokenCount(ContextTokens)}";
+            return $"{ModelFormatting.FormatLargeNumber(TotalTokens)}/{ModelFormatting.FormatLargeNumber(ContextTokens)}";
         }
     }
     
@@ -270,12 +270,6 @@ public class SessionInfo
         }
     }
 
-    private static string FormatTokenCount(long n)
-    {
-        if (n >= 1_000_000) return $"{n / 1_000_000.0:F1}M";
-        if (n >= 1_000) return $"{n / 1_000.0:F1}K";
-        return n.ToString();
-    }
 }
 
 public class GatewayUsageInfo
@@ -294,7 +288,7 @@ public class GatewayUsageInfo
         {
             var parts = new List<string>();
             if (TotalTokens > 0)
-                parts.Add($"Tokens: {FormatCount(TotalTokens)}");
+                parts.Add($"Tokens: {ModelFormatting.FormatLargeNumber(TotalTokens)}");
             if (CostUsd > 0)
                 parts.Add($"${CostUsd:F2}");
             if (RequestCount > 0)
@@ -309,12 +303,6 @@ public class GatewayUsageInfo
         }
     }
 
-    private static string FormatCount(long n)
-    {
-        if (n >= 1_000_000) return $"{n / 1_000_000.0:F1}M";
-        if (n >= 1_000) return $"{n / 1_000.0:F1}K";
-        return n.ToString();
-    }
 }
 
 public class GatewayUsageWindowInfo
@@ -451,6 +439,20 @@ public class GatewayNodeInfo
         if (delta.TotalMinutes < 60) return $"{(int)Math.Round(delta.TotalMinutes)}m ago";
         if (delta.TotalHours < 48) return $"{(int)Math.Round(delta.TotalHours)}h ago";
         return $"{(int)Math.Round(delta.TotalDays)}d ago";
+    }
+}
+
+/// <summary>Shared display-formatting helpers used by model classes.</summary>
+internal static class ModelFormatting
+{
+    /// <summary>
+    /// Formats a large integer with K/M suffix for compact display (e.g. 1500 → "1.5K", 2_000_000 → "2.0M").
+    /// </summary>
+    internal static string FormatLargeNumber(long n)
+    {
+        if (n >= 1_000_000) return $"{n / 1_000_000.0:F1}M";
+        if (n >= 1_000) return $"{n / 1_000.0:F1}K";
+        return n.ToString();
     }
 }
 
