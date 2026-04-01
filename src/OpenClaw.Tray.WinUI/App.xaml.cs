@@ -8,6 +8,7 @@ using OpenClawTray.Helpers;
 using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
