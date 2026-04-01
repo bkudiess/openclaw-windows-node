@@ -55,6 +55,21 @@ public partial class App : Application
     private DateTime _lastCheckTime = DateTime.Now;
     private DateTime _lastUsageActivityLogUtc = DateTime.MinValue;
 
+    // FrozenDictionary for O(1) case-insensitive notification type → setting lookup — no per-call allocation.
+    private static readonly System.Collections.Frozen.FrozenDictionary<string, Func<SettingsManager, bool>> s_notifTypeMap =
+        new Dictionary<string, Func<SettingsManager, bool>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["health"]    = s => s.NotifyHealth,
+            ["urgent"]    = s => s.NotifyUrgent,
+            ["reminder"]  = s => s.NotifyReminder,
+            ["email"]     = s => s.NotifyEmail,
+            ["calendar"]  = s => s.NotifyCalendar,
+            ["build"]     = s => s.NotifyBuild,
+            ["stock"]     = s => s.NotifyStock,
+            ["info"]      = s => s.NotifyInfo,
+            ["error"]     = s => s.NotifyUrgent,  // errors follow urgent setting
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+
     // Session-aware activity tracking
     private readonly Dictionary<string, AgentActivity> _sessionActivities = new();
     private string? _displayedSessionKey;
@@ -1451,19 +1466,9 @@ public partial class App : Application
         if (notification.IsChat && !_settings.NotifyChatResponses)
             return false;
 
-        return notification.Type?.ToLowerInvariant() switch
-        {
-            "health" => _settings.NotifyHealth,
-            "urgent" => _settings.NotifyUrgent,
-            "reminder" => _settings.NotifyReminder,
-            "email" => _settings.NotifyEmail,
-            "calendar" => _settings.NotifyCalendar,
-            "build" => _settings.NotifyBuild,
-            "stock" => _settings.NotifyStock,
-            "info" => _settings.NotifyInfo,
-            "error" => _settings.NotifyUrgent, // errors follow urgent setting
-            _ => true
-        };
+        var type = notification.Type;
+        if (type == null) return true;
+        return s_notifTypeMap.TryGetValue(type, out var selector) ? selector(_settings) : true;
     }
 
     #endregion
