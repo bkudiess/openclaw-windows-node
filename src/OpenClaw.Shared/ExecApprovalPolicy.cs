@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -60,8 +61,10 @@ public class ExecApprovalPolicy
     private List<ExecApprovalRule> _rules = new();
     private ExecApprovalAction _defaultAction = ExecApprovalAction.Deny;
     
-    // Compiled regex cache for patterns
-    private readonly Dictionary<string, Regex> _regexCache = new();
+    // Compiled regex cache — ConcurrentDictionary for thread safety.
+    // Pattern → compiled Regex mapping never changes for a given pattern string
+    // (glob-to-regex conversion is deterministic), so no cache invalidation is needed.
+    private static readonly ConcurrentDictionary<string, Regex> _regexCache = new(StringComparer.Ordinal);
     
     /// <summary>Current rules (read-only view)</summary>
     public IReadOnlyList<ExecApprovalRule> Rules => _rules.AsReadOnly();
@@ -143,7 +146,6 @@ public class ExecApprovalPolicy
     public void AddRule(ExecApprovalRule rule)
     {
         _rules.Add(rule);
-        ClearRegexCache();
         Save();
     }
     
@@ -154,7 +156,6 @@ public class ExecApprovalPolicy
     {
         index = Math.Clamp(index, 0, _rules.Count);
         _rules.Insert(index, rule);
-        ClearRegexCache();
         Save();
     }
     
@@ -165,7 +166,6 @@ public class ExecApprovalPolicy
     {
         if (index < 0 || index >= _rules.Count) return false;
         _rules.RemoveAt(index);
-        ClearRegexCache();
         Save();
         return true;
     }
@@ -177,7 +177,6 @@ public class ExecApprovalPolicy
     {
         _rules = new List<ExecApprovalRule>(rules);
         if (defaultAction.HasValue) _defaultAction = defaultAction.Value;
-        ClearRegexCache();
         Save();
     }
     
@@ -209,7 +208,6 @@ public class ExecApprovalPolicy
                     _rules = data.Rules ?? new List<ExecApprovalRule>();
                     _defaultAction = data.DefaultAction;
                     _logger.Info($"[EXEC-POLICY] Loaded {_rules.Count} rules from {_policyFilePath}");
-                    ClearRegexCache();
                     return;
                 }
             }
@@ -291,17 +289,14 @@ public class ExecApprovalPolicy
     internal bool MatchesPattern(string command, string pattern)
     {
         if (pattern == "*") return true;
-        
-        if (!_regexCache.TryGetValue(pattern, out var regex))
+
+        var regex = _regexCache.GetOrAdd(pattern, static p =>
         {
-            // Convert glob to regex
-            var regexPattern = "^" + Regex.Escape(pattern)
+            var regexPattern = "^" + Regex.Escape(p)
                 .Replace("\\*", ".*")
                 .Replace("\\?", ".") + "$";
-            
-            regex = new Regex(regexPattern, RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
-            _regexCache[pattern] = regex;
-        }
+            return new Regex(regexPattern, RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
+        });
 
         try
         {
@@ -313,9 +308,7 @@ public class ExecApprovalPolicy
             return false;
         }
     }
-    
-    private void ClearRegexCache() => _regexCache.Clear();
-    
+
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
         WriteIndented = true,
