@@ -36,19 +36,6 @@ public class NotificationCategorizer
         ["error"] = ("⚠️ Error", "error"),
     };
 
-    private static readonly Dictionary<string, string> CategoryTitles = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["health"] = "🩸 Blood Sugar Alert",
-        ["urgent"] = "🚨 Urgent Alert",
-        ["reminder"] = "⏰ Reminder",
-        ["stock"] = "📦 Stock Alert",
-        ["email"] = "📧 Email",
-        ["calendar"] = "📅 Calendar",
-        ["error"] = "⚠️ Error",
-        ["build"] = "🔨 Build",
-        ["info"] = "🤖 OpenClaw",
-    };
-
     /// <summary>
     /// Classify a notification using the layered pipeline.
     /// When <paramref name="preferStructuredCategories"/> is true (default),
@@ -78,7 +65,7 @@ public class NotificationCategorizer
                 if (MatchesRule(searchText, rule))
                 {
                     var cat = rule.Category.ToLowerInvariant();
-                    var title = CategoryTitles.GetValueOrDefault(cat, "🤖 OpenClaw");
+                    var title = IntentMap.TryGetValue(cat, out var catInfo) ? catInfo.title : "🤖 OpenClaw";
                     return (title, cat);
                 }
             }
