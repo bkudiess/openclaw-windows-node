@@ -71,8 +71,8 @@ public class DeviceIdentityIntegrationTests
 
             Assert.Equal(sig1, sig2);
             Assert.NotEmpty(sig1);
-            // Ed25519 signature is 64 bytes -> base64url ~86 chars
-            Assert.True(sig1.Length > 40);
+            // Ed25519 signature is 64 bytes → base64url is 86 chars (no padding)
+            Assert.Equal(86, sig1.Length);
         }
         finally { Directory.Delete(dir, true); }
     }
@@ -114,6 +114,66 @@ public class DeviceIdentityIntegrationTests
             Assert.EndsWith("|my-nonce", payload);
 
             // Full format: v2|{deviceId}|{clientId}|node|node||{signedAtMs}|{authToken}|{nonce}
+            var parts = payload.Split('|');
+            Assert.Equal(9, parts.Length);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [IntegrationFact]
+    public void BuildConnectPayloadV3_HasCorrectFormat()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var identity = new DeviceIdentity(dir);
+            identity.Initialize();
+
+            var payload = identity.BuildConnectPayloadV3(
+                nonce: "challenge-nonce",
+                signedAtMs: 1711648000000,
+                clientId: "cli",
+                clientMode: "cli",
+                role: "operator",
+                scopes: new[] { "operator.admin", "operator.read", "operator.write" },
+                authToken: "mytoken123",
+                platform: "windows",
+                deviceFamily: "desktop");
+
+            Assert.StartsWith("v3|", payload);
+            Assert.Contains(identity.DeviceId, payload);
+            Assert.Contains("|cli|cli|operator|operator.admin,operator.read,operator.write|", payload);
+            Assert.Contains("|1711648000000|mytoken123|challenge-nonce|windows|desktop", payload);
+
+            var parts = payload.Split('|');
+            Assert.Equal(11, parts.Length);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [IntegrationFact]
+    public void BuildConnectPayloadV2_HasCorrectFormat()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var identity = new DeviceIdentity(dir);
+            identity.Initialize();
+
+            var payload = identity.BuildConnectPayloadV2(
+                nonce: "challenge-nonce",
+                signedAtMs: 1711648000000,
+                clientId: "cli",
+                clientMode: "cli",
+                role: "operator",
+                scopes: new[] { "operator.admin", "operator.read", "operator.write" },
+                authToken: "mytoken123");
+
+            Assert.StartsWith("v2|", payload);
+            Assert.Contains(identity.DeviceId, payload);
+            Assert.Contains("|cli|cli|operator|operator.admin,operator.read,operator.write|", payload);
+            Assert.Contains("|1711648000000|mytoken123|challenge-nonce", payload);
+
             var parts = payload.Split('|');
             Assert.Equal(9, parts.Length);
         }
@@ -192,6 +252,16 @@ public class DeviceIdentityIntegrationTests
             Assert.DoesNotContain("+", pubKey);
             Assert.DoesNotContain("/", pubKey);
             Assert.DoesNotContain("=", pubKey);
+            
+            // Decode and verify Ed25519 public key is exactly 32 bytes
+            var padded = pubKey.Replace('-', '+').Replace('_', '/');
+            switch (padded.Length % 4)
+            {
+                case 2: padded += "=="; break;
+                case 3: padded += "="; break;
+            }
+            var bytes = Convert.FromBase64String(padded);
+            Assert.Equal(32, bytes.Length);
         }
         finally { Directory.Delete(dir, true); }
     }

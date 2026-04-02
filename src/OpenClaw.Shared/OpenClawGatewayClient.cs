@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
+using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,6 +11,29 @@ namespace OpenClaw.Shared;
 
 public class OpenClawGatewayClient : WebSocketClientBase
 {
+    private const string OperatorClientId = "cli";
+    private const string OperatorClientDisplayName = "OpenClaw Windows Tray";
+    private const string OperatorClientMode = "cli";
+    private const string OperatorRole = "operator";
+    private const string OperatorPlatform = "windows";
+    private const string OperatorDeviceFamily = "desktop";
+    private static readonly string[] s_operatorScopes =
+    [
+        "operator.admin",
+        "operator.read",
+        "operator.write",
+        "operator.approvals",
+        "operator.pairing"
+    ];
+
+    private enum SignatureTokenMode
+    {
+        V3AuthToken,
+        V3EmptyToken,
+        V2AuthToken,
+        V2EmptyToken
+    }
+
     // Tracked state
     private readonly Dictionary<string, SessionInfo> _sessions = new();
     private readonly Dictionary<string, GatewayNodeInfo> _nodes = new();
@@ -17,15 +43,29 @@ public class OpenClawGatewayClient : WebSocketClientBase
     private readonly Dictionary<string, string> _pendingRequestMethods = new();
     private readonly Dictionary<string, PendingChatPreviewState> _pendingChatPreviewSessionKeys = new();
     private readonly Dictionary<string, string> _lastAssistantMessagesBySession = new();
+    private readonly Dictionary<string, TaskCompletionSource<bool>> _pendingChatSendRequests = new();
     private readonly object _pendingRequestLock = new();
     private readonly object _pendingChatPreviewLock = new();
+    private readonly object _pendingChatSendLock = new();
     private readonly object _sessionsLock = new();
     private readonly object _nodesLock = new();
+    private readonly DeviceIdentity _deviceIdentity;
+    private string _mainSessionKey = "main";
+    private string? _operatorDeviceId;
+    private string[] _grantedOperatorScopes = Array.Empty<string>();
+    private string _connectAuthToken;
+    private SignatureTokenMode _signatureTokenMode = SignatureTokenMode.V3AuthToken;
+    private long? _challengeTimestampMs;
+    private string? _currentChallengeNonce;
     private bool _usageStatusUnsupported;
     private bool _usageCostUnsupported;
     private bool _sessionPreviewUnsupported;
     private bool _nodeListUnsupported;
     private string _defaultChatSessionKey = DefaultChatSessionKey;
+    private bool _operatorReadScopeUnavailable;
+    private bool _pairingRequiredAwaitingApproval;
+    private IReadOnlyList<UserNotificationRule>? _userRules;
+    private bool _preferStructuredCategories = true;
 
     private const string DefaultChatSessionKey = "main";
     private sealed class PendingChatPreviewState
@@ -34,12 +74,29 @@ public class OpenClawGatewayClient : WebSocketClientBase
         public int AttemptCount { get; set; }
     }
 
+    /// <summary>
+    /// Controls whether structured notification metadata (Intent, Channel) takes priority
+    /// over keyword-based classification. Call after construction and whenever settings change.
+    /// </summary>
+    public void SetPreferStructuredCategories(bool value) => _preferStructuredCategories = value;
+
     private void ResetUnsupportedMethodFlags()
     {
         _usageStatusUnsupported = false;
         _usageCostUnsupported = false;
         _sessionPreviewUnsupported = false;
         _nodeListUnsupported = false;
+        _operatorReadScopeUnavailable = false;
+    }
+
+    /// <summary>
+    /// Provides user-defined notification rules to the categorizer so custom rules
+    /// are applied when classifying incoming gateway notifications.
+    /// Call after construction and whenever settings change.
+    /// </summary>
+    public void SetUserRules(IReadOnlyList<UserNotificationRule>? rules)
+    {
+        _userRules = rules;
     }
 
     protected override int ReceiveBufferSize => 16384;
@@ -55,6 +112,11 @@ public class OpenClawGatewayClient : WebSocketClientBase
     {
         ResetUnsupportedMethodFlags();
         return Task.CompletedTask;
+    }
+
+    protected override bool ShouldAutoReconnect()
+    {
+        return !_pairingRequiredAwaitingApproval;
     }
 
     protected override void OnDisconnected()
@@ -82,9 +144,20 @@ public class OpenClawGatewayClient : WebSocketClientBase
     public event EventHandler<SessionsPreviewPayloadInfo>? SessionPreviewUpdated;
     public event EventHandler<SessionCommandResult>? SessionCommandCompleted;
 
+    public string? OperatorDeviceId => _operatorDeviceId;
+    public IReadOnlyList<string> GrantedOperatorScopes => _grantedOperatorScopes;
+    public bool IsConnectedToGateway => IsConnected;
+
     public OpenClawGatewayClient(string gatewayUrl, string token, IOpenClawLogger? logger = null)
         : base(gatewayUrl, token, logger)
     {
+        var dataPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "OpenClawTray");
+
+        _deviceIdentity = new DeviceIdentity(dataPath, _logger);
+        _deviceIdentity.Initialize();
+        _connectAuthToken = _deviceIdentity.DeviceToken ?? _token;
     }
 
     public async Task DisconnectAsync()
@@ -136,8 +209,12 @@ public class OpenClawGatewayClient : WebSocketClientBase
     {
         if (!IsConnected)
             throw new InvalidOperationException("Gateway connection is not open");
+        if (string.IsNullOrWhiteSpace(message))
+            throw new ArgumentException("Message is required", nameof(message));
 
         var requestId = Guid.NewGuid().ToString();
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        TrackPendingChatSend(requestId, completion);
         var resolvedSessionKey = ResolveChatSessionKey(sessionKey);
         var resolvedIdempotencyKey = string.IsNullOrWhiteSpace(idempotencyKey)
             ? Guid.NewGuid().ToString()
@@ -155,18 +232,28 @@ public class OpenClawGatewayClient : WebSocketClientBase
             throw;
         }
 
+        var completedTask = await Task.WhenAny(completion.Task, Task.Delay(5000, CancellationToken));
+        if (completedTask != completion.Task)
+        {
+            RemovePendingChatSend(requestId);
+            throw new TimeoutException("Timed out waiting for chat.send response from gateway");
+        }
+
+        await completion.Task;
         _logger.Info($"Sent chat message ({message.Length} chars)");
     }
 
     /// <summary>Request session list from gateway.</summary>
     public async Task RequestSessionsAsync()
     {
+        if (_operatorReadScopeUnavailable) return;
         await SendTrackedRequestAsync("sessions.list");
     }
 
     /// <summary>Request usage/context info from gateway (may not be supported on all gateways).</summary>
     public async Task RequestUsageAsync()
     {
+        if (_operatorReadScopeUnavailable) return;
         if (!IsConnected) return;
         try
         {
@@ -191,6 +278,7 @@ public class OpenClawGatewayClient : WebSocketClientBase
     /// <summary>Request connected node inventory from gateway.</summary>
     public async Task RequestNodesAsync()
     {
+        if (_operatorReadScopeUnavailable) return;
         if (_nodeListUnsupported) return;
         await SendTrackedRequestAsync("node.list");
     }
@@ -305,14 +393,81 @@ public class OpenClawGatewayClient : WebSocketClientBase
 
     private async Task SendConnectMessageAsync(string? nonce = null)
     {
+        var requestId = Guid.NewGuid().ToString();
+        TrackPendingRequest(requestId, "connect");
+
+        var signedAt = _challengeTimestampMs ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var connectNonce = nonce ?? string.Empty;
+        var signatureToken = _signatureTokenMode is SignatureTokenMode.V3EmptyToken or SignatureTokenMode.V2EmptyToken
+            ? string.Empty
+            : _connectAuthToken;
+
+        var signature = _signatureTokenMode is SignatureTokenMode.V2AuthToken or SignatureTokenMode.V2EmptyToken
+            ? _deviceIdentity.SignConnectPayloadV2(
+                connectNonce,
+                signedAt,
+                OperatorClientId,
+                OperatorClientMode,
+                OperatorRole,
+                s_operatorScopes,
+                signatureToken)
+            : _deviceIdentity.SignConnectPayloadV3(
+                connectNonce,
+                signedAt,
+                OperatorClientId,
+                OperatorClientMode,
+                OperatorRole,
+                s_operatorScopes,
+                signatureToken,
+                OperatorPlatform,
+                OperatorDeviceFamily);
+
+        // Use "cli" client ID for native apps - no browser security checks
         var msg = new
         {
             type = "req",
-            id = Guid.NewGuid().ToString(),
+            id = requestId,
             method = "connect",
-            @params = BuildConnectParameters()
+            @params = new
+            {
+                minProtocol = 3,
+                maxProtocol = 3,
+                client = new
+                {
+                    id = OperatorClientId,  // Native client ID
+                    version = "1.0.0",
+                    platform = OperatorPlatform,
+                    mode = OperatorClientMode,
+                    displayName = OperatorClientDisplayName
+                },
+                role = OperatorRole,
+                scopes = s_operatorScopes,
+                caps = Array.Empty<string>(),
+                commands = Array.Empty<string>(),
+                permissions = new { },
+                auth = new { token = _connectAuthToken },
+                locale = "en-US",
+                userAgent = "openclaw-windows-tray/1.0.0",
+                device = new
+                {
+                    id = _deviceIdentity.DeviceId,
+                    publicKey = _deviceIdentity.PublicKeyBase64Url,
+                    signature,
+                    signedAt,
+                    nonce = connectNonce
+                }
+            }
         };
-        await SendRawAsync(JsonSerializer.Serialize(msg));
+
+        try
+        {
+            await SendRawAsync(JsonSerializer.Serialize(msg));
+        }
+        catch
+        {
+            RemovePendingRequest(requestId);
+            throw;
+        }
     }
 
     private object BuildConnectParameters()
@@ -425,6 +580,51 @@ public class OpenClawGatewayClient : WebSocketClientBase
         {
             _pendingRequestMethods.Clear();
         }
+
+        lock (_pendingChatSendLock)
+        {
+            foreach (var completion in _pendingChatSendRequests.Values)
+            {
+                completion.TrySetException(new OperationCanceledException("Request canceled"));
+            }
+
+            _pendingChatSendRequests.Clear();
+        }
+    }
+
+    private void TrackPendingChatSend(string requestId, TaskCompletionSource<bool> completion)
+    {
+        lock (_pendingChatSendLock)
+        {
+            _pendingChatSendRequests[requestId] = completion;
+        }
+    }
+
+    private void RemovePendingChatSend(string requestId)
+    {
+        lock (_pendingChatSendLock)
+        {
+            _pendingChatSendRequests.Remove(requestId);
+        }
+    }
+
+    private TaskCompletionSource<bool>? TakePendingChatSend(string? requestId)
+    {
+        if (string.IsNullOrWhiteSpace(requestId))
+        {
+            return null;
+        }
+
+        lock (_pendingChatSendLock)
+        {
+            if (!_pendingChatSendRequests.TryGetValue(requestId, out var completion))
+            {
+                return null;
+            }
+
+            _pendingChatSendRequests.Remove(requestId);
+            return completion;
+        }
     }
 
     // --- Message processing ---
@@ -462,9 +662,27 @@ public class OpenClawGatewayClient : WebSocketClientBase
     private void HandleResponse(JsonElement root)
     {
         string? requestMethod = null;
+        string? requestId = null;
         if (root.TryGetProperty("id", out var idProp))
         {
-            requestMethod = TakePendingRequestMethod(idProp.GetString());
+            requestId = idProp.GetString();
+            requestMethod = TakePendingRequestMethod(requestId);
+        }
+
+        var pendingChatSend = TakePendingChatSend(requestId);
+        if (pendingChatSend != null)
+        {
+            if (root.TryGetProperty("ok", out var okChatProp) &&
+                okChatProp.ValueKind == JsonValueKind.False)
+            {
+                var message = TryGetErrorMessage(root) ?? "request failed";
+                _logger.Warn($"chat.send failed: {message}");
+                pendingChatSend.TrySetException(new InvalidOperationException(message));
+                return;
+            }
+
+            pendingChatSend.TrySetResult(true);
+            return;
         }
 
         if (root.TryGetProperty("ok", out var okProp) &&
@@ -481,11 +699,31 @@ public class OpenClawGatewayClient : WebSocketClientBase
             return;
         }
 
-        // Handle hello-ok
+        // Handle handshake acknowledgement payload.
         if (payload.TryGetProperty("type", out var t) && t.GetString() == "hello-ok")
         {
             UpdateDefaultChatSessionKeyFromHello(payload);
+            _pairingRequiredAwaitingApproval = false;
+            _operatorDeviceId = TryGetHandshakeDeviceId(payload);
+            _grantedOperatorScopes = TryGetHandshakeScopes(payload);
+            _mainSessionKey = TryGetHandshakeMainSessionKey(payload) ?? "main";
+            var newDeviceToken = TryGetHandshakeDeviceToken(payload);
+            if (!string.IsNullOrWhiteSpace(newDeviceToken))
+            {
+                _deviceIdentity.StoreDeviceToken(newDeviceToken);
+                _connectAuthToken = newDeviceToken;
+                _logger.Info("Operator device token stored for reconnect");
+            }
             _logger.Info("Handshake complete (hello-ok)");
+            if (!string.IsNullOrWhiteSpace(_operatorDeviceId))
+            {
+                _logger.Info($"Operator device ID: {_operatorDeviceId}");
+            }
+            if (_grantedOperatorScopes.Length > 0)
+            {
+                _logger.Info($"Granted operator scopes: {string.Join(", ", _grantedOperatorScopes)}");
+            }
+            _logger.Info($"Main session key: {_mainSessionKey}");
             RaiseStatusChanged(ConnectionStatus.Connected);
 
             // Request initial state after handshake
@@ -569,6 +807,50 @@ public class OpenClawGatewayClient : WebSocketClientBase
         if (string.IsNullOrEmpty(method))
         {
             _logger.Warn($"Gateway request failed: {message}");
+            return;
+        }
+
+        if (method == "connect" &&
+            message.Contains("device signature invalid", StringComparison.OrdinalIgnoreCase))
+        {
+            var previousMode = _signatureTokenMode;
+            _signatureTokenMode = _signatureTokenMode switch
+            {
+                SignatureTokenMode.V3AuthToken => SignatureTokenMode.V3EmptyToken,
+                SignatureTokenMode.V3EmptyToken => SignatureTokenMode.V2AuthToken,
+                SignatureTokenMode.V2AuthToken => SignatureTokenMode.V2EmptyToken,
+                _ => SignatureTokenMode.V2EmptyToken
+            };
+
+            if (_signatureTokenMode != previousMode)
+            {
+                _logger.Warn($"Gateway rejected device signature with mode {previousMode}; retrying with mode {_signatureTokenMode}");
+                _ = SendConnectMessageAsync(_currentChallengeNonce);
+                return;
+            }
+
+            _logger.Warn("Gateway rejected device signature in all supported payload modes");
+            return;
+        }
+
+        if (method == "connect" &&
+            message.Contains("pairing required", StringComparison.OrdinalIgnoreCase))
+        {
+            _pairingRequiredAwaitingApproval = true;
+            _logger.Warn("Pairing approval required for this device; auto-reconnect paused until manual reconnect or app restart");
+            RaiseStatusChanged(ConnectionStatus.Error);
+            return;
+        }
+
+        if (IsMissingScopeError(message, "operator.read") &&
+            method is "sessions.list" or "usage.status" or "usage.cost" or "node.list")
+        {
+            if (!_operatorReadScopeUnavailable)
+            {
+                _logger.Warn("Gateway token lacks operator.read; disabling sessions/usage/nodes polling");
+            }
+
+            _operatorReadScopeUnavailable = true;
             return;
         }
 
@@ -660,9 +942,182 @@ public class OpenClawGatewayClient : WebSocketClientBase
         return errorMessage.Contains("unknown method", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsMissingScopeError(string errorMessage, string scope)
+    {
+        if (string.IsNullOrWhiteSpace(errorMessage) || string.IsNullOrWhiteSpace(scope))
+            return false;
+
+        var expected = $"missing scope: {scope}";
+        return errorMessage.Contains(expected, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsSessionCommandMethod(string method)
     {
         return method is "sessions.patch" or "sessions.reset" or "sessions.delete" or "sessions.compact";
+    }
+
+    private static string? TryGetHandshakeDeviceId(JsonElement payload)
+    {
+        if (payload.TryGetProperty("deviceId", out var deviceIdProp) &&
+            deviceIdProp.ValueKind == JsonValueKind.String)
+        {
+            return deviceIdProp.GetString();
+        }
+
+        if (payload.TryGetProperty("device", out var deviceProp) &&
+            deviceProp.ValueKind == JsonValueKind.Object)
+        {
+            if (deviceProp.TryGetProperty("id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
+            {
+                return idProp.GetString();
+            }
+
+            if (deviceProp.TryGetProperty("deviceId", out var didProp) && didProp.ValueKind == JsonValueKind.String)
+            {
+                return didProp.GetString();
+            }
+        }
+
+        return null;
+    }
+
+    private static string[] TryGetHandshakeScopes(JsonElement payload)
+    {
+        if (payload.TryGetProperty("scopes", out var scopesProp) &&
+            scopesProp.ValueKind == JsonValueKind.Array)
+        {
+            var scopes = new List<string>();
+            foreach (var scope in scopesProp.EnumerateArray())
+            {
+                if (scope.ValueKind == JsonValueKind.String)
+                {
+                    var value = scope.GetString();
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        scopes.Add(value);
+                    }
+                }
+            }
+
+            return scopes.ToArray();
+        }
+
+        return Array.Empty<string>();
+    }
+
+    private static string? TryGetHandshakeMainSessionKey(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("snapshot", out var snapshot) || snapshot.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (!snapshot.TryGetProperty("sessionDefaults", out var sessionDefaults) || sessionDefaults.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (!sessionDefaults.TryGetProperty("mainKey", out var mainKey) || mainKey.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        var value = mainKey.GetString();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private static string? TryGetHandshakeDeviceToken(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("auth", out var authPayload) || authPayload.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (!authPayload.TryGetProperty("deviceToken", out var deviceToken) || deviceToken.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        var value = deviceToken.GetString();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    public string BuildMissingScopeFixCommands(string missingScope)
+    {
+        var scope = string.IsNullOrWhiteSpace(missingScope) ? "operator.write" : missingScope.Trim();
+        var grantedScopes = _grantedOperatorScopes.Length == 0
+            ? "(none reported by gateway)"
+            : string.Join(", ", _grantedOperatorScopes);
+        var deviceId = string.IsNullOrWhiteSpace(_operatorDeviceId)
+            ? "(not reported for this operator connection)"
+            : _operatorDeviceId;
+        var likelyNodeToken = _grantedOperatorScopes.Any(s => s.StartsWith("node.", StringComparison.OrdinalIgnoreCase));
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Quick Send is connected, but your token is missing required permission.");
+        sb.AppendLine($"Missing scope: {scope}");
+        sb.AppendLine("Note: requested connect scopes are declarative; the gateway may grant fewer scopes based on token/policy/device state.");
+        sb.AppendLine();
+        sb.AppendLine("Do this in Windows Tray right now:");
+        sb.AppendLine("1. Right-click the tray icon and open Settings.");
+        sb.AppendLine("2. Replace Gateway Token with an OPERATOR token that includes operator.write.");
+        sb.AppendLine("3. Click Save.");
+        sb.AppendLine("4. Reconnect from the tray menu (or restart the tray app).");
+        sb.AppendLine("5. Retry Quick Send.");
+        sb.AppendLine();
+        sb.AppendLine("Token requirements for Quick Send:");
+        sb.AppendLine("- Role: operator");
+        sb.AppendLine("- Required scope: operator.write");
+        sb.AppendLine("- Recommended scopes: operator.admin, operator.read, operator.approvals, operator.pairing, operator.write");
+
+        if (likelyNodeToken)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Detected node.* scopes. This usually means a node token was pasted into Gateway Token.");
+            sb.AppendLine("Quick Send requires an operator token, not a node token.");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("Connection details from this app (for debugging/support):");
+        sb.AppendLine($"- role: operator");
+        sb.AppendLine($"- client.id: {OperatorClientId}");
+        sb.AppendLine($"- client.displayName: {OperatorClientDisplayName}");
+        sb.AppendLine($"- operator device id: {deviceId}");
+        sb.AppendLine($"- granted scopes: {grantedScopes}");
+        sb.AppendLine();
+        sb.AppendLine("If this still fails after updating the token, copy this block and share it with your gateway admin.");
+        return sb.ToString().TrimEnd();
+    }
+
+    public string BuildPairingApprovalFixCommands()
+    {
+        var deviceId = !string.IsNullOrWhiteSpace(_operatorDeviceId)
+            ? _operatorDeviceId
+            : _deviceIdentity.DeviceId;
+        var grantedScopes = _grantedOperatorScopes.Length == 0
+            ? "(none reported by gateway yet)"
+            : string.Join(", ", _grantedOperatorScopes);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Quick Send requires this device to be approved (paired) in the gateway.");
+        sb.AppendLine("Gateway reported: pairing required");
+        sb.AppendLine();
+        sb.AppendLine("Do this now:");
+        sb.AppendLine("1. Open the gateway admin UI.");
+        sb.AppendLine("2. Go to pending pairing/device approvals.");
+        sb.AppendLine("3. Approve this Windows tray device ID.");
+        sb.AppendLine("4. Return to tray and reconnect (or restart tray app).");
+        sb.AppendLine("5. Retry Quick Send.");
+        sb.AppendLine();
+        sb.AppendLine("Connection details from this app (for debugging/support):");
+        sb.AppendLine("- role: operator");
+        sb.AppendLine($"- client.id: {OperatorClientId}");
+        sb.AppendLine($"- client.displayName: {OperatorClientDisplayName}");
+        sb.AppendLine($"- operator device id: {deviceId}");
+        sb.AppendLine($"- granted scopes: {grantedScopes}");
+        sb.AppendLine();
+        sb.AppendLine("If approval keeps failing, share this block with your gateway admin.");
+        return sb.ToString().TrimEnd();
     }
 
     private void HandleEvent(JsonElement root)
@@ -695,11 +1150,20 @@ public class OpenClawGatewayClient : WebSocketClientBase
     private void HandleConnectChallenge(JsonElement root)
     {
         string? nonce = null;
+        long? ts = null;
         if (root.TryGetProperty("payload", out var payload) &&
             payload.TryGetProperty("nonce", out var nonceProp))
         {
             nonce = nonceProp.GetString();
+
+            if (payload.TryGetProperty("ts", out var tsProp) && tsProp.ValueKind == JsonValueKind.Number)
+            {
+                ts = tsProp.GetInt64();
+            }
         }
+
+        _challengeTimestampMs = ts;
+        _currentChallengeNonce = nonce;
         
         _logger.Info($"Received challenge, nonce: {nonce}");
         _ = SendConnectMessageAsync(nonce);
@@ -827,8 +1291,8 @@ public class OpenClawGatewayClient : WebSocketClientBase
 
     private void HandleChatEvent(JsonElement root)
     {
-        _logger.Debug($"Chat event received: {root.GetRawText().Substring(0, Math.Min(200, root.GetRawText().Length))}");
-
+        var rawText = root.GetRawText();
+        _logger.Debug($"Chat event received: {rawText.Substring(0, Math.Min(200, rawText.Length))}");
         if (!root.TryGetProperty("payload", out var payload)) return;
         var sessionKey = NormalizeChatSessionKey(TryGetSessionKey(root, payload));
         var isFinal = !payload.TryGetProperty("state", out var state) ||
@@ -911,7 +1375,7 @@ public class OpenClawGatewayClient : WebSocketClientBase
             Message = displayText,
             IsChat = true
         };
-        var (title, type) = _categorizer.Classify(notification);
+        var (title, type) = _categorizer.Classify(notification, _userRules);
         notification.Title = title;
         notification.Type = type;
         NotificationReceived?.Invoke(this, notification);
@@ -930,18 +1394,19 @@ public class OpenClawGatewayClient : WebSocketClientBase
         SessionInfo[] snapshot;
         lock (_sessionsLock)
         {
-            if (!_sessions.ContainsKey(sessionKey))
+            if (!_sessions.TryGetValue(sessionKey, out var session))
             {
-                _sessions[sessionKey] = new SessionInfo
+                session = new SessionInfo
                 {
                     Key = sessionKey,
                     IsMain = isMain,
                     Status = "active"
                 };
+                _sessions[sessionKey] = session;
             }
 
-            _sessions[sessionKey].CurrentActivity = currentActivity;
-            _sessions[sessionKey].LastSeen = DateTime.UtcNow;
+            session.CurrentActivity = currentActivity;
+            session.LastSeen = DateTime.UtcNow;
 
             snapshot = GetSessionListInternal();
         }
@@ -1817,36 +2282,33 @@ public class OpenClawGatewayClient : WebSocketClientBase
         {
             Message = text.Length > 200 ? text[..200] + "…" : text
         };
-        var (title, type) = _categorizer.Classify(notification);
+        var (title, type) = _categorizer.Classify(notification, _userRules, _preferStructuredCategories);
         notification.Title = title;
         notification.Type = type;
         NotificationReceived?.Invoke(this, notification);
     }
 
-    private static (string title, string type) ClassifyNotification(string text)
-    {
-        return NotificationCategorizer.ClassifyByKeywords(text);
-    }
-
     // --- Utility ---
 
-    private static ActivityKind ClassifyTool(string toolName)
-    {
-        return toolName.ToLowerInvariant() switch
+    // FrozenDictionary gives O(1) case-insensitive lookup without allocating a
+    // lowercased copy of toolName on every call.
+    private static readonly FrozenDictionary<string, ActivityKind> s_toolKindMap =
+        new Dictionary<string, ActivityKind>(StringComparer.OrdinalIgnoreCase)
         {
-            "exec" => ActivityKind.Exec,
-            "read" => ActivityKind.Read,
-            "write" => ActivityKind.Write,
-            "edit" => ActivityKind.Edit,
-            "web_search" => ActivityKind.Search,
-            "web_fetch" => ActivityKind.Search,
-            "browser" => ActivityKind.Browser,
-            "message" => ActivityKind.Message,
-            "tts" => ActivityKind.Tool,
-            "image" => ActivityKind.Tool,
-            _ => ActivityKind.Tool
-        };
-    }
+            ["exec"]       = ActivityKind.Exec,
+            ["read"]       = ActivityKind.Read,
+            ["write"]      = ActivityKind.Write,
+            ["edit"]       = ActivityKind.Edit,
+            ["web_search"] = ActivityKind.Search,
+            ["web_fetch"]  = ActivityKind.Search,
+            ["browser"]    = ActivityKind.Browser,
+            ["message"]    = ActivityKind.Message,
+            ["tts"]        = ActivityKind.Tool,
+            ["image"]      = ActivityKind.Tool,
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+
+    private static ActivityKind ClassifyTool(string toolName) =>
+        s_toolKindMap.TryGetValue(toolName, out var kind) ? kind : ActivityKind.Tool;
 
     private static string ShortenPath(string path)
     {

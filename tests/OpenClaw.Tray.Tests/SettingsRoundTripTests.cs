@@ -13,6 +13,11 @@ public class SettingsRoundTripTests
         {
             GatewayUrl = "ws://localhost:18789",
             Token = "secret-token",
+            UseSshTunnel = true,
+            SshTunnelUser = "user1",
+            SshTunnelHost = "remote-host",
+            SshTunnelRemotePort = 18789,
+            SshTunnelLocalPort = 28789,
             AutoStart = true,
             GlobalHotkeyEnabled = false,
             ShowNotifications = true,
@@ -27,6 +32,7 @@ public class SettingsRoundTripTests
             NotifyInfo = true,
             EnableNodeMode = true,
             HasSeenActivityStreamTip = true,
+            SkippedUpdateTag = "v1.2.3",
             NotifyChatResponses = false,
             PreferStructuredCategories = true,
             Voice = new VoiceSettings
@@ -97,6 +103,11 @@ public class SettingsRoundTripTests
         Assert.NotNull(restored);
         Assert.Equal(original.GatewayUrl, restored.GatewayUrl);
         Assert.Equal(original.Token, restored.Token);
+        Assert.Equal(original.UseSshTunnel, restored.UseSshTunnel);
+        Assert.Equal(original.SshTunnelUser, restored.SshTunnelUser);
+        Assert.Equal(original.SshTunnelHost, restored.SshTunnelHost);
+        Assert.Equal(original.SshTunnelRemotePort, restored.SshTunnelRemotePort);
+        Assert.Equal(original.SshTunnelLocalPort, restored.SshTunnelLocalPort);
         Assert.Equal(original.AutoStart, restored.AutoStart);
         Assert.Equal(original.GlobalHotkeyEnabled, restored.GlobalHotkeyEnabled);
         Assert.Equal(original.ShowNotifications, restored.ShowNotifications);
@@ -111,6 +122,7 @@ public class SettingsRoundTripTests
         Assert.Equal(original.NotifyInfo, restored.NotifyInfo);
         Assert.Equal(original.EnableNodeMode, restored.EnableNodeMode);
         Assert.Equal(original.HasSeenActivityStreamTip, restored.HasSeenActivityStreamTip);
+        Assert.Equal(original.SkippedUpdateTag, restored.SkippedUpdateTag);
         Assert.Equal(original.NotifyChatResponses, restored.NotifyChatResponses);
         Assert.Equal(original.PreferStructuredCategories, restored.PreferStructuredCategories);
         Assert.NotNull(restored.Voice);
@@ -163,6 +175,11 @@ public class SettingsRoundTripTests
         Assert.NotNull(settings);
         Assert.Null(settings.GatewayUrl);
         Assert.Null(settings.Token);
+        Assert.False(settings.UseSshTunnel);
+        Assert.Null(settings.SshTunnelUser);
+        Assert.Null(settings.SshTunnelHost);
+        Assert.Equal(18789, settings.SshTunnelRemotePort);
+        Assert.Equal(18789, settings.SshTunnelLocalPort);
         Assert.False(settings.AutoStart);
         Assert.True(settings.GlobalHotkeyEnabled);
         Assert.True(settings.ShowNotifications);
@@ -177,6 +194,7 @@ public class SettingsRoundTripTests
         Assert.True(settings.NotifyInfo);
         Assert.False(settings.EnableNodeMode);
         Assert.False(settings.HasSeenActivityStreamTip);
+        Assert.Null(settings.SkippedUpdateTag);
         Assert.True(settings.NotifyChatResponses);
         Assert.True(settings.PreferStructuredCategories);
         Assert.NotNull(settings.Voice);
@@ -242,11 +260,17 @@ public class SettingsRoundTripTests
         Assert.NotNull(settings);
         Assert.Equal("ws://localhost:18789", settings.GatewayUrl);
         Assert.Equal("abc", settings.Token);
+        Assert.False(settings.UseSshTunnel);
+        Assert.Null(settings.SshTunnelUser);
+        Assert.Null(settings.SshTunnelHost);
+        Assert.Equal(18789, settings.SshTunnelRemotePort);
+        Assert.Equal(18789, settings.SshTunnelLocalPort);
         // New fields should have sensible defaults
         Assert.True(settings.NotifyChatResponses);
         Assert.True(settings.PreferStructuredCategories);
         Assert.False(settings.EnableNodeMode);
         Assert.False(settings.HasSeenActivityStreamTip);
+        Assert.Null(settings.SkippedUpdateTag);
         Assert.True(settings.GlobalHotkeyEnabled);
         Assert.NotNull(settings.Voice);
         Assert.False(settings.Voice.Enabled);

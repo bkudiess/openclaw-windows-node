@@ -9,6 +9,7 @@ using OpenClawTray.Services;
 using OpenClawTray.Services.Voice;
 using OpenClawTray.Windows;
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -35,6 +36,7 @@ public partial class App : Application
     private TrayIcon? _trayIcon;
     private OpenClawGatewayClient? _gatewayClient;
     private SettingsManager? _settings;
+    private SshTunnelService? _sshTunnelService;
     private GlobalHotkeyService? _globalHotkey;
     private System.Timers.Timer? _healthCheckTimer;
     private System.Timers.Timer? _sessionPollTimer;
@@ -42,6 +44,7 @@ public partial class App : Application
     private Mutex? _mutex;
     private Microsoft.UI.Dispatching.DispatcherQueue? _dispatcherQueue;
     private CancellationTokenSource? _deepLinkCts;
+    private bool _isExiting;
     
     private ConnectionStatus _currentStatus = ConnectionStatus.Disconnected;
     private AgentActivity? _currentActivity;
@@ -57,6 +60,21 @@ public partial class App : Application
     private DateTime _lastCheckTime = DateTime.Now;
     private DateTime _lastUsageActivityLogUtc = DateTime.MinValue;
     private string? _lastTrayIconPath;
+
+    // FrozenDictionary for O(1) case-insensitive notification type → setting lookup — no per-call allocation.
+    private static readonly System.Collections.Frozen.FrozenDictionary<string, Func<SettingsManager, bool>> s_notifTypeMap =
+        new Dictionary<string, Func<SettingsManager, bool>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["health"]    = s => s.NotifyHealth,
+            ["urgent"]    = s => s.NotifyUrgent,
+            ["reminder"]  = s => s.NotifyReminder,
+            ["email"]     = s => s.NotifyEmail,
+            ["calendar"]  = s => s.NotifyCalendar,
+            ["build"]     = s => s.NotifyBuild,
+            ["stock"]     = s => s.NotifyStock,
+            ["info"]      = s => s.NotifyInfo,
+            ["error"]     = s => s.NotifyUrgent,  // errors follow urgent setting
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     // Session-aware activity tracking
     private readonly Dictionary<string, AgentActivity> _sessionActivities = new();
@@ -241,6 +259,9 @@ public partial class App : Application
         // Store protocol URI for processing after setup
         _pendingProtocolUri = protocolUri;
 
+        // Initialize settings before update check so skip selections can be remembered.
+        _settings = new SettingsManager();
+
         // Register URI scheme on first run
         DeepLinkHandler.RegisterUriScheme();
 
@@ -255,13 +276,13 @@ public partial class App : Application
         // Register toast activation handler
         ToastNotificationManagerCompat.OnActivated += OnToastActivated;
 
-        // Initialize settings
-        _settings = new SettingsManager();
         _voiceService = new VoiceService(new AppLogger(), _settings);
         _voiceChatCoordinator = new VoiceChatCoordinator(
             _voiceService,
             new DispatcherQueueAdapter(_dispatcherQueue!));
         _voiceChatCoordinator.ConversationTurnAvailable += OnVoiceConversationTurnAvailable;
+        _sshTunnelService = new SshTunnelService(new AppLogger());
+        _sshTunnelService.TunnelExited += OnSshTunnelExited;
 
         // First-run check
         if (string.IsNullOrWhiteSpace(_settings.Token))
@@ -604,10 +625,9 @@ public partial class App : Application
             global::Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
             
             // Show toast confirming copy
-            new ToastContentBuilder()
+            ShowToast(new ToastContentBuilder()
                 .AddText(LocalizationHelper.GetString("Toast_DeviceIdCopied"))
-                .AddText(string.Format(LocalizationHelper.GetString("Toast_DeviceIdCopiedDetail"), _nodeService.ShortDeviceId))
-                .Show();
+                .AddText(string.Format(LocalizationHelper.GetString("Toast_DeviceIdCopiedDetail"), _nodeService.ShortDeviceId)));
         }
         catch (Exception ex)
         {
@@ -633,10 +653,9 @@ public partial class App : Application
             dataPackage.SetText(summary);
             global::Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
 
-            new ToastContentBuilder()
+            ShowToast(new ToastContentBuilder()
                 .AddText(LocalizationHelper.GetString("Toast_NodeSummaryCopied"))
-                .AddText(string.Format(LocalizationHelper.GetString("Toast_NodeSummaryCopiedDetail"), _lastNodes.Length))
-                .Show();
+                .AddText(string.Format(LocalizationHelper.GetString("Toast_NodeSummaryCopiedDetail"), _lastNodes.Length)));
         }
         catch (Exception ex)
         {
@@ -690,10 +709,9 @@ public partial class App : Application
 
             if (!sent)
             {
-                new ToastContentBuilder()
+                ShowToast(new ToastContentBuilder()
                     .AddText(LocalizationHelper.GetString("Toast_SessionActionFailed"))
-                    .AddText(LocalizationHelper.GetString("Toast_SessionActionFailedDetail"))
-                    .Show();
+                    .AddText(LocalizationHelper.GetString("Toast_SessionActionFailedDetail")));
                 return;
             }
 
@@ -707,10 +725,9 @@ public partial class App : Application
             Logger.Warn($"Session action error ({action}): {ex.Message}");
             try
             {
-                new ToastContentBuilder()
+                ShowToast(new ToastContentBuilder()
                     .AddText(LocalizationHelper.GetString("Toast_SessionActionFailed"))
-                    .AddText(ex.Message)
-                    .Show();
+                    .AddText(ex.Message));
             }
             catch { }
         }
@@ -1178,11 +1195,14 @@ public partial class App : Application
     private void InitializeGatewayClient()
     {
         if (_settings == null) return;
+        if (!EnsureSshTunnelConfigured()) return;
 
         // Unsubscribe from old client if exists
         UnsubscribeGatewayEvents();
 
-        _gatewayClient = new OpenClawGatewayClient(_settings.GatewayUrl, _settings.Token, new AppLogger());
+        _gatewayClient = new OpenClawGatewayClient(_settings.GetEffectiveGatewayUrl(), _settings.Token, new AppLogger());
+        _gatewayClient.SetUserRules(_settings.UserRules.Count > 0 ? _settings.UserRules : null);
+        _gatewayClient.SetPreferStructuredCategories(_settings.PreferStructuredCategories);
         _gatewayClient.StatusChanged += OnConnectionStatusChanged;
         _gatewayClient.ActivityChanged += OnActivityChanged;
         _gatewayClient.NotificationReceived += OnNotificationReceived;
@@ -1219,6 +1239,7 @@ public partial class App : Application
     {
         if (_settings == null || !_settings.EnableNodeMode) return;
         if (_dispatcherQueue == null) return;
+        if (!EnsureSshTunnelConfigured()) return;
         
         try
         {
@@ -1230,7 +1251,7 @@ public partial class App : Application
             _nodeService.PairingStatusChanged += OnPairingStatusChanged;
             
             // Connect to gateway as a node (separate connection from operator)
-            _ = _nodeService.ConnectAsync(_settings.GatewayUrl, _settings.Token);
+            _ = _nodeService.ConnectAsync(_settings.GetEffectiveGatewayUrl(), _settings.Token);
         }
         catch (Exception ex)
         {
@@ -1255,10 +1276,9 @@ public partial class App : Application
         {
             try
             {
-                new ToastContentBuilder()
+                ShowToast(new ToastContentBuilder()
                     .AddText(LocalizationHelper.GetString("Toast_NodeModeActive"))
-                    .AddText(LocalizationHelper.GetString("Toast_NodeModeActiveDetail"))
-                    .Show();
+                    .AddText(LocalizationHelper.GetString("Toast_NodeModeActiveDetail")));
             }
             catch { /* ignore */ }
         }
@@ -1274,18 +1294,16 @@ public partial class App : Application
             {
                 AddRecentActivity("Node pairing pending", category: "node", dashboardPath: "nodes", nodeId: args.DeviceId);
                 // Show toast with approval instructions
-                new ToastContentBuilder()
+                ShowToast(new ToastContentBuilder()
                     .AddText(LocalizationHelper.GetString("Toast_PairingPending"))
-                    .AddText(string.Format(LocalizationHelper.GetString("Toast_PairingPendingDetail"), args.DeviceId.Substring(0, 16)))
-                    .Show();
+                    .AddText(string.Format(LocalizationHelper.GetString("Toast_PairingPendingDetail"), args.DeviceId.Substring(0, 16))));
             }
             else if (args.Status == OpenClaw.Shared.PairingStatus.Paired)
             {
                 AddRecentActivity("Node paired", category: "node", dashboardPath: "nodes", nodeId: args.DeviceId);
-                new ToastContentBuilder()
+                ShowToast(new ToastContentBuilder()
                     .AddText(LocalizationHelper.GetString("Toast_NodePaired"))
-                    .AddText(LocalizationHelper.GetString("Toast_NodePairedDetail"))
-                    .Show();
+                    .AddText(LocalizationHelper.GetString("Toast_NodePairedDetail")));
             }
         }
         catch { /* ignore */ }
@@ -1298,10 +1316,9 @@ public partial class App : Application
         // Agent requested a notification via node.invoke system.notify
         try
         {
-            new ToastContentBuilder()
+            ShowToast(new ToastContentBuilder()
                 .AddText(args.Title)
-                .AddText(args.Body)
-                .Show();
+                .AddText(args.Body));
         }
         catch (Exception ex)
         {
@@ -1474,10 +1491,9 @@ public partial class App : Application
                     dashboardPath: !string.IsNullOrWhiteSpace(result.Key) ? $"sessions/{result.Key}" : "sessions",
                     sessionKey: result.Key);
 
-                new ToastContentBuilder()
+                ShowToast(new ToastContentBuilder()
                     .AddText(title)
-                    .AddText(message)
-                    .Show();
+                    .AddText(message));
             }
             catch (Exception ex)
             {
@@ -1532,7 +1548,7 @@ public partial class App : Application
                            .AddArgument("action", "open_chat"));
             }
 
-            builder.Show();
+            ShowToast(builder);
         }
         catch (Exception ex)
         {
@@ -1557,19 +1573,9 @@ public partial class App : Application
         if (notification.IsChat && !_settings.NotifyChatResponses)
             return false;
 
-        return notification.Type?.ToLowerInvariant() switch
-        {
-            "health" => _settings.NotifyHealth,
-            "urgent" => _settings.NotifyUrgent,
-            "reminder" => _settings.NotifyReminder,
-            "email" => _settings.NotifyEmail,
-            "calendar" => _settings.NotifyCalendar,
-            "build" => _settings.NotifyBuild,
-            "stock" => _settings.NotifyStock,
-            "info" => _settings.NotifyInfo,
-            "error" => _settings.NotifyUrgent, // errors follow urgent setting
-            _ => true
-        };
+        var type = notification.Type;
+        if (type == null) return true;
+        return s_notifTypeMap.TryGetValue(type, out var selector) ? selector(_settings) : true;
     }
 
     #endregion
@@ -1596,10 +1602,9 @@ public partial class App : Application
         {
             if (userInitiated)
             {
-                new ToastContentBuilder()
+                ShowToast(new ToastContentBuilder()
                     .AddText(LocalizationHelper.GetString("Toast_HealthCheck"))
-                    .AddText(LocalizationHelper.GetString("Toast_HealthCheckNotConnected"))
-                    .Show();
+                    .AddText(LocalizationHelper.GetString("Toast_HealthCheckNotConnected")));
             }
             return;
         }
@@ -1610,10 +1615,9 @@ public partial class App : Application
             await _gatewayClient.CheckHealthAsync();
             if (userInitiated)
             {
-                new ToastContentBuilder()
+                ShowToast(new ToastContentBuilder()
                     .AddText(LocalizationHelper.GetString("Toast_HealthCheck"))
-                    .AddText(LocalizationHelper.GetString("Toast_HealthCheckSent"))
-                    .Show();
+                    .AddText(LocalizationHelper.GetString("Toast_HealthCheckSent")));
             }
         }
         catch (Exception ex)
@@ -1621,10 +1625,9 @@ public partial class App : Application
             Logger.Warn($"Health check failed: {ex.Message}");
             if (userInitiated)
             {
-                new ToastContentBuilder()
+                ShowToast(new ToastContentBuilder()
                     .AddText(LocalizationHelper.GetString("Toast_HealthCheckFailed"))
-                    .AddText(ex.Message)
-                    .Show();
+                    .AddText(ex.Message));
             }
         }
     }
@@ -1844,10 +1847,19 @@ public partial class App : Application
                 }
             }
 
-        if (_settings?.EnableNodeMode == true)
-        {
-            InitializeNodeService();
-        }
+            if (_settings?.UseSshTunnel != true)
+            {
+                _sshTunnelService?.Stop();
+            }
+
+            // Reset status so the tray doesn't show a stale "Connected" from the previous mode
+            _currentStatus = ConnectionStatus.Disconnected;
+            UpdateTrayIcon();
+
+            if (_settings?.EnableNodeMode == true)
+            {
+                InitializeNodeService();
+            }
             else
             {
                 InitializeGatewayClient();
@@ -1886,10 +1898,13 @@ public partial class App : Application
 
     private void ShowWebChat()
     {
+        if (_settings == null) return;
+        if (!EnsureSshTunnelConfigured()) return;
+
         if (_webChatWindow == null || _webChatWindow.IsClosed)
         {
             _webChatWindow = new WebChatWindow(
-                _settings!.GatewayUrl,
+                _settings.GetEffectiveGatewayUrl(),
                 _settings.Token);
             _webChatWindow.Closed += (s, e) =>
             {
@@ -1924,7 +1939,7 @@ public partial class App : Application
                 else
                 {
                     Logger.Info("QuickSend dialog already open; activating");
-                    _quickSendDialog.Activate();
+                    _quickSendDialog.ShowAsync();
                     return;
                 }
             }
@@ -1939,7 +1954,7 @@ public partial class App : Application
                 }
             };
             _quickSendDialog = dialog;
-            dialog.Activate();
+            dialog.ShowAsync();
         }
         catch (Exception ex)
         {
@@ -2004,13 +2019,12 @@ public partial class App : Application
 
         try
         {
-            new ToastContentBuilder()
+            ShowToast(new ToastContentBuilder()
                 .AddText(LocalizationHelper.GetString("Toast_ActivityStreamTip"))
                 .AddText(LocalizationHelper.GetString("Toast_ActivityStreamTipDetail"))
                 .AddButton(new ToastButton()
                     .SetContent(LocalizationHelper.GetString("Toast_ActivityStreamTipButton"))
-                    .AddArgument("action", "open_activity"))
-                .Show();
+                    .AddArgument("action", "open_activity")));
         }
         catch (Exception ex)
         {
@@ -2020,13 +2034,28 @@ public partial class App : Application
 
     #endregion
 
+    private void ShowToast(ToastContentBuilder builder)
+    {
+        var sound = _settings?.NotificationSound;
+        if (string.Equals(sound, "None", StringComparison.OrdinalIgnoreCase))
+        {
+            builder.AddAudio(new ToastAudio { Silent = true });
+        }
+        else if (string.Equals(sound, "Subtle", StringComparison.OrdinalIgnoreCase))
+        {
+            builder.AddAudio(new Uri("ms-winsoundevent:Notification.IM"), silent: false);
+        }
+        builder.Show();
+    }
+
     #region Actions
 
     private void OpenDashboard(string? path = null)
     {
         if (_settings == null) return;
+        if (!EnsureSshTunnelConfigured()) return;
         
-        var baseUrl = _settings.GatewayUrl
+        var baseUrl = _settings.GetEffectiveGatewayUrl()
             .Replace("ws://", "http://")
             .Replace("wss://", "https://")
             .TrimEnd('/');
@@ -2268,13 +2297,31 @@ public partial class App : Application
             var changelog = AppUpdater.GetChangelog(true) ?? "No release notes available.";
             Logger.Info($"Update available: {release.TagName}");
 
+            if (!string.IsNullOrWhiteSpace(_settings?.SkippedUpdateTag) &&
+                string.Equals(_settings.SkippedUpdateTag, release.TagName, StringComparison.OrdinalIgnoreCase))
+            {
+                Logger.Info($"Skipping update prompt for remembered version {release.TagName}");
+                return true;
+            }
+
             var dialog = new UpdateDialog(release.TagName, changelog);
             var result = await dialog.ShowAsync();
 
             if (result == UpdateDialogResult.Download)
             {
+                if (_settings != null)
+                {
+                    _settings.SkippedUpdateTag = string.Empty;
+                    _settings.Save();
+                }
                 var installed = await DownloadAndInstallUpdateAsync();
                 return !installed; // Don't launch if update succeeded
+            }
+
+            if (result == UpdateDialogResult.Skip && _settings != null)
+            {
+                _settings.SkippedUpdateTag = release.TagName ?? string.Empty;
+                _settings.Save();
             }
 
             return true; // RemindLater or Skip - continue
@@ -2343,6 +2390,7 @@ public partial class App : Application
                 }
                 catch (OperationCanceledException)
                 {
+                    Logger.Info("Deep link server stopping (canceled)");
                     break; // Normal shutdown
                 }
                 catch (Exception ex)
@@ -2432,69 +2480,214 @@ public partial class App : Application
 
     private void ExitApplication()
     {
-        Logger.Info("Application exiting");
-
-        TryCloseWindow(_voiceRepeaterWindow);
-        TryCloseWindow(_voiceModeWindow);
-        TryCloseWindow(_webChatWindow);
-        TryCloseWindow(_settingsWindow);
-        TryCloseWindow(_statusDetailWindow);
-        TryCloseWindow(_notificationHistoryWindow);
-        TryCloseWindow(_activityStreamWindow);
-        TryCloseWindow(_quickSendDialog);
-        
-        // Cancel background tasks
-        _deepLinkCts?.Cancel();
-        
-        // Stop timers
-        _healthCheckTimer?.Stop();
-        _healthCheckTimer?.Dispose();
-        _sessionPollTimer?.Stop();
-        _sessionPollTimer?.Dispose();
-        _voiceTrayIconTimer?.Stop();
-        
-        // Cleanup hotkey
-        _globalHotkey?.Dispose();
-        
-        // Unsubscribe and dispose gateway client
-        UnsubscribeGatewayEvents();
-        _gatewayClient?.Dispose();
-        
-        // Dispose tray and mutex
-        _trayIcon?.Dispose();
-        _mutex?.Dispose();
-        
-        // Dispose cancellation token source
-        _deepLinkCts?.Dispose();
-        if (_voiceChatCoordinator != null)
+        if (_isExiting)
         {
-            _voiceChatCoordinator.ConversationTurnAvailable -= OnVoiceConversationTurnAvailable;
-            _voiceChatCoordinator.Dispose();
-        }
-        _voiceService?.Dispose();
-        
-        Exit();
-    }
-
-    private static void TryCloseWindow(Window? window)
-    {
-        if (window == null)
-        {
+            Logger.Info("Exit requested while shutdown already in progress");
             return;
         }
 
+        _isExiting = true;
+        Logger.Info("Application exiting");
+
+        // Cancel background tasks
+        if (_deepLinkCts != null)
+        {
+            Logger.Info("Shutdown: canceling deep link server");
+            try { _deepLinkCts.Cancel(); } catch (Exception ex) { Logger.Warn($"Shutdown: deep link cancel failed: {ex.Message}"); }
+        }
+
+        // Stop timers
+        SafeShutdownStep("health timer", () =>
+        {
+            _healthCheckTimer?.Stop();
+            _healthCheckTimer?.Dispose();
+            _healthCheckTimer = null;
+        });
+
+        SafeShutdownStep("session poll timer", () =>
+        {
+            _sessionPollTimer?.Stop();
+            _sessionPollTimer?.Dispose();
+            _sessionPollTimer = null;
+        });
+        SafeShutdownStep("voice tray icon timer", () =>
+        {
+            _voiceTrayIconTimer?.Stop();
+            _voiceTrayIconTimer = null;
+        });
+        // Cleanup hotkey
+        SafeShutdownStep("global hotkey", () =>
+        {
+            _globalHotkey?.Dispose();
+            _globalHotkey = null;
+        });
+
+        // Dispose runtime services
+        SafeShutdownStep("gateway client", () =>
+        {
+            UnsubscribeGatewayEvents();
+            _gatewayClient?.Dispose();
+            _gatewayClient = null;
+        });
+
+        SafeShutdownStep("node service", () =>
+        {
+            _nodeService?.Dispose();
+            _nodeService = null;
+        });
+
+        SafeShutdownStep("ssh tunnel service", () =>
+        {
+            _sshTunnelService?.Dispose();
+            _sshTunnelService = null;
+        });
+
+        // Close windows explicitly for deterministic shutdown tracing.
+        SafeShutdownStep("settings window", () => CloseWindow(_settingsWindow));
+        _settingsWindow = null;
+        SafeShutdownStep("web chat window", () => CloseWindow(_webChatWindow));
+        _webChatWindow = null;
+        SafeShutdownStep("status detail window", () => CloseWindow(_statusDetailWindow));
+        _statusDetailWindow = null;
+        SafeShutdownStep("notification history window", () => CloseWindow(_notificationHistoryWindow));
+        _notificationHistoryWindow = null;
+        SafeShutdownStep("activity stream window", () => CloseWindow(_activityStreamWindow));
+        _activityStreamWindow = null;
+        SafeShutdownStep("tray menu window", () => CloseWindow(_trayMenuWindow));
+        _trayMenuWindow = null;
+        SafeShutdownStep("quick send dialog", () => CloseWindow(_quickSendDialog));
+        _quickSendDialog = null;
+        SafeShutdownStep("keep alive window", () => CloseWindow(_keepAliveWindow));
+        _keepAliveWindow = null;
+
+        // Dispose tray and mutex
+        SafeShutdownStep("tray icon", () =>
+        {
+            _trayIcon?.Dispose();
+            _trayIcon = null;
+        });
+
+        SafeShutdownStep("single-instance mutex", () =>
+        {
+            _mutex?.Dispose();
+            _mutex = null;
+        });
+
+        // Dispose cancellation token source
+        SafeShutdownStep("deep link token source", () =>
+        {
+            _deepLinkCts?.Dispose();
+            _deepLinkCts = null;
+        });
+
+        SafeShutdownStep("voice chat coordinator", () =>
+        {
+            if (_voiceChatCoordinator != null)
+            {
+                _voiceChatCoordinator.ConversationTurnAvailable -= OnVoiceConversationTurnAvailable;
+                _voiceChatCoordinator.Dispose();
+                _voiceChatCoordinator = null;
+            }
+        });
+
+        SafeShutdownStep("voice service", () =>
+        {
+            _voiceService?.Dispose();
+            _voiceService = null;
+        });
+
+        Logger.Info("Shutdown complete; calling Exit() now");
+        Exit();
+    }
+
+    private static void CloseWindow(Window? window)
+    {
         try
         {
-            window.Close();
+            window?.Close();
         }
         catch
         {
+            // Let caller log specific failure context.
+            throw;
         }
     }
 
+    private static void SafeShutdownStep(string name, Action action)
+    {
+        try
+        {
+            Logger.Info($"Shutdown: disposing {name}");
+            action();
+            Logger.Info($"Shutdown: disposed {name}");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Shutdown: failed disposing {name}: {ex.Message}");
+        }
+    }
+
+    private bool EnsureSshTunnelConfigured()
+    {
+        if (_settings == null)
+        {
+            return false;
+        }
+
+        if (_settings.UseSshTunnel)
+        {
+            if (string.IsNullOrWhiteSpace(_settings.SshTunnelUser) ||
+                string.IsNullOrWhiteSpace(_settings.SshTunnelHost) ||
+                _settings.SshTunnelRemotePort is < 1 or > 65535 ||
+                _settings.SshTunnelLocalPort is < 1 or > 65535)
+            {
+                Logger.Warn("SSH tunnel is enabled but settings are incomplete");
+                _currentStatus = ConnectionStatus.Error;
+                UpdateTrayIcon();
+                return false;
+            }
+
+            try
+            {
+                _sshTunnelService ??= new SshTunnelService(new AppLogger());
+                _sshTunnelService.EnsureStarted(_settings);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"Failed to start SSH tunnel: {ex.Message}");
+                _currentStatus = ConnectionStatus.Error;
+                UpdateTrayIcon();
+                return false;
+            }
+        }
+        else
+        {
+            _sshTunnelService?.Stop();
+        }
+
+        return true;
+    }
     #endregion
 
-    private Microsoft.UI.Dispatching.DispatcherQueue? AppDispatcherQueue => 
+    private async void OnSshTunnelExited(object? sender, int exitCode)
+    {
+        Logger.Warn($"SSH tunnel exited unexpectedly (code {exitCode}); restarting in 3s...");
+        await Task.Delay(3000);
+        if (_sshTunnelService != null && _settings?.UseSshTunnel == true)
+        {
+            try
+            {
+                _sshTunnelService.EnsureStarted(_settings);
+                Logger.Info("SSH tunnel restarted successfully");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"SSH tunnel restart failed: {ex.Message}");
+            }
+        }
+    }
+
+    private Microsoft.UI.Dispatching.DispatcherQueue? AppDispatcherQueue =>
         Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
 }
 

@@ -51,16 +51,22 @@ public class NotificationCategorizer
 
     /// <summary>
     /// Classify a notification using the layered pipeline.
+    /// When <paramref name="preferStructuredCategories"/> is true (default),
+    /// structured metadata (Intent, Channel) is checked first.
+    /// When false, classification starts from user-defined rules then keyword fallback.
     /// </summary>
-    public (string title, string type) Classify(OpenClawNotification notification, IReadOnlyList<UserNotificationRule>? userRules = null)
+    public (string title, string type) Classify(OpenClawNotification notification, IReadOnlyList<UserNotificationRule>? userRules = null, bool preferStructuredCategories = true)
     {
-        // 1. Structured metadata: Intent
-        if (!string.IsNullOrEmpty(notification.Intent) && IntentMap.TryGetValue(notification.Intent, out var intentResult))
-            return intentResult;
+        if (preferStructuredCategories)
+        {
+            // 1. Structured metadata: Intent
+            if (!string.IsNullOrEmpty(notification.Intent) && IntentMap.TryGetValue(notification.Intent, out var intentResult))
+                return intentResult;
 
-        // 2. Structured metadata: Channel
-        if (!string.IsNullOrEmpty(notification.Channel) && ChannelMap.TryGetValue(notification.Channel, out var channelResult))
-            return channelResult;
+            // 2. Structured metadata: Channel
+            if (!string.IsNullOrEmpty(notification.Channel) && ChannelMap.TryGetValue(notification.Channel, out var channelResult))
+                return channelResult;
+        }
 
         // 3. User-defined rules (pattern match on title + message)
         if (userRules is { Count: > 0 })
@@ -87,29 +93,37 @@ public class NotificationCategorizer
     /// </summary>
     public static (string title, string type) ClassifyByKeywords(string text)
     {
-        var lower = text.ToLowerInvariant();
-        if (lower.Contains("blood sugar") || lower.Contains("glucose") ||
-            lower.Contains("cgm") || lower.Contains("mg/dl"))
+        // Use OrdinalIgnoreCase overloads to avoid allocating a lowercased copy of `text`.
+        if (text.Contains("blood sugar", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("glucose", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("cgm", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("mg/dl", StringComparison.OrdinalIgnoreCase))
             return ("🩸 Blood Sugar Alert", "health");
-        if (lower.Contains("urgent") || lower.Contains("critical") ||
-            lower.Contains("emergency"))
+        if (text.Contains("urgent", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("critical", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("emergency", StringComparison.OrdinalIgnoreCase))
             return ("🚨 Urgent Alert", "urgent");
-        if (lower.Contains("reminder"))
+        if (text.Contains("reminder", StringComparison.OrdinalIgnoreCase))
             return ("⏰ Reminder", "reminder");
-        if (lower.Contains("stock") || lower.Contains("in stock") ||
-            lower.Contains("available now"))
+        if (text.Contains("stock", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("in stock", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("available now", StringComparison.OrdinalIgnoreCase))
             return ("📦 Stock Alert", "stock");
-        if (lower.Contains("email") || lower.Contains("inbox") ||
-            lower.Contains("gmail"))
+        if (text.Contains("email", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("inbox", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("gmail", StringComparison.OrdinalIgnoreCase))
             return ("📧 Email", "email");
-        if (lower.Contains("calendar") || lower.Contains("meeting") ||
-            lower.Contains("event"))
+        if (text.Contains("calendar", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("meeting", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("event", StringComparison.OrdinalIgnoreCase))
             return ("📅 Calendar", "calendar");
-        if (lower.Contains("error") || lower.Contains("failed") ||
-            lower.Contains("exception"))
+        if (text.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("exception", StringComparison.OrdinalIgnoreCase))
             return ("⚠️ Error", "error");
-        if (lower.Contains("build") || lower.Contains("ci ") ||
-            lower.Contains("deploy"))
+        if (text.Contains("build", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("ci ", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("deploy", StringComparison.OrdinalIgnoreCase))
             return ("🔨 Build", "build");
         return ("🤖 OpenClaw", "info");
     }

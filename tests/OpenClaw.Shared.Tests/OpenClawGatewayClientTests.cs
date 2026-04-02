@@ -23,20 +23,14 @@ public class OpenClawGatewayClientTests
 
         public string ClassifyNotification(string text)
         {
-            var method = typeof(OpenClawGatewayClient).GetMethod("ClassifyNotification",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-            var result = method!.Invoke(null, new object[] { text });
-            var tuple = ((string title, string type))result!;
-            return tuple.type;
+            var (_, type) = NotificationCategorizer.ClassifyByKeywords(text);
+            return type;
         }
 
         public string GetNotificationTitle(string text)
         {
-            var method = typeof(OpenClawGatewayClient).GetMethod("ClassifyNotification",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-            var result = method!.Invoke(null, new object[] { text });
-            var tuple = ((string title, string type))result!;
-            return tuple.title;
+            var (title, _) = NotificationCategorizer.ClassifyByKeywords(text);
+            return title;
         }
 
         public ActivityKind ClassifyTool(string toolName)
@@ -61,6 +55,24 @@ public class OpenClawGatewayClientTests
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
             var result = method!.Invoke(null, new object[] { text, maxLen });
             return (string)result!;
+        }
+
+        public Task<bool> RegisterPendingChatSend(string requestId)
+        {
+            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var method = typeof(OpenClawGatewayClient).GetMethod(
+                "TrackPendingChatSend",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            method!.Invoke(_client, new object[] { requestId, completion });
+            return completion.Task;
+        }
+
+        public void ProcessRawMessage(string json)
+        {
+            var method = typeof(OpenClawGatewayClient).GetMethod(
+                "ProcessMessage",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            method!.Invoke(_client, new object[] { json });
         }
 
         public SessionInfo[] GetSessionList()
@@ -252,6 +264,26 @@ public class OpenClawGatewayClientTests
             }
 
             return parsed;
+        }
+
+        public string? ParseHandshakeMainSessionKey(string payloadJson)
+        {
+            using var doc = JsonDocument.Parse(payloadJson);
+            var method = typeof(OpenClawGatewayClient).GetMethod(
+                "TryGetHandshakeMainSessionKey",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            var result = method!.Invoke(null, new object[] { doc.RootElement.Clone() });
+            return result as string;
+        }
+
+        public string? ParseHandshakeDeviceToken(string payloadJson)
+        {
+            using var doc = JsonDocument.Parse(payloadJson);
+            var method = typeof(OpenClawGatewayClient).GetMethod(
+                "TryGetHandshakeDeviceToken",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            var result = method!.Invoke(null, new object[] { doc.RootElement.Clone() });
+            return result as string;
         }
 
         public (ChannelHealth[] channels, bool eventFired) ParseChannelHealthPayload(string payloadJson)
@@ -456,6 +488,109 @@ public class OpenClawGatewayClientTests
         var helper = new GatewayClientTestHelper();
         Assert.Equal(ActivityKind.Edit, helper.ClassifyTool("edit"));
     }
+
+    [Fact]
+    public async Task PendingChatSend_CompletesOnSuccessfulResponse()
+    {
+        var helper = new GatewayClientTestHelper();
+        var task = helper.RegisterPendingChatSend("chat-1");
+
+        helper.ProcessRawMessage("""
+        {
+            "type": "res",
+            "id": "chat-1",
+            "ok": true,
+            "payload": { "accepted": true }
+        }
+        """);
+
+        Assert.True(await task);
+    }
+
+    [Fact]
+    public async Task PendingChatSend_FailsOnErrorResponse()
+    {
+        var helper = new GatewayClientTestHelper();
+        var task = helper.RegisterPendingChatSend("chat-2");
+
+        helper.ProcessRawMessage("""
+        {
+            "type": "res",
+            "id": "chat-2",
+            "ok": false,
+            "error": "missing scope: operator.write"
+        }
+        """);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () => await task);
+        Assert.Contains("operator.write", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+        [Fact]
+        public void ParseHandshakeMainSessionKey_ReturnsMainKey_WhenPresent()
+        {
+                var helper = new GatewayClientTestHelper();
+                var key = helper.ParseHandshakeMainSessionKey("""
+                {
+                    "type": "hello-ok",
+                    "snapshot": {
+                        "sessionDefaults": {
+                            "mainKey": "agent:main:123"
+                        }
+                    }
+                }
+                """);
+
+                Assert.Equal("agent:main:123", key);
+        }
+
+        [Fact]
+        public void ParseHandshakeMainSessionKey_ReturnsNull_WhenMissing()
+        {
+                var helper = new GatewayClientTestHelper();
+                var key = helper.ParseHandshakeMainSessionKey("""
+                {
+                    "type": "hello-ok",
+                    "snapshot": {
+                        "sessionDefaults": {
+                        }
+                    }
+                }
+                """);
+
+                Assert.Null(key);
+        }
+
+        [Fact]
+        public void ParseHandshakeDeviceToken_ReturnsValue_WhenPresent()
+        {
+                var helper = new GatewayClientTestHelper();
+                var token = helper.ParseHandshakeDeviceToken("""
+                {
+                    "type": "hello-ok",
+                    "auth": {
+                        "deviceToken": "device-token-123"
+                    }
+                }
+                """);
+
+                Assert.Equal("device-token-123", token);
+        }
+
+        [Fact]
+        public void ParseHandshakeDeviceToken_ReturnsNull_WhenMissing()
+        {
+                var helper = new GatewayClientTestHelper();
+                var token = helper.ParseHandshakeDeviceToken("""
+                {
+                    "type": "hello-ok",
+                    "auth": {
+                    }
+                }
+                """);
+
+                Assert.Null(token);
+        }
 
     [Fact]
     public void ClassifyTool_MapsWebSearch()
@@ -695,19 +830,27 @@ public class OpenClawGatewayClientTests
     public void Constructor_InitializesWithProvidedValues()
     {
         var logger = new TestLogger();
-        var client = new OpenClawGatewayClient("ws://test:8080", "my-token", logger);
+        var client = new OpenClawGatewayClient("http://test:8080", "my-token", logger);
         
-        // Should not throw
-        Assert.NotNull(client);
+        // Verify URL was normalized (http → ws) — field is now on base class WebSocketClientBase
+        var field = typeof(OpenClawGatewayClient).BaseType?.GetField(
+            "_gatewayUrl",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var actualUrl = field?.GetValue(client) as string;
+        Assert.Equal("ws://test:8080", actualUrl);
     }
 
     [Fact]
     public void Constructor_UsesNullLogger_WhenNotProvided()
     {
-        var client = new OpenClawGatewayClient("ws://test:8080", "my-token");
+        // Verify construction without logger doesn't throw and still normalizes URL
+        var client = new OpenClawGatewayClient("https://test:8080", "my-token");
         
-        // Should not throw
-        Assert.NotNull(client);
+        var field = typeof(OpenClawGatewayClient).BaseType?.GetField(
+            "_gatewayUrl",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var actualUrl = field?.GetValue(client) as string;
+        Assert.Equal("wss://test:8080", actualUrl);
     }
 
     [Theory]

@@ -74,6 +74,13 @@ jobs:
       with:
         dotnet-version: 10.0.x
 
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+        restore-keys: nuget-${{ runner.os }}-
+
     - name: Restore WinUI Tray App
       run: dotnet restore src/OpenClaw.Tray.WinUI -r ${{ matrix.rid }}
 
@@ -132,6 +139,13 @@ jobs:
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: 10.0.x
+
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+        restore-keys: nuget-${{ runner.os }}-
 
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2

@@ -10,22 +10,25 @@ A Windows companion suite for [OpenClaw](https://openclaw.ai) - the AI-powered p
 
 ## Projects
 
-This monorepo contains three projects:
+This monorepo contains four projects:
 
 | Project | Description |
 |---------|-------------|
 | **OpenClaw.Tray.WinUI** | System tray application (WinUI 3) for quick access to OpenClaw |
 | **OpenClaw.Shared** | Shared gateway client library |
+| **OpenClaw.Cli** | CLI validator for WebSocket connect/send/probe using tray settings |
 | **OpenClaw.CommandPalette** | PowerToys Command Palette extension |
 
 ## 🚀 Quick Start
+
+> **End-user installer?** See [docs/SETUP.md](docs/SETUP.md) for a step-by-step installation guide (no build required).
 
 ### Prerequisites
 - Windows 10 (20H2+) or Windows 11
 - .NET 10.0 SDK - https://dotnet.microsoft.com/download/dotnet/10.0
 - Windows 10 SDK (for WinUI build) - install via Visual Studio or standalone
 - WebView2 Runtime - pre-installed on modern Windows, or get from https://developer.microsoft.com/microsoft-edge/webview2
-- PowerToys (optional, for Command Palette extension)
+- PowerToys (optional, for Command Palette extension) — see [docs/POWERTOYS.md](docs/POWERTOYS.md)
 
 ### Build
 
@@ -65,6 +68,24 @@ dotnet build src/OpenClaw.Tray.WinUI -r win-x64 -p:PackageMsix=true    # x64 MSI
 .\src\OpenClaw.Tray.WinUI\bin\Debug\net10.0-windows10.0.19041.0\win-x64\OpenClaw.Tray.WinUI.exe    # x64
 ```
 
+### Run CLI WebSocket Validator
+
+Use the CLI to validate gateway connectivity and `chat.send` outside the tray UI.
+
+```powershell
+# Show help
+dotnet run --project src/OpenClaw.Cli -- --help
+
+# Use tray settings from %APPDATA%\OpenClawTray\settings.json and send one message
+dotnet run --project src/OpenClaw.Cli -- --message "quick send validation"
+
+# Loop sends and also probe sessions/usage/nodes APIs
+dotnet run --project src/OpenClaw.Cli -- --repeat 5 --delay-ms 1000 --probe-read --verbose
+
+# Override gateway URL/token for isolated testing
+dotnet run --project src/OpenClaw.Cli -- --url ws://127.0.0.1:18789 --token "<token>" --message "override test"
+```
+
 ## 📦 OpenClaw.Tray (Molty)
 
 Modern Windows 11-style system tray companion that connects to your local OpenClaw gateway.
@@ -85,6 +106,20 @@ Modern Windows 11-style system tray companion that connects to your local OpenCl
 - ⚙️ **Settings** - Full configuration dialog
 - 🎯 **First-run experience** - Welcome dialog guides new users
 - <img src="src/OpenClaw.Tray.WinUI/Assets/voice-mode-feature.png" alt="Voice Mode" width="20" height="20" /> **Voice Mode (new)** - Talk to your Claw via your Windows node
+
+#### Quick Send scope requirement
+
+Quick Send uses the gateway `chat.send` method and requires the operator device to have `operator.write` scope.
+
+If Quick Send fails with `missing scope: operator.write`, Molty now copies identity + remediation guidance to your clipboard, including:
+
+- operator role and `client.id` used by the tray app
+- gateway-reported operator device id (if provided)
+- currently granted scopes (if provided)
+
+For this specific error (`missing scope: operator.write`), the cause is an **operator token scope issue**. Update the token used by the tray app so it includes `operator.write`, then retry Quick Send.
+
+If Quick Send fails with `pairing required` / `NOT_PAIRED`, that is a **device approval** issue. Approve the tray device in gateway pairing approvals, reconnect, and retry.
 
 ### Menu Sections
 - **Status** - Gateway connection status with click-to-view details
@@ -262,18 +297,17 @@ Currently supports Talk Mode - Always on talk to your Claw! Wakeword and PTT mod
 PowerToys Command Palette extension for quick OpenClaw access.
 
 ### Commands
-- **🦞 Open Dashboard** - Launch web dashboard
-- **💬 Quick Send** - Send a message
-- **📊 Full Status** - View gateway status
-- **⚡ Sessions** - View active sessions
-- **📡 Channels** - View channel health
-- **🔄 Health Check** - Trigger health refresh
+- **🦞 Open Dashboard** - Launch the OpenClaw web dashboard
+- **💬 Web Chat** - Open the embedded Web Chat window
+- **📝 Quick Send** - Open the Quick Send dialog to compose a message
+- **⚙️ Settings** - Open the OpenClaw Tray Settings dialog
 
 ### Installation
-1. Build the solution in Release mode
-2. Deploy the MSIX package via Visual Studio
-3. Open Command Palette (Win+Alt+Space)
-4. Type "OpenClaw" to see commands
+1. Run the OpenClaw Tray installer and tick **"Install PowerToys Command Palette extension"**, or
+2. Register manually: `Add-AppxPackage -Register "$env:LOCALAPPDATA\OpenClawTray\CommandPalette\AppxManifest.xml" -ForceApplicationShutdown`
+3. Open Command Palette (`Win+Alt+Space`) and type "OpenClaw" to see commands
+
+See [docs/POWERTOYS.md](docs/POWERTOYS.md) for detailed setup and troubleshooting.
 
 ## 📦 OpenClaw.Shared
 
