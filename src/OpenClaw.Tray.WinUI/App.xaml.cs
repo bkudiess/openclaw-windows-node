@@ -360,7 +360,7 @@ public partial class App : Application
         // Pre-create tray menu window at startup to avoid creation crashes later
         InitializeTrayMenuWindow();
         
-            var iconPath = AppIconHelper.GetStatusIconPath(ConnectionStatus.Disconnected);
+        var iconPath = AppIconHelper.GetStatusIconPath(ConnectionStatus.Disconnected);
         _trayIcon = new TrayIcon(1, iconPath, "OpenClaw Tray — Disconnected");
         _lastTrayIconPath = iconPath;
         _trayIcon.IsVisible = true;
