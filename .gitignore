@@ -344,3 +344,24 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 Output/
+
+# Internal fork workflow docs — never reach upstream PRs
+CLAUDE.md
+AGENTS.md
+STYLE.md
+docs/PR_WORKFLOW.md
+docs/CONTRIBUTING.md
+PLAN_*.md
+
+# Internal scratch and analysis files
+diff.txt
+merge-analysis.txt
+*.diff
+pr*.txt
+
+# Development diary — private, never reaches upstream
+DIARY.md
+
+# Internal tooling state
+.claude/
+.serena/
