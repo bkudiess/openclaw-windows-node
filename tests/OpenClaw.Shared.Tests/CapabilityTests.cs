@@ -940,6 +940,177 @@ public class ScreenCapabilityTests
         Assert.False(res.Ok);
         Assert.Contains("GPU capture failed", res.Error);
     }
+
+    // ── screen.record.start ────────────────────────────────────────────────────
+
+    [Fact]
+    public void CanHandle_RecordStartStop()
+    {
+        var cap = new ScreenCapability(NullLogger.Instance);
+        Assert.True(cap.CanHandle("screen.record.start"));
+        Assert.True(cap.CanHandle("screen.record.stop"));
+        Assert.False(cap.CanHandle("screen.record.pause"));
+    }
+
+    [Fact]
+    public async Task Start_ReturnsError_WhenNoHandler()
+    {
+        var cap = new ScreenCapability(NullLogger.Instance);
+        var req = new NodeInvokeRequest { Id = "ss1", Command = "screen.record.start", Args = Parse("""{}""") };
+        var res = await cap.ExecuteAsync(req);
+        Assert.False(res.Ok);
+        Assert.Contains("not available", res.Error!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Start_CallsHandler_WithArgs_AndReturnsRecordingId()
+    {
+        var cap = new ScreenCapability(NullLogger.Instance);
+        ScreenRecordStartArgs? receivedArgs = null;
+        cap.StartRequested += args =>
+        {
+            receivedArgs = args;
+            return Task.FromResult("abc123");
+        };
+
+        var req = new NodeInvokeRequest
+        {
+            Id = "ss2",
+            Command = "screen.record.start",
+            Args = Parse("""{"fps":15,"screenIndex":2}""")
+        };
+
+        var res = await cap.ExecuteAsync(req);
+        Assert.True(res.Ok);
+        Assert.NotNull(receivedArgs);
+        Assert.Equal(15, receivedArgs!.Fps);
+        Assert.Equal(2,  receivedArgs.ScreenIndex);
+
+        var json = JsonSerializer.Serialize(res.Payload);
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal("abc123", doc.RootElement.GetProperty("recordingId").GetString());
+    }
+
+    [Fact]
+    public async Task Start_UsesMonitorAlias_ForScreenIndex()
+    {
+        var cap = new ScreenCapability(NullLogger.Instance);
+        ScreenRecordStartArgs? receivedArgs = null;
+        cap.StartRequested += args => { receivedArgs = args; return Task.FromResult("id1"); };
+
+        var req = new NodeInvokeRequest
+        {
+            Id = "ss3",
+            Command = "screen.record.start",
+            Args = Parse("""{"monitor":1}""")
+        };
+
+        await cap.ExecuteAsync(req);
+        Assert.Equal(1, receivedArgs!.ScreenIndex);
+    }
+
+    [Fact]
+    public async Task Start_ReturnsError_WhenHandlerThrows()
+    {
+        var cap = new ScreenCapability(NullLogger.Instance);
+        cap.StartRequested += _ => throw new InvalidOperationException("D3D init failed");
+
+        var req = new NodeInvokeRequest { Id = "ss4", Command = "screen.record.start", Args = Parse("""{}""") };
+        var res = await cap.ExecuteAsync(req);
+        Assert.False(res.Ok);
+        Assert.Contains("D3D init failed", res.Error);
+    }
+
+    // ── screen.record.stop ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Stop_ReturnsError_WhenNoHandler()
+    {
+        var cap = new ScreenCapability(NullLogger.Instance);
+        var req = new NodeInvokeRequest
+        {
+            Id = "st1",
+            Command = "screen.record.stop",
+            Args = Parse("""{"recordingId":"abc"}""")
+        };
+        var res = await cap.ExecuteAsync(req);
+        Assert.False(res.Ok);
+        Assert.Contains("not available", res.Error!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Stop_ReturnsError_WhenMissingRecordingId()
+    {
+        var cap = new ScreenCapability(NullLogger.Instance);
+        cap.StopRequested += _ => Task.FromResult(new ScreenRecordResult());
+
+        var req = new NodeInvokeRequest { Id = "st2", Command = "screen.record.stop", Args = Parse("""{}""") };
+        var res = await cap.ExecuteAsync(req);
+        Assert.False(res.Ok);
+        Assert.Contains("recordingId", res.Error!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Stop_CallsHandler_WithRecordingId_AndReturnsFullPayload()
+    {
+        var cap = new ScreenCapability(NullLogger.Instance);
+        string? receivedId = null;
+        cap.StopRequested += id =>
+        {
+            receivedId = id;
+            return Task.FromResult(new ScreenRecordResult
+            {
+                Format      = "mp4",
+                Base64      = "dGVzdA==",
+                DurationMs  = 3200,
+                Fps         = 15,
+                ScreenIndex = 1,
+                Width       = 1920,
+                Height      = 1080,
+                HasAudio    = false,
+            });
+        };
+
+        var req = new NodeInvokeRequest
+        {
+            Id = "st3",
+            Command = "screen.record.stop",
+            Args = Parse("""{"recordingId":"myRecId"}""")
+        };
+
+        var res = await cap.ExecuteAsync(req);
+        Assert.True(res.Ok);
+        Assert.Equal("myRecId", receivedId);
+
+        var json = JsonSerializer.Serialize(res.Payload);
+        using var doc = JsonDocument.Parse(json);
+        var p = doc.RootElement;
+        Assert.Equal("mp4",      p.GetProperty("format").GetString());
+        Assert.Equal("dGVzdA==", p.GetProperty("base64").GetString());
+        Assert.Equal(3200,       p.GetProperty("durationMs").GetInt32());
+        Assert.Equal(15,         p.GetProperty("fps").GetInt32());
+        Assert.Equal(1,          p.GetProperty("screenIndex").GetInt32());
+        Assert.Equal(1920,       p.GetProperty("width").GetInt32());
+        Assert.Equal(1080,       p.GetProperty("height").GetInt32());
+        Assert.False(            p.GetProperty("hasAudio").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Stop_ReturnsError_WhenHandlerThrows()
+    {
+        var cap = new ScreenCapability(NullLogger.Instance);
+        cap.StopRequested += _ => throw new KeyNotFoundException("session not found");
+
+        var req = new NodeInvokeRequest
+        {
+            Id = "st4",
+            Command = "screen.record.stop",
+            Args = Parse("""{"recordingId":"bad"}""")
+        };
+        var res = await cap.ExecuteAsync(req);
+        Assert.False(res.Ok);
+        Assert.Contains("session not found", res.Error);
+    }
 }
 
 public class CameraCapabilityTests

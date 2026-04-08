@@ -130,6 +130,8 @@ public class NodeService : IDisposable
         _screenCapability.ListRequested    += OnScreenList;
         _screenCapability.CaptureRequested += OnScreenCapture;
         _screenCapability.RecordRequested  += OnScreenRecord;
+        _screenCapability.StartRequested   += OnScreenRecordStart;
+        _screenCapability.StopRequested    += OnScreenRecordStop;
         _nodeClient.RegisterCapability(_screenCapability);
 
         // Camera capability
@@ -444,6 +446,22 @@ public class NodeService : IDisposable
         return _screenRecordingService.RecordAsync(args);
     }
 
+    private Task<string> OnScreenRecordStart(ScreenRecordStartArgs args)
+    {
+        if (_screenRecordingService == null)
+            throw new InvalidOperationException("Screen recording service not available");
+
+        return _screenRecordingService.StartAsync(args);
+    }
+
+    private Task<ScreenRecordResult> OnScreenRecordStop(string recordingId)
+    {
+        if (_screenRecordingService == null)
+            throw new InvalidOperationException("Screen recording service not available");
+
+        return _screenRecordingService.StopAsync(recordingId);
+    }
+
     #endregion
     
     #region Camera Capability Handlers
@@ -494,6 +512,7 @@ public class NodeService : IDisposable
         _nodeClient = null;
         try { client?.Dispose(); } catch { /* ignore */ }
         
+        try { _screenRecordingService?.Dispose(); } catch { /* ignore */ }
         try { _cameraCaptureService?.Dispose(); } catch { /* ignore */ }
         
         if (_canvasWindow != null && !_canvasWindow.IsClosed)

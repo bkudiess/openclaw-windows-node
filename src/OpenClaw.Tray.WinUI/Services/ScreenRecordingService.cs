@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -19,9 +20,10 @@ namespace OpenClawTray.Services;
 /// <summary>
 /// Records the screen using Windows.Graphics.Capture and encodes to MP4 via MediaTranscoder.
 /// </summary>
-internal sealed class ScreenRecordingService
+internal sealed class ScreenRecordingService : IDisposable
 {
     private readonly IOpenClawLogger _logger;
+    private readonly ConcurrentDictionary<string, ActiveSession> _sessions = new();
 
     private const int MaxFps        = 60;
     private const int MinFps        = 1;
@@ -130,6 +132,77 @@ internal sealed class ScreenRecordingService
             Height      = height,
             HasAudio    = false,
         };
+    }
+
+    public Task<string> StartAsync(ScreenRecordStartArgs args)
+    {
+        var fps         = Math.Clamp(args.Fps, MinFps, MaxFps);
+        var screenIndex = args.ScreenIndex;
+
+        _logger.Info($"[ScreenRecording] start fps={fps} screen={screenIndex}");
+
+        var item   = CreateCaptureItem(screenIndex);
+        var width  = item.Size.Width;
+        var height = item.Size.Height;
+        var d3d    = CreateDirect3DDevice();
+
+        var pool = Direct3D11CaptureFramePool.CreateFreeThreaded(
+            d3d,
+            DirectXPixelFormat.B8G8R8A8UIntNormalized,
+            PoolBuffers,
+            new global::Windows.Graphics.SizeInt32 { Width = width, Height = height });
+
+        var captureSession = pool.CreateCaptureSession(item);
+        captureSession.IsCursorCaptureEnabled = false;
+
+        var session = new ActiveSession(screenIndex, fps, width, height, pool, captureSession, _logger);
+        _sessions[session.Id] = session;
+
+        _logger.Info($"[ScreenRecording] started session {session.Id}");
+        return Task.FromResult(session.Id);
+    }
+
+    public async Task<ScreenRecordResult> StopAsync(string recordingId)
+    {
+        if (!_sessions.TryRemove(recordingId, out var session))
+            throw new KeyNotFoundException($"Recording session '{recordingId}' not found");
+
+        _logger.Info($"[ScreenRecording] stopping session {recordingId}...");
+
+        List<byte[]> frames;
+        int width, height, fps, screenIndex, durationMs;
+        using (session)
+        {
+            (frames, durationMs) = await session.StopAsync();
+            width       = session.Width;
+            height      = session.Height;
+            fps         = session.Fps;
+            screenIndex = session.ScreenIndex;
+        }
+
+        _logger.Info($"[ScreenRecording] session {recordingId}: {frames.Count} frames, encoding...");
+        var base64 = await EncodeToMp4Async(frames, width, height, fps);
+
+        return new ScreenRecordResult
+        {
+            Format      = "mp4",
+            Base64      = base64,
+            DurationMs  = durationMs,
+            Fps         = fps,
+            ScreenIndex = screenIndex,
+            Width       = width,
+            Height      = height,
+            HasAudio    = false,
+        };
+    }
+
+    public void Dispose()
+    {
+        foreach (var kv in _sessions)
+        {
+            if (_sessions.TryRemove(kv.Key, out var s))
+                try { s.Dispose(); } catch { }
+        }
     }
 
     // ── Encoding ──────────────────────────────────────────────────────────────
@@ -324,5 +397,105 @@ internal sealed class ScreenRecordingService
     {
         void CreateForWindow(IntPtr hwnd, in Guid riid, out IntPtr ppv);
         void CreateForMonitor(IntPtr hMonitor, in Guid riid, out IntPtr ppv);
+    }
+
+    // ── Active session (start/stop) ───────────────────────────────────────────
+
+    private sealed class ActiveSession : IDisposable
+    {
+        public readonly string Id          = Guid.NewGuid().ToString("N")[..12];
+        public readonly int    ScreenIndex;
+        public readonly int    Fps;
+        public readonly int    Width;
+        public readonly int    Height;
+
+        private readonly IOpenClawLogger              _logger;
+        private readonly List<byte[]>                 _frames     = new();
+        private readonly object                       _framesLock = new();
+        private readonly CancellationTokenSource      _cts        = new();
+        private readonly Direct3D11CaptureFramePool   _pool;
+        private readonly GraphicsCaptureSession       _session;
+        private readonly DateTime                     _startedAt  = DateTime.UtcNow;
+        private volatile Direct3D11CaptureFrame?      _latestFrame;
+        private readonly SemaphoreSlim                _ready      = new(0, 1);
+        private readonly Task                         _captureTask;
+
+        public ActiveSession(int screenIndex, int fps, int width, int height,
+            Direct3D11CaptureFramePool pool, GraphicsCaptureSession session,
+            IOpenClawLogger logger)
+        {
+            ScreenIndex = screenIndex; Fps = fps; Width = width; Height = height;
+            _pool = pool; _session = session; _logger = logger;
+
+            pool.FrameArrived += OnFrameArrived;
+            session.StartCapture();
+            _captureTask = RunAsync(_cts.Token);
+        }
+
+        private void OnFrameArrived(Direct3D11CaptureFramePool pool, object _)
+        {
+            var f = pool.TryGetNextFrame();
+            if (f == null) return;
+            Interlocked.Exchange(ref _latestFrame, f)?.Dispose();
+            try { _ready.Release(); } catch { /* already signaled */ }
+        }
+
+        private async Task RunAsync(CancellationToken ct)
+        {
+            var intervalMs  = 1000 / Fps;
+            var nextCapture = DateTime.UtcNow;
+
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    var waitMs = (int)(nextCapture - DateTime.UtcNow).TotalMilliseconds;
+                    if (waitMs > 0) await Task.Delay(waitMs, ct);
+
+                    if (!await _ready.WaitAsync(intervalMs * 2, ct)) continue;
+                }
+                catch (OperationCanceledException) { break; }
+
+                var frame = Interlocked.Exchange(ref _latestFrame, null);
+                if (frame == null) continue;
+
+                using (frame)
+                {
+                    try
+                    {
+                        var bmp   = await SoftwareBitmap.CreateCopyFromSurfaceAsync(frame.Surface);
+                        var bytes = ExtractBitmapBytes(bmp);
+                        lock (_framesLock) _frames.Add(bytes);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warn($"[ScreenRecording] Session {Id} frame skipped: {ex.Message}");
+                    }
+                }
+
+                nextCapture = nextCapture.AddMilliseconds(intervalMs);
+            }
+        }
+
+        public async Task<(List<byte[]> frames, int durationMs)> StopAsync()
+        {
+            _cts.Cancel();
+            try { await _captureTask; } catch (OperationCanceledException) { } catch { }
+
+            var durationMs = (int)(DateTime.UtcNow - _startedAt).TotalMilliseconds;
+            List<byte[]> snapshot;
+            lock (_framesLock) snapshot = new List<byte[]>(_frames);
+            return (snapshot, durationMs);
+        }
+
+        public void Dispose()
+        {
+            _cts.Cancel();
+            try { _session.Dispose(); } catch { }
+            try { _pool.Dispose(); } catch { }
+            Interlocked.Exchange(ref _latestFrame, null)?.Dispose();
+            _cts.Dispose();
+            _ready.Dispose();
+        }
     }
 }

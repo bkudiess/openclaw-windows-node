@@ -16,6 +16,8 @@ public class ScreenCapability : NodeCapabilityBase
         "screen.capture",
         "screen.list",
         "screen.record",
+        "screen.record.start",
+        "screen.record.stop",
     };
 
     public override IReadOnlyList<string> Commands => _commands;
@@ -24,6 +26,8 @@ public class ScreenCapability : NodeCapabilityBase
     public event Func<ScreenCaptureArgs, Task<ScreenCaptureResult>>? CaptureRequested;
     public event Func<Task<ScreenInfo[]>>? ListRequested;
     public event Func<ScreenRecordArgs, Task<ScreenRecordResult>>? RecordRequested;
+    public event Func<ScreenRecordStartArgs, Task<string>>? StartRequested;
+    public event Func<string, Task<ScreenRecordResult>>? StopRequested;
     
     public ScreenCapability(IOpenClawLogger logger) : base(logger)
     {
@@ -33,9 +37,11 @@ public class ScreenCapability : NodeCapabilityBase
     {
         return request.Command switch
         {
-            "screen.capture" => await HandleCaptureAsync(request),
-            "screen.list"    => await HandleListAsync(request),
-            "screen.record"  => await HandleRecordAsync(request),
+            "screen.capture"      => await HandleCaptureAsync(request),
+            "screen.list"         => await HandleListAsync(request),
+            "screen.record"       => await HandleRecordAsync(request),
+            "screen.record.start" => await HandleStartAsync(request),
+            "screen.record.stop"  => await HandleStopAsync(request),
             _ => Error($"Unknown command: {request.Command}")
         };
     }
@@ -155,11 +161,77 @@ public class ScreenCapability : NodeCapabilityBase
             return Error($"Record failed: {ex.Message}");
         }
     }
+
+    private async Task<NodeInvokeResponse> HandleStartAsync(NodeInvokeRequest request)
+    {
+        var fps         = GetIntArg(request.Args, "fps", 10);
+        var screenIndex = GetIntArg(request.Args, "screenIndex", GetIntArg(request.Args, "monitor", 0));
+
+        Logger.Info($"screen.record.start: fps={fps} screenIndex={screenIndex}");
+
+        if (StartRequested == null)
+            return Error("Screen recording not available");
+
+        try
+        {
+            var recordingId = await StartRequested(new ScreenRecordStartArgs
+            {
+                Fps         = fps,
+                ScreenIndex = screenIndex,
+            });
+            return Success(new { recordingId });
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("screen.record.start failed", ex);
+            return Error($"Start failed: {ex.Message}");
+        }
+    }
+
+    private async Task<NodeInvokeResponse> HandleStopAsync(NodeInvokeRequest request)
+    {
+        var recordingId = GetStringArg(request.Args, "recordingId", "");
+
+        Logger.Info($"screen.record.stop: recordingId={recordingId}");
+
+        if (string.IsNullOrEmpty(recordingId))
+            return Error("recordingId is required");
+
+        if (StopRequested == null)
+            return Error("Screen recording not available");
+
+        try
+        {
+            var result = await StopRequested(recordingId);
+            return Success(new
+            {
+                format      = result.Format,
+                base64      = result.Base64,
+                durationMs  = result.DurationMs,
+                fps         = result.Fps,
+                screenIndex = result.ScreenIndex,
+                width       = result.Width,
+                height      = result.Height,
+                hasAudio    = result.HasAudio,
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("screen.record.stop failed", ex);
+            return Error($"Stop failed: {ex.Message}");
+        }
+    }
 }
 
 public class ScreenRecordArgs
 {
     public int DurationMs { get; set; } = 5000;
+    public int Fps { get; set; } = 10;
+    public int ScreenIndex { get; set; }
+}
+
+public class ScreenRecordStartArgs
+{
     public int Fps { get; set; } = 10;
     public int ScreenIndex { get; set; }
 }
