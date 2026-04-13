@@ -1,7 +1,7 @@
 {
-  "lr": "2026-04-12T12:30Z",
-  "rid": "24306768533",
-  "prs": ["165", "166"],
+  "lr": "2026-04-13T01:06Z",
+  "rid": "24320949839",
+  "prs": ["165", "167"],
   "comments_made": {
     "99": "2026-03-26",
     "149": "2026-04-06",
@@ -9,5 +9,5 @@
     "159": "2026-04-09",
     "164": "2026-04-12"
   },
-  "notes": "Tasks 2+4 selected. Task 2: commented on #164 (transient safe-output failure Apr 10-11, now resolved, suggested close). Task 4: created PR #166 - add NuGet cache to build-extension CI job. PR #165 (ArrayPool in SendRawAsync) still open. PR #159 (screen recording, AlexAlves87) still open, no new activity. PR #120 (Voice Mode, NichUK) still open, no new activity since Apr 8. Issues #149/#151 still open (bugs). Issue #164 (workflow failures) - commented, suggest close."
+  "notes": "Tasks 1+8 selected. Task 1: 0 unlabelled, nothing to do. Task 8: created PR #167 - O(1) command dispatch index in WindowsNodeClient (Dictionary<string,INodeCapability> _commandIndex replaces FirstOrDefault LINQ on both dispatch sites; +2 tests, 586 Shared pass). PR #165 (ArrayPool in SendRawAsync) still open. PR #166 (NuGet cache build-extension) merged. PR #159 (screen recording, AlexAlves87) still open. PR #120 (Voice Mode, NichUK) still open. Issues #149/#151 still open (bugs). Issue #164 (workflow failures) - commented, suggest close."
 }
