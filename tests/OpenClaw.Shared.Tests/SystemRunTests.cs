@@ -248,6 +248,16 @@ public class SystemRunTests
 
         var res = await cap.ExecuteAsync(req);
         Assert.True(res.Ok, res.Error);
+
+        var json = JsonSerializer.Serialize(res.Payload);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        Assert.Equal("git status --short", root.GetProperty("cmdText").GetString());
+        var plan = root.GetProperty("plan");
+        var argv = plan.GetProperty("argv");
+        Assert.Equal("git", argv[0].GetString());
+        Assert.Equal("status", argv[1].GetString());
+        Assert.Equal("--short", argv[2].GetString());
     }
 
     [Fact]
@@ -263,6 +273,14 @@ public class SystemRunTests
 
         var res = await cap.ExecuteAsync(req);
         Assert.True(res.Ok, res.Error);
+
+        var json = JsonSerializer.Serialize(res.Payload);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        Assert.Equal("\"echo hello\"", root.GetProperty("cmdText").GetString());
+        var argv = root.GetProperty("plan").GetProperty("argv");
+        Assert.Single(argv.EnumerateArray());
+        Assert.Equal("echo hello", argv[0].GetString());
     }
 
     [Fact]

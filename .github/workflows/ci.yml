@@ -51,6 +51,8 @@ jobs:
         dotnet build tests/OpenClaw.Tray.Tests -c Debug
 
     - name: Run Shared Tests
+      env:
+        OPENCLAW_RUN_INTEGRATION: 1
       run: >
         dotnet test tests/OpenClaw.Shared.Tests
         --no-build
