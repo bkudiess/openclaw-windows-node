@@ -1,13 +1,16 @@
 {
-  "lr": "2026-04-21T01:04Z",
-  "rid": "24698532801",
+  "lr": "2026-04-21T12:42Z",
+  "rid": "24722885558",
   "prs": [
     "feat-webchat-webview2-bridge-2026-04-21",
+    "perf-execshell-tokenize-skip-2026-04-21",
+    "improve-execenv-frozenset-2026-04-21",
     "perf-gateway-json-parse-allocs-2026-04-20",
     "eng-warnings-as-errors-2026-04-20",
     "improve-sysrun-syntax-and-policy-tests-2026-04-18",
     "improve-string-slice-dedup-trunc-2026-04-18"
   ],
+  "pr_numbers": [192, 193, 194, 190, 189, 181, 180],
   "comments_made": {
     "99": "2026-03-26",
     "120": "2026-04-19",
@@ -17,5 +20,5 @@
     "164": "2026-04-12",
     "191": "2026-04-21"
   },
-  "notes": "Tasks 10+2. Task 10: PR #192 - WebView2 bidirectional native<->SPA bridge in WebChatWindow; WebBridgeMessage model in Shared; BridgeMessageReceived event + PostBridgeMessage method; +15 tests; 648 Shared+122 Tray. Task 2: Commented on issue #191 (WebView2 bridge proposal by AlexAlves87), labelled with enhancement. Open Repo Assist PRs: #192, #190, #189, #181, #180. Issue #184 closed (completed). Future: once gateway SPA adds window.chrome.webview listener, wire NodeService to post recording-start/stop. Monitor PR #120 (NichUK voice mode new PR). Monitor PR #159 (screen recording, awaiting merge)."
+  "notes": "Tasks 8+5. Task 8: PR #193 - eliminate LINQ Skip allocs in ExecShellWrapperParser; Tokenize returns string[]; string.Join(string,string[],int,int). Task 5: PR #194 - ExecEnvSanitizer._blockedNames HashSet→FrozenSet. Open Repo Assist PRs: #192, #194, #193, #190, #189, #181, #180. Issue #184 closed (completed). Future: once gateway SPA adds window.chrome.webview listener, wire NodeService to post recording-start/stop. Monitor PR #120 (NichUK voice mode new PR). Monitor PR #159 (screen recording, awaiting merge)."
 }
