@@ -1,7 +1,8 @@
 {
-  "lr": "2026-04-20T12:44Z",
-  "rid": "24667107626",
+  "lr": "2026-04-21T01:04Z",
+  "rid": "24698532801",
   "prs": [
+    "feat-webchat-webview2-bridge-2026-04-21",
     "perf-gateway-json-parse-allocs-2026-04-20",
     "eng-warnings-as-errors-2026-04-20",
     "improve-sysrun-syntax-and-policy-tests-2026-04-18",
@@ -13,7 +14,8 @@
     "149": "2026-04-06",
     "151": "2026-04-06",
     "159": "2026-04-16",
-    "164": "2026-04-12"
+    "164": "2026-04-12",
+    "191": "2026-04-21"
   },
-  "notes": "Tasks 4+8. Task 4: PR #188 - TreatWarningsAsErrors in tests/Directory.Build.props; 630 Shared+122 Tray. Task 8: PR #187 - pre-allocate arrays from JSON array length in TryGetHandshakeScopes, GetStringArrayArg (NodeCapabilities), ParseNodeList; replace LINQ sort chain with Array.Sort static Comparison; +3 tests; 633 Shared+122 Tray. Open Repo Assist PRs: #187, #188, #181, #180. Issue #184 labelled bug+security; env-var vector addressed by merged #186; shell wrapper bypass (item 2 of #184) still needs separate PR. Monitor PR #120 for new PR from NichUK; Monitor PR #159 awaiting merge."
+  "notes": "Tasks 10+2. Task 10: PR #192 - WebView2 bidirectional native<->SPA bridge in WebChatWindow; WebBridgeMessage model in Shared; BridgeMessageReceived event + PostBridgeMessage method; +15 tests; 648 Shared+122 Tray. Task 2: Commented on issue #191 (WebView2 bridge proposal by AlexAlves87), labelled with enhancement. Open Repo Assist PRs: #192, #190, #189, #181, #180. Issue #184 closed (completed). Future: once gateway SPA adds window.chrome.webview listener, wire NodeService to post recording-start/stop. Monitor PR #120 (NichUK voice mode new PR). Monitor PR #159 (screen recording, awaiting merge)."
 }
