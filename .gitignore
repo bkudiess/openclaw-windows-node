@@ -344,6 +344,8 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 Output/
+*.lscache
+test_ws.py
 
 # Internal fork workflow docs — never reach upstream PRs
 CLAUDE.md

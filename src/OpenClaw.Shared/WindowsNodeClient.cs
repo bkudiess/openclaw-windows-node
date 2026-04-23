@@ -1,6 +1,6 @@
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -18,6 +18,7 @@ public class WindowsNodeClient : WebSocketClientBase
     
     // Node capabilities registry
     private readonly List<INodeCapability> _capabilities = new();
+    private FrozenDictionary<string, INodeCapability> _commandMap = FrozenDictionary<string, INodeCapability>.Empty;
     private readonly NodeRegistration _registration;
     
     // Connection state
@@ -54,7 +55,7 @@ public class WindowsNodeClient : WebSocketClientBase
     
     /// <summary>Device ID for display/approval (first 16 chars of full ID)</summary>
     public string ShortDeviceId => _deviceIdentity.DeviceId.Length > 16 
-        ? _deviceIdentity.DeviceId.Substring(0, 16) 
+        ? _deviceIdentity.DeviceId[..16] 
         : _deviceIdentity.DeviceId;
     
     /// <summary>Full device ID for approval command</summary>
@@ -100,7 +101,24 @@ public class WindowsNodeClient : WebSocketClientBase
             }
         }
         
+        // Rebuild the O(1) command dispatch map so node.invoke lookups stay fast
+        // regardless of how many capabilities or commands are registered.
+        _commandMap = BuildCommandMap();
+        
         _logger.Info($"Registered capability: {capability.Category} ({capability.Commands.Count} commands)");
+    }
+    
+    /// <summary>
+    /// Builds a FrozenDictionary mapping each command name to the capability that owns it.
+    /// First-registered capability wins on collision (matching the former FirstOrDefault semantics).
+    /// </summary>
+    private FrozenDictionary<string, INodeCapability> BuildCommandMap()
+    {
+        var map = new Dictionary<string, INodeCapability>(StringComparer.OrdinalIgnoreCase);
+        foreach (var cap in _capabilities)
+            foreach (var cmd in cap.Commands)
+                map.TryAdd(cmd, cap);
+        return map.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
     }
     
     /// <summary>
@@ -351,7 +369,7 @@ public class WindowsNodeClient : WebSocketClientBase
         };
         
         // Find capability that can handle this command
-        var capability = _capabilities.FirstOrDefault(c => c.CanHandle(command));
+        var capability = _commandMap.GetValueOrDefault(command);
         
         if (capability == null)
         {
@@ -489,7 +507,7 @@ public class WindowsNodeClient : WebSocketClientBase
         };
         
         await SendRawAsync(JsonSerializer.Serialize(msg));
-        _logger.Info($"Sent node registration with device ID: {_deviceIdentity.DeviceId.Substring(0, 16)}..., paired: {isPaired}");
+        _logger.Info($"Sent node registration with device ID: {_deviceIdentity.DeviceId[..16]}..., paired: {isPaired}");
     }
     
     private void HandleResponse(JsonElement root)
@@ -512,6 +530,7 @@ public class WindowsNodeClient : WebSocketClientBase
         {
             var reconnectingAfterApproval = _pairingApprovedAwaitingReconnect;
             _isConnected = true;
+            ResetReconnectAttempts();
             
             // Extract node ID if returned
             if (payload.TryGetProperty("nodeId", out var nodeIdProp))
@@ -543,7 +562,7 @@ public class WindowsNodeClient : WebSocketClientBase
                 }
             }
             
-            _logger.Info($"Node registered successfully! ID: {_nodeId ?? _deviceIdentity.DeviceId.Substring(0, 16)}");
+            _logger.Info($"Node registered successfully! ID: {_nodeId ?? _deviceIdentity.DeviceId[..16]}");
             
             // Pairing happens at connect time via device identity, no separate request needed.
             // Skip this block if we already fired PairingStatusChanged above via gotNewToken.
@@ -743,7 +762,7 @@ public class WindowsNodeClient : WebSocketClientBase
         if (string.IsNullOrEmpty(command) || command.Length > 100 || 
             !s_commandValidator.IsMatch(command))
         {
-            _logger.Warn($"Invalid command format: {(command.Length > 50 ? command.Substring(0, 50) + "..." : command)}");
+            _logger.Warn($"Invalid command format: {(command.Length > 50 ? command[..50] + "..." : command)}");
             await SendErrorResponseAsync(requestId, "Invalid command format");
             return;
         }
@@ -762,7 +781,7 @@ public class WindowsNodeClient : WebSocketClientBase
         };
         
         // Find capability that can handle this command
-        var capability = _capabilities.FirstOrDefault(c => c.CanHandle(command));
+        var capability = _commandMap.GetValueOrDefault(command);
         
         if (capability == null)
         {

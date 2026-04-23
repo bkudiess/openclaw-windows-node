@@ -58,6 +58,7 @@ public class OpenClawGatewayClient : WebSocketClientBase
     private bool _nodeListUnsupported;
     private bool _operatorReadScopeUnavailable;
     private bool _pairingRequiredAwaitingApproval;
+    private bool _authFailed;
     private IReadOnlyList<UserNotificationRule>? _userRules;
     private bool _preferStructuredCategories = true;
 
@@ -103,7 +104,7 @@ public class OpenClawGatewayClient : WebSocketClientBase
 
     protected override bool ShouldAutoReconnect()
     {
-        return !_pairingRequiredAwaitingApproval;
+        return !_pairingRequiredAwaitingApproval && !_authFailed;
     }
 
     protected override void OnDisconnected()
@@ -665,6 +666,8 @@ public class OpenClawGatewayClient : WebSocketClientBase
         if (payload.TryGetProperty("type", out var t) && t.GetString() == "hello-ok")
         {
             _pairingRequiredAwaitingApproval = false;
+            _authFailed = false;
+            ResetReconnectAttempts();
             _operatorDeviceId = TryGetHandshakeDeviceId(payload);
             _grantedOperatorScopes = TryGetHandshakeScopes(payload);
             _mainSessionKey = TryGetHandshakeMainSessionKey(payload) ?? "main";
@@ -792,6 +795,9 @@ public class OpenClawGatewayClient : WebSocketClientBase
             }
 
             _logger.Warn("Gateway rejected device signature in all supported payload modes");
+            _authFailed = true;
+            RaiseAuthenticationFailed("device signature rejected in all modes — the gateway may require a different auth protocol version");
+            RaiseStatusChanged(ConnectionStatus.Error);
             return;
         }
 
@@ -800,6 +806,15 @@ public class OpenClawGatewayClient : WebSocketClientBase
         {
             _pairingRequiredAwaitingApproval = true;
             _logger.Warn("Pairing approval required for this device; auto-reconnect paused until manual reconnect or app restart");
+            RaiseStatusChanged(ConnectionStatus.Error);
+            return;
+        }
+
+        // Permanent auth failures — stop retrying and notify the app
+        if (method == "connect" && IsTerminalAuthError(message))
+        {
+            _authFailed = true;
+            RaiseAuthenticationFailed(message);
             RaiseStatusChanged(ConnectionStatus.Error);
             return;
         }
@@ -904,6 +919,13 @@ public class OpenClawGatewayClient : WebSocketClientBase
         return errorMessage.Contains("unknown method", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsTerminalAuthError(string errorMessage)
+    {
+        return errorMessage.Contains("token mismatch", StringComparison.OrdinalIgnoreCase) ||
+               errorMessage.Contains("origin not allowed", StringComparison.OrdinalIgnoreCase) ||
+               errorMessage.Contains("too many failed", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsMissingScopeError(string errorMessage, string scope)
     {
         if (string.IsNullOrWhiteSpace(errorMessage) || string.IsNullOrWhiteSpace(scope))
@@ -948,23 +970,22 @@ public class OpenClawGatewayClient : WebSocketClientBase
         if (payload.TryGetProperty("scopes", out var scopesProp) &&
             scopesProp.ValueKind == JsonValueKind.Array)
         {
-            var scopes = new List<string>();
+            var buffer = new string[scopesProp.GetArrayLength()];
+            var count = 0;
             foreach (var scope in scopesProp.EnumerateArray())
             {
                 if (scope.ValueKind == JsonValueKind.String)
                 {
                     var value = scope.GetString();
                     if (!string.IsNullOrWhiteSpace(value))
-                    {
-                        scopes.Add(value);
-                    }
+                        buffer[count++] = value;
                 }
             }
 
-            return scopes.ToArray();
+            return buffer[..count];
         }
 
-        return Array.Empty<string>();
+        return [];
     }
 
     private static string? TryGetHandshakeMainSessionKey(JsonElement payload)
@@ -1210,15 +1231,15 @@ public class OpenClawGatewayClient : WebSocketClientBase
             if (data.TryGetProperty("args", out var args))
             {
                 if (args.TryGetProperty("command", out var cmd))
-                    label = TruncateLabel(cmd.GetString()?.Split('\n')[0] ?? "");
+                    label = MenuDisplayHelper.TruncateText(cmd.GetString()?.Split('\n')[0], 60);
                 else if (args.TryGetProperty("path", out var path))
                     label = ShortenPath(path.GetString() ?? "");
                 else if (args.TryGetProperty("file_path", out var filePath))
                     label = ShortenPath(filePath.GetString() ?? "");
                 else if (args.TryGetProperty("query", out var query))
-                    label = TruncateLabel(query.GetString() ?? "");
+                    label = MenuDisplayHelper.TruncateText(query.GetString(), 60);
                 else if (args.TryGetProperty("url", out var url))
-                    label = TruncateLabel(url.GetString() ?? "");
+                    label = MenuDisplayHelper.TruncateText(url.GetString(), 60);
             }
         }
 
@@ -1254,7 +1275,7 @@ public class OpenClawGatewayClient : WebSocketClientBase
     private void HandleChatEvent(JsonElement root)
     {
         var rawText = root.GetRawText();
-        _logger.Debug($"Chat event received: {rawText.Substring(0, Math.Min(200, rawText.Length))}");
+        _logger.Debug($"Chat event received: {rawText[..Math.Min(200, rawText.Length)]}");
         
         if (!root.TryGetProperty("payload", out var payload)) return;
 
@@ -1276,7 +1297,7 @@ public class OpenClawGatewayClient : WebSocketClientBase
                                 payload.TryGetProperty("state", out var state) && 
                                 state.GetString() == "final")
                             {
-                                _logger.Info($"Assistant response: {text.Substring(0, Math.Min(100, text.Length))}...");
+                                _logger.Info($"Assistant response: {text[..Math.Min(100, text.Length)]}...");
                                 EmitChatNotification(text);
                             }
                         }
@@ -1293,7 +1314,7 @@ public class OpenClawGatewayClient : WebSocketClientBase
                 role.GetString() == "assistant" &&
                 !string.IsNullOrEmpty(text))
             {
-                _logger.Info($"Assistant response (legacy): {text.Substring(0, Math.Min(100, text.Length))}");
+                _logger.Info($"Assistant response (legacy): {text[..Math.Min(100, text.Length)]}");
                 EmitChatNotification(text);
             }
         }
@@ -1607,7 +1628,8 @@ public class OpenClawGatewayClient : WebSocketClientBase
             if (nodes.ValueKind != JsonValueKind.Array)
                 return;
 
-            var parsed = new List<GatewayNodeInfo>();
+            var buffer = new GatewayNodeInfo[nodes.GetArrayLength()];
+            var count = 0;
             foreach (var nodeElement in nodes.EnumerateArray())
             {
                 if (nodeElement.ValueKind != JsonValueKind.Object)
@@ -1628,7 +1650,7 @@ public class OpenClawGatewayClient : WebSocketClientBase
                 var connected = GetOptionalBool(nodeElement, "connected");
                 var online = GetOptionalBool(nodeElement, "online");
 
-                parsed.Add(new GatewayNodeInfo
+                buffer[count++] = new GatewayNodeInfo
                 {
                     NodeId = nodeId!,
                     DisplayName = FirstNonEmpty(
@@ -1656,14 +1678,18 @@ public class OpenClawGatewayClient : WebSocketClientBase
                         GetArrayLength(nodeElement, "declaredCommands"),
                         GetArrayLength(nodeElement, "commands")),
                     IsOnline = online ?? connected ?? status is "ok" or "online" or "connected" or "ready" or "active"
-                });
+                };
             }
 
-            var ordered = parsed
-                .OrderByDescending(n => n.IsOnline)
-                .ThenByDescending(n => n.LastSeen ?? DateTime.MinValue)
-                .ThenBy(n => n.DisplayName, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+            var ordered = buffer[..count];
+            Array.Sort(ordered, static (a, b) =>
+            {
+                int c = b.IsOnline.CompareTo(a.IsOnline);
+                if (c != 0) return c;
+                c = (b.LastSeen ?? DateTime.MinValue).CompareTo(a.LastSeen ?? DateTime.MinValue);
+                if (c != 0) return c;
+                return StringComparer.OrdinalIgnoreCase.Compare(a.DisplayName, b.DisplayName);
+            });
 
             NodesUpdated?.Invoke(this, ordered);
         }
@@ -2057,11 +2083,5 @@ public class OpenClawGatewayClient : WebSocketClientBase
         return parts.Length > 2
             ? $"…/{parts[^2]}/{parts[^1]}"
             : parts[^1];
-    }
-
-    private static string TruncateLabel(string text, int maxLen = 60)
-    {
-        if (string.IsNullOrEmpty(text) || text.Length <= maxLen) return text;
-        return text[..(maxLen - 1)] + "…";
     }
 }
