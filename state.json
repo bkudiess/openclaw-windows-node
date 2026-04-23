@@ -1,6 +1,6 @@
 {
-  "last_run": "2026-04-23T01:06:43Z",
-  "run_id": "24810954892",
+  "last_run": "2026-04-23T12:41:06Z",
+  "run_id": "24835716493",
   "comments_made": {
     "198": "2026-04-23T01:06:43Z",
     "191": "2026-04-21T01:14:08Z",
@@ -10,16 +10,23 @@
   },
   "fix_attempts": {
     "test-handlerequest-error": {
-      "pr_branch": "repo-assist/test-gateway-request-error-handling",
+      "pr_number": 202,
+      "pr_branch": "repo-assist/test-gateway-request-error-handling-02ba01aec8037a90",
       "status": "open",
       "created": "2026-04-23T01:06:43Z",
       "description": "13 new tests for HandleRequestError paths"
+    },
+    "improve-receive-buffer-pooling": {
+      "pr_branch": "repo-assist/improve-receive-buffer-pooling-2026-04-23",
+      "status": "open",
+      "created": "2026-04-23T12:41:06Z",
+      "description": "Pool receive buffer in WebSocketClientBase via ArrayPool"
     }
   },
-  "notes": "Issue #198: root cause confirmed - _reconnectAttempts resets on TCP connect success even when auth fails at challenge/response stage. Proposed fix options A and B in comment. Future work: implement Option A fix. PR #195 superseded by #200 from AlexAlves87. PR #201 by shanselman addresses #199 setup wizard. New PR created this run for HandleRequestError test coverage.",
+  "notes": "PR #202 open: HandleRequestError test coverage. New PR created this run: pool receive buffer in WebSocketClientBase. Issue #198: root cause confirmed - _reconnectAttempts resets on TCP connect success even when auth fails. Fix Option A recommended. PR #195 (issue) superseded by PR #200 from AlexAlves87. Issue #199 still open - setup wizard feature request.",
   "monthly_activity_issue": 127,
   "backlog_cursor": {
     "issues": 199,
-    "prs": 201
+    "prs": 202
   }
 }
