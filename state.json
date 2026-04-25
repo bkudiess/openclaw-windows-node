@@ -1,6 +1,6 @@
 {
-  "last_run": "2026-04-24T12:40:40Z",
-  "run_id": "24889942184",
+  "last_run": "2026-04-25T01:00:54Z",
+  "run_id": "24918690865",
   "comments_made": {
     "198": "2026-04-23T01:06:43Z",
     "191": "2026-04-21T01:14:08Z",
@@ -18,15 +18,23 @@
     },
     "improve-searchvalues-systemcapability-tests": {
       "pr_branch": "repo-assist/improve-searchvalues-gatewayurlhelper-2026-04-24",
+      "pr_number": 209,
       "status": "open",
       "created": "2026-04-24T12:40:40Z",
-      "description": "Task5: SearchValues<char> in GatewayUrlHelper; Task9: 10 new SystemCapability tests (run.prepare, execApprovals.get/set, blocked/allowed env vars); 670 Shared pass"
+      "description": "Task5: SearchValues<char> in GatewayUrlHelper; Task9: 10 new SystemCapability tests; 670 Shared pass"
+    },
+    "eng-src-directory-build-props": {
+      "pr_branch": "repo-assist/eng-src-directory-build-props-2026-04-25",
+      "pr_number": 211,
+      "status": "open",
+      "created": "2026-04-25T01:00:54Z",
+      "description": "Task4: add src/Directory.Build.props with EnableNETAnalyzers=true, AnalysisMode=Recommended, NuGetAuditMode=all; matches CommandPalette quality baseline; 652 Shared pass"
     }
   },
-  "notes": "PR #192 open: WebView2 bridge. PR #207 open: terminal auth-failure tests. New PR this run: SearchValues improvement + 10 SystemCapability tests (PR number pending push). Issue #208: dependabot config (protected file, requires maintainer to create PR via link).",
+  "notes": "PR #192 open: WebView2 bridge. PR #207 open: terminal auth-failure tests. PR #209 open: SearchValues improvement + 10 SystemCapability tests. PR #211 open (this run): src/Directory.Build.props engineering investment. PR #210 open: shanselman's camera.clip/location.get/canvas-local-serving (808 tests, ready for review). Issue #208: dependabot config (protected file, requires maintainer to create PR via link). Task2 this run: no new human activity on any of the 5 open issues.",
   "monthly_activity_issue": 127,
   "backlog_cursor": {
-    "issues": 199,
-    "prs": 208
+    "issues": 210,
+    "prs": 211
   }
 }
