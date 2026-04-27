@@ -18,6 +18,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Updatum;
+using Windows.ApplicationModel.DataTransfer;
 using WinUIEx;
 
 namespace OpenClawTray;
@@ -56,6 +57,7 @@ public partial class App : Application
     private GatewayUsageStatusInfo? _lastUsageStatus;
     private GatewayCostUsageInfo? _lastUsageCost;
     private GatewaySelfInfo? _lastGatewaySelf;
+    private UpdateCommandCenterInfo _lastUpdateInfo = BuildInitialUpdateInfo();
     private DateTime _lastCheckTime = DateTime.Now;
     private DateTime _lastUsageActivityLogUtc = DateTime.MinValue;
     private string? _lastChannelStatusSignature;
@@ -550,10 +552,24 @@ public partial class App : Application
             case "history": ShowNotificationHistory(); break;
             case "activity": ShowActivityStream(); break;
             case "healthcheck": _ = RunHealthCheckAsync(userInitiated: true); break;
+            case "checkupdates": _ = CheckForUpdatesUserInitiatedAsync(); break;
             case "settings": ShowSettings(); break;
             case "setup": _ = ShowSetupWizardAsync(); break;
             case "autostart": ToggleAutoStart(); break;
             case "log": OpenLogFile(); break;
+            case "logfolder": OpenLogFolder(); break;
+            case "configfolder": OpenConfigFolder(); break;
+            case "diagnosticsfolder": OpenDiagnosticsFolder(); break;
+            case "supportcontext": CopySupportContext(); break;
+            case "debugbundle": CopyDebugBundle(); break;
+            case "browsersetup": CopyBrowserSetupGuidance(); break;
+            case "portdiagnostics": CopyPortDiagnostics(); break;
+            case "capabilitydiagnostics": CopyCapabilityDiagnostics(); break;
+            case "nodeinventory": CopyNodeInventory(); break;
+            case "channelsummary": CopyChannelSummary(); break;
+            case "activitysummary": CopyActivitySummary(); break;
+            case "extensibilitysummary": CopyExtensibilitySummary(); break;
+            case "restartsshtunnel": RestartSshTunnel(); break;
             case "copydeviceid": CopyDeviceIdToClipboard(); break;
             case "copynodesummary": CopyNodeSummaryToClipboard(); break;
             case "exit": ExitApplication(); break;
@@ -939,11 +955,14 @@ public partial class App : Application
         {
             menu.AddSeparator();
             var totalActivity = ActivityStreamService.GetItems().Count;
-            menu.AddMenuItem(string.Format(LocalizationHelper.GetString("Menu_RecentActivityFormat"), totalActivity), "⚡", "activity");
-            foreach (var line in recentActivity)
-            {
-                menu.AddMenuItem(TruncateMenuText(line, 94), "", "", isEnabled: false, indent: true);
-            }
+            var recentActivityFlyoutItems = recentActivity
+                .Select(line => new TrayMenuFlyoutItem(TruncateMenuText(line, 94), "", "activity"))
+                .Append(new TrayMenuFlyoutItem(LocalizationHelper.GetString("Menu_ActivityStream"), "⚡", "activity"))
+                .ToArray();
+            menu.AddFlyoutMenuItem(
+                string.Format(LocalizationHelper.GetString("Menu_RecentActivityFormat"), totalActivity),
+                "⚡",
+                recentActivityFlyoutItems);
         }
 
         menu.AddSeparator();
@@ -955,6 +974,7 @@ public partial class App : Application
         menu.AddMenuItem(LocalizationHelper.GetString("Menu_ActivityStream"), "⚡", "activity");
         menu.AddMenuItem(LocalizationHelper.GetString("Menu_NotificationHistory"), "📋", "history");
         menu.AddMenuItem(LocalizationHelper.GetString("Menu_RunHealthCheck"), "🔄", "healthcheck");
+        menu.AddMenuItem("Check for Updates", "⬇️", "checkupdates");
 
         menu.AddSeparator();
 
@@ -968,7 +988,30 @@ public partial class App : Application
 
         menu.AddSeparator();
 
-        menu.AddMenuItem(LocalizationHelper.GetString("Menu_OpenLogFile"), "📄", "log");
+        menu.AddHeader("🧰 Support & Debug");
+        menu.AddFlyoutMenuItem("Open Support Files", "📁", new[]
+        {
+            new TrayMenuFlyoutItem(LocalizationHelper.GetString("Menu_OpenLogFile"), "📄", "log"),
+            new TrayMenuFlyoutItem("Logs Folder", "📁", "logfolder"),
+            new TrayMenuFlyoutItem("Config Folder", "🗂️", "configfolder"),
+            new TrayMenuFlyoutItem("Diagnostics Folder", "🧪", "diagnosticsfolder")
+        }, indent: true);
+        menu.AddFlyoutMenuItem("Copy Diagnostics", "📋", new[]
+        {
+            new TrayMenuFlyoutItem("Support Context", "📋", "supportcontext"),
+            new TrayMenuFlyoutItem("Debug Bundle", "🧰", "debugbundle"),
+            new TrayMenuFlyoutItem("Browser Setup", "🌐", "browsersetup"),
+            new TrayMenuFlyoutItem("Port Diagnostics", "🔌", "portdiagnostics"),
+            new TrayMenuFlyoutItem("Capability Diagnostics", "🛡️", "capabilitydiagnostics"),
+            new TrayMenuFlyoutItem("Node Inventory", "🖥️", "nodeinventory"),
+            new TrayMenuFlyoutItem("Channel Summary", "📡", "channelsummary"),
+            new TrayMenuFlyoutItem("Activity Summary", "⚡", "activitysummary"),
+            new TrayMenuFlyoutItem("Extensibility Summary", "🧩", "extensibilitysummary")
+        }, indent: true);
+        menu.AddMenuItem("Restart SSH Tunnel", "🔁", "restartsshtunnel", indent: true);
+
+        menu.AddSeparator();
+
         menu.AddMenuItem(LocalizationHelper.GetString("Menu_Exit"), "❌", "exit");
     }
 
@@ -1175,7 +1218,12 @@ public partial class App : Application
         {
             Logger.Info("Initializing Windows Node service...");
             
-            _nodeService = new NodeService(new AppLogger(), _dispatcherQueue, DataPath);
+            _nodeService = new NodeService(
+                new AppLogger(),
+                _dispatcherQueue,
+                DataPath,
+                () => _keepAliveWindow?.Content as FrameworkElement,
+                _settings);
             _nodeService.StatusChanged += OnNodeStatusChanged;
             _nodeService.NotificationRequested += OnNodeNotificationRequested;
             _nodeService.PairingStatusChanged += OnPairingStatusChanged;
@@ -1727,14 +1775,7 @@ public partial class App : Application
         }
 
         var iconPath = IconHelper.GetStatusIconPath(status);
-        var tooltip = $"OpenClaw Tray — {_currentStatus}";
-        
-        if (_currentActivity != null && !string.IsNullOrEmpty(_currentActivity.DisplayText))
-        {
-            tooltip += $"\n{_currentActivity.DisplayText}";
-        }
-
-        tooltip += $"\nLast check: {_lastCheckTime:HH:mm:ss}";
+        var tooltip = BuildTrayTooltip();
 
         try
         {
@@ -1745,6 +1786,47 @@ public partial class App : Application
         {
             Logger.Warn($"Failed to update tray icon: {ex.Message}");
         }
+    }
+
+    private string BuildTrayTooltip()
+    {
+        var topology = GatewayTopologyClassifier.Classify(
+            _settings?.GatewayUrl,
+            _settings?.UseSshTunnel == true,
+            _settings?.SshTunnelHost,
+            _settings?.SshTunnelLocalPort ?? 0,
+            _settings?.SshTunnelRemotePort ?? 0);
+        var channelReady = _lastChannels.Count(c => ChannelHealth.IsHealthyStatus(c.Status));
+        var nodeOnline = _lastNodes.Count(n => n.IsOnline);
+        var nodeTotal = _lastNodes.Length;
+        if (nodeTotal == 0 && _nodeService?.GetLocalNodeInfo() is { } localNode)
+        {
+            nodeTotal = 1;
+            nodeOnline = localNode.IsOnline ? 1 : 0;
+        }
+
+        var warningCount = 0;
+        if (_currentStatus != ConnectionStatus.Connected)
+            warningCount++;
+        if (_authFailureMessage != null)
+            warningCount++;
+        if (_lastChannels.Length == 0 && _currentStatus == ConnectionStatus.Connected)
+            warningCount++;
+
+        var tooltip = new List<string>
+        {
+            $"OpenClaw Tray — {_currentStatus}",
+            $"Topology: {topology.DisplayName}",
+            $"Channels: {channelReady}/{_lastChannels.Length} ready · Nodes: {nodeOnline}/{nodeTotal} online",
+            $"Warnings: {warningCount} · Last check: {_lastCheckTime:HH:mm:ss}"
+        };
+
+        if (_currentActivity != null && !string.IsNullOrEmpty(_currentActivity.DisplayText))
+        {
+            tooltip.Insert(1, _currentActivity.DisplayText);
+        }
+
+        return string.Join("\n", tooltip);
     }
 
     #endregion
@@ -1883,6 +1965,12 @@ public partial class App : Application
         if (_statusDetailWindow == null || _statusDetailWindow.IsClosed)
         {
             _statusDetailWindow = new StatusDetailWindow(BuildCommandCenterState());
+            _statusDetailWindow.RefreshRequested += async (s, e) => await RefreshCommandCenterAsync();
+            _statusDetailWindow.ActivityStreamRequested += (s, e) => ShowActivityStream();
+            _statusDetailWindow.ChannelToggleRequested += (s, channelName) => ToggleChannel(channelName);
+            _statusDetailWindow.DashboardPathRequested += (s, dashboardPath) => OpenDashboard(dashboardPath);
+            _statusDetailWindow.RestartSshTunnelRequested += (s, e) => RestartSshTunnel();
+            _statusDetailWindow.CheckUpdatesRequested += async (s, e) => await CheckForUpdatesUserInitiatedAsync();
             _statusDetailWindow.Closed += (s, e) => _statusDetailWindow = null;
         }
         else
@@ -1890,6 +1978,74 @@ public partial class App : Application
             _statusDetailWindow.UpdateStatus(BuildCommandCenterState());
         }
         _statusDetailWindow.Activate();
+    }
+
+    private void RestartSshTunnel()
+    {
+        if (_settings?.UseSshTunnel != true)
+        {
+            ShowToast(new ToastContentBuilder()
+                .AddText("SSH tunnel")
+                .AddText("Managed SSH tunnel mode is not enabled."));
+            return;
+        }
+
+        try
+        {
+            Logger.Info("Restarting managed SSH tunnel from Command Center");
+            DiagnosticsJsonlService.Write("tunnel.restart_requested", new
+            {
+                localEndpoint = _settings.SshTunnelLocalPort > 0 ? $"127.0.0.1:{_settings.SshTunnelLocalPort}" : null,
+                remotePort = _settings.SshTunnelRemotePort
+            });
+
+            UnsubscribeGatewayEvents();
+            _gatewayClient?.Dispose();
+            _gatewayClient = null;
+            _lastGatewaySelf = null;
+
+            var oldNodeService = _nodeService;
+            _nodeService = null;
+            try { oldNodeService?.Dispose(); } catch (Exception ex) { Logger.Warn($"Node dispose error: {ex.Message}"); }
+
+            _sshTunnelService?.Stop();
+            _currentStatus = ConnectionStatus.Disconnected;
+            UpdateTrayIcon();
+
+            if (!EnsureSshTunnelConfigured())
+            {
+                UpdateStatusDetailWindow();
+                ShowToast(new ToastContentBuilder()
+                    .AddText("SSH tunnel restart failed")
+                    .AddText(_sshTunnelService?.LastError ?? "Check SSH tunnel settings and logs."));
+                return;
+            }
+
+            if (_settings.EnableNodeMode)
+                InitializeNodeService();
+            else
+                InitializeGatewayClient();
+
+            UpdateStatusDetailWindow();
+            ShowToast(new ToastContentBuilder()
+                .AddText("SSH tunnel")
+                .AddText("Restarted; reconnecting to gateway."));
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"SSH tunnel restart request failed: {ex.Message}");
+            DiagnosticsJsonlService.Write("tunnel.restart_request_failed", new { ex.Message });
+            ShowToast(new ToastContentBuilder()
+                .AddText("SSH tunnel restart failed")
+                .AddText(ex.Message));
+        }
+    }
+
+    private async Task RefreshCommandCenterAsync()
+    {
+        await RunHealthCheckAsync(userInitiated: true);
+        await PollSessionsAsync();
+        UpdateStatusDetailWindow();
     }
 
     private void UpdateStatusDetailWindow()
@@ -1916,9 +2072,12 @@ public partial class App : Application
             _settings?.SshTunnelRemotePort ?? 0);
         var tunnel = BuildTunnelInfo();
         var portDiagnostics = PortDiagnosticsService.BuildDiagnostics(topology, tunnel);
+        ApplyDetectedSshForwardTopology(topology, portDiagnostics);
+        var runtime = BuildGatewayRuntimeInfo(portDiagnostics);
         var warnings = nodes.SelectMany(n => n.Warnings).ToList();
         warnings.AddRange(CommandCenterDiagnostics.BuildTopologyWarnings(topology, tunnel));
         warnings.AddRange(BuildPortDiagnosticWarnings(portDiagnostics, topology, tunnel));
+        warnings.AddRange(BuildBrowserProxyAuthWarnings(nodes));
 
         if (!string.IsNullOrWhiteSpace(_authFailureMessage))
         {
@@ -2036,6 +2195,8 @@ public partial class App : Application
             ConnectionStatus = _currentStatus,
             LastRefresh = _lastCheckTime.ToUniversalTime(),
             Topology = topology,
+            Runtime = runtime,
+            Update = _lastUpdateInfo,
             Tunnel = tunnel,
             GatewaySelf = _lastGatewaySelf,
             PortDiagnostics = portDiagnostics,
@@ -2046,7 +2207,39 @@ public partial class App : Application
             UsageStatus = _lastUsageStatus,
             UsageCost = _lastUsageCost,
             Nodes = nodes,
-            Warnings = CommandCenterDiagnostics.SortAndDedupeWarnings(warnings)
+            Warnings = CommandCenterDiagnostics.SortAndDedupeWarnings(warnings),
+            RecentActivity = ActivityStreamService.GetItems(12)
+                .Select(item => new CommandCenterActivityInfo
+                {
+                    Timestamp = item.Timestamp,
+                    Category = item.Category,
+                    Title = item.Title,
+                    Details = item.Details,
+                    DashboardPath = item.DashboardPath,
+                    SessionKey = item.SessionKey,
+                    NodeId = item.NodeId
+                })
+                .ToList()
+        };
+    }
+
+    private IEnumerable<GatewayDiagnosticWarning> BuildBrowserProxyAuthWarnings(IReadOnlyList<NodeCapabilityHealthInfo> nodes)
+    {
+        if (_settings?.NodeBrowserProxyEnabled == false ||
+            !string.IsNullOrWhiteSpace(_settings?.Token) ||
+            !nodes.Any(node => node.BrowserDeclaredCommands.Contains("browser.proxy", StringComparer.OrdinalIgnoreCase)))
+        {
+            yield break;
+        }
+
+        yield return new GatewayDiagnosticWarning
+        {
+            Severity = GatewayDiagnosticSeverity.Info,
+            Category = "browser",
+            Title = "Browser proxy auth may need a gateway token",
+            Detail = "This Windows node is advertising browser.proxy without a saved gateway shared token. QR/bootstrap pairing can connect the node, but an authenticated browser-control host may still require the same gateway token in Settings.",
+            RepairAction = "Copy browser proxy auth guidance",
+            CopyText = "If browser.proxy returns an auth error, enter the gateway shared token in Settings > Gateway Token, or configure the browser-control host to use auth compatible with the Windows node. Do not paste QR bootstrap tokens into the normal gateway token field."
         };
     }
 
@@ -2086,15 +2279,144 @@ public partial class App : Application
             if (port.Purpose.Equals("Browser proxy host", StringComparison.OrdinalIgnoreCase) &&
                 !port.IsListening)
             {
+                if (topology.UsesSshTunnel)
+                {
+                    yield return new GatewayDiagnosticWarning
+                    {
+                        Severity = GatewayDiagnosticSeverity.Info,
+                        Category = "browser",
+                        Title = "Browser proxy SSH forward is not listening",
+                        Detail = $"browser.proxy over SSH needs a companion local forward for port {port.Port}. Add the browser-control forward to the same tunnel, or enable the managed SSH tunnel so Windows starts both forwards.",
+                        RepairAction = "Copy browser proxy SSH forward",
+                        CopyText = BuildBrowserProxySshForwardHint(port.Port, tunnel)
+                    };
+                    continue;
+                }
+
                 yield return new GatewayDiagnosticWarning
                 {
                     Severity = GatewayDiagnosticSeverity.Info,
                     Category = "browser",
                     Title = "Browser proxy host not detected",
-                    Detail = "browser.proxy is Mac-local today. Windows can only add a compatible local browser proxy when a browser host is listening on the gateway port + 2."
+                    Detail = "browser.proxy needs a compatible browser-control host listening on the gateway port + 2.",
+                    RepairAction = "Copy browser setup guidance",
+                    CopyText = StatusDetailWindow.BuildBrowserSetupGuidance(port.Port, topology, tunnel)
                 };
             }
         }
+    }
+
+    private static string BuildBrowserProxySshForwardHint(int browserProxyPort, TunnelCommandCenterInfo? tunnel)
+    {
+        if (browserProxyPort is < 1 or > 65535)
+            return "ssh -N -L <local-browser-port>:127.0.0.1:<remote-browser-port> <user>@<host>";
+
+        var localBrowserPort = ResolveLocalBrowserProxyPort(browserProxyPort, tunnel);
+        var target = BuildSshTarget(tunnel);
+        var remoteBrowserPort = ResolveRemoteBrowserProxyPort(localBrowserPort, tunnel);
+        return remoteBrowserPort is >= 1 and <= 65535
+            ? $"ssh -N -L {localBrowserPort}:127.0.0.1:{remoteBrowserPort} {target}"
+            : $"ssh -N -L {localBrowserPort}:127.0.0.1:<remote-gateway-port+2> {target}";
+    }
+
+    private static string BuildSshTarget(TunnelCommandCenterInfo? tunnel)
+    {
+        var host = tunnel?.Host?.Trim();
+        var user = tunnel?.User?.Trim();
+        if (!string.IsNullOrWhiteSpace(host) && !string.IsNullOrWhiteSpace(user))
+            return $"{user}@{host}";
+        if (!string.IsNullOrWhiteSpace(host))
+            return $"<user>@{host}";
+        return "<user>@<host>";
+    }
+
+    private static int ResolveLocalBrowserProxyPort(int fallbackBrowserProxyPort, TunnelCommandCenterInfo? tunnel)
+    {
+        if (TryGetEndpointPort(tunnel?.BrowserProxyLocalEndpoint, out var browserLocalPort))
+            return browserLocalPort;
+
+        if (TryGetEndpointPort(tunnel?.LocalEndpoint, out var localGatewayPort) &&
+            localGatewayPort <= 65533)
+        {
+            return localGatewayPort + 2;
+        }
+
+        return fallbackBrowserProxyPort;
+    }
+
+    private static int? ResolveRemoteBrowserProxyPort(int localBrowserProxyPort, TunnelCommandCenterInfo? tunnel)
+    {
+        if (TryGetEndpointPort(tunnel?.BrowserProxyRemoteEndpoint, out var browserRemotePort))
+            return browserRemotePort;
+
+        if (!TryGetEndpointPort(tunnel?.RemoteEndpoint, out var remoteGatewayPort) ||
+            remoteGatewayPort > 65533)
+        {
+            return null;
+        }
+
+        if (TryGetEndpointPort(tunnel?.LocalEndpoint, out var localGatewayPort) &&
+            localBrowserProxyPort != localGatewayPort + 2)
+        {
+            return null;
+        }
+
+        return remoteGatewayPort + 2;
+    }
+
+    private static bool TryGetEndpointPort(string? endpoint, out int port)
+    {
+        port = 0;
+        if (string.IsNullOrWhiteSpace(endpoint))
+            return false;
+
+        var separator = endpoint.LastIndexOf(':');
+        return separator >= 0 &&
+            int.TryParse(endpoint[(separator + 1)..], out port) &&
+            port is >= 1 and <= 65535;
+    }
+
+    private static void ApplyDetectedSshForwardTopology(
+        GatewayTopologyInfo topology,
+        IReadOnlyList<PortDiagnosticInfo> ports)
+    {
+        if (topology.UsesSshTunnel ||
+            topology.DetectedKind != GatewayKind.WindowsNative ||
+            !topology.IsLoopback)
+        {
+            return;
+        }
+
+        var gatewayPort = ports.FirstOrDefault(port =>
+            port.Purpose.Equals("Gateway endpoint", StringComparison.OrdinalIgnoreCase));
+        if (gatewayPort is null ||
+            !gatewayPort.IsListening ||
+            !string.Equals(gatewayPort.OwningProcessName, "ssh", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        topology.DetectedKind = GatewayKind.MacOverSsh;
+        topology.DisplayName = "SSH tunnel (detected)";
+        topology.Transport = "ssh tunnel";
+        topology.UsesSshTunnel = true;
+        topology.Detail = $"Local gateway port {gatewayPort.Port} is owned by ssh, so Command Center treats it as a manually managed SSH local forward.";
+    }
+
+    private static GatewayRuntimeInfo BuildGatewayRuntimeInfo(IReadOnlyList<PortDiagnosticInfo> ports)
+    {
+        var gatewayPort = ports.FirstOrDefault(port =>
+            port.Purpose.Equals("Gateway endpoint", StringComparison.OrdinalIgnoreCase));
+        if (gatewayPort is null || !gatewayPort.IsListening)
+            return new GatewayRuntimeInfo();
+
+        return new GatewayRuntimeInfo
+        {
+            ProcessName = gatewayPort.OwningProcessName ?? "",
+            ProcessId = gatewayPort.OwningProcessId,
+            Port = gatewayPort.Port,
+            IsSshForward = string.Equals(gatewayPort.OwningProcessName, "ssh", StringComparison.OrdinalIgnoreCase)
+        };
     }
 
     private TunnelCommandCenterInfo? BuildTunnelInfo()
@@ -2129,6 +2451,14 @@ public partial class App : Application
             RemoteEndpoint = string.IsNullOrWhiteSpace(host)
                 ? $"127.0.0.1:{remotePort}"
                 : $"{host}:127.0.0.1:{remotePort}",
+            BrowserProxyLocalEndpoint = _sshTunnelService?.CurrentBrowserProxyLocalPort > 0
+                ? $"127.0.0.1:{_sshTunnelService.CurrentBrowserProxyLocalPort}"
+                : "",
+            BrowserProxyRemoteEndpoint = _sshTunnelService?.CurrentBrowserProxyRemotePort > 0
+                ? string.IsNullOrWhiteSpace(host)
+                    ? $"127.0.0.1:{_sshTunnelService.CurrentBrowserProxyRemotePort}"
+                    : $"{host}:127.0.0.1:{_sshTunnelService.CurrentBrowserProxyRemotePort}"
+                : "",
             Host = host,
             User = user,
             LastError = _sshTunnelService?.LastError,
@@ -2278,17 +2608,20 @@ public partial class App : Application
             if (isRunning)
             {
                 await _gatewayClient.StopChannelAsync(channelName);
+                AddRecentActivity($"Stopped channel: {channelName}", category: "channel", dashboardPath: "settings");
             }
             else
             {
                 await _gatewayClient.StartChannelAsync(channelName);
+                AddRecentActivity($"Started channel: {channelName}", category: "channel", dashboardPath: "settings");
             }
-            
+             
             // Refresh health
             await RunHealthCheckAsync();
         }
         catch (Exception ex)
         {
+            AddRecentActivity($"Channel toggle failed: {channelName}", category: "channel", details: ex.Message);
             Logger.Error($"Failed to toggle channel: {ex.Message}");
         }
     }
@@ -2313,6 +2646,176 @@ public partial class App : Application
         }
     }
 
+    private void OpenLogFolder()
+    {
+        OpenFolder(Path.GetDirectoryName(Logger.LogFilePath), "logs");
+    }
+
+    private void OpenConfigFolder()
+    {
+        OpenFolder(SettingsManager.SettingsDirectoryPath, "config");
+    }
+
+    private void OpenDiagnosticsFolder()
+    {
+        OpenFolder(Path.GetDirectoryName(DiagnosticsJsonlService.FilePath), "diagnostics");
+    }
+
+    private static void OpenFolder(string? folderPath, string label)
+    {
+        if (string.IsNullOrWhiteSpace(folderPath))
+        {
+            Logger.Warn($"Failed to open {label} folder: path is not configured");
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(folderPath);
+            Process.Start(new ProcessStartInfo(folderPath) { UseShellExecute = true });
+            Logger.Info($"Opened {label} folder: {folderPath}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            Logger.Warn($"Failed to open {label} folder {folderPath}: {ex.Message}");
+        }
+    }
+
+    private void CopySupportContext()
+    {
+        try
+        {
+            var package = new DataPackage();
+            package.SetText(StatusDetailWindow.BuildSupportContext(BuildCommandCenterState()));
+            Clipboard.SetContent(package);
+            Logger.Info("Copied support context from deep link");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Failed to copy support context from deep link: {ex.Message}");
+        }
+    }
+
+    private void CopyDebugBundle()
+    {
+        try
+        {
+            var package = new DataPackage();
+            package.SetText(StatusDetailWindow.BuildDebugBundle(BuildCommandCenterState()));
+            Clipboard.SetContent(package);
+            Logger.Info("Copied debug bundle from deep link");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Failed to copy debug bundle from deep link: {ex.Message}");
+        }
+    }
+
+    private void CopyBrowserSetupGuidance()
+    {
+        try
+        {
+            var package = new DataPackage();
+            package.SetText(StatusDetailWindow.BuildBrowserSetupGuidance(BuildCommandCenterState()));
+            Clipboard.SetContent(package);
+            Logger.Info("Copied browser setup guidance from deep link");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Failed to copy browser setup guidance from deep link: {ex.Message}");
+        }
+    }
+
+    private void CopyPortDiagnostics()
+    {
+        try
+        {
+            var package = new DataPackage();
+            package.SetText(StatusDetailWindow.BuildPortDiagnosticsSummary(BuildCommandCenterState().PortDiagnostics));
+            Clipboard.SetContent(package);
+            Logger.Info("Copied port diagnostics from deep link");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Failed to copy port diagnostics from deep link: {ex.Message}");
+        }
+    }
+
+    private void CopyCapabilityDiagnostics()
+    {
+        try
+        {
+            var package = new DataPackage();
+            package.SetText(StatusDetailWindow.BuildCapabilityDiagnosticsSummary(BuildCommandCenterState()));
+            Clipboard.SetContent(package);
+            Logger.Info("Copied capability diagnostics from deep link");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Failed to copy capability diagnostics from deep link: {ex.Message}");
+        }
+    }
+
+    private void CopyNodeInventory()
+    {
+        try
+        {
+            var package = new DataPackage();
+            package.SetText(StatusDetailWindow.BuildNodeInventorySummary(BuildCommandCenterState().Nodes));
+            Clipboard.SetContent(package);
+            Logger.Info("Copied node inventory from deep link");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Failed to copy node inventory from deep link: {ex.Message}");
+        }
+    }
+
+    private void CopyChannelSummary()
+    {
+        try
+        {
+            var package = new DataPackage();
+            package.SetText(StatusDetailWindow.BuildChannelSummaryText(BuildCommandCenterState().Channels));
+            Clipboard.SetContent(package);
+            Logger.Info("Copied channel summary from deep link");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Failed to copy channel summary from deep link: {ex.Message}");
+        }
+    }
+
+    private void CopyActivitySummary()
+    {
+        try
+        {
+            var package = new DataPackage();
+            package.SetText(StatusDetailWindow.BuildActivitySummary(BuildCommandCenterState().RecentActivity));
+            Clipboard.SetContent(package);
+            Logger.Info("Copied activity summary from deep link");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Failed to copy activity summary from deep link: {ex.Message}");
+        }
+    }
+
+    private void CopyExtensibilitySummary()
+    {
+        try
+        {
+            var package = new DataPackage();
+            package.SetText(StatusDetailWindow.BuildExtensibilitySummary(BuildCommandCenterState().Channels));
+            Clipboard.SetContent(package);
+            Logger.Info("Copied extensibility summary from deep link");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Failed to copy extensibility summary from deep link: {ex.Message}");
+        }
+    }
+
     private void OnGlobalHotkeyPressed(object? sender, EventArgs e)
     {
         // Hotkey events are raised from a dedicated Win32 message-loop thread.
@@ -2334,31 +2837,66 @@ public partial class App : Application
 
     #region Updates
 
+    private static UpdateCommandCenterInfo BuildInitialUpdateInfo() => new()
+    {
+        Status = "Not checked",
+        CurrentVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown"
+    };
+
     private async Task<bool> CheckForUpdatesAsync()
     {
         try
         {
 #if DEBUG
             Logger.Info("Skipping update check in debug build");
+            _lastUpdateInfo = new UpdateCommandCenterInfo
+            {
+                Status = "Skipped",
+                CurrentVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown",
+                CheckedAt = DateTime.UtcNow,
+                Detail = "debug build"
+            };
             return true;
 #else
             Logger.Info("Checking for updates...");
+            _lastUpdateInfo = new UpdateCommandCenterInfo
+            {
+                Status = "Checking",
+                CurrentVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown",
+                CheckedAt = DateTime.UtcNow
+            };
             var updateFound = await AppUpdater.CheckForUpdatesAsync();
 
             if (!updateFound)
             {
                 Logger.Info("No updates available");
+                _lastUpdateInfo = new UpdateCommandCenterInfo
+                {
+                    Status = "Current",
+                    CurrentVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown",
+                    CheckedAt = DateTime.UtcNow,
+                    Detail = "no updates available"
+                };
                 return true;
             }
 
             var release = AppUpdater.LatestRelease!;
             var changelog = AppUpdater.GetChangelog(true) ?? "No release notes available.";
             Logger.Info($"Update available: {release.TagName}");
+            _lastUpdateInfo = new UpdateCommandCenterInfo
+            {
+                Status = "Available",
+                CurrentVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown",
+                LatestVersion = release.TagName,
+                CheckedAt = DateTime.UtcNow,
+                Detail = "prompted"
+            };
 
             if (!string.IsNullOrWhiteSpace(_settings?.SkippedUpdateTag) &&
                 string.Equals(_settings.SkippedUpdateTag, release.TagName, StringComparison.OrdinalIgnoreCase))
             {
                 Logger.Info($"Skipping update prompt for remembered version {release.TagName}");
+                _lastUpdateInfo.Detail = "skipped by user";
                 return true;
             }
 
@@ -2367,6 +2905,7 @@ public partial class App : Application
 
             if (result == UpdateDialogResult.Download)
             {
+                _lastUpdateInfo.Detail = "download requested";
                 if (_settings != null)
                 {
                     _settings.SkippedUpdateTag = string.Empty;
@@ -2380,6 +2919,7 @@ public partial class App : Application
             {
                 _settings.SkippedUpdateTag = release.TagName ?? string.Empty;
                 _settings.Save();
+                _lastUpdateInfo.Detail = "skipped by user";
             }
 
             return true; // RemindLater or Skip - continue
@@ -2388,7 +2928,25 @@ public partial class App : Application
         catch (Exception ex)
         {
             Logger.Warn($"Update check failed: {ex.Message}");
+            _lastUpdateInfo = new UpdateCommandCenterInfo
+            {
+                Status = "Failed",
+                CurrentVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown",
+                CheckedAt = DateTime.UtcNow,
+                Detail = ex.Message
+            };
             return true;
+        }
+    }
+
+    private async Task CheckForUpdatesUserInitiatedAsync()
+    {
+        Logger.Info("Manual update check requested");
+        var shouldContinue = await CheckForUpdatesAsync();
+        UpdateStatusDetailWindow();
+        if (!shouldContinue)
+        {
+            Exit();
         }
     }
 
@@ -2470,8 +3028,26 @@ public partial class App : Application
         {
             OpenSettings = ShowSettings,
             OpenSetup = () => _ = ShowSetupWizardAsync(),
+            RunHealthCheck = () => RunHealthCheckAsync(userInitiated: true),
+            CheckForUpdates = CheckForUpdatesUserInitiatedAsync,
+            OpenLogFile = OpenLogFile,
+            OpenLogFolder = OpenLogFolder,
+            OpenConfigFolder = OpenConfigFolder,
+            OpenDiagnosticsFolder = OpenDiagnosticsFolder,
+            CopySupportContext = CopySupportContext,
+            CopyDebugBundle = CopyDebugBundle,
+            CopyBrowserSetupGuidance = CopyBrowserSetupGuidance,
+            CopyPortDiagnostics = CopyPortDiagnostics,
+            CopyCapabilityDiagnostics = CopyCapabilityDiagnostics,
+            CopyNodeInventory = CopyNodeInventory,
+            CopyChannelSummary = CopyChannelSummary,
+            CopyActivitySummary = CopyActivitySummary,
+            CopyExtensibilitySummary = CopyExtensibilitySummary,
+            RestartSshTunnel = RestartSshTunnel,
             OpenChat = ShowWebChat,
             OpenCommandCenter = ShowStatusDetail,
+            OpenActivityStream = ShowActivityStream,
+            OpenNotificationHistory = ShowNotificationHistory,
             OpenDashboard = OpenDashboard,
             OpenQuickSend = ShowQuickSend,
             SendMessage = async (msg) =>

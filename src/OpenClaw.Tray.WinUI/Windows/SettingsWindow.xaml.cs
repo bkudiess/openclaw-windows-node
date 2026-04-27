@@ -47,6 +47,7 @@ public sealed partial class SettingsWindow : WindowEx
         _manualGatewayUrl = _settings.GatewayUrl;
         GatewayUrlTextBox.Text = _settings.GatewayUrl;
         UpdateSshTunnelUiState();
+        UpdateDetectedTopologyText();
         TokenTextBox.Text = _settings.Token;
         AutoStartToggle.IsOn = _settings.AutoStart;
         GlobalHotkeyToggle.IsOn = _settings.GlobalHotkeyEnabled;
@@ -77,6 +78,12 @@ public sealed partial class SettingsWindow : WindowEx
         
         // Advanced
         NodeModeToggle.IsOn = _settings.EnableNodeMode;
+        NodeCanvasToggle.IsOn = _settings.NodeCanvasEnabled;
+        NodeScreenToggle.IsOn = _settings.NodeScreenEnabled;
+        NodeCameraToggle.IsOn = _settings.NodeCameraEnabled;
+        NodeLocationToggle.IsOn = _settings.NodeLocationEnabled;
+        NodeBrowserProxyToggle.IsOn = _settings.NodeBrowserProxyEnabled;
+        UpdateSshTunnelPreviewText();
     }
 
     private void SaveSettings()
@@ -116,6 +123,11 @@ public sealed partial class SettingsWindow : WindowEx
         
         // Advanced
         _settings.EnableNodeMode = NodeModeToggle.IsOn;
+        _settings.NodeCanvasEnabled = NodeCanvasToggle.IsOn;
+        _settings.NodeScreenEnabled = NodeScreenToggle.IsOn;
+        _settings.NodeCameraEnabled = NodeCameraToggle.IsOn;
+        _settings.NodeLocationEnabled = NodeLocationToggle.IsOn;
+        _settings.NodeBrowserProxyEnabled = NodeBrowserProxyToggle.IsOn;
 
         _settings.Save();
         AutoStartManager.SetAutoStart(_settings.AutoStart);
@@ -153,8 +165,11 @@ public sealed partial class SettingsWindow : WindowEx
             if (useSshTunnel)
             {
                 testTunnel = new SshTunnelService(testLogger);
-                Logger.Info($"[Settings] Starting temporary SSH tunnel for test: {sshUser}@{sshHost} local:{localPort} remote:{remotePort}");
-                testTunnel.EnsureStarted(sshUser, sshHost, remotePort, localPort);
+                var includeBrowserProxyForward =
+                    NodeBrowserProxyToggle.IsOn &&
+                    SshTunnelCommandLine.CanForwardBrowserProxyPort(remotePort, localPort);
+                Logger.Info($"[Settings] Starting temporary SSH tunnel for test: {sshUser}@{sshHost} local:{localPort} remote:{remotePort} browserProxyForward:{includeBrowserProxyForward}");
+                testTunnel.EnsureStarted(sshUser, sshHost, remotePort, localPort, includeBrowserProxyForward);
             }
 
             var client = new OpenClawGatewayClient(
@@ -338,6 +353,64 @@ public sealed partial class SettingsWindow : WindowEx
         {
             UpdateSshTunnelUiState();
         }
+        else
+        {
+            UpdateDetectedTopologyText();
+            UpdateSshTunnelPreviewText();
+        }
+    }
+
+    private void OnTopologyInputChanged(object sender, Microsoft.UI.Xaml.Controls.TextChangedEventArgs e)
+    {
+        UpdateDetectedTopologyText();
+        UpdateSshTunnelPreviewText();
+    }
+
+    private void OnNodeBrowserProxyToggled(object sender, RoutedEventArgs e)
+    {
+        UpdateSshTunnelPreviewText();
+    }
+
+    private void OnUseLocalGateway(object sender, RoutedEventArgs e)
+    {
+        UseSshTunnelToggle.IsOn = false;
+        GatewayUrlTextBox.Text = "ws://127.0.0.1:18789";
+        _manualGatewayUrl = GatewayUrlTextBox.Text;
+        StatusLabel.Text = "Local gateway selected. Use this when the gateway runs directly on Windows.";
+        UpdateDetectedTopologyText();
+        Logger.Info("[Settings] Topology preset selected: local gateway");
+    }
+
+    private void OnUseWslGateway(object sender, RoutedEventArgs e)
+    {
+        UseSshTunnelToggle.IsOn = false;
+        GatewayUrlTextBox.Text = "ws://wsl.localhost:18789";
+        _manualGatewayUrl = GatewayUrlTextBox.Text;
+        StatusLabel.Text = "WSL gateway selected. Change the distro host if your gateway uses a named distro.";
+        UpdateDetectedTopologyText();
+        Logger.Info("[Settings] Topology preset selected: WSL gateway");
+    }
+
+    private void OnUseSshTunnel(object sender, RoutedEventArgs e)
+    {
+        UseSshTunnelToggle.IsOn = true;
+        UpdateSshTunnelUiState();
+        StatusLabel.Text = "SSH tunnel selected. Fill in SSH User and SSH Host, then test the connection.";
+        UpdateDetectedTopologyText();
+        Logger.Info("[Settings] Topology preset selected: SSH tunnel");
+    }
+
+    private void OnUseRemoteGateway(object sender, RoutedEventArgs e)
+    {
+        UseSshTunnelToggle.IsOn = false;
+        GatewayUrlTextBox.Text = GatewayUrlTextBox.Text.StartsWith("ws://127.0.0.1:", StringComparison.OrdinalIgnoreCase) ||
+                                 GatewayUrlTextBox.Text.StartsWith("ws://wsl.localhost:", StringComparison.OrdinalIgnoreCase)
+            ? "wss://host.tailnet.ts.net"
+            : GatewayUrlTextBox.Text;
+        _manualGatewayUrl = GatewayUrlTextBox.Text;
+        StatusLabel.Text = "Remote gateway selected. Prefer wss:// for Tailscale, LAN, or public gateways.";
+        UpdateDetectedTopologyText();
+        Logger.Info("[Settings] Topology preset selected: remote gateway");
     }
 
     private void UpdateSshTunnelUiState()
@@ -364,6 +437,64 @@ public sealed partial class SettingsWindow : WindowEx
             {
                 GatewayUrlTextBox.Text = _manualGatewayUrl;
             }
+        }
+
+        UpdateDetectedTopologyText();
+        UpdateSshTunnelPreviewText();
+    }
+
+    private void UpdateDetectedTopologyText()
+    {
+        if (DetectedTopologyText == null)
+            return;
+
+        var topology = GatewayTopologyClassifier.Classify(
+            GatewayUrlTextBox.Text,
+            UseSshTunnelToggle.IsOn,
+            SshTunnelHostTextBox.Text,
+            ParsePortOrDefault(SshTunnelLocalPortTextBox.Text, _settings.SshTunnelLocalPort),
+            ParsePortOrDefault(SshTunnelRemotePortTextBox.Text, _settings.SshTunnelRemotePort));
+
+        DetectedTopologyText.Text = $"Detected: {topology.DisplayName} · {topology.Transport} · {topology.Detail}";
+    }
+
+    private void UpdateSshTunnelPreviewText()
+    {
+        if (SshTunnelPreviewText == null)
+            return;
+
+        if (!UseSshTunnelToggle.IsOn)
+        {
+            SshTunnelPreviewText.Text = "";
+            return;
+        }
+
+        var user = SshTunnelUserTextBox.Text.Trim();
+        var host = SshTunnelHostTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(user) || string.IsNullOrWhiteSpace(host) ||
+            !int.TryParse(SshTunnelRemotePortTextBox.Text.Trim(), out var remotePort) ||
+            !int.TryParse(SshTunnelLocalPortTextBox.Text.Trim(), out var localPort))
+        {
+            SshTunnelPreviewText.Text = "Managed tunnel preview: fill SSH user, SSH host, and ports to preview the exact ssh command.";
+            return;
+        }
+
+        var includeBrowserProxyForward =
+            NodeBrowserProxyToggle.IsOn &&
+            SshTunnelCommandLine.CanForwardBrowserProxyPort(remotePort, localPort);
+
+        try
+        {
+            var args = SshTunnelCommandLine.BuildArguments(user, host, remotePort, localPort, includeBrowserProxyForward);
+            SshTunnelPreviewText.Text = $"Managed tunnel preview: ssh {args}";
+            if (NodeBrowserProxyToggle.IsOn && !includeBrowserProxyForward)
+            {
+                SshTunnelPreviewText.Text += "\nBrowser proxy companion forward skipped because gateway ports must be 65533 or below.";
+            }
+        }
+        catch (ArgumentException ex)
+        {
+            SshTunnelPreviewText.Text = $"Managed tunnel preview unavailable: {ex.Message}";
         }
     }
 

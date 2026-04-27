@@ -224,6 +224,57 @@ public sealed partial class TrayMenuWindow : WindowEx
         _itemCount++;
     }
 
+    public void AddFlyoutMenuItem(string text, string? icon, IEnumerable<TrayMenuFlyoutItem> items, bool indent = false)
+    {
+        var content = new TextBlock
+        {
+            Text = string.IsNullOrEmpty(icon) ? $"{text}  ›" : $"{icon}  {text}  ›",
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            IsTextSelectionEnabled = false
+        };
+
+        var flyout = new MenuFlyout();
+        foreach (var item in items)
+        {
+            var menuItem = new MenuFlyoutItem
+            {
+                Text = string.IsNullOrEmpty(item.Icon) ? item.Text : $"{item.Icon}  {item.Text}",
+                Tag = item.Action
+            };
+            menuItem.Click += (s, e) =>
+            {
+                MenuItemClicked?.Invoke(this, item.Action);
+                this.Hide();
+            };
+            flyout.Items.Add(menuItem);
+        }
+
+        var leftPadding = indent ? 28 : 12;
+        var button = new Button
+        {
+            Content = content,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(leftPadding, 8, 12, 8),
+            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Flyout = flyout,
+            CornerRadius = new CornerRadius(4)
+        };
+
+        button.PointerEntered += (s, e) =>
+        {
+            button.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SubtleFillColorSecondaryBrush"];
+        };
+        button.PointerExited += (s, e) =>
+        {
+            button.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        };
+
+        MenuPanel.Children.Add(button);
+        _itemCount++;
+    }
+
     public void AddSeparator()
     {
         MenuPanel.Children.Add(new Border
@@ -355,4 +406,18 @@ public sealed partial class TrayMenuWindow : WindowEx
         var dpi = hwnd != IntPtr.Zero ? GetDpiForWindow(hwnd) : 0;
         return dpi == 0 ? 96u : dpi;
     }
+}
+
+public sealed class TrayMenuFlyoutItem
+{
+    public TrayMenuFlyoutItem(string text, string? icon, string action)
+    {
+        Text = text;
+        Icon = icon;
+        Action = action;
+    }
+
+    public string Text { get; }
+    public string? Icon { get; }
+    public string Action { get; }
 }

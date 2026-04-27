@@ -135,6 +135,31 @@ public class SshTunnelCommandLineTests
         Assert.Equal("-o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o TCPKeepAlive=yes -N -L 28789:127.0.0.1:18789 scott@mac-mini.local", args);
     }
 
+    [Fact]
+    public void BuildArguments_CanIncludeBrowserProxyForward()
+    {
+        var args = SshTunnelCommandLine.BuildArguments(
+            "scott",
+            "mac-mini.local",
+            18789,
+            28789,
+            includeBrowserProxyForward: true);
+
+        Assert.Equal("-o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o TCPKeepAlive=yes -N -L 28789:127.0.0.1:18789 -L 28791:127.0.0.1:18791 scott@mac-mini.local", args);
+    }
+
+    [Fact]
+    public void BuildArguments_RejectsBrowserProxyForwardWhenPortPlusTwoOverflows()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            SshTunnelCommandLine.BuildArguments(
+                "scott",
+                "mac-mini.local",
+                65534,
+                28789,
+                includeBrowserProxyForward: true));
+    }
+
     [Theory]
     [InlineData("bad user", "mac-mini", 18789, 28789)]
     [InlineData("scott", "mac mini", 18789, 28789)]
@@ -893,6 +918,7 @@ public class CommandCenterModelTests
         Assert.Contains("device.info", CommandCenterCommandGroups.SafeCompanionCommands);
         Assert.Contains("device.status", CommandCenterCommandGroups.SafeCompanionCommands);
         Assert.Contains("screen.record", CommandCenterCommandGroups.DangerousCommands);
+        Assert.Contains("browser.proxy", CommandCenterCommandGroups.BrowserCommands);
         Assert.Contains("browser.proxy", CommandCenterCommandGroups.MacNodeParityCommands);
     }
 
@@ -1040,7 +1066,95 @@ public class CommandCenterModelTests
             !w.CopyText.Contains("screen.record", StringComparison.Ordinal));
         Assert.Contains(info.Warnings, w =>
             w.Title == "Privacy-sensitive commands are currently blocked" &&
-            string.IsNullOrEmpty(w.CopyText));
+            w.CopyText != null &&
+            w.CopyText.Contains("screen.record", StringComparison.Ordinal) &&
+            w.CopyText.Contains("camera.snap", StringComparison.Ordinal) &&
+            !w.CopyText.Contains("openclaw config set", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(info.Warnings, w =>
+            w.Title == "Privacy-sensitive commands require explicit opt-in" &&
+            w.RepairAction == "Copy opt-in guidance" &&
+            !string.IsNullOrWhiteSpace(w.CopyText));
+    }
+
+    [Fact]
+    public void NodeCapabilityHealthInfo_WarnsSpecificallyForBlockedBrowserProxy()
+    {
+        var node = new GatewayNodeInfo
+        {
+            NodeId = "node-1",
+            DisplayName = "Windows Node",
+            Platform = "windows",
+            IsOnline = true,
+            Commands =
+            [
+                "system.notify",
+                "system.run",
+                "system.which",
+                "browser.proxy"
+            ],
+            Permissions = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["browser.proxy"] = false
+            }
+        };
+
+        var info = NodeCapabilityHealthInfo.FromNode(node);
+
+        Assert.Contains("browser.proxy", info.BrowserDeclaredCommands);
+        Assert.Contains("browser.proxy", info.MissingBrowserAllowlistCommands);
+        Assert.DoesNotContain("browser.proxy", info.MissingMacParityCommands);
+        Assert.Contains(info.Warnings, w =>
+            w.Title == "Browser proxy command is filtered by gateway policy" &&
+            w.RepairAction == "Copy browser proxy allowlist repair command" &&
+            w.CopyText == "openclaw config set gateway.nodes.allowCommands '[\"browser.proxy\"]'");
+        Assert.DoesNotContain(info.Warnings, w => w.Title == "Some node commands are filtered");
+    }
+
+    [Fact]
+    public void NodeCapabilityHealthInfo_TreatsDisabledCommandsAsSettingsChoice()
+    {
+        var node = new GatewayNodeInfo
+        {
+            NodeId = "node-1",
+            DisplayName = "Windows Node",
+            Platform = "windows",
+            IsOnline = true,
+            Commands =
+            [
+                "system.notify",
+                "system.run",
+                "system.which",
+                "device.info",
+                "device.status"
+            ],
+            DisabledCommands =
+            [
+                "camera.list",
+                "camera.snap",
+                "camera.clip",
+                "screen.snapshot",
+                "screen.record",
+                "browser.proxy"
+            ]
+        };
+
+        var info = NodeCapabilityHealthInfo.FromNode(node);
+
+        Assert.Contains("camera.snap", info.DisabledBySettingsCommands);
+        Assert.DoesNotContain("camera.list", info.MissingMacParityCommands);
+        Assert.DoesNotContain("screen.snapshot", info.MissingMacParityCommands);
+        Assert.DoesNotContain("browser.proxy", info.MissingMacParityCommands);
+        Assert.Contains(info.Warnings, w =>
+            w.Category == "settings" &&
+            w.Title == "Some node capabilities are disabled" &&
+            w.Detail.Contains("screen.record", StringComparison.Ordinal));
+        Assert.Contains(info.Warnings, w =>
+            w.Category == "settings" &&
+            w.Title == "Browser proxy bridge is disabled" &&
+            w.Detail.Contains("Mac browser-control parity", StringComparison.Ordinal) &&
+            w.CopyText != null &&
+            w.CopyText.Contains("local gateway port + 2 forwards to remote port + 2", StringComparison.Ordinal));
+        Assert.DoesNotContain(info.Warnings, w => w.Title == "Browser proxy host not available");
     }
 
     [Fact]
@@ -1050,6 +1164,17 @@ public class CommandCenterModelTests
             ["screen.snapshot", "canvas.present", "screen.snapshot"]);
 
         Assert.Equal("openclaw config set gateway.nodes.allowCommands '[\"canvas.present\",\"screen.snapshot\"]'", command);
+    }
+
+    [Fact]
+    public void BuildDangerousCommandOptInGuidance_IsStableAndDoesNotEmitRepairCommand()
+    {
+        var guidance = CommandCenterDiagnostics.BuildDangerousCommandOptInGuidance(
+            ["screen.record", "camera.snap", "screen.record"]);
+
+        Assert.Contains("camera.snap, screen.record", guidance);
+        Assert.Contains("Do not use wildcards", guidance);
+        Assert.DoesNotContain("openclaw config set", guidance, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1067,6 +1192,34 @@ public class CommandCenterModelTests
         Assert.Equal(GatewayDiagnosticSeverity.Critical, warnings[0].Severity);
         Assert.Equal(GatewayDiagnosticSeverity.Warning, warnings[1].Severity);
         Assert.Equal(GatewayDiagnosticSeverity.Info, warnings[2].Severity);
+    }
+
+    [Fact]
+    public void UpdateCommandCenterInfo_DisplayTextIncludesCurrentAndLatest()
+    {
+        var info = new UpdateCommandCenterInfo
+        {
+            Status = "Available",
+            CurrentVersion = "1.2.3",
+            LatestVersion = "v1.2.4",
+            Detail = "prompted"
+        };
+
+        Assert.Equal("Available · current 1.2.3 · latest v1.2.4 · prompted", info.DisplayText);
+    }
+
+    [Fact]
+    public void GatewayRuntimeInfo_DisplayTextIncludesProcessPortAndForward()
+    {
+        var info = new GatewayRuntimeInfo
+        {
+            ProcessName = "ssh",
+            ProcessId = 1234,
+            Port = 18789,
+            IsSshForward = true
+        };
+
+        Assert.Equal("ssh (PID 1234) on :18789 · SSH local forward", info.DisplayText);
     }
 
     [Theory]
@@ -1090,6 +1243,21 @@ public class CommandCenterModelTests
         var topology = GatewayTopologyClassifier.Classify(url, useSshTunnel, sshHost, 18789, 18789);
 
         Assert.Equal(expectedKind, topology.DetectedKind);
+    }
+
+    [Fact]
+    public void GatewayTopologyClassifier_UsesTunnelLocalPortWhenSshGatewayUrlIsStale()
+    {
+        var topology = GatewayTopologyClassifier.Classify(
+            "ws://127.0.0.1:18789",
+            useSshTunnel: true,
+            sshHost: "mac-mini",
+            sshLocalPort: 28789,
+            sshRemotePort: 18789);
+
+        Assert.Equal(GatewayKind.MacOverSsh, topology.DetectedKind);
+        Assert.Equal("ws://127.0.0.1:28789", topology.GatewayUrl);
+        Assert.Contains("Local port 28789 forwards to mac-mini:18789", topology.Detail);
     }
 
     [Fact]

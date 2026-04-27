@@ -72,7 +72,7 @@ Important Mac security/privacy pieces:
 - Command display sanitizer for control chars, invisible characters, and non-ASCII spaces to prevent spoofing.
 - Glob allowlist matcher semantics.
 - Host environment sanitizer with large inherited secret/toolchain blocklist, PATH override rejection, and shell-wrapper allowlist.
-- Exec approval edits with base-hash optimistic concurrency.
+- Exec approval edits with base-hash optimistic concurrency: **implemented for `system.execApprovals.get/set`; stale remote writes are rejected**
 - Pairing prompt with name, node ID, platform, app, IP, and approve/reject/later actions.
 
 ### 2.3 Gateway and browser proxy findings
@@ -92,6 +92,7 @@ Gateway/browser facts:
   - files are base64 payloads with path/mime metadata
 - Persistent profile mutations are blocked at gateway and node-host levels.
 - Mac implements `browser.proxy` only for local mode, proxying to `127.0.0.1:{gatewayPort+2}` with Bearer or `x-openclaw-password` auth, and a 10 MB/file extraction cap.
+- Windows managed SSH tunnel mode now forwards both the gateway port and the browser-control companion port (`local+2` to `remote+2`) when the browser proxy capability is enabled, so Mac-over-SSH topologies can satisfy the same local-only browser proxy contract.
 
 Gateway APIs and signals worth surfacing:
 
@@ -219,7 +220,7 @@ Add categories beyond current node/channel/allowlist/parity:
 | `tunnel` | SSH tunnel stopped/restarting/failed | Copy `ssh -N -L ...` command; "Reset tunnel" later |
 | `wsl` | Localhost likely backed by WSL; NAT or distro reboot may break it | Show WSL-specific diagnostic hints |
 | `tailscale` | Tailnet host but no tunnel/direct auth mismatch | Show Tailscale/wss/auth hints |
-| `browser` | `browser.proxy` not declared/implemented | Explain local-only browser proxy options |
+| `browser` | `browser.proxy` disabled, policy-filtered, or missing a gateway+2 browser-control host | Explain Settings, allowlist, SSH forward, or local browser-host repair path |
 | `gateway` | stale health/stateVersion, auth error, not connected | Existing patterns plus topology-specific detail |
 
 ### 4.3 Tray menu badge
@@ -232,7 +233,7 @@ Add a small topology badge next to status:
 
 ### 4.4 Settings hint
 
-In Settings, show read-only detected topology near gateway URL/tunnel settings:
+In Settings, show read-only detected topology near gateway URL/tunnel settings: **implemented with a live summary under the topology guide**
 
 - detected kind
 - whether settings imply tunnel/direct
@@ -268,25 +269,25 @@ Keep StatusDetailWindow as the first Command Center, but plan for tabs/sections:
 | Device info/status | Present | Present | Done; keep payload shape tests |
 | System notify | Present | Present | Add overlay/priority parity later |
 | System run/which | Present | Present | Verify push event names and approval reasons |
-| Exec approvals get/set | Present | Present | Add base-hash concurrency parity if missing |
-| Browser proxy | Present, local-only | Missing | Highest concrete command gap |
+| Exec approvals get/set | Present | Present | Base-hash optimistic concurrency implemented |
+| Browser proxy | Present, local-only | Local bridge present; live smoke blocked until browser-control host listens on gateway+2 | Continue host setup/live-smoke guidance |
 
 ### 5.2 Mission Control surfaces
 
 | Mac capability | Windows today | Plan |
 |---|---|---|
-| Gateway process state | Missing | Topology/gateway card first; process manager later only for local Windows gateway |
-| Endpoint store/discovery | Missing | Add classifier, then discovery/profiles |
-| SSH tunnel robust state | Basic | Add tunnel status/error/startedAt; later Mac-equivalent SSH options/reuse |
-| PortGuardian | Missing | Add port diagnostics later |
-| HealthStore derived states | Partial | Add topology-aware health summary |
-| Nodes submenu copy actions | Partial | Improve node detail/copy actions |
-| Session previews/settings | Partial | Add thinking/verbose submenus and richer previews |
-| Cost 30-day chart | Partial usage display | Add usage/cost section and daily bars |
-| Agent events ring | Partial Activity Stream | Expand to 400-event rich ring |
+| Gateway process state | Implemented for detected/managed runtimes | Command Center shows topology, gateway listener process/PID, and managed/detected SSH context; process manager remains only for a future owned local Windows gateway |
+| Endpoint store/discovery | Implemented first slice | Settings topology presets and detected topology summaries classify local, SSH, WSL, and remote gateway shapes |
+| SSH tunnel robust state | Implemented | Managed SSH tunnel status/error/runtime details surface in Settings, Command Center, support context, and restart actions |
+| PortGuardian | Partial | Read-only port diagnostics identify local listeners and owning process/PID; destructive kill actions remain intentionally absent |
+| HealthStore derived states | Implemented first slice | Command Center warnings include topology-aware gateway, tunnel, browser-control, channel, usage, and node health |
+| Nodes submenu copy actions | Implemented | Per-node copy and full node inventory copy include command groups, filtered commands, disabled settings, and parity gaps |
+| Session previews/settings | Implemented | Tray session rows include previews plus thinking/verbose, reset, compact, and delete actions |
+| Cost 30-day chart | Implemented | Command Center renders 30-day cost bars from `usage.cost` daily totals |
+| Agent events ring | Implemented | Activity Stream keeps a 400-event rich ring and support bundle window |
 | Permissions matrix | Implemented first slice | Command Center shows safe Windows privacy settings deep links without probing devices |
-| Onboarding security banner | Partial setup wizard | Add Mac-style warning and topology choice |
-| Debug actions | Partial | Add restart/reset/log/config/port/test heartbeat actions |
+| Onboarding security banner | Implemented | Setup Wizard warns about agent control of enabled local command/screen/camera/location/browser/canvas surfaces |
+| Debug actions | Implemented | Tray, Command Center, deep links, and PowerToys expose logs/config/diagnostics, health/update actions, managed SSH restart, support context, debug bundle, browser setup, and copyable diagnostics/summaries |
 | Voice/Talk | Missing | Separate roadmap track |
 | Cron/Skills settings | Missing/limited | Separate roadmap track |
 
@@ -318,7 +319,7 @@ Keep StatusDetailWindow as the first Command Center, but plan for tabs/sections:
 
 Recommended: investigate option 1 first, with `browser.proxy` gated to local/tunnel topologies and disabled for remote public gateways unless the upstream browser host contract says otherwise.
 
-Current Windows implementation status: Command Center now performs a read-only feasibility probe for direct local/WSL gateways by checking the expected browser-host port (`gateway port + 2`) and warning when no compatible local browser host is listening. It intentionally does not advertise `browser.proxy` yet, because doing so without a reachable browser host would create a broken command surface.
+Current Windows implementation status: Windows node now advertises `browser.proxy` and forwards it to the local browser control host at `127.0.0.1:{gateway port + 2}`. It uses the gateway bearer token first and retries with the same shared secret as browser-host password/basic auth if bearer auth is rejected. Managed SSH tunnel mode also forwards the companion browser-control port (`local gateway port + 2` to `remote gateway port + 2`) when the browser proxy capability is enabled. Command Center still performs the read-only feasibility probe and warns when no compatible local browser host is listening, because the command depends on that local service being available.
 
 ## 7. Security and privacy requirements
 
@@ -389,15 +390,28 @@ Risk: low-medium; mostly parsing and UI.
 Deliverables:
 
 - Debug/Mission Control actions:
-  - open log
-  - open config folder
+  - open log: **implemented as Open Logs folder**
+  - open config folder: **implemented**
   - open session store
-  - run health now
+  - run health now: **implemented as Refresh Health**
   - send test heartbeat
-  - reset tunnel
+  - reset managed SSH tunnel: **implemented as Restart SSH Tunnel when Settings owns the tunnel**
   - restart local gateway if topology is WindowsNative and managed
+  - copy privacy-safe support context: **implemented**
 - Rolling diagnostics JSONL with rotation: **implemented for privacy-safe app/connection/gateway/tunnel metadata**
-- Port diagnostics table: **read-only local listener visibility implemented**
+- Port diagnostics table: **read-only local listener visibility implemented, including owning PID/process name when Windows exposes it**
+- Manual SSH tunnel detection: **implemented Command Center classification for loopback gateway ports owned by `ssh`, so hand-started local forwards are not mislabeled as native Windows gateways**
+- Gateway runtime owner summary: **implemented in Command Center topology/support context so local gateway or SSH-forward listener process name, PID, and port are visible without managing the process**
+- Browser proxy SSH forward warning: **implemented targeted Command Center guidance when an SSH tunnel gateway is up but the companion `gateway port + 2` browser-control forward is missing**
+- Browser proxy invoke error guidance: **implemented `browser.proxy` unreachable/timeout errors that name `127.0.0.1:{gateway+2}` and show the exact SSH local-forward shape**
+- Settings SSH browser-forward guidance: **implemented Settings copy explaining that the managed SSH tunnel forwards `local-port+2` to `remote-port+2` for `browser.proxy` when the browser proxy bridge is enabled**
+- Settings SSH test tunnel parity: **implemented temporary Settings test tunnels with the same optional browser-control `local+2` forward runtime uses when Browser proxy bridge is enabled**
+- Settings SSH tunnel preview: **implemented selectable Settings preview of the exact managed `ssh -N -L ...` command, including the optional browser-control companion forward**
+- Browser proxy disabled guidance: **implemented a specific Command Center warning/copy hint when `browser.proxy` is intentionally disabled in Settings**
+- Asymmetric SSH browser guidance: **fixed Command Center and `browser.proxy` invoke guidance so local `gateway+2` and remote `gateway+2` can differ**
+- SSH local browser-port source: **fixed Command Center browser diagnostics to derive the local browser-control port from the active tunnel local endpoint instead of stale saved gateway URLs**
+- Browser-control host runtime smoke: **verified the upstream browser-control host can listen locally on `127.0.0.1:{gateway+2}`, return HTTP 200 from `/` and `/tabs`, and appear in Command Center port diagnostics with owning PID/process**
+- Browser proxy auth guidance: **implemented warnings for QR/bootstrap-paired Windows nodes that advertise `browser.proxy` without a saved gateway shared token, and clarified invoke errors for missing versus mismatched browser-control auth**
 
 Risk: medium-high for kill/restart actions; start as read-only/copy actions.
 
@@ -407,8 +421,8 @@ Deliverables:
 
 - Verify and align canvas/screen/camera/location/system payload defaults and error tokens.
 - Verify push event names for exec.
-- Add missing base-hash concurrency semantics if needed.
-- Add `browser.proxy` feasibility prototype or explicit "not implemented" install guidance.
+- Add missing base-hash concurrency semantics if needed: **implemented for remote exec approval policy edits**
+- Add `browser.proxy` feasibility prototype or explicit "not implemented" install guidance: **local browser-control bridge implemented; host runtime and Command Center listener detection smoke-tested; remaining end-to-end invoke blocker is matching operator/gateway auth for the active gateway**
 
 Risk: varies; `browser.proxy` is medium-high.
 
@@ -424,9 +438,16 @@ Deliverables:
   - broad file system access if relevant
   - screen capture/graphics capture guidance
   - First read-only Command Center slice is implemented. It surfaces these settings pages and explanatory rows, but intentionally does not query, request, or exercise device permissions.
-- Mac-style onboarding security warning.
-- Exec approval dialog with sanitizer and three-button flow.
-- Host env sanitizer parity hardening.
+  - Capability diagnostics copy is implemented for declared commands, gateway allowlist status, and privacy-sensitive opt-ins.
+- Mac-style onboarding security warning: **implemented in Setup Wizard Node Mode step, warning users that approved agents can run local commands and access enabled screen/camera/location/browser/canvas surfaces**
+- Topology choice onboarding: **first Settings guide implemented with local, WSL, SSH tunnel, and remote/Tailscale presets**
+- Exec approval dialog with sanitizer and three-button flow: **implemented for local `Prompt` policy decisions with Allow once / Always allow / Deny**
+- Exec approval remote-policy hardening: **implemented guardrails so `system.execApprovals.set` cannot remotely switch to default allow, install broad/dangerous allow rules, or overwrite a newer local policy without a matching `baseHash`**
+- Host env sanitizer parity hardening: **implemented expanded blocking for secret-looking overrides such as tokens, passwords, API keys, access keys, private keys, client secrets, and connection strings**
+- Dangerous command opt-in guidance: **implemented copyable safety guidance for camera/screen privacy-sensitive commands without emitting one-click dangerous repair commands**
+- Node capability settings: **implemented Settings toggles for canvas, screen, camera, location, and browser proxy command groups so privacy-sensitive surfaces can be disabled before reconnecting/re-pairing**
+- Disabled capability diagnostics: **implemented Command Center distinction between intentionally disabled Settings groups and true gateway allowlist/parity gaps**
+- Browser proxy policy diagnostics: **implemented a specific Command Center warning/copy action for declared `browser.proxy` commands filtered by gateway policy, instead of burying them under generic blocked-command output**
 
 Risk: high for exec/security. Do not rush.
 
@@ -435,12 +456,14 @@ Risk: high for exec/security. Do not rush.
 Deliverables:
 
 - Session previews with thinking/verbose controls.
-- Cost 30-day bars.
-- Node copy submenus.
-- Channel schema forms and QR login flows.
-- Skills/Cron settings.
-- Agent events ring expansion.
-- Hover HUD / richer tray tooltip.
+- Cost 30-day bars: **implemented in Command Center from `usage.cost` daily totals**
+- Node copy submenus / summaries: **implemented first Command Center copy action**
+- Channel health summary and copyable context: **implemented first summary plus Command Center start/stop actions**
+- Channel schema forms and QR login flows: **implemented first Windows surface with channel setup/dashboard deep links and copyable channel context**
+- Skills/Cron settings: **implemented first Windows surface with Command Center dashboard entrypoints and copyable guidance**
+- Agent events ring expansion: **implemented first Command Center recent-activity panel with copy/open-stream actions**
+- Hover HUD / richer tray tooltip: **implemented with topology, channel, node, warning, and activity summary**
+- Update status: **implemented in Command Center support/debug section and copied support context, including current version, latest prompted version when known, and last check outcome**
 
 Risk: medium; mostly UI and gateway method plumbing.
 
@@ -516,7 +539,7 @@ dotnet test .\tests\OpenClaw.Tray.Tests\OpenClaw.Tray.Tests.csproj --no-restore
 4. Do we want a future "managed local gateway" mode, or only "detected local gateway"?
 5. How much Tailscale integration should Windows own vs merely detect?
 6. Should WSL detection use process/port probing, `wsl.exe`, or gateway presence fields once available?
-7. Should support bundles include topology/tunnel diagnostics by default, and how should they redact host/user/IP?
+7. Should support bundles include topology/tunnel diagnostics by default, and how should they redact host/user/IP? **Implemented for Command Center copy support context with redacted gateway URL, topology detail, tunnel endpoints/errors, and port details.**
 
 ## 11. Immediate recommendation
 
