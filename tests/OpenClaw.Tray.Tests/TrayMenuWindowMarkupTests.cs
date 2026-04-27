@@ -141,6 +141,15 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains("OpenClaw port diagnostics", source);
         Assert.Contains("OwningProcessId", source);
         Assert.Contains("OwningProcessName", source);
+        var appSourcePath = Path.Combine(
+            GetRepositoryRoot(),
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "App.xaml.cs");
+        var appSource = File.ReadAllText(appSourcePath);
+
+        Assert.Contains("ApplyDetectedSshForwardTopology", appSource);
+        Assert.Contains("SSH tunnel (detected)", appSource);
     }
 
     [Fact]

@@ -400,6 +400,7 @@ Deliverables:
   - copy privacy-safe support context: **implemented**
 - Rolling diagnostics JSONL with rotation: **implemented for privacy-safe app/connection/gateway/tunnel metadata**
 - Port diagnostics table: **read-only local listener visibility implemented, including owning PID/process name when Windows exposes it**
+- Manual SSH tunnel detection: **implemented Command Center classification for loopback gateway ports owned by `ssh`, so hand-started local forwards are not mislabeled as native Windows gateways**
 
 Risk: medium-high for kill/restart actions; start as read-only/copy actions.
 

@@ -1967,6 +1967,7 @@ public partial class App : Application
             _settings?.SshTunnelRemotePort ?? 0);
         var tunnel = BuildTunnelInfo();
         var portDiagnostics = PortDiagnosticsService.BuildDiagnostics(topology, tunnel);
+        ApplyDetectedSshForwardTopology(topology, portDiagnostics);
         var warnings = nodes.SelectMany(n => n.Warnings).ToList();
         warnings.AddRange(CommandCenterDiagnostics.BuildTopologyWarnings(topology, tunnel));
         warnings.AddRange(BuildPortDiagnosticWarnings(portDiagnostics, topology, tunnel));
@@ -2159,6 +2160,33 @@ public partial class App : Application
                 };
             }
         }
+    }
+
+    private static void ApplyDetectedSshForwardTopology(
+        GatewayTopologyInfo topology,
+        IReadOnlyList<PortDiagnosticInfo> ports)
+    {
+        if (topology.UsesSshTunnel ||
+            topology.DetectedKind != GatewayKind.WindowsNative ||
+            !topology.IsLoopback)
+        {
+            return;
+        }
+
+        var gatewayPort = ports.FirstOrDefault(port =>
+            port.Purpose.Equals("Gateway endpoint", StringComparison.OrdinalIgnoreCase));
+        if (gatewayPort is null ||
+            !gatewayPort.IsListening ||
+            !string.Equals(gatewayPort.OwningProcessName, "ssh", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        topology.DetectedKind = GatewayKind.MacOverSsh;
+        topology.DisplayName = "SSH tunnel (detected)";
+        topology.Transport = "ssh tunnel";
+        topology.UsesSshTunnel = true;
+        topology.Detail = $"Local gateway port {gatewayPort.Port} is owned by ssh, so Command Center treats it as a manually managed SSH local forward.";
     }
 
     private TunnelCommandCenterInfo? BuildTunnelInfo()
