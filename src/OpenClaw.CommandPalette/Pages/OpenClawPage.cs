@@ -44,6 +44,11 @@ internal sealed partial class OpenClawPage : ListPage
                 Title = "⚡ Activity Stream",
                 Subtitle = "Open recent tray activity and support bundle actions"
             },
+            new ListItem(new OpenUrlCommand("openclaw://history"))
+            {
+                Title = "📋 Notification History",
+                Subtitle = "Open recent OpenClaw tray notifications"
+            },
             new ListItem(new OpenUrlCommand("openclaw://settings"))
             {
                 Title = "⚙️ Settings",

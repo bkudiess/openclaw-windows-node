@@ -69,6 +69,14 @@ public class DeepLinkParserTests
     }
 
     [Fact]
+    public void ParseDeepLink_History()
+    {
+        var result = DeepLinkParser.ParseDeepLink("openclaw://history");
+        Assert.NotNull(result);
+        Assert.Equal("history", result.Path);
+    }
+
+    [Fact]
     public void ParseDeepLink_TrailingSlash_IsStripped()
     {
         var result = DeepLinkParser.ParseDeepLink("openclaw://settings/");

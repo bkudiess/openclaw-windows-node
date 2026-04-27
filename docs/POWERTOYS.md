@@ -39,6 +39,7 @@ Open Command Palette (`Win+Alt+Space`), type **"OpenClaw"** — you should see t
 | **📝 Quick Send** | Opens the Quick Send dialog to compose a message |
 | **🧭 Command Center** | Opens gateway, tunnel, node, browser, and support diagnostics |
 | **⚡ Activity Stream** | Opens recent tray activity and support bundle actions |
+| **📋 Notification History** | Opens recent OpenClaw tray notifications |
 | **⚙️ Settings** | Opens the OpenClaw Tray Settings dialog |
 
 ## Usage
@@ -93,4 +94,5 @@ Get-AppxPackage -Name '*OpenClaw*' | Remove-AppxPackage
   | Quick Send | `openclaw://send` |
   | Command Center | `openclaw://commandcenter` |
   | Activity Stream | `openclaw://activity` |
+  | Notification History | `openclaw://history` |
   | Settings | `openclaw://settings` |

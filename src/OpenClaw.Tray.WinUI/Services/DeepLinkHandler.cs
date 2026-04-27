@@ -78,6 +78,12 @@ public static class DeepLinkHandler
                 actions.OpenActivityStream?.Invoke(result.Parameters.GetValueOrDefault("filter"));
                 break;
 
+            case "history":
+            case "notifications":
+            case "notification-history":
+                actions.OpenNotificationHistory?.Invoke();
+                break;
+
             case "dashboard":
                 actions.OpenDashboard?.Invoke(null);
                 break;
@@ -129,6 +135,7 @@ public class DeepLinkActions
     public Action? OpenChat { get; set; }
     public Action? OpenCommandCenter { get; set; }
     public Action<string?>? OpenActivityStream { get; set; }
+    public Action? OpenNotificationHistory { get; set; }
     public Action<string?>? OpenDashboard { get; set; }
     public Action<string?>? OpenQuickSend { get; set; }
     public Func<string, Task>? SendMessage { get; set; }

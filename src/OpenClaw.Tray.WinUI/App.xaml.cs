@@ -2756,6 +2756,7 @@ public partial class App : Application
             OpenChat = ShowWebChat,
             OpenCommandCenter = ShowStatusDetail,
             OpenActivityStream = ShowActivityStream,
+            OpenNotificationHistory = ShowNotificationHistory,
             OpenDashboard = OpenDashboard,
             OpenQuickSend = ShowQuickSend,
             SendMessage = async (msg) =>

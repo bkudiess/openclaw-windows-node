@@ -73,6 +73,23 @@ public class TrayMenuWindowMarkupTests
     }
 
     [Fact]
+    public void CommandPalette_HasNotificationHistoryEntryPoint()
+    {
+        var sourcePath = Path.Combine(
+            GetRepositoryRoot(),
+            "src",
+            "OpenClaw.CommandPalette",
+            "Pages",
+            "OpenClawPage.cs");
+
+        var source = File.ReadAllText(sourcePath);
+
+        Assert.Contains(@"openclaw://history", source);
+        Assert.Contains("Notification History", source);
+        Assert.Contains("recent OpenClaw tray notifications", source);
+    }
+
+    [Fact]
     public void DeepLinkHandler_HasActivityStreamEntryPoint()
     {
         var sourcePath = Path.Combine(
@@ -87,6 +104,23 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains(@"case ""activity"":", source);
         Assert.Contains("OpenActivityStream?.Invoke", source);
         Assert.Contains(@"GetValueOrDefault(""filter"")", source);
+    }
+
+    [Fact]
+    public void DeepLinkHandler_HasNotificationHistoryEntryPoint()
+    {
+        var sourcePath = Path.Combine(
+            GetRepositoryRoot(),
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "Services",
+            "DeepLinkHandler.cs");
+
+        var source = File.ReadAllText(sourcePath);
+
+        Assert.Contains(@"case ""history"":", source);
+        Assert.Contains(@"case ""notification-history"":", source);
+        Assert.Contains("OpenNotificationHistory?.Invoke", source);
     }
 
     [Fact]
