@@ -56,6 +56,7 @@ public partial class App : Application
     private GatewayUsageStatusInfo? _lastUsageStatus;
     private GatewayCostUsageInfo? _lastUsageCost;
     private GatewaySelfInfo? _lastGatewaySelf;
+    private UpdateCommandCenterInfo _lastUpdateInfo = BuildInitialUpdateInfo();
     private DateTime _lastCheckTime = DateTime.Now;
     private DateTime _lastUsageActivityLogUtc = DateTime.MinValue;
     private string? _lastChannelStatusSignature;
@@ -2086,6 +2087,7 @@ public partial class App : Application
             ConnectionStatus = _currentStatus,
             LastRefresh = _lastCheckTime.ToUniversalTime(),
             Topology = topology,
+            Update = _lastUpdateInfo,
             Tunnel = tunnel,
             GatewaySelf = _lastGatewaySelf,
             PortDiagnostics = portDiagnostics,
@@ -2399,31 +2401,66 @@ public partial class App : Application
 
     #region Updates
 
+    private static UpdateCommandCenterInfo BuildInitialUpdateInfo() => new()
+    {
+        Status = "Not checked",
+        CurrentVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown"
+    };
+
     private async Task<bool> CheckForUpdatesAsync()
     {
         try
         {
 #if DEBUG
             Logger.Info("Skipping update check in debug build");
+            _lastUpdateInfo = new UpdateCommandCenterInfo
+            {
+                Status = "Skipped",
+                CurrentVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown",
+                CheckedAt = DateTime.UtcNow,
+                Detail = "debug build"
+            };
             return true;
 #else
             Logger.Info("Checking for updates...");
+            _lastUpdateInfo = new UpdateCommandCenterInfo
+            {
+                Status = "Checking",
+                CurrentVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown",
+                CheckedAt = DateTime.UtcNow
+            };
             var updateFound = await AppUpdater.CheckForUpdatesAsync();
 
             if (!updateFound)
             {
                 Logger.Info("No updates available");
+                _lastUpdateInfo = new UpdateCommandCenterInfo
+                {
+                    Status = "Current",
+                    CurrentVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown",
+                    CheckedAt = DateTime.UtcNow,
+                    Detail = "no updates available"
+                };
                 return true;
             }
 
             var release = AppUpdater.LatestRelease!;
             var changelog = AppUpdater.GetChangelog(true) ?? "No release notes available.";
             Logger.Info($"Update available: {release.TagName}");
+            _lastUpdateInfo = new UpdateCommandCenterInfo
+            {
+                Status = "Available",
+                CurrentVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown",
+                LatestVersion = release.TagName,
+                CheckedAt = DateTime.UtcNow,
+                Detail = "prompted"
+            };
 
             if (!string.IsNullOrWhiteSpace(_settings?.SkippedUpdateTag) &&
                 string.Equals(_settings.SkippedUpdateTag, release.TagName, StringComparison.OrdinalIgnoreCase))
             {
                 Logger.Info($"Skipping update prompt for remembered version {release.TagName}");
+                _lastUpdateInfo.Detail = "skipped by user";
                 return true;
             }
 
@@ -2432,6 +2469,7 @@ public partial class App : Application
 
             if (result == UpdateDialogResult.Download)
             {
+                _lastUpdateInfo.Detail = "download requested";
                 if (_settings != null)
                 {
                     _settings.SkippedUpdateTag = string.Empty;
@@ -2445,6 +2483,7 @@ public partial class App : Application
             {
                 _settings.SkippedUpdateTag = release.TagName ?? string.Empty;
                 _settings.Save();
+                _lastUpdateInfo.Detail = "skipped by user";
             }
 
             return true; // RemindLater or Skip - continue
@@ -2453,6 +2492,13 @@ public partial class App : Application
         catch (Exception ex)
         {
             Logger.Warn($"Update check failed: {ex.Message}");
+            _lastUpdateInfo = new UpdateCommandCenterInfo
+            {
+                Status = "Failed",
+                CurrentVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown",
+                CheckedAt = DateTime.UtcNow,
+                Detail = ex.Message
+            };
             return true;
         }
     }

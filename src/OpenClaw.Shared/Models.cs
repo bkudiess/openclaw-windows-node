@@ -912,6 +912,7 @@ public class GatewayCommandCenterState
     public ConnectionStatus ConnectionStatus { get; set; } = ConnectionStatus.Disconnected;
     public DateTime LastRefresh { get; set; } = DateTime.UtcNow;
     public GatewayTopologyInfo Topology { get; set; } = new();
+    public UpdateCommandCenterInfo Update { get; set; } = new();
     public TunnelCommandCenterInfo? Tunnel { get; set; }
     public GatewaySelfInfo? GatewaySelf { get; set; }
     public List<PortDiagnosticInfo> PortDiagnostics { get; set; } = new();
@@ -924,6 +925,25 @@ public class GatewayCommandCenterState
     public List<NodeCapabilityHealthInfo> Nodes { get; set; } = new();
     public List<GatewayDiagnosticWarning> Warnings { get; set; } = new();
     public List<CommandCenterActivityInfo> RecentActivity { get; set; } = new();
+}
+
+public class UpdateCommandCenterInfo
+{
+    public string Status { get; set; } = "Not checked";
+    public string CurrentVersion { get; set; } = "unknown";
+    public string? LatestVersion { get; set; }
+    public DateTime? CheckedAt { get; set; }
+    public string? Detail { get; set; }
+
+    public string DisplayText
+    {
+        get
+        {
+            var latest = string.IsNullOrWhiteSpace(LatestVersion) ? "" : $" · latest {LatestVersion}";
+            var detail = string.IsNullOrWhiteSpace(Detail) ? "" : $" · {Detail}";
+            return $"{Status} · current {CurrentVersion}{latest}{detail}";
+        }
+    }
 }
 
 public class CommandCenterActivityInfo

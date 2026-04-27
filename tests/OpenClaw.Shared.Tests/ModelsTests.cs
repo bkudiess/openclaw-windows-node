@@ -1128,6 +1128,20 @@ public class CommandCenterModelTests
         Assert.Equal(GatewayDiagnosticSeverity.Info, warnings[2].Severity);
     }
 
+    [Fact]
+    public void UpdateCommandCenterInfo_DisplayTextIncludesCurrentAndLatest()
+    {
+        var info = new UpdateCommandCenterInfo
+        {
+            Status = "Available",
+            CurrentVersion = "1.2.3",
+            LatestVersion = "v1.2.4",
+            Detail = "prompted"
+        };
+
+        Assert.Equal("Available · current 1.2.3 · latest v1.2.4 · prompted", info.DisplayText);
+    }
+
     [Theory]
     [InlineData("ws://localhost:18789", false, "", GatewayKind.WindowsNative)]
     [InlineData("ws://127.0.0.1:18789", false, "", GatewayKind.WindowsNative)]

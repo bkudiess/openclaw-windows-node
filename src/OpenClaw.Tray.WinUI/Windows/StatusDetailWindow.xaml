@@ -88,6 +88,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition/>
                         <RowDefinition/>
+                        <RowDefinition/>
                     </Grid.RowDefinitions>
                     <TextBlock x:Name="OverviewChannelsText" Grid.Row="0" Grid.Column="0" Text="Channels: 0"/>
                     <TextBlock x:Name="OverviewSessionsText" Grid.Row="0" Grid.Column="1" Text="Sessions: 0"/>
@@ -126,6 +127,12 @@
                                 Click="OnCopySupportContext"
                                 AutomationProperties.AutomationId="CommandCenterCopySupportContextButton"/>
                     </StackPanel>
+                    <TextBlock x:Name="UpdateStatusText"
+                               Grid.Row="2"
+                               AutomationProperties.AutomationId="CommandCenterUpdateStatusText"
+                               Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               TextWrapping="Wrap"/>
                 </Grid>
                 <TextBlock Text="These actions only open local folders or copy metadata. They do not include tokens, command arguments, screenshots, recordings, camera data, or payloads."
                            Style="{StaticResource CaptionTextBlockStyle}"

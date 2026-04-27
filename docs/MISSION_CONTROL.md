@@ -449,6 +449,7 @@ Deliverables:
 - Skills/Cron settings: **implemented first Windows surface with Command Center dashboard entrypoints and copyable guidance**
 - Agent events ring expansion: **implemented first Command Center recent-activity panel with copy/open-stream actions**
 - Hover HUD / richer tray tooltip: **implemented with topology, channel, node, warning, and activity summary**
+- Update status: **implemented in Command Center support/debug section and copied support context, including current version, latest prompted version when known, and last check outcome**
 
 Risk: medium; mostly UI and gateway method plumbing.
 

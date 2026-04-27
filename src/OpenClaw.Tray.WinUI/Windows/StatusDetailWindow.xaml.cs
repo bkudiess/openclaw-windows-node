@@ -73,6 +73,7 @@ public sealed partial class StatusDetailWindow : WindowEx
             : state.Topology.GatewayUrl;
         GatewayTransportText.Text = state.Topology.Transport;
         GatewayDetailText.Text = state.Topology.Detail;
+        UpdateStatusText.Text = $"Updates: {state.Update.DisplayText}";
 
         if (state.Tunnel != null && state.Tunnel.Status != TunnelStatus.NotConfigured)
         {
@@ -438,6 +439,7 @@ public sealed partial class StatusDetailWindow : WindowEx
         builder.AppendLine($"Transport: {state.Topology.Transport}");
         builder.AppendLine($"Gateway URL: {RedactSupportValue(state.Topology.GatewayUrl)}");
         builder.AppendLine($"Topology detail: {RedactSupportValue(state.Topology.Detail)}");
+        builder.AppendLine($"Update status: {RedactSupportValue(state.Update.DisplayText)}");
         if (state.Tunnel != null && state.Tunnel.Status != TunnelStatus.NotConfigured)
         {
             builder.AppendLine($"Tunnel: {state.Tunnel.Status}");
