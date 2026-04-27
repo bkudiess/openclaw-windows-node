@@ -455,6 +455,12 @@ public sealed partial class StatusDetailWindow : WindowEx
             builder.AppendLine($"Tunnel: {state.Tunnel.Status}");
             builder.AppendLine($"Tunnel local endpoint: {RedactSupportValue(state.Tunnel.LocalEndpoint)}");
             builder.AppendLine($"Tunnel remote endpoint: {RedactSupportValue(state.Tunnel.RemoteEndpoint)}");
+            if (!string.IsNullOrWhiteSpace(state.Tunnel.BrowserProxyLocalEndpoint) ||
+                !string.IsNullOrWhiteSpace(state.Tunnel.BrowserProxyRemoteEndpoint))
+            {
+                builder.AppendLine($"Tunnel browser proxy local endpoint: {RedactSupportValue(state.Tunnel.BrowserProxyLocalEndpoint)}");
+                builder.AppendLine($"Tunnel browser proxy remote endpoint: {RedactSupportValue(state.Tunnel.BrowserProxyRemoteEndpoint)}");
+            }
             if (!string.IsNullOrWhiteSpace(state.Tunnel.LastError))
                 builder.AppendLine($"Tunnel last error: {RedactSupportValue(state.Tunnel.LastError)}");
         }

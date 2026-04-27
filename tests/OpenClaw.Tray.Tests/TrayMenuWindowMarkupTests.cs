@@ -130,6 +130,8 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains("Gateway URL: {RedactSupportValue", source);
         Assert.Contains("Topology detail: {RedactSupportValue", source);
         Assert.Contains("Tunnel remote endpoint: {RedactSupportValue", source);
+        Assert.Contains("Tunnel browser proxy local endpoint: {RedactSupportValue", source);
+        Assert.Contains("Tunnel browser proxy remote endpoint: {RedactSupportValue", source);
         Assert.Contains("Tunnel last error: {RedactSupportValue", source);
         Assert.Contains("RedactSupportValue", source);
         Assert.Contains("<host>", source);

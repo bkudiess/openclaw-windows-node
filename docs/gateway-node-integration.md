@@ -177,7 +177,7 @@ PR #159 originally explored session-based start/stop recording commands, but the
 
 | Command | macOS | Windows | Notes |
 |---------|-------|---------|-------|
-| `browser.proxy` | ✅ | ✅ | Local browser-control bridge; requires browser control host on gateway port + 2 and retries with password/basic auth if bearer auth is rejected |
+| `browser.proxy` | ✅ | ✅ | Local browser-control bridge; requires browser control host on gateway port + 2, retries with password/basic auth if bearer auth is rejected, and managed SSH tunnel mode forwards local+2 to remote+2 when enabled |
 
 ### 2.6 Safe Gateway-Policy Gaps to Consider
 

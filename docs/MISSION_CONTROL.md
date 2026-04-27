@@ -92,6 +92,7 @@ Gateway/browser facts:
   - files are base64 payloads with path/mime metadata
 - Persistent profile mutations are blocked at gateway and node-host levels.
 - Mac implements `browser.proxy` only for local mode, proxying to `127.0.0.1:{gatewayPort+2}` with Bearer or `x-openclaw-password` auth, and a 10 MB/file extraction cap.
+- Windows managed SSH tunnel mode now forwards both the gateway port and the browser-control companion port (`local+2` to `remote+2`) when the browser proxy capability is enabled, so Mac-over-SSH topologies can satisfy the same local-only browser proxy contract.
 
 Gateway APIs and signals worth surfacing:
 
@@ -318,7 +319,7 @@ Keep StatusDetailWindow as the first Command Center, but plan for tabs/sections:
 
 Recommended: investigate option 1 first, with `browser.proxy` gated to local/tunnel topologies and disabled for remote public gateways unless the upstream browser host contract says otherwise.
 
-Current Windows implementation status: Windows node now advertises `browser.proxy` and forwards it to the local browser control host at `127.0.0.1:{gateway port + 2}`. It uses the gateway bearer token first and retries with the same shared secret as browser-host password/basic auth if bearer auth is rejected. Command Center still performs the read-only feasibility probe and warns when no compatible local browser host is listening, because the command depends on that local service being available.
+Current Windows implementation status: Windows node now advertises `browser.proxy` and forwards it to the local browser control host at `127.0.0.1:{gateway port + 2}`. It uses the gateway bearer token first and retries with the same shared secret as browser-host password/basic auth if bearer auth is rejected. Managed SSH tunnel mode also forwards the companion browser-control port (`local gateway port + 2` to `remote gateway port + 2`) when the browser proxy capability is enabled. Command Center still performs the read-only feasibility probe and warns when no compatible local browser host is listening, because the command depends on that local service being available.
 
 ## 7. Security and privacy requirements
 

@@ -686,7 +686,7 @@ This is a big effort and **contributions are very welcome!** Here's how to get s
 
 ### Medium Issues
 
-4. **Browser proxy parity** — Windows now includes a Mac-compatible local `browser.proxy` bridge to the browser control host on gateway port + 2; continue hardening live browser-host setup guidance and diagnostics.
+4. **Browser proxy parity** — Windows now includes a Mac-compatible local `browser.proxy` bridge to the browser control host on gateway port + 2, and managed SSH tunnel mode forwards local+2 to remote+2 when the browser proxy capability is enabled; continue hardening live browser-host setup guidance and diagnostics.
 5. **Gateway/channel flyout** — Show configured/running/error/probe state for channels and gateway health in the tray.
 
 ### Harder Issues

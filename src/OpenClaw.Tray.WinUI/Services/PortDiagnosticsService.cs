@@ -83,7 +83,7 @@ public static class PortDiagnosticsService
     private static bool TryGetBrowserProxyPort(GatewayTopologyInfo topology, out int port)
     {
         port = 0;
-        if (topology.DetectedKind is not (GatewayKind.WindowsNative or GatewayKind.Wsl) ||
+        if (topology.DetectedKind is not (GatewayKind.WindowsNative or GatewayKind.Wsl or GatewayKind.MacOverSsh) ||
             !TryGetPort(topology.GatewayUrl, out var gatewayPort) ||
             gatewayPort > 65533)
         {

@@ -566,6 +566,8 @@ public class TunnelCommandCenterInfo
     public TunnelStatus Status { get; set; } = TunnelStatus.NotConfigured;
     public string LocalEndpoint { get; set; } = "";
     public string RemoteEndpoint { get; set; } = "";
+    public string BrowserProxyLocalEndpoint { get; set; } = "";
+    public string BrowserProxyRemoteEndpoint { get; set; } = "";
     public string? Host { get; set; }
     public string? User { get; set; }
     public string? LastError { get; set; }

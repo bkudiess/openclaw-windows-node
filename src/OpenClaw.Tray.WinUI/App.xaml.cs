@@ -2193,6 +2193,14 @@ public partial class App : Application
             RemoteEndpoint = string.IsNullOrWhiteSpace(host)
                 ? $"127.0.0.1:{remotePort}"
                 : $"{host}:127.0.0.1:{remotePort}",
+            BrowserProxyLocalEndpoint = _sshTunnelService?.CurrentBrowserProxyLocalPort > 0
+                ? $"127.0.0.1:{_sshTunnelService.CurrentBrowserProxyLocalPort}"
+                : "",
+            BrowserProxyRemoteEndpoint = _sshTunnelService?.CurrentBrowserProxyRemotePort > 0
+                ? string.IsNullOrWhiteSpace(host)
+                    ? $"127.0.0.1:{_sshTunnelService.CurrentBrowserProxyRemotePort}"
+                    : $"{host}:127.0.0.1:{_sshTunnelService.CurrentBrowserProxyRemotePort}"
+                : "",
             Host = host,
             User = user,
             LastError = _sshTunnelService?.LastError,
