@@ -378,7 +378,7 @@ After changing either `gateway.nodes.allowCommands` or `gateway.nodes.denyComman
 - [x] Send `bootstrapToken` in correct field: `auth.bootstrapToken` not `auth.token`
 - [x] Handle `hello-ok.auth.deviceToken` — save it for future connections
 - [x] Accept QR images and clipboard setup content as alternate ways to enter the same bootstrap payload
-- [ ] Show "auto-paired!" vs "waiting for approval" based on auth method
+- [x] Show "auto-paired!" vs "waiting for approval" based on auth method
 - [ ] Handle bootstrap token expiry gracefully (re-generate if expired)
 
 ### 5.4 Upstream Contributions / Issues to File

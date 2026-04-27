@@ -60,6 +60,7 @@ public sealed class SetupWizardWindow : WindowEx
     private readonly TextBlock _deviceIdText;
     private readonly Button _copyDeviceIdButton;
     private readonly TextBlock _pairingStatusText;
+    private bool _hasStoredDeviceToken;
 
     // Result
     public bool Completed { get; private set; } = false;
@@ -200,6 +201,11 @@ public sealed class SetupWizardWindow : WindowEx
         };
         AutomationProperties.SetAutomationId(_tokenBox, "TokenBox");
         _tokenBox.PasswordChanged += (s, e) => _connectionTested = false;
+        _tokenBox.PasswordChanged += (s, e) =>
+        {
+            _draftToken = _tokenBox.Password;
+            UpdatePairingStatusText();
+        };
         _manualEntryPanel.Children.Add(_tokenBox);
         _stepPanels[0].Children.Add(_manualEntryPanel);
 
@@ -266,6 +272,7 @@ public sealed class SetupWizardWindow : WindowEx
             TextWrapping = TextWrapping.Wrap,
             Visibility = _draftEnableNodeMode ? Visibility.Visible : Visibility.Collapsed
         };
+        AutomationProperties.SetAutomationId(_pairingStatusText, "SetupPairingStatusText");
         _stepPanels[1].Children.Add(_pairingStatusText);
 
         var pairingInstructions = new StackPanel
@@ -445,6 +452,7 @@ public sealed class SetupWizardWindow : WindowEx
                 _draftEnableNodeMode = !string.IsNullOrWhiteSpace(_draftBootstrapToken);
                 _nodeModeToggle.IsOn = _draftEnableNodeMode;
                 UpdateNodeModePairingVisibility(_draftEnableNodeMode);
+                UpdatePairingStatusText();
             }
 
             if (string.IsNullOrWhiteSpace(_draftGatewayUrl) ||
@@ -600,12 +608,15 @@ public sealed class SetupWizardWindow : WindowEx
         _deviceIdText.Visibility = showPairing ? Visibility.Visible : Visibility.Collapsed;
         _copyDeviceIdButton.Visibility = showPairing ? Visibility.Visible : Visibility.Collapsed;
         _pairingStatusText.Visibility = showPairing ? Visibility.Visible : Visibility.Collapsed;
+        _draftEnableNodeMode = showPairing;
+        UpdatePairingStatusText();
     }
 
     private async void OnTestConnection(object sender, RoutedEventArgs e)
     {
         _draftGatewayUrl = _gatewayUrlBox.Text.Trim();
         _draftToken = _tokenBox.Password;
+        UpdatePairingStatusText();
 
         if (!GatewayUrlHelper.IsValidGatewayUrl(_draftGatewayUrl))
         {
@@ -746,12 +757,59 @@ public sealed class SetupWizardWindow : WindowEx
             var shortId = fullId.Length > 12 ? fullId[..12] : fullId;
             _deviceIdText.Text = $"Device ID: {shortId}...";
             _copyDeviceIdButton.Tag = fullId;
+            _hasStoredDeviceToken = !string.IsNullOrWhiteSpace(identity.DeviceToken);
+            UpdatePairingStatusText();
         }
         catch (Exception ex)
         {
             Logger.Warn($"[Setup] Could not load device identity: {ex.Message}");
             _deviceIdText.Text = LocalizationHelper.GetString("Setup_DeviceIdFallback");
+            _hasStoredDeviceToken = false;
+            UpdatePairingStatusText();
         }
+    }
+
+    private void UpdatePairingStatusText()
+    {
+        if (_pairingStatusText == null)
+        {
+            return;
+        }
+
+        _pairingStatusText.Text = BuildPairingExpectationText(
+            _draftEnableNodeMode,
+            _hasStoredDeviceToken,
+            !string.IsNullOrWhiteSpace(_draftBootstrapToken),
+            !string.IsNullOrWhiteSpace(_draftToken));
+    }
+
+    internal static string BuildPairingExpectationText(
+        bool nodeModeEnabled,
+        bool hasStoredDeviceToken,
+        bool hasBootstrapToken,
+        bool hasGatewayToken)
+    {
+        if (!nodeModeEnabled)
+        {
+            return "Node Mode is off; this tray will only act as an operator UI.";
+        }
+
+        if (hasStoredDeviceToken)
+        {
+            return "Already paired: this device has a saved gateway device token and should reconnect without manual approval.";
+        }
+
+        if (hasBootstrapToken)
+        {
+            return "Auto-pairing expected: this setup code includes a bootstrap token. Finish setup and the gateway should approve this node automatically. If the bootstrap token expired or was already used, Command Center will show a waiting-for-approval repair command.";
+        }
+
+        if (hasGatewayToken)
+        {
+            return "Manual approval expected: this setup uses a gateway token, not a bootstrap token. Finish setup, then approve the device from the gateway CLI if Command Center reports that the node is waiting for approval.";
+        }
+
+        return "Pairing method unknown: enter a setup code for auto-pairing or a gateway token for manual approval.";
     }
 
     private void OnCopyDeviceId(object sender, RoutedEventArgs e)

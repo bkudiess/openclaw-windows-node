@@ -180,6 +180,24 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains(@"Click=""OnCopyCapabilityDiagnostics""", xaml);
     }
 
+    [Fact]
+    public void SetupWizard_HasPairingExpectationGuidance()
+    {
+        var sourcePath = Path.Combine(
+            GetRepositoryRoot(),
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "Windows",
+            "SetupWizardWindow.cs");
+
+        var source = File.ReadAllText(sourcePath);
+
+        Assert.Contains(@"""SetupPairingStatusText""", source);
+        Assert.Contains("Auto-pairing expected", source);
+        Assert.Contains("Manual approval expected", source);
+        Assert.Contains("Already paired", source);
+    }
+
     private static string GetRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
