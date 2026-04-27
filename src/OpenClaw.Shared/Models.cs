@@ -1148,8 +1148,8 @@ public static class CommandCenterDiagnostics
             {
                 Severity = GatewayDiagnosticSeverity.Info,
                 Category = "parity",
-                Title = "Browser proxy parity not implemented",
-                Detail = "Windows does not yet declare browser.proxy. Command Center checks whether a compatible local browser host is present before this can be safely implemented."
+                Title = "Browser proxy host not available",
+                Detail = "browser.proxy requires a compatible local browser control host on the gateway port + 2. Command Center checks that host before browser control is expected to work."
             });
         }
 

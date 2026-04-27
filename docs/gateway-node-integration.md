@@ -177,7 +177,7 @@ PR #159 originally explored session-based start/stop recording commands, but the
 
 | Command | macOS | Windows | Notes |
 |---------|-------|---------|-------|
-| `browser.proxy` | ✅ | ❌ | Chrome DevTools proxy |
+| `browser.proxy` | ✅ | ✅ | Local browser-control bridge; requires browser control host on gateway port + 2 |
 
 ### 2.6 Safe Gateway-Policy Gaps to Consider
 

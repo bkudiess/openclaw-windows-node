@@ -35,6 +35,7 @@ public class NodeService : IDisposable
     private CameraCapability? _cameraCapability;
     private LocationCapability? _locationCapability;
     private DeviceCapability? _deviceCapability;
+    private BrowserProxyCapability? _browserProxyCapability;
     private readonly string _dataPath;
     private string? _token;
     
@@ -159,7 +160,13 @@ public class NodeService : IDisposable
         // Device metadata/status capability
         _deviceCapability = new DeviceCapability(_logger);
         _nodeClient.RegisterCapability(_deviceCapability);
-        
+
+        _browserProxyCapability = new BrowserProxyCapability(
+            _logger,
+            _nodeClient.GatewayUrl,
+            _token);
+        _nodeClient.RegisterCapability(_browserProxyCapability);
+         
         _logger.Info("All capabilities registered");
     }
 

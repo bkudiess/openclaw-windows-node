@@ -1,4 +1,6 @@
 using System.IO;
+using System.Net;
+using System.Net.Http;
 using System.Text.Json;
 using Xunit;
 using OpenClaw.Shared;
@@ -628,6 +630,109 @@ public class SystemCapabilityTests
                 ExitCode = 0,
                 TimedOut = false,
                 DurationMs = 1
+            });
+        }
+    }
+}
+
+public class BrowserProxyCapabilityTests
+{
+    private static JsonElement Parse(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.Clone();
+    }
+
+    [Fact]
+    public async Task BrowserProxy_ForwardsToLocalControlPortWithBearerAuth()
+    {
+        var handler = new CapturingHandler("""{"ok":true,"url":"https://example.com"}""");
+        var cap = new BrowserProxyCapability(
+            NullLogger.Instance,
+            "ws://127.0.0.1:18789",
+            "secret-token",
+            handler);
+
+        var res = await cap.ExecuteAsync(new NodeInvokeRequest
+        {
+            Id = "browser-1",
+            Command = "browser.proxy",
+            Args = Parse("""{"method":"POST","path":"/snapshot","query":{"format":"aria"},"profile":"openclaw","body":{"limit":1},"timeoutMs":5000}""")
+        });
+
+        Assert.True(res.Ok);
+        Assert.NotNull(handler.LastRequest);
+        Assert.Equal(HttpMethod.Post, handler.LastRequest!.Method);
+        Assert.Equal("http://127.0.0.1:18791/snapshot?format=aria&profile=openclaw", handler.LastRequest.RequestUri!.ToString());
+        Assert.Equal("Bearer", handler.LastRequest.Headers.Authorization?.Scheme);
+        Assert.Equal("secret-token", handler.LastRequest.Headers.Authorization?.Parameter);
+
+        var payload = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(res.Payload));
+        Assert.True(payload.TryGetProperty("result", out var result));
+        Assert.True(result.GetProperty("ok").GetBoolean());
+    }
+
+    [Fact]
+    public async Task BrowserProxy_RejectsAbsoluteUrlPath()
+    {
+        var cap = new BrowserProxyCapability(
+            NullLogger.Instance,
+            "ws://127.0.0.1:18789",
+            "secret-token",
+            new CapturingHandler("""{"ok":true}"""));
+
+        var res = await cap.ExecuteAsync(new NodeInvokeRequest
+        {
+            Id = "browser-2",
+            Command = "browser.proxy",
+            Args = Parse("""{"path":"https://example.com"}""")
+        });
+
+        Assert.False(res.Ok);
+        Assert.Contains("must be a local control path", res.Error);
+    }
+
+    [Fact]
+    public async Task BrowserProxy_ReturnsUnauthorizedAsAuthError()
+    {
+        var cap = new BrowserProxyCapability(
+            NullLogger.Instance,
+            "ws://127.0.0.1:18789",
+            "wrong-token",
+            new CapturingHandler("Unauthorized", HttpStatusCode.Unauthorized));
+
+        var res = await cap.ExecuteAsync(new NodeInvokeRequest
+        {
+            Id = "browser-3",
+            Command = "browser.proxy",
+            Args = Parse("""{"path":"/"}""")
+        });
+
+        Assert.False(res.Ok);
+        Assert.Contains("authentication", res.Error);
+    }
+
+    private sealed class CapturingHandler : HttpMessageHandler
+    {
+        private readonly string _response;
+        private readonly HttpStatusCode _statusCode;
+
+        public HttpRequestMessage? LastRequest { get; private set; }
+
+        public CapturingHandler(string response, HttpStatusCode statusCode = HttpStatusCode.OK)
+        {
+            _response = response;
+            _statusCode = statusCode;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            LastRequest = request;
+            return Task.FromResult(new HttpResponseMessage(_statusCode)
+            {
+                Content = new StringContent(_response)
             });
         }
     }

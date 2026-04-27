@@ -318,7 +318,7 @@ Keep StatusDetailWindow as the first Command Center, but plan for tabs/sections:
 
 Recommended: investigate option 1 first, with `browser.proxy` gated to local/tunnel topologies and disabled for remote public gateways unless the upstream browser host contract says otherwise.
 
-Current Windows implementation status: Command Center now performs a read-only feasibility probe for direct local/WSL gateways by checking the expected browser-host port (`gateway port + 2`) and warning when no compatible local browser host is listening. It intentionally does not advertise `browser.proxy` yet, because doing so without a reachable browser host would create a broken command surface.
+Current Windows implementation status: Windows node now advertises `browser.proxy` and forwards it to the local browser control host at `127.0.0.1:{gateway port + 2}` using the gateway bearer token. Command Center still performs the read-only feasibility probe and warns when no compatible local browser host is listening, because the command depends on that local service being available.
 
 ## 7. Security and privacy requirements
 
@@ -409,7 +409,7 @@ Deliverables:
 - Verify and align canvas/screen/camera/location/system payload defaults and error tokens.
 - Verify push event names for exec.
 - Add missing base-hash concurrency semantics if needed.
-- Add `browser.proxy` feasibility prototype or explicit "not implemented" install guidance.
+- Add `browser.proxy` feasibility prototype or explicit "not implemented" install guidance: **local browser-control bridge implemented**
 
 Risk: varies; `browser.proxy` is medium-high.
 

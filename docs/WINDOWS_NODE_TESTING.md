@@ -37,7 +37,7 @@ The Windows Node feature allows the tray app to receive commands from the OpenCl
 ### 4. Command Center
 - Open the tray status detail or launch `openclaw://commandcenter`
 - In Node Mode, verify the window shows gateway channel health from node `health` events plus a synthesized local Windows node when operator `node.list` is not connected
-- Check diagnostics for pairing approval, stale health, all-stopped channels, allowlist filtering, missing `browser.proxy` parity, and usage-cost gaps
+- Check diagnostics for pairing approval, stale health, all-stopped channels, allowlist filtering, browser control host availability for `browser.proxy`, and usage-cost gaps
 - Use "Copy fix" only for safe repair commands; privacy-sensitive commands remain informational unless you explicitly opt in on the gateway
 
 ## What Requires Gateway Support
