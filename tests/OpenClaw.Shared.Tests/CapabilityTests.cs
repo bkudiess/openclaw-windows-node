@@ -1,6 +1,7 @@
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using Xunit;
 using OpenClaw.Shared;
@@ -712,6 +713,34 @@ public class BrowserProxyCapabilityTests
         Assert.Contains("authentication", res.Error);
     }
 
+    [Fact]
+    public async Task BrowserProxy_RetriesUnauthorizedWithPasswordAuth()
+    {
+        var handler = new BrowserProxyAuthFallbackHandler();
+        var cap = new BrowserProxyCapability(
+            NullLogger.Instance,
+            "ws://127.0.0.1:18789",
+            "browser-secret",
+            handler);
+
+        var res = await cap.ExecuteAsync(new NodeInvokeRequest
+        {
+            Id = "browser-4",
+            Command = "browser.proxy",
+            Args = Parse("""{"method":"DELETE","path":"/tabs/1","body":{"reason":"test"}}""")
+        });
+
+        Assert.True(res.Ok);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal("Bearer", handler.Requests[0].Headers.Authorization?.Scheme);
+        Assert.Equal("Basic", handler.Requests[1].Headers.Authorization?.Scheme);
+        Assert.Equal(
+            Convert.ToBase64String(Encoding.UTF8.GetBytes(":browser-secret")),
+            handler.Requests[1].Headers.Authorization?.Parameter);
+        Assert.True(handler.Requests[1].Headers.TryGetValues("x-openclaw-password", out var passwordValues));
+        Assert.Contains("browser-secret", passwordValues);
+    }
+
     private sealed class CapturingHandler : HttpMessageHandler
     {
         private readonly string _response;
@@ -733,6 +762,29 @@ public class BrowserProxyCapabilityTests
             return Task.FromResult(new HttpResponseMessage(_statusCode)
             {
                 Content = new StringContent(_response)
+            });
+        }
+    }
+
+    private sealed class BrowserProxyAuthFallbackHandler : HttpMessageHandler
+    {
+        public List<HttpRequestMessage> Requests { get; } = new();
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            var hasPasswordHeader =
+                request.Headers.TryGetValues("x-openclaw-password", out var passwordValues) &&
+                passwordValues.Contains("browser-secret");
+            var isBasic = request.Headers.Authorization?.Scheme == "Basic";
+            var status = hasPasswordHeader && isBasic ? HttpStatusCode.OK : HttpStatusCode.Unauthorized;
+            var response = status == HttpStatusCode.OK ? """{"ok":true}""" : "Unauthorized";
+
+            return Task.FromResult(new HttpResponseMessage(status)
+            {
+                Content = new StringContent(response)
             });
         }
     }

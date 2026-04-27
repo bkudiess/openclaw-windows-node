@@ -318,7 +318,7 @@ Keep StatusDetailWindow as the first Command Center, but plan for tabs/sections:
 
 Recommended: investigate option 1 first, with `browser.proxy` gated to local/tunnel topologies and disabled for remote public gateways unless the upstream browser host contract says otherwise.
 
-Current Windows implementation status: Windows node now advertises `browser.proxy` and forwards it to the local browser control host at `127.0.0.1:{gateway port + 2}` using the gateway bearer token. Command Center still performs the read-only feasibility probe and warns when no compatible local browser host is listening, because the command depends on that local service being available.
+Current Windows implementation status: Windows node now advertises `browser.proxy` and forwards it to the local browser control host at `127.0.0.1:{gateway port + 2}`. It uses the gateway bearer token first and retries with the same shared secret as browser-host password/basic auth if bearer auth is rejected. Command Center still performs the read-only feasibility probe and warns when no compatible local browser host is listening, because the command depends on that local service being available.
 
 ## 7. Security and privacy requirements
 

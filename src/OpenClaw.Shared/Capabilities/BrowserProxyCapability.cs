@@ -54,37 +54,22 @@ public class BrowserProxyCapability : NodeCapabilityBase
         using var timeoutCts = new System.Threading.CancellationTokenSource(TimeSpan.FromMilliseconds(timeoutMs));
 
         var uri = BuildUri(controlPort, path, request.Args);
-        using var httpRequest = new HttpRequestMessage(new HttpMethod(method), uri);
-        if (!string.IsNullOrWhiteSpace(_bearerToken))
-        {
-            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
-        }
-
-        if (method is "POST" or "DELETE" &&
-            request.Args.ValueKind == JsonValueKind.Object &&
-            request.Args.TryGetProperty("body", out var body))
-        {
-            httpRequest.Content = new StringContent(body.GetRawText(), Encoding.UTF8, "application/json");
-        }
-
         try
         {
+            using var httpRequest = CreateHttpRequest(method, uri, request.Args, usePasswordAuth: false);
             using var response = await _httpClient.SendAsync(httpRequest, timeoutCts.Token);
             var responseText = await response.Content.ReadAsStringAsync(timeoutCts.Token);
-            if (response.StatusCode == HttpStatusCode.Unauthorized)
-                return Error("Browser control host rejected authentication.");
-            if (!response.IsSuccessStatusCode)
-                return Error(string.IsNullOrWhiteSpace(responseText) ? $"Browser control host returned HTTP {(int)response.StatusCode}" : responseText);
 
-            using var doc = string.IsNullOrWhiteSpace(responseText)
-                ? JsonDocument.Parse("{}")
-                : JsonDocument.Parse(responseText);
-            var result = doc.RootElement.Clone();
-            var files = TryCollectFiles(result);
+            if (response.StatusCode == HttpStatusCode.Unauthorized &&
+                !string.IsNullOrWhiteSpace(_bearerToken))
+            {
+                using var passwordRequest = CreateHttpRequest(method, uri, request.Args, usePasswordAuth: true);
+                using var passwordResponse = await _httpClient.SendAsync(passwordRequest, timeoutCts.Token);
+                var passwordResponseText = await passwordResponse.Content.ReadAsStringAsync(timeoutCts.Token);
+                return BuildProxyResponse(passwordResponse, passwordResponseText);
+            }
 
-            return files.Count == 0
-                ? Success(new { result })
-                : Success(new { result, files });
+            return BuildProxyResponse(response, responseText);
         }
         catch (TaskCanceledException)
         {
@@ -106,6 +91,52 @@ public class BrowserProxyCapability : NodeCapabilityBase
         {
             return Error($"Browser proxy file read denied: {ex.Message}");
         }
+    }
+
+    private HttpRequestMessage CreateHttpRequest(string method, Uri uri, JsonElement args, bool usePasswordAuth)
+    {
+        var httpRequest = new HttpRequestMessage(new HttpMethod(method), uri);
+        if (!string.IsNullOrWhiteSpace(_bearerToken))
+        {
+            if (usePasswordAuth)
+            {
+                httpRequest.Headers.TryAddWithoutValidation("x-openclaw-password", _bearerToken);
+                httpRequest.Headers.Authorization = new AuthenticationHeaderValue(
+                    "Basic",
+                    Convert.ToBase64String(Encoding.UTF8.GetBytes($":{_bearerToken}")));
+            }
+            else
+            {
+                httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+            }
+        }
+
+        if (method is "POST" or "DELETE" &&
+            args.ValueKind == JsonValueKind.Object &&
+            args.TryGetProperty("body", out var body))
+        {
+            httpRequest.Content = new StringContent(body.GetRawText(), Encoding.UTF8, "application/json");
+        }
+
+        return httpRequest;
+    }
+
+    private NodeInvokeResponse BuildProxyResponse(HttpResponseMessage response, string responseText)
+    {
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
+            return Error("Browser control host rejected authentication.");
+        if (!response.IsSuccessStatusCode)
+            return Error(string.IsNullOrWhiteSpace(responseText) ? $"Browser control host returned HTTP {(int)response.StatusCode}" : responseText);
+
+        using var doc = string.IsNullOrWhiteSpace(responseText)
+            ? JsonDocument.Parse("{}")
+            : JsonDocument.Parse(responseText);
+        var result = doc.RootElement.Clone();
+        var files = TryCollectFiles(result);
+
+        return files.Count == 0
+            ? Success(new { result })
+            : Success(new { result, files });
     }
 
     private static bool TryResolveControlEndpoint(string gatewayUrl, out int controlPort, out string error)
