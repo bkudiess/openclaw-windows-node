@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using OpenClaw.Shared.ExecApprovals;
 
@@ -53,6 +54,7 @@ public class SystemCapability : NodeCapabilityBase
 
     // Exec approval policy (optional - if null, all commands are allowed)
     private ExecApprovalPolicy? _approvalPolicy;
+    private IExecApprovalPromptHandler? _promptHandler;
 
     // V2 exec approval handler (null = legacy path; inert until explicitly set)
     private IExecApprovalV2Handler? _v2Handler;
@@ -75,6 +77,11 @@ public class SystemCapability : NodeCapabilityBase
     public void SetApprovalPolicy(ExecApprovalPolicy policy)
     {
         _approvalPolicy = policy;
+    }
+
+    public void SetPromptHandler(IExecApprovalPromptHandler promptHandler)
+    {
+        _promptHandler = promptHandler;
     }
 
     /// <summary>
@@ -348,7 +355,7 @@ public class SystemCapability : NodeCapabilityBase
         if (_approvalPolicy != null)
         {
             var approval = _approvalPolicy.Evaluate(fullCommand, shell);
-            if (!approval.Allowed)
+            if (!await EnsureApprovedAsync(fullCommand, shell, approval))
             {
                 Logger.Warn($"system.run DENIED: {fullCommand} ({approval.Reason})");
                 return Error($"Command denied by exec policy: {approval.Reason}");
@@ -364,7 +371,7 @@ public class SystemCapability : NodeCapabilityBase
             foreach (var target in parseResult.Targets)
             {
                 var innerApproval = _approvalPolicy.Evaluate(target.Command, target.Shell);
-                if (!innerApproval.Allowed)
+                if (!await EnsureApprovedAsync(target.Command, target.Shell, innerApproval))
                 {
                     Logger.Warn($"system.run DENIED: {target.Command} ({innerApproval.Reason})");
                     return Error($"Command denied by exec policy: {innerApproval.Reason}");
@@ -399,6 +406,59 @@ public class SystemCapability : NodeCapabilityBase
             return Error($"Execution failed: {ex.Message}");
         }
     }
+
+    private async Task<bool> EnsureApprovedAsync(
+        string command,
+        string? shell,
+        ExecApprovalResult approval,
+        CancellationToken cancellationToken = default)
+    {
+        if (approval.Allowed)
+            return true;
+
+        if (approval.Action != ExecApprovalAction.Prompt || _promptHandler == null || _approvalPolicy == null)
+            return false;
+
+        var decision = await _promptHandler.RequestAsync(new ExecApprovalPromptRequest
+        {
+            Command = command,
+            Shell = shell,
+            MatchedPattern = approval.MatchedPattern,
+            Reason = approval.Reason ?? "Command requires approval"
+        }, cancellationToken);
+
+        if (decision.Kind == ExecApprovalPromptDecisionKind.Deny)
+        {
+            Logger.Warn($"system.run DENIED by prompt: {command} ({decision.Reason})");
+            return false;
+        }
+
+        if (decision.Kind == ExecApprovalPromptDecisionKind.AlwaysAllow)
+        {
+            if (CanPersistExactAllowRule(command))
+            {
+                _approvalPolicy.InsertRule(0, new ExecApprovalRule
+                {
+                    Pattern = command,
+                    Action = ExecApprovalAction.Allow,
+                    Shells = string.IsNullOrWhiteSpace(shell) ? null : [shell],
+                    Description = "Approved from Windows tray prompt"
+                });
+                Logger.Info($"system.run prompt persisted exact allow rule: {command}");
+            }
+            else
+            {
+                Logger.Warn($"system.run prompt could not persist wildcard command; allowing once only: {command}");
+            }
+        }
+
+        Logger.Info($"system.run APPROVED by prompt: {command} ({decision.Kind})");
+        return true;
+    }
+
+    private static bool CanPersistExactAllowRule(string command) =>
+        !string.IsNullOrWhiteSpace(command) &&
+        command.IndexOfAny(['*', '?']) < 0;
     
     private NodeInvokeResponse HandleExecApprovalsGet()
     {

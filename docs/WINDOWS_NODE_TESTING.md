@@ -54,7 +54,7 @@ These features need the gateway to send `node.invoke` commands:
 | `screen.snapshot` | Take screenshot | Captures screen, shows notification, returns base64 |
 | `screen.record` | Record short screen clip | Returns MP4/base64 metadata; requires explicit gateway allowlist |
 | `system.notify` | Show notification | Displays toast notification |
-| `system.run` / `system.which` | Controlled command execution | Uses local exec approval policy |
+| `system.run` / `system.which` | Controlled command execution | Uses local exec approval policy; `prompt` decisions show a Windows Allow once / Always allow / Deny dialog |
 | `camera.list` | Enumerate cameras | Returns device IDs and names |
 | `camera.snap` | Capture photo | Returns base64 image (NV12 fallback) |
 | `camera.clip` | Capture video clip | Returns MP4/base64 metadata |

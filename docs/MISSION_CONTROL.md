@@ -427,7 +427,7 @@ Deliverables:
   - First read-only Command Center slice is implemented. It surfaces these settings pages and explanatory rows, but intentionally does not query, request, or exercise device permissions.
 - Mac-style onboarding security warning.
 - Topology choice onboarding: **first Settings guide implemented with local, WSL, SSH tunnel, and remote/Tailscale presets**
-- Exec approval dialog with sanitizer and three-button flow.
+- Exec approval dialog with sanitizer and three-button flow: **implemented for local `Prompt` policy decisions with Allow once / Always allow / Deny**
 - Exec approval remote-policy hardening: **implemented guardrails so `system.execApprovals.set` cannot remotely switch to default allow or install broad/dangerous allow rules**
 - Host env sanitizer parity hardening.
 

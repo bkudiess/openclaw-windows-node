@@ -20,6 +20,7 @@ public class NodeService : IDisposable
 {
     private readonly IOpenClawLogger _logger;
     private readonly DispatcherQueue _dispatcherQueue;
+    private readonly Func<FrameworkElement?> _rootProvider;
     private WindowsNodeClient? _nodeClient;
     private CanvasWindow? _canvasWindow;
     private ScreenCaptureService? _screenCaptureService;
@@ -55,11 +56,16 @@ public class NodeService : IDisposable
     public string? FullDeviceId => _nodeClient?.FullDeviceId;
     public string? GatewayUrl => _nodeClient?.GatewayUrl;
     
-    public NodeService(IOpenClawLogger logger, DispatcherQueue dispatcherQueue, string dataPath)
+    public NodeService(
+        IOpenClawLogger logger,
+        DispatcherQueue dispatcherQueue,
+        string dataPath,
+        Func<FrameworkElement?>? rootProvider = null)
     {
         _logger = logger;
         _dispatcherQueue = dispatcherQueue;
         _dataPath = dataPath;
+        _rootProvider = rootProvider ?? (() => null);
         _screenCaptureService = new ScreenCaptureService(logger);
         _screenRecordingService = new ScreenRecordingService(logger);
         _cameraCaptureService = new CameraCaptureService(logger);
@@ -126,6 +132,7 @@ public class NodeService : IDisposable
         _systemCapability.NotifyRequested += OnSystemNotify;
         _systemCapability.SetCommandRunner(new LocalCommandRunner(_logger));
         _systemCapability.SetApprovalPolicy(new ExecApprovalPolicy(_dataPath, _logger));
+        _systemCapability.SetPromptHandler(new ExecApprovalPromptService(_dispatcherQueue, _rootProvider, _logger));
         _nodeClient.RegisterCapability(_systemCapability);
         
         // Canvas capability

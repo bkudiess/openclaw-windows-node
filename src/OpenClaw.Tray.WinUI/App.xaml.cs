@@ -1175,7 +1175,11 @@ public partial class App : Application
         {
             Logger.Info("Initializing Windows Node service...");
             
-            _nodeService = new NodeService(new AppLogger(), _dispatcherQueue, DataPath);
+            _nodeService = new NodeService(
+                new AppLogger(),
+                _dispatcherQueue,
+                DataPath,
+                () => _keepAliveWindow?.Content as FrameworkElement);
             _nodeService.StatusChanged += OnNodeStatusChanged;
             _nodeService.NotificationRequested += OnNodeNotificationRequested;
             _nodeService.PairingStatusChanged += OnPairingStatusChanged;
