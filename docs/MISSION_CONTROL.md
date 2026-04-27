@@ -279,7 +279,7 @@ Keep StatusDetailWindow as the first Command Center, but plan for tabs/sections:
 | Gateway process state | Missing | Topology/gateway card first; process manager later only for local Windows gateway |
 | Endpoint store/discovery | Missing | Add classifier, then discovery/profiles |
 | SSH tunnel robust state | Basic | Add tunnel status/error/startedAt; later Mac-equivalent SSH options/reuse |
-| PortGuardian | Missing | Add port diagnostics later |
+| PortGuardian | Partial | Read-only port diagnostics identify local listeners and owning process/PID; destructive kill actions remain intentionally absent |
 | HealthStore derived states | Partial | Add topology-aware health summary |
 | Nodes submenu copy actions | Implemented | Per-node copy and full node inventory copy include command groups, filtered commands, disabled settings, and parity gaps |
 | Session previews/settings | Partial | Add thinking/verbose submenus and richer previews |
@@ -287,7 +287,7 @@ Keep StatusDetailWindow as the first Command Center, but plan for tabs/sections:
 | Agent events ring | Partial Activity Stream | Expand to 400-event rich ring |
 | Permissions matrix | Implemented first slice | Command Center shows safe Windows privacy settings deep links without probing devices |
 | Onboarding security banner | Partial setup wizard | Add Mac-style warning and topology choice |
-| Debug actions | Implemented first wave | Open logs/config/diagnostics, refresh health, copy support context, copy port diagnostics, and copy capability diagnostics |
+| Debug actions | Implemented first wave | Open logs/config/diagnostics, refresh health, restart managed SSH tunnel, copy support context, copy port diagnostics, and copy capability diagnostics |
 | Voice/Talk | Missing | Separate roadmap track |
 | Cron/Skills settings | Missing/limited | Separate roadmap track |
 
@@ -395,7 +395,7 @@ Deliverables:
   - open session store
   - run health now: **implemented as Refresh Health**
   - send test heartbeat
-  - reset tunnel
+  - reset managed SSH tunnel: **implemented as Restart SSH Tunnel when Settings owns the tunnel**
   - restart local gateway if topology is WindowsNative and managed
   - copy privacy-safe support context: **implemented**
 - Rolling diagnostics JSONL with rotation: **implemented for privacy-safe app/connection/gateway/tunnel metadata**

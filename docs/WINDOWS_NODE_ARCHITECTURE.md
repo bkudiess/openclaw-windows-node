@@ -522,7 +522,7 @@ On macOS: launchd plist. On Linux: systemd unit. On Windows, options include:
 - **Startup folder** (simplest, least robust)
 - **Tray app manages gateway process** (like macOS menubar app can start/stop gateway)
 
-The Mac menubar app has "Gateway start/stop/restart" in its menu. The tray app has this marked as ❌ in the parity table. If the gateway runs on Windows, the tray app could manage it.
+The Mac menubar app has "Gateway start/stop/restart" in its menu. Windows Command Center can restart a tray-managed SSH tunnel, but it intentionally does not stop or kill externally managed gateway processes. If the gateway runs as a future Windows-managed process, the tray app could add explicit start/stop/restart controls for that owned process.
 
 ### 4. WSL2 networking: the NAT problem
 
