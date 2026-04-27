@@ -2032,6 +2032,7 @@ public partial class App : Application
             Tunnel = tunnel,
             GatewaySelf = _lastGatewaySelf,
             PortDiagnostics = portDiagnostics,
+            Permissions = PermissionDiagnostics.BuildDefaultWindowsMatrix(),
             Channels = _lastChannels.Select(ChannelCommandCenterInfo.FromHealth).ToList(),
             Sessions = _lastSessions.ToList(),
             Usage = _lastUsage,

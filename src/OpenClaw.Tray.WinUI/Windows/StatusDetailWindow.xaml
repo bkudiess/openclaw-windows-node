@@ -159,6 +159,39 @@
                 </ItemsControl>
             </StackPanel>
 
+            <!-- Permissions Section -->
+            <StackPanel x:Name="PermissionsSection" AutomationProperties.AutomationId="CommandCenterPermissionsSection" Spacing="8">
+                <TextBlock Text="PERMISSIONS" Style="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" FontWeight="Bold"/>
+                <ItemsControl x:Name="PermissionsList" AutomationProperties.AutomationId="CommandCenterPermissionsList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Padding="8" Margin="0,2" CornerRadius="4"
+                                  Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding StatusIcon}" Grid.Column="0" Margin="0,0,8,0"/>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                                    <TextBlock Text="{Binding Detail}"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <Button Grid.Column="2"
+                                        Content="Settings"
+                                        Tag="{Binding SettingsUri}"
+                                        Click="OnOpenPermissionSettings"
+                                        AutomationProperties.AutomationId="CommandCenterOpenPermissionSettingsButton"/>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+
             <!-- Usage Section -->
             <StackPanel x:Name="UsageSection" AutomationProperties.AutomationId="CommandCenterUsageSection" Spacing="8">
                 <TextBlock x:Uid="StatusUsageHeader" Text="USAGE" Style="{StaticResource CaptionTextBlockStyle}"

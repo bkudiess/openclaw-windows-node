@@ -5,7 +5,9 @@ using OpenClaw.Shared;
 using OpenClawTray.Helpers;
 using OpenClawTray.Services;
 using System;
+using System.ComponentModel;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using Windows.ApplicationModel.DataTransfer;
 using WinUIEx;
@@ -139,6 +141,14 @@ public sealed partial class StatusDetailWindow : WindowEx
             PortDiagnosticsSection.Visibility = Visibility.Collapsed;
         }
 
+        PermissionsList.ItemsSource = state.Permissions.Select(p => new PermissionDiagnosticViewModel
+        {
+            StatusIcon = p.Status.Equals("optional", StringComparison.OrdinalIgnoreCase) ? "⚪" : "🔒",
+            Name = $"{p.Name} ({p.Status})",
+            Detail = p.Detail,
+            SettingsUri = p.SettingsUri
+        }).ToList();
+
         // Usage
         if (state.Usage != null)
         {
@@ -233,6 +243,29 @@ public sealed partial class StatusDetailWindow : WindowEx
         Logger.Info("[CommandCenter] Copied diagnostic repair text");
     }
 
+    private void OnOpenPermissionSettings(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Microsoft.UI.Xaml.Controls.Button { Tag: string settingsUri } ||
+            string.IsNullOrWhiteSpace(settingsUri))
+        {
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(settingsUri) { UseShellExecute = true });
+            Logger.Info($"[CommandCenter] Opened permission settings: {settingsUri}");
+        }
+        catch (InvalidOperationException ex)
+        {
+            Logger.Warn($"[CommandCenter] Failed to open permission settings {settingsUri}: {ex.Message}");
+        }
+        catch (Win32Exception ex)
+        {
+            Logger.Warn($"[CommandCenter] Failed to open permission settings {settingsUri}: {ex.Message}");
+        }
+    }
+
     private class ChannelViewModel
     {
         public string Name { get; set; } = "";
@@ -268,6 +301,14 @@ public sealed partial class StatusDetailWindow : WindowEx
         public string Purpose { get; set; } = "";
         public string Detail { get; set; } = "";
         public string StatusText { get; set; } = "";
+    }
+
+    private class PermissionDiagnosticViewModel
+    {
+        public string StatusIcon { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string Detail { get; set; } = "";
+        public string SettingsUri { get; set; } = "";
     }
 
     private static string BuildChannelDetail(ChannelCommandCenterInfo channel)

@@ -284,7 +284,7 @@ Keep StatusDetailWindow as the first Command Center, but plan for tabs/sections:
 | Session previews/settings | Partial | Add thinking/verbose submenus and richer previews |
 | Cost 30-day chart | Partial usage display | Add usage/cost section and daily bars |
 | Agent events ring | Partial Activity Stream | Expand to 400-event rich ring |
-| Permissions matrix | Missing | Add Windows privacy settings/deep links |
+| Permissions matrix | Implemented first slice | Command Center shows safe Windows privacy settings deep links without probing devices |
 | Onboarding security banner | Partial setup wizard | Add Mac-style warning and topology choice |
 | Debug actions | Partial | Add restart/reset/log/config/port/test heartbeat actions |
 | Voice/Talk | Missing | Separate roadmap track |
@@ -423,6 +423,7 @@ Deliverables:
   - notifications
   - broad file system access if relevant
   - screen capture/graphics capture guidance
+  - First read-only Command Center slice is implemented. It surfaces these settings pages and explanatory rows, but intentionally does not query, request, or exercise device permissions.
 - Mac-style onboarding security warning.
 - Exec approval dialog with sanitizer and three-button flow.
 - Host env sanitizer parity hardening.

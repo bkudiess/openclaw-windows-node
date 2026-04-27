@@ -732,6 +732,66 @@ public class PortDiagnosticInfo
     public string StatusText => IsListening ? "listening" : "not listening";
 }
 
+public class PermissionDiagnosticInfo
+{
+    public string Name { get; set; } = "";
+    public string Status { get; set; } = "review";
+    public string Detail { get; set; } = "";
+    public string SettingsUri { get; set; } = "";
+}
+
+public static class PermissionDiagnostics
+{
+    public static List<PermissionDiagnosticInfo> BuildDefaultWindowsMatrix()
+    {
+        return
+        [
+            new()
+            {
+                Name = "Camera",
+                Status = "review",
+                Detail = "Required only for camera.list, camera.snap, and camera.clip.",
+                SettingsUri = "ms-settings:privacy-webcam"
+            },
+            new()
+            {
+                Name = "Microphone",
+                Status = "review",
+                Detail = "Required only for camera clips with audio or future voice features.",
+                SettingsUri = "ms-settings:privacy-microphone"
+            },
+            new()
+            {
+                Name = "Location",
+                Status = "review",
+                Detail = "Required only for location.get.",
+                SettingsUri = "ms-settings:privacy-location"
+            },
+            new()
+            {
+                Name = "Notifications",
+                Status = "review",
+                Detail = "Required for system notifications from gateway or node commands.",
+                SettingsUri = "ms-settings:notifications"
+            },
+            new()
+            {
+                Name = "Screen capture",
+                Status = "review",
+                Detail = "Required only for screen.snapshot and screen.record; recording remains gateway-policy gated.",
+                SettingsUri = "ms-settings:privacy-graphicscaptureprogrammatic"
+            },
+            new()
+            {
+                Name = "Broad file system access",
+                Status = "optional",
+                Detail = "Usually not required. Keep disabled unless a future packaged workflow explicitly needs it.",
+                SettingsUri = "ms-settings:privacy-broadfilesystemaccess"
+            }
+        ];
+    }
+}
+
 public class GatewayDiagnosticWarning
 {
     public GatewayDiagnosticSeverity Severity { get; set; } = GatewayDiagnosticSeverity.Info;
@@ -848,6 +908,7 @@ public class GatewayCommandCenterState
     public TunnelCommandCenterInfo? Tunnel { get; set; }
     public GatewaySelfInfo? GatewaySelf { get; set; }
     public List<PortDiagnosticInfo> PortDiagnostics { get; set; } = new();
+    public List<PermissionDiagnosticInfo> Permissions { get; set; } = new();
     public List<ChannelCommandCenterInfo> Channels { get; set; } = new();
     public List<SessionInfo> Sessions { get; set; } = new();
     public GatewayUsageInfo? Usage { get; set; }

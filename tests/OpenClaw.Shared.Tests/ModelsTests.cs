@@ -897,6 +897,21 @@ public class CommandCenterModelTests
     }
 
     [Fact]
+    public void PermissionDiagnostics_BuildsSafeWindowsReviewMatrix()
+    {
+        var permissions = PermissionDiagnostics.BuildDefaultWindowsMatrix();
+
+        Assert.Contains(permissions, p =>
+            p.Name == "Camera" &&
+            p.Status == "review" &&
+            p.SettingsUri == "ms-settings:privacy-webcam");
+        Assert.Contains(permissions, p =>
+            p.Name == "Screen capture" &&
+            p.Detail.Contains("gateway-policy gated", StringComparison.OrdinalIgnoreCase));
+        Assert.All(permissions, p => Assert.StartsWith("ms-settings:", p.SettingsUri, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void ChannelCommandCenterInfo_EnablesStopForHealthyChannel()
     {
         var info = ChannelCommandCenterInfo.FromHealth(new ChannelHealth
