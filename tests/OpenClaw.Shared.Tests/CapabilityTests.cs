@@ -816,6 +816,28 @@ public class BrowserProxyCapabilityTests
         Assert.Contains("browser-secret", passwordValues);
     }
 
+    [Fact]
+    public async Task BrowserProxy_UnreachableHostExplainsGatewayPlusTwoAndSshForward()
+    {
+        var cap = new BrowserProxyCapability(
+            NullLogger.Instance,
+            "ws://127.0.0.1:18789",
+            "browser-secret",
+            new ThrowingBrowserProxyHandler());
+
+        var res = await cap.ExecuteAsync(new NodeInvokeRequest
+        {
+            Id = "browser-5",
+            Command = "browser.proxy",
+            Args = Parse("""{"method":"GET","path":"/"}""")
+        });
+
+        Assert.False(res.Ok);
+        Assert.Contains("127.0.0.1:18791", res.Error);
+        Assert.Contains("gateway port + 2", res.Error);
+        Assert.Contains("ssh -N -L 18791:127.0.0.1:18791", res.Error);
+    }
+
     private sealed class CapturingHandler : HttpMessageHandler
     {
         private readonly string _response;
@@ -862,6 +884,14 @@ public class BrowserProxyCapabilityTests
                 Content = new StringContent(response)
             });
         }
+    }
+
+    private sealed class ThrowingBrowserProxyHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            throw new HttpRequestException("connection refused");
     }
 }
 

@@ -73,11 +73,11 @@ public class BrowserProxyCapability : NodeCapabilityBase
         }
         catch (TaskCanceledException)
         {
-            return Error($"browser proxy timed out for {method} {path} after {timeoutMs}ms");
+            return Error($"browser proxy timed out for {method} {path} after {timeoutMs}ms. {BuildReachabilityGuidance(controlPort)}");
         }
         catch (HttpRequestException ex)
         {
-            return Error($"Browser control host is not reachable: {ex.Message}");
+            return Error($"Browser control host is not reachable on 127.0.0.1:{controlPort}: {ex.Message}. {BuildReachabilityGuidance(controlPort)}");
         }
         catch (JsonException ex)
         {
@@ -158,6 +158,9 @@ public class BrowserProxyCapability : NodeCapabilityBase
 
         return true;
     }
+
+    private static string BuildReachabilityGuidance(int controlPort) =>
+        $"Start the local OpenClaw browser control host on gateway port + 2 ({controlPort}). If the gateway is reached through SSH, also forward it with: ssh -N -L {controlPort}:127.0.0.1:{controlPort} <user>@<host>";
 
     private static bool TryNormalizePath(string? rawPath, out string path, out string error)
     {
