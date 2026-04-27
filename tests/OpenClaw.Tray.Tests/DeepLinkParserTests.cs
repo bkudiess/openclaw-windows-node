@@ -60,6 +60,15 @@ public class DeepLinkParserTests
     }
 
     [Fact]
+    public void ParseDeepLink_ActivityWithFilter()
+    {
+        var result = DeepLinkParser.ParseDeepLink("openclaw://activity?filter=nodes");
+        Assert.NotNull(result);
+        Assert.Equal("activity", result.Path);
+        Assert.Equal("nodes", result.Parameters["filter"]);
+    }
+
+    [Fact]
     public void ParseDeepLink_TrailingSlash_IsStripped()
     {
         var result = DeepLinkParser.ParseDeepLink("openclaw://settings/");

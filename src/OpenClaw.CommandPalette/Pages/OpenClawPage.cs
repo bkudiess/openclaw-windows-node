@@ -39,6 +39,11 @@ internal sealed partial class OpenClawPage : ListPage
                 Title = "🧭 Command Center",
                 Subtitle = "Open gateway, tunnel, node, and browser diagnostics"
             },
+            new ListItem(new OpenUrlCommand("openclaw://activity"))
+            {
+                Title = "⚡ Activity Stream",
+                Subtitle = "Open recent tray activity and support bundle actions"
+            },
             new ListItem(new OpenUrlCommand("openclaw://settings"))
             {
                 Title = "⚙️ Settings",

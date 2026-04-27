@@ -56,6 +56,40 @@ public class TrayMenuWindowMarkupTests
     }
 
     [Fact]
+    public void CommandPalette_HasActivityStreamEntryPoint()
+    {
+        var sourcePath = Path.Combine(
+            GetRepositoryRoot(),
+            "src",
+            "OpenClaw.CommandPalette",
+            "Pages",
+            "OpenClawPage.cs");
+
+        var source = File.ReadAllText(sourcePath);
+
+        Assert.Contains(@"openclaw://activity", source);
+        Assert.Contains("Activity Stream", source);
+        Assert.Contains("recent tray activity", source);
+    }
+
+    [Fact]
+    public void DeepLinkHandler_HasActivityStreamEntryPoint()
+    {
+        var sourcePath = Path.Combine(
+            GetRepositoryRoot(),
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "Services",
+            "DeepLinkHandler.cs");
+
+        var source = File.ReadAllText(sourcePath);
+
+        Assert.Contains(@"case ""activity"":", source);
+        Assert.Contains("OpenActivityStream?.Invoke", source);
+        Assert.Contains(@"GetValueOrDefault(""filter"")", source);
+    }
+
+    [Fact]
     public void SettingsWindow_HasTopologyChoiceGuide()
     {
         var xamlPath = Path.Combine(

@@ -2755,6 +2755,7 @@ public partial class App : Application
             OpenSetup = () => _ = ShowSetupWizardAsync(),
             OpenChat = ShowWebChat,
             OpenCommandCenter = ShowStatusDetail,
+            OpenActivityStream = ShowActivityStream,
             OpenDashboard = OpenDashboard,
             OpenQuickSend = ShowQuickSend,
             SendMessage = async (msg) =>
