@@ -8,9 +8,11 @@ using OpenClawTray.Helpers;
 using OpenClawTray.Services;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage.Pickers;
@@ -455,6 +457,16 @@ public sealed class SetupWizardWindow : WindowEx
                 UpdatePairingStatusText();
             }
 
+            if (TryGetSetupCodeExpiry(doc.RootElement, out var expiresAt) &&
+                expiresAt <= DateTimeOffset.UtcNow)
+            {
+                _draftBootstrapToken = "";
+                _connectionTested = false;
+                _testStatusLabel.Text = "❌ Setup code expired. Generate a fresh QR/setup code from the gateway and try again.";
+                Logger.Warn($"[Setup] Setup code expired at {expiresAt:O}");
+                return false;
+            }
+
             if (string.IsNullOrWhiteSpace(_draftGatewayUrl) ||
                 string.IsNullOrWhiteSpace(_draftBootstrapToken))
             {
@@ -477,6 +489,56 @@ public sealed class SetupWizardWindow : WindowEx
             return false;
         }
     }
+
+    internal static bool TryGetSetupCodeExpiry(JsonElement payload, out DateTimeOffset expiresAt)
+    {
+        foreach (var propertyName in new[] { "expiresAt", "expires_at", "expires", "expiry", "exp" })
+        {
+            if (payload.TryGetProperty(propertyName, out var value) &&
+                TryParseSetupCodeExpiryValue(value, out expiresAt))
+            {
+                return true;
+            }
+        }
+
+        expiresAt = default;
+        return false;
+    }
+
+    private static bool TryParseSetupCodeExpiryValue(JsonElement value, out DateTimeOffset expiresAt)
+    {
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            var text = value.GetString();
+            if (DateTimeOffset.TryParse(
+                text,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out expiresAt))
+            {
+                return true;
+            }
+
+            if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var unixFromString))
+            {
+                expiresAt = UnixTimeToDateTimeOffset(unixFromString);
+                return true;
+            }
+        }
+        else if (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var unix))
+        {
+            expiresAt = UnixTimeToDateTimeOffset(unix);
+            return true;
+        }
+
+        expiresAt = default;
+        return false;
+    }
+
+    private static DateTimeOffset UnixTimeToDateTimeOffset(long value) =>
+        value > 10_000_000_000
+            ? DateTimeOffset.FromUnixTimeMilliseconds(value)
+            : DateTimeOffset.FromUnixTimeSeconds(value);
 
     private async void OnPasteSetupFromClipboard(object sender, RoutedEventArgs e)
     {

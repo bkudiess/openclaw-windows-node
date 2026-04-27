@@ -379,7 +379,7 @@ After changing either `gateway.nodes.allowCommands` or `gateway.nodes.denyComman
 - [x] Handle `hello-ok.auth.deviceToken` — save it for future connections
 - [x] Accept QR images and clipboard setup content as alternate ways to enter the same bootstrap payload
 - [x] Show "auto-paired!" vs "waiting for approval" based on auth method
-- [ ] Handle bootstrap token expiry gracefully (re-generate if expired)
+- [x] Handle bootstrap token expiry gracefully when setup code payloads include expiry metadata (`expiresAt`, `expires_at`, `expires`, `expiry`, or `exp`)
 
 ### 5.4 Upstream Contributions / Issues to File
 

@@ -198,6 +198,25 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains("Already paired", source);
     }
 
+    [Fact]
+    public void SetupWizard_DetectsExpiredSetupCodes()
+    {
+        var sourcePath = Path.Combine(
+            GetRepositoryRoot(),
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "Windows",
+            "SetupWizardWindow.cs");
+
+        var source = File.ReadAllText(sourcePath);
+
+        Assert.Contains("TryGetSetupCodeExpiry", source);
+        Assert.Contains("Setup code expired", source);
+        Assert.Contains("expiresAt", source);
+        Assert.Contains("expires_at", source);
+        Assert.Contains("exp", source);
+    }
+
     private static string GetRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
