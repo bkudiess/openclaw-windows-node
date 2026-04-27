@@ -1,6 +1,6 @@
 {
-  "last_run": "2026-04-27T01:09:01Z",
-  "run_id": "24971824529",
+  "last_run": "2026-04-27T12:52:49Z",
+  "run_id": "24996051649",
   "comments_made": {
     "159": "2026-04-26T12:33:12Z",
     "198": "2026-04-23T01:06:43Z",
@@ -9,58 +9,40 @@
     "99": "prior run"
   },
   "fix_attempts": {
-    "perf-tolowerinvariant": {
-      "pr_branch": "repo-assist/perf-avoid-tolowerinvariant-2026-04-27",
-      "pr_number": 217,
+    "test-diagnostics-and-screen": {
+      "pr_branch": "repo-assist/test-diagnostics-and-screen-2026-04-27",
+      "pr_number": null,
       "status": "open",
-      "created": "2026-04-27T01:09:01Z",
-      "description": "Task8: eliminate ToLowerInvariant() allocations in LocalCommandRunner, ExecApprovalPolicy, NotificationCategorizer; 663 Shared pass"
+      "created": "2026-04-27T12:52:49Z",
+      "description": "Task9: 14 new tests - TryGetCommandPermission (7), BuildNodeWarnings (2), SortAndDedupeWarnings (1), ScreenCapability fps/throws (3); 838 Shared pass"
     },
-    "test-shell-parser-env-sanitizer": {
-      "pr_branch": "repo-assist/test-shell-parser-env-sanitizer-2026-04-25",
-      "pr_number": 212,
+    "webview2-bridge": {
+      "pr_branch": "repo-assist/feat-webview2-bridge-webchatwindow",
+      "pr_number": 192,
       "status": "open",
-      "created": "2026-04-25T12:31:47Z",
-      "description": "Task9: 34 ExecShellWrapperParser tests + 24 ExecEnvSanitizer tests; 750 Shared pass"
-    },
-    "test-auth-failure-terminal": {
-      "pr_branch": "repo-assist/test-auth-failure-terminal-2026-04-24",
-      "pr_number": 207,
-      "status": "open",
-      "created": "2026-04-24T01:07:10Z",
-      "description": "8 new tests for terminal auth-failure paths (PR #206 fix)"
-    },
-    "improve-searchvalues-systemcapability-tests": {
-      "pr_branch": "repo-assist/improve-searchvalues-gatewayurlhelper-2026-04-24",
-      "pr_number": 209,
-      "status": "open",
-      "created": "2026-04-24T12:40:40Z",
-      "description": "Task5: SearchValues<char> in GatewayUrlHelper; Task9: 10 new SystemCapability tests; 670 Shared pass"
-    },
-    "eng-src-directory-build-props": {
-      "pr_branch": "repo-assist/eng-src-directory-build-props-2026-04-25",
-      "pr_number": 211,
-      "status": "open",
-      "created": "2026-04-25T01:00:54Z",
-      "description": "Task4: add src/Directory.Build.props with EnableNETAnalyzers=true, AnalysisMode=Recommended, NuGetAuditMode=all; 652 Shared pass"
-    },
-    "improve-remove-linq-systemcapability": {
-      "pr_branch": "repo-assist/improve-remove-linq-systemcapability-2026-04-26",
-      "pr_number": 213,
-      "status": "open",
-      "created": "2026-04-26T01:15:00Z",
-      "description": "Task5: remove System.Linq from SystemCapability; 3 LINQ chains replaced with loops; 652 Shared pass"
+      "created": "2026-04-21T01:04:00Z",
+      "description": "Task10: WebView2 bidirectional native<->SPA bridge; +15 tests; 648 Shared + 122 Tray pass"
     }
   },
   "closed_items": {
     "198": "closed 2026-04-23 by shanselman (auth retry loop fix completed)",
     "210": "merged 2026-04-26 by shanselman (camera.clip, location.get, canvas)",
-    "214": "issue #214 (NuGet.Config tracking) - picked up by AlexAlves87 as PR #215"
+    "214": "issue #214 (NuGet.Config tracking) - picked up by AlexAlves87 as PR #215, closed by #218",
+    "217": "closed 2026-04-27 - superseded by PR #218",
+    "216": "closed 2026-04-27 - superseded by PR #218",
+    "215": "closed 2026-04-27 - superseded by PR #218",
+    "213": "closed 2026-04-27 - superseded by PR #218",
+    "212": "closed 2026-04-27 - superseded by PR #218",
+    "211": "closed 2026-04-27 - superseded by PR #218",
+    "209": "closed 2026-04-27 - superseded by PR #218",
+    "207": "closed 2026-04-27 - superseded by PR #218",
+    "159": "closed 2026-04-27 - screen recording implemented directly by shanselman in commit dba5342",
+    "218": "merged 2026-04-27 by shanselman: handle repo-assist easy wins (NuGet.Config, Dependabot, perf/LINQ/tests bundle)"
   },
-  "notes": "PR #217 created (this run): perf - eliminate ToLowerInvariant() allocations. PR #216 open from AlexAlves87: exec approvals routing seam. PR #215 open from AlexAlves87: NuGet.Config (Closes #214). PR #213 open: remove System.Linq. PR #212 open: parser+sanitizer tests. PR #211 open: src/Directory.Build.props. PR #209 open: SearchValues+SystemCapability tests. PR #207 open: terminal auth-failure tests. PR #192 open: WebView2 bridge.",
+  "notes": "PR #192 open: WebView2 bridge. New test PR created this run (branch repo-assist/test-diagnostics-and-screen-2026-04-27, no PR# yet). Dependabot PRs #228-#232 open. shanselman merged #218 (easy wins), #219 (NuGet audit). Screen recording implemented directly in dba5342. Issue #99 Voice Mode - NichUK planning new PR. Issue #191 WebView2 bridge - open.",
   "monthly_activity_issue": 127,
   "backlog_cursor": {
-    "issues": 217,
-    "prs": 217
+    "issues": 232,
+    "prs": 232
   }
 }
