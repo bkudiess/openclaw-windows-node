@@ -97,6 +97,7 @@ public class DeepLinkParserTests
     [InlineData("openclaw://config", "config")]
     [InlineData("openclaw://diagnostics", "diagnostics")]
     [InlineData("openclaw://support-context", "support-context")]
+    [InlineData("openclaw://debug-bundle", "debug-bundle")]
     [InlineData("openclaw://browser-setup", "browser-setup")]
     [InlineData("openclaw://port-diagnostics", "port-diagnostics")]
     [InlineData("openclaw://capability-diagnostics", "capability-diagnostics")]
@@ -236,6 +237,7 @@ public class DeepLinkParserTests
     [InlineData("openclaw://config", nameof(DeepLinkActions.OpenConfigFolder))]
     [InlineData("openclaw://diagnostics", nameof(DeepLinkActions.OpenDiagnosticsFolder))]
     [InlineData("openclaw://support-context", nameof(DeepLinkActions.CopySupportContext))]
+    [InlineData("openclaw://debug-bundle", nameof(DeepLinkActions.CopyDebugBundle))]
     [InlineData("openclaw://browser-setup", nameof(DeepLinkActions.CopyBrowserSetupGuidance))]
     [InlineData("openclaw://port-diagnostics", nameof(DeepLinkActions.CopyPortDiagnostics))]
     [InlineData("openclaw://capability-diagnostics", nameof(DeepLinkActions.CopyCapabilityDiagnostics))]
@@ -260,6 +262,7 @@ public class DeepLinkParserTests
             OpenConfigFolder = () => invoked = nameof(DeepLinkActions.OpenConfigFolder),
             OpenDiagnosticsFolder = () => invoked = nameof(DeepLinkActions.OpenDiagnosticsFolder),
             CopySupportContext = () => invoked = nameof(DeepLinkActions.CopySupportContext),
+            CopyDebugBundle = () => invoked = nameof(DeepLinkActions.CopyDebugBundle),
             CopyBrowserSetupGuidance = () => invoked = nameof(DeepLinkActions.CopyBrowserSetupGuidance),
             CopyPortDiagnostics = () => invoked = nameof(DeepLinkActions.CopyPortDiagnostics),
             CopyCapabilityDiagnostics = () => invoked = nameof(DeepLinkActions.CopyCapabilityDiagnostics),

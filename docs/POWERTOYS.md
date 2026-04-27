@@ -53,6 +53,7 @@ Open Command Palette (`Win+Alt+Space`), type **"OpenClaw"** — you should see t
 | **🗂️ Open Config Folder** | Opens the OpenClaw Tray configuration folder |
 | **🧪 Open Diagnostics Folder** | Opens the diagnostics JSONL folder |
 | **📋 Copy Support Context** | Copies redacted Command Center support metadata |
+| **🧰 Copy Debug Bundle** | Copies combined support, port, capability, node, channel, and activity diagnostics |
 | **🌐 Copy Browser Setup** | Copies browser.proxy and node-host setup guidance |
 | **🔌 Copy Port Diagnostics** | Copies gateway/browser/tunnel port owners and stop hints |
 | **🛡️ Copy Capability Diagnostics** | Copies permission, allowlist, and parity diagnostics |
@@ -128,6 +129,7 @@ Get-AppxPackage -Name '*OpenClaw*' | Remove-AppxPackage
   | Open Config Folder | `openclaw://config` |
   | Open Diagnostics Folder | `openclaw://diagnostics` |
   | Copy Support Context | `openclaw://support-context` |
+  | Copy Debug Bundle | `openclaw://debug-bundle` |
   | Copy Browser Setup | `openclaw://browser-setup` |
   | Copy Port Diagnostics | `openclaw://port-diagnostics` |
   | Copy Capability Diagnostics | `openclaw://capability-diagnostics` |

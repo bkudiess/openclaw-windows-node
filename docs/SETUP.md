@@ -91,6 +91,7 @@ OpenClaw Tray responds to `openclaw://` deep links, which can be invoked from a 
 | `openclaw://config` | Open the config folder |
 | `openclaw://diagnostics` | Open the diagnostics JSONL folder |
 | `openclaw://support-context` | Copy redacted support context |
+| `openclaw://debug-bundle` | Copy a combined debug bundle for support |
 | `openclaw://browser-setup` | Copy browser.proxy/browser-control setup guidance |
 | `openclaw://port-diagnostics` | Copy gateway/browser/tunnel port diagnostics with owner PID stop hints |
 | `openclaw://capability-diagnostics` | Copy permissions, allowlist, and parity diagnostics |

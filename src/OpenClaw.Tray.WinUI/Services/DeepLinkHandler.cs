@@ -117,6 +117,12 @@ public static class DeepLinkHandler
                 actions.CopySupportContext?.Invoke();
                 break;
 
+            case "debug-bundle":
+            case "diagnostics-bundle":
+            case "support-bundle":
+                actions.CopyDebugBundle?.Invoke();
+                break;
+
             case "browser-setup":
             case "browser-guidance":
             case "browser-proxy-setup":
@@ -240,6 +246,7 @@ public class DeepLinkActions
     public Action? OpenConfigFolder { get; set; }
     public Action? OpenDiagnosticsFolder { get; set; }
     public Action? CopySupportContext { get; set; }
+    public Action? CopyDebugBundle { get; set; }
     public Action? CopyBrowserSetupGuidance { get; set; }
     public Action? CopyPortDiagnostics { get; set; }
     public Action? CopyCapabilityDiagnostics { get; set; }

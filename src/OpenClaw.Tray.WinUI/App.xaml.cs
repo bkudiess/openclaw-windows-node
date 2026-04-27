@@ -561,6 +561,7 @@ public partial class App : Application
             case "configfolder": OpenConfigFolder(); break;
             case "diagnosticsfolder": OpenDiagnosticsFolder(); break;
             case "supportcontext": CopySupportContext(); break;
+            case "debugbundle": CopyDebugBundle(); break;
             case "browsersetup": CopyBrowserSetupGuidance(); break;
             case "portdiagnostics": CopyPortDiagnostics(); break;
             case "copydeviceid": CopyDeviceIdToClipboard(); break;
@@ -984,6 +985,7 @@ public partial class App : Application
         menu.AddMenuItem("Open Config Folder", "🗂️", "configfolder", indent: true);
         menu.AddMenuItem("Open Diagnostics Folder", "🧪", "diagnosticsfolder", indent: true);
         menu.AddMenuItem("Copy Support Context", "📋", "supportcontext", indent: true);
+        menu.AddMenuItem("Copy Debug Bundle", "🧰", "debugbundle", indent: true);
         menu.AddMenuItem("Copy Browser Setup", "🌐", "browsersetup", indent: true);
         menu.AddMenuItem("Copy Port Diagnostics", "🔌", "portdiagnostics", indent: true);
 
@@ -2673,6 +2675,21 @@ public partial class App : Application
         }
     }
 
+    private void CopyDebugBundle()
+    {
+        try
+        {
+            var package = new DataPackage();
+            package.SetText(StatusDetailWindow.BuildDebugBundle(BuildCommandCenterState()));
+            Clipboard.SetContent(package);
+            Logger.Info("Copied debug bundle from deep link");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Failed to copy debug bundle from deep link: {ex.Message}");
+        }
+    }
+
     private void CopyBrowserSetupGuidance()
     {
         try
@@ -2997,6 +3014,7 @@ public partial class App : Application
             OpenConfigFolder = OpenConfigFolder,
             OpenDiagnosticsFolder = OpenDiagnosticsFolder,
             CopySupportContext = CopySupportContext,
+            CopyDebugBundle = CopyDebugBundle,
             CopyBrowserSetupGuidance = CopyBrowserSetupGuidance,
             CopyPortDiagnostics = CopyPortDiagnostics,
             CopyCapabilityDiagnostics = CopyCapabilityDiagnostics,

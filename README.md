@@ -312,6 +312,7 @@ OpenClaw registers the `openclaw://` URL scheme for automation and integration:
 | `openclaw://config` | Open the config folder |
 | `openclaw://diagnostics` | Open the diagnostics JSONL folder |
 | `openclaw://support-context` | Copy redacted support context |
+| `openclaw://debug-bundle` | Copy a combined debug bundle for support |
 | `openclaw://browser-setup` | Copy browser.proxy/browser-control setup guidance |
 | `openclaw://port-diagnostics` | Copy gateway/browser/tunnel port diagnostics with owner PID stop hints |
 | `openclaw://capability-diagnostics` | Copy permissions, allowlist, and parity diagnostics |
@@ -346,6 +347,7 @@ PowerToys Command Palette extension for quick OpenClaw access.
 - **⚙️ Settings** - Open the OpenClaw Tray Settings dialog
 - **📄 Open Log File / 📁 Logs / 🗂️ Config / 🧪 Diagnostics** - Open support files and folders
 - **📋 Copy Support Context** - Copy redacted Command Center metadata
+- **🧰 Copy Debug Bundle** - Copy combined support, port, capability, node, channel, and activity diagnostics
 - **🌐 Copy Browser Setup** - Copy browser.proxy and node-host setup guidance
 - **🔌 Copy Port Diagnostics** - Copy gateway/browser/tunnel port owners and stop hints
 - **🛡️ Copy Capability Diagnostics** - Copy permission, allowlist, and parity diagnostics

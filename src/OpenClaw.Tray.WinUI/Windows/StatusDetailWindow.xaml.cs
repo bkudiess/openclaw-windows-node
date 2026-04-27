@@ -383,6 +383,11 @@ public sealed partial class StatusDetailWindow : WindowEx
         CopyText(BuildBrowserSetupGuidance(_state), "[CommandCenter] Copied browser setup guidance");
     }
 
+    private void OnCopyDebugBundle(object sender, RoutedEventArgs e)
+    {
+        CopyText(BuildDebugBundle(_state), "[CommandCenter] Copied debug bundle");
+    }
+
     private void OnCheckUpdates(object sender, RoutedEventArgs e)
     {
         CheckUpdatesRequested?.Invoke(this, EventArgs.Empty);
@@ -523,6 +528,29 @@ public sealed partial class StatusDetailWindow : WindowEx
         builder.AppendLine($"Settings folder: {RedactSupportPath(SettingsManager.SettingsDirectoryPath)}");
         builder.AppendLine("Excluded: tokens, bootstrap tokens, command arguments, screenshots, recordings, camera data, microphone data, base64 payloads, and message payloads.");
         return builder.ToString();
+    }
+
+    internal static string BuildDebugBundle(GatewayCommandCenterState state)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("OpenClaw Windows Tray Debug Bundle");
+        builder.AppendLine($"Generated: {DateTimeOffset.Now:O}");
+        builder.AppendLine();
+        AppendSection(builder, "Support Context", BuildSupportContext(state));
+        AppendSection(builder, "Port Diagnostics", BuildPortDiagnosticsSummary(state.PortDiagnostics));
+        AppendSection(builder, "Capability Diagnostics", BuildCapabilityDiagnosticsSummary(state));
+        AppendSection(builder, "Node Inventory", BuildNodeInventorySummary(state.Nodes));
+        AppendSection(builder, "Channel Summary", BuildChannelSummaryText(state.Channels));
+        AppendSection(builder, "Activity Summary", BuildActivitySummary(state.RecentActivity));
+        AppendSection(builder, "Extensibility Summary", BuildExtensibilitySummary(state.Channels));
+        return builder.ToString();
+    }
+
+    private static void AppendSection(StringBuilder builder, string title, string content)
+    {
+        builder.AppendLine($"## {title}");
+        builder.AppendLine(content.TrimEnd());
+        builder.AppendLine();
     }
 
     internal static string BuildBrowserSetupGuidance(GatewayCommandCenterState state)

@@ -144,6 +144,9 @@
                         <Button Content="Copy Browser Setup"
                                 Click="OnCopyBrowserSetup"
                                 AutomationProperties.AutomationId="CommandCenterCopyBrowserSetupButton"/>
+                        <Button Content="Copy Debug Bundle"
+                                Click="OnCopyDebugBundle"
+                                AutomationProperties.AutomationId="CommandCenterCopyDebugBundleButton"/>
                         <Button Content="Check Updates"
                                 Click="OnCheckUpdates"
                                 AutomationProperties.AutomationId="CommandCenterCheckUpdatesButton"/>

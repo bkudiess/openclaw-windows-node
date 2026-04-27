@@ -155,6 +155,8 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains("Check for Updates", source);
         Assert.Contains(@"openclaw://support-context", source);
         Assert.Contains("Copy Support Context", source);
+        Assert.Contains(@"openclaw://debug-bundle", source);
+        Assert.Contains("Copy Debug Bundle", source);
         Assert.Contains(@"openclaw://browser-setup", source);
         Assert.Contains("Copy Browser Setup", source);
         Assert.Contains(@"openclaw://port-diagnostics", source);
@@ -247,6 +249,8 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains("OpenDiagnosticsFolder?.Invoke", source);
         Assert.Contains(@"case ""support-context"":", source);
         Assert.Contains("CopySupportContext?.Invoke", source);
+        Assert.Contains(@"case ""debug-bundle"":", source);
+        Assert.Contains("CopyDebugBundle?.Invoke", source);
         Assert.Contains(@"case ""browser-setup"":", source);
         Assert.Contains("CopyBrowserSetupGuidance?.Invoke", source);
         Assert.Contains(@"case ""port-diagnostics"":", source);
@@ -343,6 +347,7 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains(@"AutomationProperties.AutomationId=""CommandCenterOpenDiagnosticsButton""", xaml);
         Assert.Contains(@"AutomationProperties.AutomationId=""CommandCenterCopySupportContextButton""", xaml);
         Assert.Contains(@"AutomationProperties.AutomationId=""CommandCenterCopyBrowserSetupButton""", xaml);
+        Assert.Contains(@"AutomationProperties.AutomationId=""CommandCenterCopyDebugBundleButton""", xaml);
         Assert.Contains(@"AutomationProperties.AutomationId=""CommandCenterCheckUpdatesButton""", xaml);
         Assert.Contains(@"AutomationProperties.AutomationId=""CommandCenterRestartSshTunnelButton""", xaml);
         Assert.Contains(@"AutomationProperties.AutomationId=""CommandCenterUpdateStatusText""", xaml);
@@ -366,6 +371,7 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains(@"case ""configfolder"": OpenConfigFolder(); break;", source);
         Assert.Contains(@"case ""diagnosticsfolder"": OpenDiagnosticsFolder(); break;", source);
         Assert.Contains(@"case ""supportcontext"": CopySupportContext(); break;", source);
+        Assert.Contains(@"case ""debugbundle"": CopyDebugBundle(); break;", source);
         Assert.Contains(@"case ""browsersetup"": CopyBrowserSetupGuidance(); break;", source);
         Assert.Contains(@"case ""portdiagnostics"": CopyPortDiagnostics(); break;", source);
         Assert.Contains(@"menu.AddHeader(""🧰 Support & Debug"")", source);
@@ -373,6 +379,7 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains(@"menu.AddMenuItem(""Open Config Folder"", ""🗂️"", ""configfolder"", indent: true)", source);
         Assert.Contains(@"menu.AddMenuItem(""Open Diagnostics Folder"", ""🧪"", ""diagnosticsfolder"", indent: true)", source);
         Assert.Contains(@"menu.AddMenuItem(""Copy Support Context"", ""📋"", ""supportcontext"", indent: true)", source);
+        Assert.Contains(@"menu.AddMenuItem(""Copy Debug Bundle"", ""🧰"", ""debugbundle"", indent: true)", source);
         Assert.Contains(@"menu.AddMenuItem(""Copy Browser Setup"", ""🌐"", ""browsersetup"", indent: true)", source);
         Assert.Contains(@"menu.AddMenuItem(""Copy Port Diagnostics"", ""🔌"", ""portdiagnostics"", indent: true)", source);
     }
@@ -447,6 +454,9 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains("<user>@<host>", source);
         Assert.Contains("BuildPortDiagnosticsSummary", source);
         Assert.Contains("OpenClaw port diagnostics", source);
+        Assert.Contains("OpenClaw Windows Tray Debug Bundle", source);
+        Assert.Contains("BuildDebugBundle", source);
+        Assert.Contains("AppendSection", source);
         Assert.Contains("OwningProcessId", source);
         Assert.Contains("OwningProcessName", source);
         Assert.Contains("Stop-Process -Id", source);

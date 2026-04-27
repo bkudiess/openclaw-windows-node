@@ -114,6 +114,11 @@ internal sealed partial class OpenClawPage : ListPage
                 Title = "📋 Copy Support Context",
                 Subtitle = "Copy redacted Command Center support metadata"
             },
+            new ListItem(new OpenUrlCommand("openclaw://debug-bundle"))
+            {
+                Title = "🧰 Copy Debug Bundle",
+                Subtitle = "Copy support context plus port, capability, node, channel, and activity diagnostics"
+            },
             new ListItem(new OpenUrlCommand("openclaw://browser-setup"))
             {
                 Title = "🌐 Copy Browser Setup",
