@@ -96,6 +96,7 @@ public class DeepLinkParserTests
     [InlineData("openclaw://config", "config")]
     [InlineData("openclaw://diagnostics", "diagnostics")]
     [InlineData("openclaw://support-context", "support-context")]
+    [InlineData("openclaw://browser-setup", "browser-setup")]
     [InlineData("openclaw://restart-ssh-tunnel", "restart-ssh-tunnel")]
     public void ParseDeepLink_TrayUtilityEntrypoints(string uri, string expectedPath)
     {
@@ -228,6 +229,7 @@ public class DeepLinkParserTests
     [InlineData("openclaw://config", nameof(DeepLinkActions.OpenConfigFolder))]
     [InlineData("openclaw://diagnostics", nameof(DeepLinkActions.OpenDiagnosticsFolder))]
     [InlineData("openclaw://support-context", nameof(DeepLinkActions.CopySupportContext))]
+    [InlineData("openclaw://browser-setup", nameof(DeepLinkActions.CopyBrowserSetupGuidance))]
     [InlineData("openclaw://restart-ssh-tunnel", nameof(DeepLinkActions.RestartSshTunnel))]
     public void Handle_InvokesExpectedAction(string uri, string expectedAction)
     {
@@ -244,6 +246,7 @@ public class DeepLinkParserTests
             OpenConfigFolder = () => invoked = nameof(DeepLinkActions.OpenConfigFolder),
             OpenDiagnosticsFolder = () => invoked = nameof(DeepLinkActions.OpenDiagnosticsFolder),
             CopySupportContext = () => invoked = nameof(DeepLinkActions.CopySupportContext),
+            CopyBrowserSetupGuidance = () => invoked = nameof(DeepLinkActions.CopyBrowserSetupGuidance),
             RestartSshTunnel = () => invoked = nameof(DeepLinkActions.RestartSshTunnel)
         };
 

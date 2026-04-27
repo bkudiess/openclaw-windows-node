@@ -52,6 +52,7 @@ Open Command Palette (`Win+Alt+Space`), type **"OpenClaw"** — you should see t
 | **🗂️ Open Config Folder** | Opens the OpenClaw Tray configuration folder |
 | **🧪 Open Diagnostics Folder** | Opens the diagnostics JSONL folder |
 | **📋 Copy Support Context** | Copies redacted Command Center support metadata |
+| **🌐 Copy Browser Setup** | Copies browser.proxy and node-host setup guidance |
 | **🔁 Restart SSH Tunnel** | Restarts the tray-managed SSH tunnel when enabled |
 
 ## Usage
@@ -119,4 +120,5 @@ Get-AppxPackage -Name '*OpenClaw*' | Remove-AppxPackage
   | Open Config Folder | `openclaw://config` |
   | Open Diagnostics Folder | `openclaw://diagnostics` |
   | Copy Support Context | `openclaw://support-context` |
+  | Copy Browser Setup | `openclaw://browser-setup` |
   | Restart SSH Tunnel | `openclaw://restart-ssh-tunnel` |

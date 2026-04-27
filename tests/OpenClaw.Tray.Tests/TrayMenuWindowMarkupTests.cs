@@ -151,6 +151,8 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains("Open Diagnostics Folder", source);
         Assert.Contains(@"openclaw://support-context", source);
         Assert.Contains("Copy Support Context", source);
+        Assert.Contains(@"openclaw://browser-setup", source);
+        Assert.Contains("Copy Browser Setup", source);
         Assert.Contains(@"openclaw://restart-ssh-tunnel", source);
         Assert.Contains("Restart SSH Tunnel", source);
     }
@@ -227,6 +229,8 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains("OpenDiagnosticsFolder?.Invoke", source);
         Assert.Contains(@"case ""support-context"":", source);
         Assert.Contains("CopySupportContext?.Invoke", source);
+        Assert.Contains(@"case ""browser-setup"":", source);
+        Assert.Contains("CopyBrowserSetupGuidance?.Invoke", source);
         Assert.Contains(@"case ""restart-ssh-tunnel"":", source);
         Assert.Contains("RestartSshTunnel?.Invoke", source);
     }
@@ -308,10 +312,11 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains(@"AutomationProperties.AutomationId=""CommandCenterOpenConfigButton""", xaml);
         Assert.Contains(@"AutomationProperties.AutomationId=""CommandCenterOpenDiagnosticsButton""", xaml);
         Assert.Contains(@"AutomationProperties.AutomationId=""CommandCenterCopySupportContextButton""", xaml);
+        Assert.Contains(@"AutomationProperties.AutomationId=""CommandCenterCopyBrowserSetupButton""", xaml);
         Assert.Contains(@"AutomationProperties.AutomationId=""CommandCenterRestartSshTunnelButton""", xaml);
         Assert.Contains(@"AutomationProperties.AutomationId=""CommandCenterUpdateStatusText""", xaml);
         Assert.Matches(
-            new Regex(@"<Grid\.RowDefinitions>\s*<RowDefinition/>\s*<RowDefinition/>\s*<RowDefinition/>\s*</Grid\.RowDefinitions>\s*<StackPanel Grid\.Row=""0""", RegexOptions.Singleline),
+            new Regex(@"<Grid\.RowDefinitions>\s*<RowDefinition/>\s*<RowDefinition/>\s*<RowDefinition/>\s*<RowDefinition/>\s*</Grid\.RowDefinitions>\s*<StackPanel Grid\.Row=""0""", RegexOptions.Singleline),
             xaml);
     }
 
@@ -391,8 +396,12 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains("<remote-gateway-port+2>", appSource);
         Assert.Contains("BuildBrowserProxyAuthWarnings(nodes)", appSource);
         Assert.Contains("Do not paste QR bootstrap tokens into the normal gateway token field.", appSource);
-        Assert.Contains("BuildBrowserProxyHostGuidance(port.Port)", appSource);
-        Assert.Contains("Start a compatible OpenClaw browser-control host", appSource);
+        Assert.Contains("StatusDetailWindow.BuildBrowserSetupGuidance(port.Port, topology, tunnel)", appSource);
+        Assert.Contains("Copy browser setup guidance", appSource);
+        Assert.Contains("openclaw node run --host", source);
+        Assert.Contains("openclaw browser --browser-profile openclaw doctor", source);
+        Assert.Contains(@"topology.Host", source);
+        Assert.DoesNotContain("RedactSupportValue(topology.Host)", source);
         var portDiagnosticsSourcePath = Path.Combine(
             GetRepositoryRoot(),
             "src",

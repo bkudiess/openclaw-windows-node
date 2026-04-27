@@ -107,6 +107,12 @@ public static class DeepLinkHandler
                 actions.CopySupportContext?.Invoke();
                 break;
 
+            case "browser-setup":
+            case "browser-guidance":
+            case "browser-proxy-setup":
+                actions.CopyBrowserSetupGuidance?.Invoke();
+                break;
+
             case "ssh-restart":
             case "restart-ssh":
             case "restart-ssh-tunnel":
@@ -188,6 +194,7 @@ public class DeepLinkActions
     public Action? OpenConfigFolder { get; set; }
     public Action? OpenDiagnosticsFolder { get; set; }
     public Action? CopySupportContext { get; set; }
+    public Action? CopyBrowserSetupGuidance { get; set; }
     public Action? RestartSshTunnel { get; set; }
     public Action? OpenChat { get; set; }
     public Action? OpenCommandCenter { get; set; }

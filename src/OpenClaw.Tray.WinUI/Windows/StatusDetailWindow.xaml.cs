@@ -377,6 +377,11 @@ public sealed partial class StatusDetailWindow : WindowEx
         CopyText(BuildPortDiagnosticsSummary(_state.PortDiagnostics), "[CommandCenter] Copied port diagnostics");
     }
 
+    private void OnCopyBrowserSetup(object sender, RoutedEventArgs e)
+    {
+        CopyText(BuildBrowserSetupGuidance(_state), "[CommandCenter] Copied browser setup guidance");
+    }
+
     private void OnOpenLogsFolder(object sender, RoutedEventArgs e)
     {
         OpenFolder(Path.GetDirectoryName(Logger.LogFilePath), "logs");
@@ -512,6 +517,104 @@ public sealed partial class StatusDetailWindow : WindowEx
         builder.AppendLine($"Settings folder: {RedactSupportPath(SettingsManager.SettingsDirectoryPath)}");
         builder.AppendLine("Excluded: tokens, bootstrap tokens, command arguments, screenshots, recordings, camera data, microphone data, base64 payloads, and message payloads.");
         return builder.ToString();
+    }
+
+    internal static string BuildBrowserSetupGuidance(GatewayCommandCenterState state)
+    {
+        var browserProxyPort = state.PortDiagnostics
+            .FirstOrDefault(p => p.Purpose.Equals("Browser proxy host", StringComparison.OrdinalIgnoreCase))
+            ?.Port ?? 0;
+
+        return BuildBrowserSetupGuidance(browserProxyPort, state.Topology, state.Tunnel);
+    }
+
+    internal static string BuildBrowserSetupGuidance(
+        int browserProxyPort,
+        GatewayTopologyInfo? topology,
+        TunnelCommandCenterInfo? tunnel)
+    {
+        var portText = browserProxyPort is >= 1 and <= 65535
+            ? browserProxyPort.ToString(CultureInfo.InvariantCulture)
+            : "<gateway-port+2>";
+        var gatewayHost = string.IsNullOrWhiteSpace(topology?.Host) ? "<gateway-host>" : topology.Host;
+        var gatewayPort = ResolveGatewayPort(topology?.GatewayUrl);
+        var gatewayPortText = gatewayPort is >= 1 and <= 65535
+            ? gatewayPort.Value.ToString(CultureInfo.InvariantCulture)
+            : "<gateway-port>";
+
+        var lines = new List<string>
+        {
+            "OpenClaw browser proxy setup",
+            $"Expected local browser-control endpoint: http://127.0.0.1:{portText}/",
+            "",
+            "If the Gateway and browser are on this Windows machine:",
+            "1. Ensure the upstream browser plugin is enabled in the Gateway config.",
+            "2. Verify the browser control plane:",
+            "   openclaw browser --browser-profile openclaw doctor",
+            "   openclaw browser --browser-profile openclaw start",
+            "   openclaw browser --browser-profile openclaw tabs",
+            "",
+            "If the browser is on this Windows machine but the Gateway is remote:",
+            "1. Run a browser-capable OpenClaw node host on this machine:",
+            $"   openclaw node run --host {gatewayHost} --port {gatewayPortText}",
+            "2. Or install it as a user service:",
+            $"   openclaw node install --host {gatewayHost} --port {gatewayPortText}",
+            "   openclaw node start",
+            "3. Keep nodeHost.browserProxy.enabled=true, and configure nodeHost.browserProxy.allowProfiles only if you want to restrict profile access.",
+            "",
+            "Gateway policy and auth checks:",
+            "- The Gateway allowlist must permit browser.proxy for this node.",
+            "- Browser-control auth must match the saved Gateway token/password in Settings.",
+            "- Do not paste QR bootstrap tokens into the normal Gateway Token field."
+        };
+
+        if (topology?.UsesSshTunnel == true)
+        {
+            lines.Add("");
+            lines.Add("SSH tunnel mode:");
+            lines.Add("- Prefer the tray-managed SSH tunnel with Browser proxy bridge enabled; it forwards local-port+2 to remote-port+2 automatically.");
+            lines.Add($"- Manual forward shape: {BuildBrowserProxySshForwardHint(browserProxyPort, tunnel)}");
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string BuildBrowserProxySshForwardHint(int browserProxyPort, TunnelCommandCenterInfo? tunnel)
+    {
+        if (browserProxyPort is < 1 or > 65535)
+            return "ssh -N -L <local-browser-port>:127.0.0.1:<remote-browser-port> <user>@<host>";
+
+        var target = string.IsNullOrWhiteSpace(tunnel?.User) || string.IsNullOrWhiteSpace(tunnel.Host)
+            ? "<user>@<host>"
+            : $"{tunnel.User}@{tunnel.Host}";
+        var remoteBrowserPort = TryParseEndpointPort(tunnel?.BrowserProxyRemoteEndpoint) ?? browserProxyPort;
+        return $"ssh -N -L {browserProxyPort}:127.0.0.1:{remoteBrowserPort} {target}";
+    }
+
+    private static int? TryParseEndpointPort(string? endpoint)
+    {
+        if (string.IsNullOrWhiteSpace(endpoint))
+            return null;
+
+        if (Uri.TryCreate($"tcp://{endpoint}", UriKind.Absolute, out var uri) &&
+            uri.Port is >= 1 and <= 65535)
+        {
+            return uri.Port;
+        }
+
+        var portDelimiter = endpoint.LastIndexOf(':');
+        return portDelimiter >= 0 &&
+               int.TryParse(endpoint[(portDelimiter + 1)..], NumberStyles.None, CultureInfo.InvariantCulture, out var port) &&
+               port is >= 1 and <= 65535
+            ? port
+            : null;
+    }
+
+    private static int? ResolveGatewayPort(string? gatewayUrl)
+    {
+        return Uri.TryCreate(gatewayUrl, UriKind.Absolute, out var uri) && uri.Port is >= 1 and <= 65535
+            ? uri.Port
+            : null;
     }
 
     private static string RedactSupportPath(string? path)

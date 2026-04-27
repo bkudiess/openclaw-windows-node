@@ -90,6 +90,7 @@ OpenClaw Tray responds to `openclaw://` deep links, which can be invoked from a 
 | `openclaw://config` | Open the config folder |
 | `openclaw://diagnostics` | Open the diagnostics JSONL folder |
 | `openclaw://support-context` | Copy redacted support context |
+| `openclaw://browser-setup` | Copy browser.proxy/browser-control setup guidance |
 | `openclaw://restart-ssh-tunnel` | Restart the tray-managed SSH tunnel when enabled |
 | `openclaw://agent?message=Hello` | Send a message directly to the connected gateway |
 
