@@ -36,6 +36,12 @@
                                        Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        TextWrapping="Wrap"/>
+                            <TextBlock x:Name="DetectedTopologyText"
+                                       AutomationProperties.AutomationId="SettingsDetectedTopologyText"
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       TextWrapping="Wrap"
+                                       IsTextSelectionEnabled="True"/>
                             <Grid ColumnSpacing="8" RowSpacing="8">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
@@ -80,7 +86,7 @@
                             </Grid.ColumnDefinitions>
 
                             <TextBox x:Name="SshTunnelUserTextBox" AutomationProperties.AutomationId="SshTunnelUserTextBox" Grid.Column="0" Header="SSH User" PlaceholderText="user"/>
-                            <TextBox x:Name="SshTunnelHostTextBox" AutomationProperties.AutomationId="SshTunnelHostTextBox" Grid.Column="1" Header="SSH Host" PlaceholderText="machine-name or IP"/>
+                            <TextBox x:Name="SshTunnelHostTextBox" AutomationProperties.AutomationId="SshTunnelHostTextBox" Grid.Column="1" Header="SSH Host" PlaceholderText="machine-name or IP" TextChanged="OnTopologyInputChanged"/>
                         </Grid>
 
                         <Grid ColumnSpacing="8">
@@ -89,13 +95,14 @@
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
 
-                            <TextBox x:Name="SshTunnelRemotePortTextBox" AutomationProperties.AutomationId="SshTunnelRemotePortTextBox" Grid.Column="0" Header="Remote Gateway Port" PlaceholderText="18789"/>
+                            <TextBox x:Name="SshTunnelRemotePortTextBox" AutomationProperties.AutomationId="SshTunnelRemotePortTextBox" Grid.Column="0" Header="Remote Gateway Port" PlaceholderText="18789" TextChanged="OnTopologyInputChanged"/>
                             <TextBox x:Name="SshTunnelLocalPortTextBox" AutomationProperties.AutomationId="SshTunnelLocalPortTextBox" Grid.Column="1" Header="Local Forward Port" PlaceholderText="18789" TextChanged="OnSshTunnelLocalPortTextChanged"/>
                         </Grid>
                     </StackPanel>
                     
                     <TextBox x:Name="GatewayUrlTextBox" x:Uid="SettingsGatewayUrlTextBox" AutomationProperties.AutomationId="GatewayUrlTextBox" Header="Gateway URL" 
-                             PlaceholderText="ws://localhost:18789 or https://host.tailnet.ts.net"/>
+                             PlaceholderText="ws://localhost:18789 or https://host.tailnet.ts.net"
+                             TextChanged="OnTopologyInputChanged"/>
                     
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <TextBox x:Name="TokenTextBox" x:Uid="SettingsTokenTextBox" AutomationProperties.AutomationId="TokenTextBox" Header="Token" 

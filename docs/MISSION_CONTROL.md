@@ -232,7 +232,7 @@ Add a small topology badge next to status:
 
 ### 4.4 Settings hint
 
-In Settings, show read-only detected topology near gateway URL/tunnel settings:
+In Settings, show read-only detected topology near gateway URL/tunnel settings: **implemented with a live summary under the topology guide**
 
 - detected kind
 - whether settings imply tunnel/direct

@@ -51,10 +51,12 @@ public class TrayMenuWindowMarkupTests
         var xaml = File.ReadAllText(xamlPath);
 
         Assert.Contains(@"AutomationProperties.AutomationId=""SettingsTopologyGuide""", xaml);
+        Assert.Contains(@"AutomationProperties.AutomationId=""SettingsDetectedTopologyText""", xaml);
         Assert.Contains(@"AutomationProperties.AutomationId=""SettingsUseLocalGatewayButton""", xaml);
         Assert.Contains(@"AutomationProperties.AutomationId=""SettingsUseWslGatewayButton""", xaml);
         Assert.Contains(@"AutomationProperties.AutomationId=""SettingsUseSshTunnelButton""", xaml);
         Assert.Contains(@"AutomationProperties.AutomationId=""SettingsUseRemoteGatewayButton""", xaml);
+        Assert.Contains(@"TextChanged=""OnTopologyInputChanged""", xaml);
     }
 
     [Fact]

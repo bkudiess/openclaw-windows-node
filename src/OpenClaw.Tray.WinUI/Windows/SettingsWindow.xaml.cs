@@ -47,6 +47,7 @@ public sealed partial class SettingsWindow : WindowEx
         _manualGatewayUrl = _settings.GatewayUrl;
         GatewayUrlTextBox.Text = _settings.GatewayUrl;
         UpdateSshTunnelUiState();
+        UpdateDetectedTopologyText();
         TokenTextBox.Text = _settings.Token;
         AutoStartToggle.IsOn = _settings.AutoStart;
         GlobalHotkeyToggle.IsOn = _settings.GlobalHotkeyEnabled;
@@ -348,6 +349,15 @@ public sealed partial class SettingsWindow : WindowEx
         {
             UpdateSshTunnelUiState();
         }
+        else
+        {
+            UpdateDetectedTopologyText();
+        }
+    }
+
+    private void OnTopologyInputChanged(object sender, Microsoft.UI.Xaml.Controls.TextChangedEventArgs e)
+    {
+        UpdateDetectedTopologyText();
     }
 
     private void OnUseLocalGateway(object sender, RoutedEventArgs e)
@@ -356,6 +366,7 @@ public sealed partial class SettingsWindow : WindowEx
         GatewayUrlTextBox.Text = "ws://127.0.0.1:18789";
         _manualGatewayUrl = GatewayUrlTextBox.Text;
         StatusLabel.Text = "Local gateway selected. Use this when the gateway runs directly on Windows.";
+        UpdateDetectedTopologyText();
         Logger.Info("[Settings] Topology preset selected: local gateway");
     }
 
@@ -365,6 +376,7 @@ public sealed partial class SettingsWindow : WindowEx
         GatewayUrlTextBox.Text = "ws://wsl.localhost:18789";
         _manualGatewayUrl = GatewayUrlTextBox.Text;
         StatusLabel.Text = "WSL gateway selected. Change the distro host if your gateway uses a named distro.";
+        UpdateDetectedTopologyText();
         Logger.Info("[Settings] Topology preset selected: WSL gateway");
     }
 
@@ -373,6 +385,7 @@ public sealed partial class SettingsWindow : WindowEx
         UseSshTunnelToggle.IsOn = true;
         UpdateSshTunnelUiState();
         StatusLabel.Text = "SSH tunnel selected. Fill in SSH User and SSH Host, then test the connection.";
+        UpdateDetectedTopologyText();
         Logger.Info("[Settings] Topology preset selected: SSH tunnel");
     }
 
@@ -385,6 +398,7 @@ public sealed partial class SettingsWindow : WindowEx
             : GatewayUrlTextBox.Text;
         _manualGatewayUrl = GatewayUrlTextBox.Text;
         StatusLabel.Text = "Remote gateway selected. Prefer wss:// for Tailscale, LAN, or public gateways.";
+        UpdateDetectedTopologyText();
         Logger.Info("[Settings] Topology preset selected: remote gateway");
     }
 
@@ -413,6 +427,23 @@ public sealed partial class SettingsWindow : WindowEx
                 GatewayUrlTextBox.Text = _manualGatewayUrl;
             }
         }
+
+        UpdateDetectedTopologyText();
+    }
+
+    private void UpdateDetectedTopologyText()
+    {
+        if (DetectedTopologyText == null)
+            return;
+
+        var topology = GatewayTopologyClassifier.Classify(
+            GatewayUrlTextBox.Text,
+            UseSshTunnelToggle.IsOn,
+            SshTunnelHostTextBox.Text,
+            ParsePortOrDefault(SshTunnelLocalPortTextBox.Text, _settings.SshTunnelLocalPort),
+            ParsePortOrDefault(SshTunnelRemotePortTextBox.Text, _settings.SshTunnelRemotePort));
+
+        DetectedTopologyText.Text = $"Detected: {topology.DisplayName} · {topology.Transport} · {topology.Detail}";
     }
 
     private class TestLogger : IOpenClawLogger
