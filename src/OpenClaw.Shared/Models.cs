@@ -730,6 +730,8 @@ public class PortDiagnosticInfo
     public int Port { get; set; }
     public bool IsLocal { get; set; } = true;
     public bool IsListening { get; set; }
+    public int? OwningProcessId { get; set; }
+    public string? OwningProcessName { get; set; }
     public string Detail { get; set; } = "";
 
     public string StatusText => IsListening ? "listening" : "not listening";

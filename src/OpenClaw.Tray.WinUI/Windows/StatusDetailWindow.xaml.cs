@@ -718,7 +718,10 @@ public sealed partial class StatusDetailWindow : WindowEx
         builder.AppendLine($"Generated: {DateTimeOffset.Now:O}");
         foreach (var port in ports.OrderBy(p => p.Port).ThenBy(p => p.Purpose, StringComparer.OrdinalIgnoreCase))
         {
-            builder.AppendLine($"- {port.Purpose}: {port.Port} {port.StatusText} - {RedactSupportValue(port.Detail)}");
+            var owner = port.OwningProcessId is > 0
+                ? $" · owner {port.OwningProcessName ?? "unknown"} (PID {port.OwningProcessId})"
+                : "";
+            builder.AppendLine($"- {port.Purpose}: {port.Port} {port.StatusText}{owner} - {RedactSupportValue(port.Detail)}");
         }
 
         return builder.ToString();

@@ -399,7 +399,7 @@ Deliverables:
   - restart local gateway if topology is WindowsNative and managed
   - copy privacy-safe support context: **implemented**
 - Rolling diagnostics JSONL with rotation: **implemented for privacy-safe app/connection/gateway/tunnel metadata**
-- Port diagnostics table: **read-only local listener visibility implemented**
+- Port diagnostics table: **read-only local listener visibility implemented, including owning PID/process name when Windows exposes it**
 
 Risk: medium-high for kill/restart actions; start as read-only/copy actions.
 

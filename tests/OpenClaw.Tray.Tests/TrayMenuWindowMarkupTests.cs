@@ -139,6 +139,8 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains("<user>@<host>", source);
         Assert.Contains("BuildPortDiagnosticsSummary", source);
         Assert.Contains("OpenClaw port diagnostics", source);
+        Assert.Contains("OwningProcessId", source);
+        Assert.Contains("OwningProcessName", source);
     }
 
     [Fact]
