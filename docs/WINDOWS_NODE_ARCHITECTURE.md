@@ -169,7 +169,7 @@ The tray now also has a Command Center surface that combines gateway channel hea
 |--------|---------|
 | **Gateway** | Windows native (Node.js on Windows — `node.exe`) |
 | **Nodes** | OpenClaw.Tray as full Windows node |
-| **Capabilities** | Camera ✅ Canvas ✅ Screen ✅ Notifications ✅ Browser ✅ (Playwright on Windows) Exec ✅ (native `cmd.exe`, PowerShell, `wsl.exe`) Location ⚠️ Audio/TTS ✅ |
+| **Capabilities** | Camera ✅ Canvas ✅ Screen ✅ Notifications ✅ Browser ✅/⚠️ (`browser.proxy` bridge; needs browser-control host on gateway+2) Exec ✅ (native `cmd.exe`, PowerShell, `wsl.exe`) Location ⚠️ Audio/TTS ✅ |
 | **Networking** | `ws://127.0.0.1:18789` — pure loopback, no NAT, no WSL2 networking issues |
 | **Setup complexity** | Low — `npm install -g openclaw && openclaw onboard` from PowerShell. Same as Mac. |
 | **UX Rating** | ⭐⭐⭐⭐⭐ True feature parity with Mac |
@@ -261,7 +261,7 @@ Niche scenario. If the "server" must be Windows for some reason, this works but 
 | `location.get` | ✅ CLLocationManager | ✅ CLLocationManager | ✅ FusedLocation | ❌ | **✅** | Windows.Devices.Geolocation |
 | `device.info/status` | ✅ shared schema | ✅ shared schema | ✅ shared schema | ❌ | **✅** | .NET runtime, storage, network |
 | `sms.send` | ❌ | ❌ | ✅ | ❌ | ❌ | N/A |
-| Browser proxy | ✅ | ❌ | ❌ | ✅ Playwright | **⚠️ Future** | Playwright on Windows |
+| Browser proxy | ✅ | ❌ | ❌ | ✅ Playwright | **✅/⚠️ Local bridge** | Browser-control host on gateway port + 2 |
 | Accessibility | ✅ AX API | ❌ | ❌ | ❌ | **⚠️ Future** | UI Automation |
 | Speech/TTS | ✅ NSSpeechSynthesizer | ❌ | ❌ | ❌ | **✅** | Windows.Media.SpeechSynthesis |
 | Microphone | ✅ AVAudioEngine | ✅ | ✅ | ❌ | **⚠️ Future** | Windows.Media.Audio |
@@ -292,7 +292,7 @@ The tray app uses a dedicated node connection (`WindowsNodeClient`) with `role: 
     },
     "role": "node",
     "scopes": [],
-    "caps": ["canvas", "camera", "screen", "notifications", "system", "device"],
+    "caps": ["canvas", "camera", "screen", "notifications", "system", "device", "browser"],
     "commands": [
       "canvas.present", "canvas.hide", "canvas.navigate",
       "canvas.eval", "canvas.snapshot", "canvas.a2ui.push",
@@ -302,7 +302,8 @@ The tray app uses a dedicated node connection (`WindowsNodeClient`) with `role: 
       "location.get",
       "device.info", "device.status",
       "system.run", "system.run.prepare", "system.which", "system.notify",
-      "system.execApprovals.get", "system.execApprovals.set"
+      "system.execApprovals.get", "system.execApprovals.set",
+      "browser.proxy"
     ],
     "permissions": {
       "camera.capture": true,
@@ -607,7 +608,8 @@ The node protocol requires a stable device identity (`device.id`) derived from a
 - [x] `location.get` — Windows Location API
 - [ ] TTS / Speech Synthesis
 - [ ] Microphone / voice input
-- [ ] Browser proxy (Playwright on Windows, launched by tray app)
+- [x] `browser.proxy` — local browser-control bridge on gateway port + 2, including SSH companion-forward diagnostics
+- [ ] Bundled/browser-control host setup guidance for end-to-end browser smoke tests
 - [ ] UI Automation (Windows equivalent of macOS Accessibility API)
 - [ ] Auto-update improvements (current auto-update from GitHub Releases → MSI/MSIX?)
 - [ ] PowerToys Command Palette integration for node commands

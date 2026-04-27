@@ -270,7 +270,7 @@ Keep StatusDetailWindow as the first Command Center, but plan for tabs/sections:
 | System notify | Present | Present | Add overlay/priority parity later |
 | System run/which | Present | Present | Verify push event names and approval reasons |
 | Exec approvals get/set | Present | Present | Base-hash optimistic concurrency implemented |
-| Browser proxy | Present, local-only | Missing | Highest concrete command gap |
+| Browser proxy | Present, local-only | Local bridge present; live smoke blocked until browser-control host listens on gateway+2 | Continue host setup/live-smoke guidance |
 
 ### 5.2 Mission Control surfaces
 
