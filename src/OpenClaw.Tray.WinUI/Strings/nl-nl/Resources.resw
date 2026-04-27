@@ -141,6 +141,30 @@
   <data name="StatusChannelsHeader.Text" xml:space="preserve">
     <value>KANALEN</value>
   </data>
+  <data name="StatusGatewayTopologyHeader.Text" xml:space="preserve">
+    <value>GATEWAYTOPOLOGIE</value>
+  </data>
+  <data name="StatusSupportDebugHeader.Text" xml:space="preserve">
+    <value>ONDERSTEUNING EN FOUTOPSPORING</value>
+  </data>
+  <data name="StatusPortDiagnosticsHeader.Text" xml:space="preserve">
+    <value>POORTDIAGNOSTIEK</value>
+  </data>
+  <data name="StatusPermissionsHeader.Text" xml:space="preserve">
+    <value>MACHTIGINGEN</value>
+  </data>
+  <data name="StatusCostTrendHeader.Text" xml:space="preserve">
+    <value>KOSTENTREND OVER 30 DAGEN</value>
+  </data>
+  <data name="StatusExtensibilityHeader.Text" xml:space="preserve">
+    <value>UITBREIDBAARHEID</value>
+  </data>
+  <data name="StatusNodesHeader.Text" xml:space="preserve">
+    <value>KNOOPPUNTEN</value>
+  </data>
+  <data name="StatusRecentActivityHeader.Text" xml:space="preserve">
+    <value>RECENTE ACTIVITEIT</value>
+  </data>
 
   <!-- Labels -->
   <data name="StatusCostLabel.Text" xml:space="preserve">
@@ -160,10 +184,82 @@
   <data name="StatusNoSessions.Text" xml:space="preserve">
     <value>Geen actieve sessies</value>
   </data>
+  <data name="StatusNoNodes.Text" xml:space="preserve">
+    <value>Geen knooppunten gerapporteerd</value>
+  </data>
+  <data name="StatusNoRecentActivity.Text" xml:space="preserve">
+    <value>Geen recente activiteit</value>
+  </data>
+  <data name="StatusExtensibilityDescription.Text" xml:space="preserve">
+    <value>Kanaalconfiguratie, skills en geplande automatiseringen zijn gateway-beheerde onderdelen. Gebruik deze koppelingen wanneer de verbonden gateway de bijbehorende dashboardpagina's aanbiedt.</value>
+  </data>
+  <data name="StatusChannelSetupTitle.Text" xml:space="preserve">
+    <value>Kanaalconfiguratie / schema's</value>
+  </data>
+  <data name="StatusChannelSetupDescription.Text" xml:space="preserve">
+    <value>Open kanaalconfiguratie voor schema-gestuurde verificatie, QR, aanmelden en dashboardstromen wanneer beschikbaar.</value>
+  </data>
+  <data name="StatusSkillsTitle.Text" xml:space="preserve">
+    <value>Skills</value>
+  </data>
+  <data name="StatusSkillsDescription.Text" xml:space="preserve">
+    <value>Open gateway-skillconfiguratie wanneer de verbonden gateway dit ondersteunt.</value>
+  </data>
+  <data name="StatusCronTitle.Text" xml:space="preserve">
+    <value>Cron / planningen</value>
+  </data>
+  <data name="StatusCronDescription.Text" xml:space="preserve">
+    <value>Open geplande automatiseringsbesturing wanneer de verbonden gateway dit ondersteunt.</value>
+  </data>
 
   <!-- Buttons -->
   <data name="StatusRefreshButton.Content" xml:space="preserve">
     <value>Vernieuwen</value>
+  </data>
+  <data name="StatusOpenLogsButton.Content" xml:space="preserve">
+    <value>Logboeken openen</value>
+  </data>
+  <data name="StatusOpenConfigButton.Content" xml:space="preserve">
+    <value>Configuratie openen</value>
+  </data>
+  <data name="StatusRefreshHealthButton.Content" xml:space="preserve">
+    <value>Status vernieuwen</value>
+  </data>
+  <data name="StatusOpenDiagnosticsJsonlButton.Content" xml:space="preserve">
+    <value>Diagnostiek-JSONL openen</value>
+  </data>
+  <data name="StatusCopySupportContextButton.Content" xml:space="preserve">
+    <value>Ondersteuningscontext kopiëren</value>
+  </data>
+  <data name="StatusRestartSshTunnelButton.Content" xml:space="preserve">
+    <value>SSH-tunnel opnieuw starten</value>
+  </data>
+  <data name="StatusCopyBrowserSetupButton.Content" xml:space="preserve">
+    <value>Browserconfiguratie kopiëren</value>
+  </data>
+  <data name="StatusCopyDebugBundleButton.Content" xml:space="preserve">
+    <value>Debugbundel kopiëren</value>
+  </data>
+  <data name="StatusCheckUpdatesButton.Content" xml:space="preserve">
+    <value>Updates zoeken</value>
+  </data>
+  <data name="StatusCopyPortDiagnosticsButton.Content" xml:space="preserve">
+    <value>Poortdiagnostiek kopiëren</value>
+  </data>
+  <data name="StatusCopyButton.Content" xml:space="preserve">
+    <value>Kopiëren</value>
+  </data>
+  <data name="StatusSettingsButton.Content" xml:space="preserve">
+    <value>Instellingen</value>
+  </data>
+  <data name="StatusOpenButton.Content" xml:space="preserve">
+    <value>Openen</value>
+  </data>
+  <data name="StatusCopyNodeInventoryButton.Content" xml:space="preserve">
+    <value>Knooppuntinventaris kopiëren</value>
+  </data>
+  <data name="StatusOpenStreamButton.Content" xml:space="preserve">
+    <value>Stream openen</value>
   </data>
 
   <!-- ==================== ActivityStreamWindow.xaml ==================== -->
@@ -373,6 +469,60 @@
   </data>
   <data name="Menu_CopyNodeSummary" xml:space="preserve">
     <value>Node-overzicht kopiëren</value>
+  </data>
+  <data name="Menu_CheckForUpdates" xml:space="preserve">
+    <value>Updates zoeken</value>
+  </data>
+  <data name="Menu_SetupGuide" xml:space="preserve">
+    <value>Installatiegids...</value>
+  </data>
+  <data name="Menu_SupportDebugHeader" xml:space="preserve">
+    <value>🧰 Ondersteuning en foutopsporing</value>
+  </data>
+  <data name="Menu_OpenSupportFiles" xml:space="preserve">
+    <value>Ondersteuningsbestanden openen</value>
+  </data>
+  <data name="Menu_LogsFolder" xml:space="preserve">
+    <value>Logboekmap</value>
+  </data>
+  <data name="Menu_ConfigFolder" xml:space="preserve">
+    <value>Configuratiemap</value>
+  </data>
+  <data name="Menu_DiagnosticsFolder" xml:space="preserve">
+    <value>Diagnostiekmap</value>
+  </data>
+  <data name="Menu_CopyDiagnostics" xml:space="preserve">
+    <value>Diagnostiek kopiëren</value>
+  </data>
+  <data name="Menu_SupportContext" xml:space="preserve">
+    <value>Ondersteuningscontext</value>
+  </data>
+  <data name="Menu_DebugBundle" xml:space="preserve">
+    <value>Debugbundel</value>
+  </data>
+  <data name="Menu_BrowserSetup" xml:space="preserve">
+    <value>Browserconfiguratie</value>
+  </data>
+  <data name="Menu_PortDiagnostics" xml:space="preserve">
+    <value>Poortdiagnostiek</value>
+  </data>
+  <data name="Menu_CapabilityDiagnostics" xml:space="preserve">
+    <value>Capaciteitsdiagnostiek</value>
+  </data>
+  <data name="Menu_NodeInventory" xml:space="preserve">
+    <value>Knooppuntinventaris</value>
+  </data>
+  <data name="Menu_ChannelSummary" xml:space="preserve">
+    <value>Kanaaloverzicht</value>
+  </data>
+  <data name="Menu_ActivitySummary" xml:space="preserve">
+    <value>Activiteitenoverzicht</value>
+  </data>
+  <data name="Menu_ExtensibilitySummary" xml:space="preserve">
+    <value>Uitbreidbaarheidsoverzicht</value>
+  </data>
+  <data name="Menu_RestartSshTunnel" xml:space="preserve">
+    <value>SSH-tunnel opnieuw starten</value>
   </data>
 
   <!-- Tray menu dynamic text -->

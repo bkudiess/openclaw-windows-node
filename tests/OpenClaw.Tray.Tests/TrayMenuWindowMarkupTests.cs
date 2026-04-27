@@ -380,23 +380,23 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains(@"case ""activitysummary"": CopyActivitySummary(); break;", source);
         Assert.Contains(@"case ""extensibilitysummary"": CopyExtensibilitySummary(); break;", source);
         Assert.Contains(@"case ""restartsshtunnel"": RestartSshTunnel(); break;", source);
-        Assert.Contains(@"menu.AddHeader(""🧰 Support & Debug"")", source);
-        Assert.Contains(@"menu.AddFlyoutMenuItem(""Open Support Files"", ""📁"", new[]", source);
+        Assert.Contains(@"menu.AddHeader(LocalizationHelper.GetString(""Menu_SupportDebugHeader""))", source);
+        Assert.Contains(@"menu.AddFlyoutMenuItem(LocalizationHelper.GetString(""Menu_OpenSupportFiles""), ""📁"", new[]", source);
         Assert.Contains(@"new TrayMenuFlyoutItem(LocalizationHelper.GetString(""Menu_OpenLogFile""), ""📄"", ""log"")", source);
-        Assert.Contains(@"new TrayMenuFlyoutItem(""Logs Folder"", ""📁"", ""logfolder"")", source);
-        Assert.Contains(@"new TrayMenuFlyoutItem(""Config Folder"", ""🗂️"", ""configfolder"")", source);
-        Assert.Contains(@"new TrayMenuFlyoutItem(""Diagnostics Folder"", ""🧪"", ""diagnosticsfolder"")", source);
-        Assert.Contains(@"menu.AddFlyoutMenuItem(""Copy Diagnostics"", ""📋"", new[]", source);
-        Assert.Contains(@"new TrayMenuFlyoutItem(""Support Context"", ""📋"", ""supportcontext"")", source);
-        Assert.Contains(@"new TrayMenuFlyoutItem(""Debug Bundle"", ""🧰"", ""debugbundle"")", source);
-        Assert.Contains(@"new TrayMenuFlyoutItem(""Browser Setup"", ""🌐"", ""browsersetup"")", source);
-        Assert.Contains(@"new TrayMenuFlyoutItem(""Port Diagnostics"", ""🔌"", ""portdiagnostics"")", source);
-        Assert.Contains(@"new TrayMenuFlyoutItem(""Capability Diagnostics"", ""🛡️"", ""capabilitydiagnostics"")", source);
-        Assert.Contains(@"new TrayMenuFlyoutItem(""Node Inventory"", ""🖥️"", ""nodeinventory"")", source);
-        Assert.Contains(@"new TrayMenuFlyoutItem(""Channel Summary"", ""📡"", ""channelsummary"")", source);
-        Assert.Contains(@"new TrayMenuFlyoutItem(""Activity Summary"", ""⚡"", ""activitysummary"")", source);
-        Assert.Contains(@"new TrayMenuFlyoutItem(""Extensibility Summary"", ""🧩"", ""extensibilitysummary"")", source);
-        Assert.Contains(@"menu.AddMenuItem(""Restart SSH Tunnel"", ""🔁"", ""restartsshtunnel"", indent: true)", source);
+        Assert.Contains(@"new TrayMenuFlyoutItem(LocalizationHelper.GetString(""Menu_LogsFolder""), ""📁"", ""logfolder"")", source);
+        Assert.Contains(@"new TrayMenuFlyoutItem(LocalizationHelper.GetString(""Menu_ConfigFolder""), ""🗂️"", ""configfolder"")", source);
+        Assert.Contains(@"new TrayMenuFlyoutItem(LocalizationHelper.GetString(""Menu_DiagnosticsFolder""), ""🧪"", ""diagnosticsfolder"")", source);
+        Assert.Contains(@"menu.AddFlyoutMenuItem(LocalizationHelper.GetString(""Menu_CopyDiagnostics""), ""📋"", new[]", source);
+        Assert.Contains(@"new TrayMenuFlyoutItem(LocalizationHelper.GetString(""Menu_SupportContext""), ""📋"", ""supportcontext"")", source);
+        Assert.Contains(@"new TrayMenuFlyoutItem(LocalizationHelper.GetString(""Menu_DebugBundle""), ""🧰"", ""debugbundle"")", source);
+        Assert.Contains(@"new TrayMenuFlyoutItem(LocalizationHelper.GetString(""Menu_BrowserSetup""), ""🌐"", ""browsersetup"")", source);
+        Assert.Contains(@"new TrayMenuFlyoutItem(LocalizationHelper.GetString(""Menu_PortDiagnostics""), ""🔌"", ""portdiagnostics"")", source);
+        Assert.Contains(@"new TrayMenuFlyoutItem(LocalizationHelper.GetString(""Menu_CapabilityDiagnostics""), ""🛡️"", ""capabilitydiagnostics"")", source);
+        Assert.Contains(@"new TrayMenuFlyoutItem(LocalizationHelper.GetString(""Menu_NodeInventory""), ""🖥️"", ""nodeinventory"")", source);
+        Assert.Contains(@"new TrayMenuFlyoutItem(LocalizationHelper.GetString(""Menu_ChannelSummary""), ""📡"", ""channelsummary"")", source);
+        Assert.Contains(@"new TrayMenuFlyoutItem(LocalizationHelper.GetString(""Menu_ActivitySummary""), ""⚡"", ""activitysummary"")", source);
+        Assert.Contains(@"new TrayMenuFlyoutItem(LocalizationHelper.GetString(""Menu_ExtensibilitySummary""), ""🧩"", ""extensibilitysummary"")", source);
+        Assert.Contains(@"menu.AddMenuItem(LocalizationHelper.GetString(""Menu_RestartSshTunnel""), ""🔁"", ""restartsshtunnel"", indent: true)", source);
     }
 
     [Fact]

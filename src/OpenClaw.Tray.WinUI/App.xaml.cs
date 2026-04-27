@@ -974,13 +974,13 @@ public partial class App : Application
         menu.AddMenuItem(LocalizationHelper.GetString("Menu_ActivityStream"), "⚡", "activity");
         menu.AddMenuItem(LocalizationHelper.GetString("Menu_NotificationHistory"), "📋", "history");
         menu.AddMenuItem(LocalizationHelper.GetString("Menu_RunHealthCheck"), "🔄", "healthcheck");
-        menu.AddMenuItem("Check for Updates", "⬇️", "checkupdates");
+        menu.AddMenuItem(LocalizationHelper.GetString("Menu_CheckForUpdates"), "⬇️", "checkupdates");
 
         menu.AddSeparator();
 
         // Settings & Setup
         menu.AddMenuItem(LocalizationHelper.GetString("Menu_Settings"), "⚙️", "settings");
-        menu.AddMenuItem("Setup Guide...", "🧭", "setup");
+        menu.AddMenuItem(LocalizationHelper.GetString("Menu_SetupGuide"), "🧭", "setup");
         var autoStartText = (_settings?.AutoStart ?? false)
             ? LocalizationHelper.GetString("Menu_AutoStartEnabled")
             : LocalizationHelper.GetString("Menu_AutoStart");
@@ -988,27 +988,27 @@ public partial class App : Application
 
         menu.AddSeparator();
 
-        menu.AddHeader("🧰 Support & Debug");
-        menu.AddFlyoutMenuItem("Open Support Files", "📁", new[]
+        menu.AddHeader(LocalizationHelper.GetString("Menu_SupportDebugHeader"));
+        menu.AddFlyoutMenuItem(LocalizationHelper.GetString("Menu_OpenSupportFiles"), "📁", new[]
         {
             new TrayMenuFlyoutItem(LocalizationHelper.GetString("Menu_OpenLogFile"), "📄", "log"),
-            new TrayMenuFlyoutItem("Logs Folder", "📁", "logfolder"),
-            new TrayMenuFlyoutItem("Config Folder", "🗂️", "configfolder"),
-            new TrayMenuFlyoutItem("Diagnostics Folder", "🧪", "diagnosticsfolder")
+            new TrayMenuFlyoutItem(LocalizationHelper.GetString("Menu_LogsFolder"), "📁", "logfolder"),
+            new TrayMenuFlyoutItem(LocalizationHelper.GetString("Menu_ConfigFolder"), "🗂️", "configfolder"),
+            new TrayMenuFlyoutItem(LocalizationHelper.GetString("Menu_DiagnosticsFolder"), "🧪", "diagnosticsfolder")
         }, indent: true);
-        menu.AddFlyoutMenuItem("Copy Diagnostics", "📋", new[]
+        menu.AddFlyoutMenuItem(LocalizationHelper.GetString("Menu_CopyDiagnostics"), "📋", new[]
         {
-            new TrayMenuFlyoutItem("Support Context", "📋", "supportcontext"),
-            new TrayMenuFlyoutItem("Debug Bundle", "🧰", "debugbundle"),
-            new TrayMenuFlyoutItem("Browser Setup", "🌐", "browsersetup"),
-            new TrayMenuFlyoutItem("Port Diagnostics", "🔌", "portdiagnostics"),
-            new TrayMenuFlyoutItem("Capability Diagnostics", "🛡️", "capabilitydiagnostics"),
-            new TrayMenuFlyoutItem("Node Inventory", "🖥️", "nodeinventory"),
-            new TrayMenuFlyoutItem("Channel Summary", "📡", "channelsummary"),
-            new TrayMenuFlyoutItem("Activity Summary", "⚡", "activitysummary"),
-            new TrayMenuFlyoutItem("Extensibility Summary", "🧩", "extensibilitysummary")
+            new TrayMenuFlyoutItem(LocalizationHelper.GetString("Menu_SupportContext"), "📋", "supportcontext"),
+            new TrayMenuFlyoutItem(LocalizationHelper.GetString("Menu_DebugBundle"), "🧰", "debugbundle"),
+            new TrayMenuFlyoutItem(LocalizationHelper.GetString("Menu_BrowserSetup"), "🌐", "browsersetup"),
+            new TrayMenuFlyoutItem(LocalizationHelper.GetString("Menu_PortDiagnostics"), "🔌", "portdiagnostics"),
+            new TrayMenuFlyoutItem(LocalizationHelper.GetString("Menu_CapabilityDiagnostics"), "🛡️", "capabilitydiagnostics"),
+            new TrayMenuFlyoutItem(LocalizationHelper.GetString("Menu_NodeInventory"), "🖥️", "nodeinventory"),
+            new TrayMenuFlyoutItem(LocalizationHelper.GetString("Menu_ChannelSummary"), "📡", "channelsummary"),
+            new TrayMenuFlyoutItem(LocalizationHelper.GetString("Menu_ActivitySummary"), "⚡", "activitysummary"),
+            new TrayMenuFlyoutItem(LocalizationHelper.GetString("Menu_ExtensibilitySummary"), "🧩", "extensibilitysummary")
         }, indent: true);
-        menu.AddMenuItem("Restart SSH Tunnel", "🔁", "restartsshtunnel", indent: true);
+        menu.AddMenuItem(LocalizationHelper.GetString("Menu_RestartSshTunnel"), "🔁", "restartsshtunnel", indent: true);
 
         menu.AddSeparator();
 
