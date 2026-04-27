@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Windows Node feature allows the tray app to receive commands from the OpenClaw agent (canvas, screenshots, notifications). This is **experimental** and must be explicitly enabled in Settings.
+The Windows Node feature allows the tray app to receive commands from the OpenClaw agent (canvas, screenshots, screen recordings, camera, location, notifications, and controlled command execution). This is **experimental** and must be explicitly enabled in Settings.
 
 ## How to Enable
 
@@ -25,8 +25,8 @@ The Windows Node feature allows the tray app to receive commands from the OpenCl
   ```
   [INFO] Starting Windows Node connection to ws://...
   [INFO] Node connected, waiting for challenge...
-  [INFO] Sent node registration with X capabilities, Y commands
-  [INFO] Node registered successfully!
+  [INFO] Registered capability: screen (2 commands)
+  [INFO] All capabilities registered
   [INFO] Node status: Connected
   ```
 
@@ -45,22 +45,28 @@ These features need the gateway to send `node.invoke` commands:
 | `canvas.eval` | Execute JavaScript | Runs JS in canvas, returns result |
 | `canvas.snapshot` | Capture canvas | Returns base64 PNG of canvas content |
 | `screen.snapshot` | Take screenshot | Captures screen, shows notification, returns base64 |
+| `screen.record` | Record short screen clip | Returns MP4/base64 metadata; requires explicit gateway allowlist |
 | `system.notify` | Show notification | Displays toast notification |
+| `system.run` / `system.which` | Controlled command execution | Uses local exec approval policy |
 | `camera.list` | Enumerate cameras | Returns device IDs and names |
 | `camera.snap` | Capture photo | Returns base64 image (NV12 fallback) |
+| `camera.clip` | Capture video clip | Returns MP4/base64 metadata |
+| `location.get` | Get Windows location | Uses Windows location permission/settings |
 
 ## Capabilities Advertised
 
 When the node connects, it advertises these capabilities:
 - `canvas` - WebView2-based canvas window
-- `screen` - Screen capture via GDI
+- `screen` - Screen snapshot and recording via Windows.Graphics.Capture
 - `system` - Notifications, command execution (`system.run`, `system.run.prepare`, `system.which`), exec approval policy
-- `camera` - MediaCapture photo capture (frame reader fallback)
+- `camera` - MediaCapture photo/video capture (frame reader fallback)
+- `location` - Windows.Devices.Geolocation
 
 ## Security Features
 
 - **URL Validation**: Canvas blocks `file://`, `javascript:`, localhost, private IPs, IPv6 localhost
-- **Screen Capture Notification**: User is notified when screen is captured
+- **Screen Capture Notification**: User is notified when screen snapshots are captured
+- **Screen Recording Allowlist**: `screen.record` must be explicitly allowed by the gateway and does not leave a hidden local MP4 copy on Windows
 - **Node Mode Toggle**: Must be explicitly enabled by user
 - **Command Validation**: Only alphanumeric commands with dots/hyphens allowed
 
@@ -92,10 +98,10 @@ When the node connects, it advertises these capabilities:
    - `system.execApprovals` allowlist flow
 2. ~~**screen.record**~~ ✅ Implemented
    - Graphics Capture video recording (MP4/base64)
-3. **camera.clip**
+3. ~~**camera.clip**~~ ✅ Implemented
    - Short webcam video capture (MediaCapture + encoding)
-4. **A2UI end-to-end**
-   - Resolve tool policy/allowlist and validate JSONL rendering
+4. **A2UI pushJSONL alias**
+   - Windows supports `canvas.a2ui.push` and `canvas.a2ui.reset`; Mac also supports legacy `canvas.a2ui.pushJSONL`
 5. **Packaging & consent prompts**
    - MSIX packaging with camera/screen capabilities for system prompts
 6. **Test matrix & polish**
@@ -107,5 +113,7 @@ When the node connects, it advertises these capabilities:
 - `src/OpenClaw.Shared/WindowsNodeClient.cs` - Node protocol client
 - `src/OpenClaw.Shared/Capabilities/*.cs` - Capability handlers
 - `src/OpenClaw.Tray.WinUI/Services/NodeService.cs` - Orchestrates capabilities
-- `src/OpenClaw.Tray.WinUI/Services/ScreenCaptureService.cs` - GDI screen capture
+- `src/OpenClaw.Tray.WinUI/Services/ScreenCaptureService.cs` - screen snapshots
+- `src/OpenClaw.Tray.WinUI/Services/ScreenRecordingService.cs` - screen recordings
+- `src/OpenClaw.Tray.WinUI/Services/CameraCaptureService.cs` - camera photo/video capture
 - `src/OpenClaw.Tray.WinUI/Windows/CanvasWindow.xaml` - WebView2 canvas

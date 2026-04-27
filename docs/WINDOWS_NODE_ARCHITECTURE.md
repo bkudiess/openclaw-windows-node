@@ -242,12 +242,13 @@ Niche scenario. If the "server" must be Windows for some reason, this works but 
 
 ## Capability Matrix by Node Type
 
-| Capability | macOS App | iOS App | Android App | WSL2 Headless | **Windows Tray (proposed)** | Windows API |
+| Capability | macOS App | iOS App | Android App | WSL2 Headless | **Windows Tray** | Windows API |
 |-----------|-----------|---------|-------------|---------------|---------------------------|-------------|
 | `canvas.present` | ✅ SwiftUI WebView | ✅ WKWebView | ✅ WebView | ❌ | **✅ WebView2** | WebView2 |
 | `canvas.snapshot` | ✅ | ✅ | ✅ | ❌ | **✅** | WebView2 CapturePreviewAsync |
 | `canvas.eval` | ✅ | ✅ | ✅ | ❌ | **✅** | WebView2 ExecuteScriptAsync |
-| `canvas.a2ui` | ✅ | ✅ | ✅ | ❌ | **⚠️ Investigating** | WebView2 |
+| `canvas.a2ui.push/reset` | ✅ | ✅ | ✅ | ❌ | **✅** | WebView2 |
+| `canvas.a2ui.pushJSONL` | ✅ | ✅ | ✅ | ❌ | ❌ | Legacy alias not yet implemented |
 | `camera.snap` | ✅ AVFoundation | ✅ AVFoundation | ✅ CameraX | ❌ | **✅** | MediaCapture + frame reader fallback |
 | `camera.clip` | ✅ | ✅ | ✅ | ❌ | **✅** | MediaCapture + MediaEncoding |
 | `camera.list` | ✅ | ✅ | ✅ | ❌ | **✅** | DeviceInformation.FindAllAsync |
@@ -255,7 +256,7 @@ Niche scenario. If the "server" must be Windows for some reason, this works but 
 | `system.run` | ✅ | ❌ | ❌ | ✅ | **✅** | Process.Start (cmd/pwsh) + ExecApprovalPolicy |
 | `system.execApprovals` | ❌ | ❌ | ❌ | ❌ | **✅** | JSON policy file (exec-policy.json) |
 | `system.notify` | ✅ NSUserNotification | ✅ UNUserNotification | ✅ NotificationManager | ❌ | **✅** | ToastNotificationManager |
-| `location.get` | ✅ CLLocationManager | ✅ CLLocationManager | ✅ FusedLocation | ❌ | **⚠️** | Windows.Devices.Geolocation |
+| `location.get` | ✅ CLLocationManager | ✅ CLLocationManager | ✅ FusedLocation | ❌ | **✅** | Windows.Devices.Geolocation |
 | `sms.send` | ❌ | ❌ | ✅ | ❌ | ❌ | N/A |
 | Browser proxy | ✅ | ❌ | ❌ | ✅ Playwright | **⚠️ Future** | Playwright on Windows |
 | Accessibility | ✅ AX API | ❌ | ❌ | ❌ | **⚠️ Future** | UI Automation |
@@ -270,7 +271,7 @@ For contributors: here's what implementing a Windows node means at the protocol 
 
 ### 1. Connect as a node
 
-The tray app's `OpenClawGatewayClient` currently connects as an **operator**. To become a node, it needs to send (or send an additional) `connect` with `role: "node"`:
+The tray app uses a dedicated node connection (`WindowsNodeClient`) with `role: "node"`:
 
 ```json
 {
@@ -294,8 +295,9 @@ The tray app's `OpenClawGatewayClient` currently connects as an **operator**. To
       "canvas.eval", "canvas.snapshot", "canvas.a2ui.push",
       "canvas.a2ui.reset",
       "camera.list", "camera.snap", "camera.clip",
-      "screen.record",
-      "system.run", "system.notify",
+      "screen.snapshot", "screen.record",
+      "location.get",
+      "system.run", "system.run.prepare", "system.which", "system.notify",
       "system.execApprovals.get", "system.execApprovals.set"
     ],
     "permissions": {
@@ -564,7 +566,7 @@ The node protocol requires a stable device identity (`device.id`) derived from a
 - [x] `system.notify` — agent can request Windows toast notifications
 - [x] `canvas.present` / `canvas.hide` — floating WebView2 canvas window
 - [x] `canvas.navigate` / `canvas.eval` / `canvas.snapshot` — full canvas support
-- [ ] `canvas.a2ui.push` / `canvas.a2ui.reset` — A2UI rendering (investigating: agent tool policy blocks)
+- [x] `canvas.a2ui.push` / `canvas.a2ui.reset` — A2UI rendering
 - [x] `system.run` — exec commands on Windows (PowerShell/cmd) with ICommandRunner abstraction
 - [x] `system.execApprovals.get/set` — remote-manageable exec approval policy
 - [ ] Settings UI for node capabilities (enable/disable camera, screen, etc.)
@@ -577,7 +579,7 @@ The node protocol requires a stable device identity (`device.id`) derived from a
 
 - [x] `camera.list` — enumerate Windows cameras (DeviceInformation.FindAllAsync)
 - [x] `camera.snap` — capture photo from webcam (MediaCapture + frame reader fallback)
-- [ ] `camera.clip` — record short video clip (MediaCapture + MediaEncoding)
+- [x] `camera.clip` — record short video clip (MediaCapture + MediaEncoding)
 - [x] `screen.record` — capture Windows desktop via Graphics Capture API
 - [x] `screen.snapshot` — screenshot via Windows.Graphics.Capture
 - [x] Permission prompts (camera: UnauthorizedAccessException → toast; future MSIX consent)
@@ -597,7 +599,7 @@ The node protocol requires a stable device identity (`device.id`) derived from a
 ### Phase 4: Feature Parity + Polish
 **Priority: LOW | Effort: Medium | Impact: Medium**
 
-- [ ] `location.get` — Windows Location API
+- [x] `location.get` — Windows Location API
 - [ ] TTS / Speech Synthesis
 - [ ] Microphone / voice input
 - [ ] Browser proxy (Playwright on Windows, launched by tray app)
@@ -613,25 +615,27 @@ The node protocol requires a stable device identity (`device.id`) derived from a
 
 ```
 OpenClaw.Shared/
-├── OpenClawGatewayClient.cs    ← existing operator client
-├── OpenClawNodeClient.cs       ← NEW: node protocol handler
-├── INodeCommandHandler.cs      ← NEW: interface for command dispatch
-├── NodeIdentity.cs             ← NEW: keypair + device ID
-└── Models/
-    ├── NodeConnectParams.cs    ← NEW
-    ├── NodeInvokeRequest.cs    ← NEW
-    └── NodeInvokeResponse.cs   ← NEW
+├── OpenClawGatewayClient.cs    ← operator client
+├── WindowsNodeClient.cs        ← node protocol handler
+├── DeviceIdentity.cs           ← Ed25519 keypair + device token
+├── NodeCapabilities.cs         ← command/capability interfaces
+└── Capabilities/
+    ├── CanvasCapability.cs
+    ├── CameraCapability.cs
+    ├── ScreenCapability.cs
+    ├── LocationCapability.cs
+    └── SystemCapability.cs
 
-OpenClaw.Tray/
+OpenClaw.Tray.WinUI/
 ├── Services/
-│   ├── NodeService.cs          ← NEW: orchestrates node connection
-│   ├── CanvasService.cs        ← NEW: handles canvas.* commands
-│   ├── CameraService.cs        ← NEW: handles camera.* commands
-│   ├── ScreenService.cs        ← NEW: handles screen.* commands
-│   ├── SystemService.cs        ← NEW: handles system.* commands
-│   └── ExecApprovals.cs        ← NEW: local approval store
+│   ├── NodeService.cs          ← orchestrates node connection
+│   ├── CameraCaptureService.cs
+│   ├── ScreenCaptureService.cs
+│   ├── ScreenRecordingService.cs
+│   ├── LocalCommandRunner.cs
+│   └── SettingsManager.cs
 ├── Windows/
-│   ├── CanvasWindow.xaml       ← NEW: floating WebView2 canvas
+│   ├── CanvasWindow.xaml       ← floating WebView2 canvas
 │   └── CanvasWindow.xaml.cs
 ```
 
@@ -648,12 +652,15 @@ Tray App Start
     │   └─ (existing functionality)
     │
     └─ Connect WS #2: role=node
-        ├─ Advertise caps: [canvas, camera, screen, system, notifications]
-        ├─ Advertise commands: [canvas.*, camera.*, screen.*, system.*]
+        ├─ Advertise caps: [canvas, camera, location, screen, system]
+        ├─ Advertise commands: [canvas.*, camera.*, location.get, screen.*, system.*]
         ├─ Handle node.invoke requests
         │   ├─ canvas.present → show/navigate CanvasWindow
         │   ├─ canvas.snapshot → WebView2 CapturePreview
         │   ├─ camera.snap → MediaCapture → JPEG → base64
+        │   ├─ camera.clip → MediaCapture → MP4 → base64
+        │   ├─ location.get → Windows.Devices.Geolocation
+        │   ├─ screen.snapshot → GraphicsCapture → image base64
         │   ├─ screen.record → GraphicsCapture → MP4 → base64
         │   ├─ system.run → Process.Start → stdout/stderr
         │   └─ system.notify → ToastNotification
@@ -668,29 +675,29 @@ This is a big effort and **contributions are very welcome!** Here's how to get s
 
 ### Good First Issues
 
-1. **Device identity module** — Generate Ed25519 keypair, store in `%APPDATA%`, derive fingerprint. Pure crypto, well-defined scope.
-2. **`system.notify` handler** — Accept title + body + priority, show a Windows toast. The tray app already shows toasts — this just adds the node protocol wrapper.
-3. **`system.run` handler** — Execute a command via `Process.Start`, return stdout/stderr/exit code. Add exec approvals.
+1. **`canvas.a2ui.pushJSONL` alias** — Route the legacy Mac-compatible alias through the existing A2UI push path.
+2. **Device status command** — Add `device.info` / `device.status` with OS, version, host, and basic availability details.
+3. **Capability diagnostics copy** — Add a copyable summary that explains declared commands, gateway allowlist status, and dangerous-command opt-ins.
 
 ### Medium Issues
 
-4. **Node protocol client** (`OpenClawNodeClient`) — WebSocket connect with `role: "node"`, handle `node.invoke` dispatch. Builds on the existing `OpenClawGatewayClient`.
-5. **Canvas floating window** — WebView2 in a borderless/floating window that appears on `canvas.present` and hides on `canvas.hide`. Related: #5.
+4. **Browser proxy parity** — Investigate a safe Windows implementation for Mac-compatible `browser.proxy`.
+5. **Gateway/channel flyout** — Show configured/running/error/probe state for channels and gateway health in the tray.
 
 ### Harder Issues
 
-6. **Camera capture** — `Windows.Media.Capture` for photos and video clips. Handle permissions, multiple cameras, front/back mapping.
-7. **Screen recording** — `Windows.Graphics.Capture` for screen recording. Handle multi-monitor, permission consent, encoding to MP4.
-8. **Native Windows gateway audit** — Run `openclaw gateway` on Windows, identify and fix platform-specific failures.
+6. **Voice mode parity** — Review the open Windows Voice Mode PR against the current Mac voice runtime/controller/session split.
+7. **Native Windows gateway audit** — Run `openclaw gateway` on Windows, identify and fix platform-specific failures.
+8. **Richer channel operations** — Add tray surfaces for channel configuration, probe status, token source, last error, and recovery actions.
 
 ### Development Setup
 
-See #7 / #8 for DEVELOPMENT.md. Quick start:
-```bash
+See `DEVELOPMENT.md`. Quick start:
+```powershell
 git clone https://github.com/shanselman/openclaw-windows-hub.git
 cd openclaw-windows-hub
-dotnet build
-dotnet run --project src/OpenClaw.Tray
+.\build.ps1
+dotnet run --project src\OpenClaw.Tray.WinUI\OpenClaw.Tray.WinUI.csproj
 ```
 
 Requires .NET 10.0 SDK, Windows 10/11. For testing node protocol, you'll need a running OpenClaw gateway (in WSL2 or on another machine).
@@ -699,12 +706,10 @@ Requires .NET 10.0 SDK, Windows 10/11. For testing node protocol, you'll need a 
 
 ## Open Questions
 
-- [ ] Does the gateway protocol support dual-role connections, or must we open two WebSockets?
-- [ ] What's the minimum `PROTOCOL_VERSION` the node connect needs? (Currently 3)
-- [ ] Should exec from a Windows node default to PowerShell or cmd.exe?
-- [ ] How should the tray app handle "node in background" — Windows can suspend tray apps. Do we need a background service?
-- [ ] Can the Graphics Capture API work without a visible window / user picker? (Background capture requires Windows 11+)
-- [ ] Should we pursue MSIX packaging for the tray app to unlock restricted capabilities?
+- [ ] Should Windows implement `device.info` / `device.status` before or after browser proxy parity?
+- [ ] Should dangerous command opt-ins be shown in the tray as a guided repair flow, a docs link, or both?
+- [ ] How much channel management should live in the native tray versus opening the web dashboard?
+- [ ] Should Voice Mode land as a separate parity track after the open PR is reviewed against current Mac architecture?
 
 ---
 

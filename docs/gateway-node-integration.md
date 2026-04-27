@@ -1,6 +1,6 @@
 # OpenClaw Gateway ↔ Windows Node Integration Guide
 
-> Last updated: 2026-04-25
+> Last updated: 2026-04-26
 > Source of truth: [`openclaw/openclaw` — `src/gateway/node-command-policy.ts`](https://github.com/openclaw/openclaw/blob/main/src/gateway/node-command-policy.ts)
 
 This document captures everything we've learned about how the OpenClaw gateway handles node commands, platform allowlists, and the QR bootstrap pairing flow. It exists because these details are not obvious from the docs alone and caused real debugging sessions.
@@ -138,7 +138,13 @@ Our node previously registered `screen.list`. This command does not exist in the
 
 **Fixed locally**: `screen.list` is no longer advertised.
 
-### 2.3 Verified Correct Names
+### 2.3 `screen.record.start` / `screen.record.stop` — Not Mac/Gateway Commands
+
+PR #159 originally explored session-based start/stop recording commands, but the current Mac node and gateway command surface only define fixed-duration `screen.record`.
+
+**Fixed locally**: Windows now implements only fixed-duration `screen.record`; `screen.record.start` and `screen.record.stop` are intentionally not advertised.
+
+### 2.4 Verified Correct Names
 
 | Our Command | Gateway Canonical | Status |
 |-------------|-------------------|--------|
@@ -160,14 +166,16 @@ Our node previously registered `screen.list`. This command does not exist in the
 | `canvas.a2ui.reset` | `canvas.a2ui.reset` | ✅ Match |
 | `screen.record` | `screen.record` | ✅ Match (dangerous) |
 
-### 2.4 Commands We're Missing vs macOS
+### 2.5 Remaining Command Gaps vs Current Mac Node
 
 | Command | macOS | Windows | Notes |
 |---------|-------|---------|-------|
-| `canvas.a2ui.pushJSONL` | ✅ (in gateway allowlist) | ❌ | Not widely used |
-| `device.info` | ✅ | ❌ | Hardware/OS info |
-| `device.status` | ✅ | ❌ | Battery/charging status |
+| `canvas.a2ui.pushJSONL` | ✅ | ❌ | Legacy alias for `canvas.a2ui.push`; easy parity follow-up |
 | `browser.proxy` | ✅ | ❌ | Chrome DevTools proxy |
+
+### 2.6 Safe Gateway-Policy Gaps to Consider
+
+The gateway's macOS/iOS default allowlists include safe device-info commands (`device.info`, `device.status`) and other mobile-oriented commands. Windows does not currently implement those. They are good future parity candidates, but they are separate from the current Mac runtime's core canvas/camera/location/screen/system/browser command set.
 
 ---
 
@@ -333,7 +341,8 @@ Until the gateway expands Windows safe defaults, the practical local solution is
 
 - [x] Rename `screen.capture` → `screen.snapshot` in `ScreenCapability.cs`
 - [x] Remove `screen.list` from declared commands
-- [ ] Remove debug logging from `WindowsNodeClient.cs` (done)
+- [x] Remove debug logging from `WindowsNodeClient.cs`
+- [x] Add Mac-compatible fixed-duration `screen.record`; do not add `screen.list` or record start/stop commands
 
 ### 5.2 Setup Wizard Improvements
 
@@ -347,7 +356,7 @@ Until the gateway expands Windows safe defaults, the practical local solution is
 
 - [ ] **Request Windows/macOS parity for safe declared commands** — Windows should allow the same safe companion commands macOS does, while dangerous commands stay explicit opt-in.
 - [ ] **Document `gateway.nodes.allowCommands`** — it's not in the config reference page
-- [ ] **Consider `canvas.a2ui.pushJSONL`** — it's in the gateway allowlist but we don't implement it
+- [ ] **Consider `canvas.a2ui.pushJSONL`** — current Mac supports it as a legacy JSONL alias; Windows implements `canvas.a2ui.push` and `canvas.a2ui.reset`
 
 #### Upstream issue draft
 
@@ -398,6 +407,8 @@ When shipping the Windows node, README/wiki should tell users:
 > openclaw gateway restart
 > ```
 > Then re-pair the node (`openclaw devices reject <old-id>` + re-approve).
+>
+> Add `screen.record` only when you explicitly want to allow privacy-sensitive screen recording.
 
 ---
 

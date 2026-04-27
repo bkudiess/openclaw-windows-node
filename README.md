@@ -203,17 +203,17 @@ When Node Mode is enabled in Settings, your Windows PC becomes a **node** that t
            "canvas.snapshot",
            "canvas.a2ui.push",
            "canvas.a2ui.reset",
-            "screen.snapshot",
-            "camera.list",
-            "camera.snap",
-            "camera.clip",
-            "location.get"
+           "screen.snapshot",
+           "camera.list",
+           "camera.snap",
+           "camera.clip",
+           "location.get"
          ]
-       }
-     }
+        }
+      }
    }
    ```
-    > ⚠️ **Important**: The gateway has a server-side allowlist. Commands must be listed explicitly - wildcards like `canvas.*` don't work! Privacy-sensitive commands such as `screen.record` should only be added when you explicitly want to allow them.
+    > ⚠️ **Important**: The gateway has a server-side allowlist. Commands must be listed explicitly - wildcards like `canvas.*` don't work! Privacy-sensitive commands such as `screen.record` should only be added to `allowCommands` when you explicitly want to allow them.
 
 5. **Test it** from your Mac/gateway:
    ```bash
@@ -227,10 +227,13 @@ When Node Mode is enabled in Settings, your Windows PC becomes a **node** that t
     openclaw nodes canvas eval --node <id> --javaScript "document.title"
     
     # Render A2UI JSONL in the canvas (pass the file contents as a string)
-    openclaw nodes canvas a2ui push --node <id> --jsonl "$(Get-Content -Raw .\\ui.jsonl)"
+    openclaw nodes canvas a2ui push --node <id> --jsonl "$(cat ./ui.jsonl)"
     
     # Take a screenshot
     openclaw nodes invoke --node <id> --command screen.snapshot --params '{"screenIndex":0,"format":"png"}'
+
+    # Record a short screen clip (requires explicitly allowing screen.record on the gateway)
+    openclaw nodes screen record --node <id> --duration 3000 --fps 10 --screen 0 --no-audio --out /tmp/openclaw-windows-screen-record-test.mp4 --json
 
     # List cameras
     openclaw nodes invoke --node <id> --command camera.list
