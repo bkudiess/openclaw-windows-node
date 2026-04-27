@@ -374,6 +374,11 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains(@"case ""debugbundle"": CopyDebugBundle(); break;", source);
         Assert.Contains(@"case ""browsersetup"": CopyBrowserSetupGuidance(); break;", source);
         Assert.Contains(@"case ""portdiagnostics"": CopyPortDiagnostics(); break;", source);
+        Assert.Contains(@"case ""capabilitydiagnostics"": CopyCapabilityDiagnostics(); break;", source);
+        Assert.Contains(@"case ""nodeinventory"": CopyNodeInventory(); break;", source);
+        Assert.Contains(@"case ""channelsummary"": CopyChannelSummary(); break;", source);
+        Assert.Contains(@"case ""activitysummary"": CopyActivitySummary(); break;", source);
+        Assert.Contains(@"case ""extensibilitysummary"": CopyExtensibilitySummary(); break;", source);
         Assert.Contains(@"case ""restartsshtunnel"": RestartSshTunnel(); break;", source);
         Assert.Contains(@"menu.AddHeader(""🧰 Support & Debug"")", source);
         Assert.Contains(@"menu.AddMenuItem(""Open Logs Folder"", ""📁"", ""logfolder"", indent: true)", source);
@@ -383,6 +388,11 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains(@"menu.AddMenuItem(""Copy Debug Bundle"", ""🧰"", ""debugbundle"", indent: true)", source);
         Assert.Contains(@"menu.AddMenuItem(""Copy Browser Setup"", ""🌐"", ""browsersetup"", indent: true)", source);
         Assert.Contains(@"menu.AddMenuItem(""Copy Port Diagnostics"", ""🔌"", ""portdiagnostics"", indent: true)", source);
+        Assert.Contains(@"menu.AddMenuItem(""Copy Capability Diagnostics"", ""🛡️"", ""capabilitydiagnostics"", indent: true)", source);
+        Assert.Contains(@"menu.AddMenuItem(""Copy Node Inventory"", ""🖥️"", ""nodeinventory"", indent: true)", source);
+        Assert.Contains(@"menu.AddMenuItem(""Copy Channel Summary"", ""📡"", ""channelsummary"", indent: true)", source);
+        Assert.Contains(@"menu.AddMenuItem(""Copy Activity Summary"", ""⚡"", ""activitysummary"", indent: true)", source);
+        Assert.Contains(@"menu.AddMenuItem(""Copy Extensibility Summary"", ""🧩"", ""extensibilitysummary"", indent: true)", source);
         Assert.Contains(@"menu.AddMenuItem(""Restart SSH Tunnel"", ""🔁"", ""restartsshtunnel"", indent: true)", source);
     }
 

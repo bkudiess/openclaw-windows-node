@@ -564,6 +564,11 @@ public partial class App : Application
             case "debugbundle": CopyDebugBundle(); break;
             case "browsersetup": CopyBrowserSetupGuidance(); break;
             case "portdiagnostics": CopyPortDiagnostics(); break;
+            case "capabilitydiagnostics": CopyCapabilityDiagnostics(); break;
+            case "nodeinventory": CopyNodeInventory(); break;
+            case "channelsummary": CopyChannelSummary(); break;
+            case "activitysummary": CopyActivitySummary(); break;
+            case "extensibilitysummary": CopyExtensibilitySummary(); break;
             case "restartsshtunnel": RestartSshTunnel(); break;
             case "copydeviceid": CopyDeviceIdToClipboard(); break;
             case "copynodesummary": CopyNodeSummaryToClipboard(); break;
@@ -989,6 +994,11 @@ public partial class App : Application
         menu.AddMenuItem("Copy Debug Bundle", "🧰", "debugbundle", indent: true);
         menu.AddMenuItem("Copy Browser Setup", "🌐", "browsersetup", indent: true);
         menu.AddMenuItem("Copy Port Diagnostics", "🔌", "portdiagnostics", indent: true);
+        menu.AddMenuItem("Copy Capability Diagnostics", "🛡️", "capabilitydiagnostics", indent: true);
+        menu.AddMenuItem("Copy Node Inventory", "🖥️", "nodeinventory", indent: true);
+        menu.AddMenuItem("Copy Channel Summary", "📡", "channelsummary", indent: true);
+        menu.AddMenuItem("Copy Activity Summary", "⚡", "activitysummary", indent: true);
+        menu.AddMenuItem("Copy Extensibility Summary", "🧩", "extensibilitysummary", indent: true);
         menu.AddMenuItem("Restart SSH Tunnel", "🔁", "restartsshtunnel", indent: true);
 
         menu.AddSeparator();
