@@ -557,6 +557,12 @@ public partial class App : Application
             case "setup": _ = ShowSetupWizardAsync(); break;
             case "autostart": ToggleAutoStart(); break;
             case "log": OpenLogFile(); break;
+            case "logfolder": OpenLogFolder(); break;
+            case "configfolder": OpenConfigFolder(); break;
+            case "diagnosticsfolder": OpenDiagnosticsFolder(); break;
+            case "supportcontext": CopySupportContext(); break;
+            case "browsersetup": CopyBrowserSetupGuidance(); break;
+            case "portdiagnostics": CopyPortDiagnostics(); break;
             case "copydeviceid": CopyDeviceIdToClipboard(); break;
             case "copynodesummary": CopyNodeSummaryToClipboard(); break;
             case "exit": ExitApplication(); break;
@@ -972,7 +978,17 @@ public partial class App : Application
 
         menu.AddSeparator();
 
-        menu.AddMenuItem(LocalizationHelper.GetString("Menu_OpenLogFile"), "📄", "log");
+        menu.AddHeader("🧰 Support & Debug");
+        menu.AddMenuItem(LocalizationHelper.GetString("Menu_OpenLogFile"), "📄", "log", indent: true);
+        menu.AddMenuItem("Open Logs Folder", "📁", "logfolder", indent: true);
+        menu.AddMenuItem("Open Config Folder", "🗂️", "configfolder", indent: true);
+        menu.AddMenuItem("Open Diagnostics Folder", "🧪", "diagnosticsfolder", indent: true);
+        menu.AddMenuItem("Copy Support Context", "📋", "supportcontext", indent: true);
+        menu.AddMenuItem("Copy Browser Setup", "🌐", "browsersetup", indent: true);
+        menu.AddMenuItem("Copy Port Diagnostics", "🔌", "portdiagnostics", indent: true);
+
+        menu.AddSeparator();
+
         menu.AddMenuItem(LocalizationHelper.GetString("Menu_Exit"), "❌", "exit");
     }
 

@@ -352,6 +352,32 @@ public class TrayMenuWindowMarkupTests
     }
 
     [Fact]
+    public void TrayMenu_HasSupportDebugActions()
+    {
+        var sourcePath = Path.Combine(
+            GetRepositoryRoot(),
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "App.xaml.cs");
+
+        var source = File.ReadAllText(sourcePath);
+
+        Assert.Contains(@"case ""logfolder"": OpenLogFolder(); break;", source);
+        Assert.Contains(@"case ""configfolder"": OpenConfigFolder(); break;", source);
+        Assert.Contains(@"case ""diagnosticsfolder"": OpenDiagnosticsFolder(); break;", source);
+        Assert.Contains(@"case ""supportcontext"": CopySupportContext(); break;", source);
+        Assert.Contains(@"case ""browsersetup"": CopyBrowserSetupGuidance(); break;", source);
+        Assert.Contains(@"case ""portdiagnostics"": CopyPortDiagnostics(); break;", source);
+        Assert.Contains(@"menu.AddHeader(""🧰 Support & Debug"")", source);
+        Assert.Contains(@"menu.AddMenuItem(""Open Logs Folder"", ""📁"", ""logfolder"", indent: true)", source);
+        Assert.Contains(@"menu.AddMenuItem(""Open Config Folder"", ""🗂️"", ""configfolder"", indent: true)", source);
+        Assert.Contains(@"menu.AddMenuItem(""Open Diagnostics Folder"", ""🧪"", ""diagnosticsfolder"", indent: true)", source);
+        Assert.Contains(@"menu.AddMenuItem(""Copy Support Context"", ""📋"", ""supportcontext"", indent: true)", source);
+        Assert.Contains(@"menu.AddMenuItem(""Copy Browser Setup"", ""🌐"", ""browsersetup"", indent: true)", source);
+        Assert.Contains(@"menu.AddMenuItem(""Copy Port Diagnostics"", ""🔌"", ""portdiagnostics"", indent: true)", source);
+    }
+
+    [Fact]
     public void StatusDetailWindow_WiresRestartSshTunnelRequest()
     {
         var sourcePath = Path.Combine(
