@@ -77,6 +77,11 @@ public sealed partial class SettingsWindow : WindowEx
         
         // Advanced
         NodeModeToggle.IsOn = _settings.EnableNodeMode;
+        NodeCanvasToggle.IsOn = _settings.NodeCanvasEnabled;
+        NodeScreenToggle.IsOn = _settings.NodeScreenEnabled;
+        NodeCameraToggle.IsOn = _settings.NodeCameraEnabled;
+        NodeLocationToggle.IsOn = _settings.NodeLocationEnabled;
+        NodeBrowserProxyToggle.IsOn = _settings.NodeBrowserProxyEnabled;
     }
 
     private void SaveSettings()
@@ -116,6 +121,11 @@ public sealed partial class SettingsWindow : WindowEx
         
         // Advanced
         _settings.EnableNodeMode = NodeModeToggle.IsOn;
+        _settings.NodeCanvasEnabled = NodeCanvasToggle.IsOn;
+        _settings.NodeScreenEnabled = NodeScreenToggle.IsOn;
+        _settings.NodeCameraEnabled = NodeCameraToggle.IsOn;
+        _settings.NodeLocationEnabled = NodeLocationToggle.IsOn;
+        _settings.NodeBrowserProxyEnabled = NodeBrowserProxyToggle.IsOn;
 
         _settings.Save();
         AutoStartManager.SetAutoStart(_settings.AutoStart);

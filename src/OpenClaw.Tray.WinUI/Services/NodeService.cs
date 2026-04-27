@@ -21,6 +21,7 @@ public class NodeService : IDisposable
     private readonly IOpenClawLogger _logger;
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly Func<FrameworkElement?> _rootProvider;
+    private readonly SettingsManager? _settings;
     private WindowsNodeClient? _nodeClient;
     private CanvasWindow? _canvasWindow;
     private ScreenCaptureService? _screenCaptureService;
@@ -60,12 +61,14 @@ public class NodeService : IDisposable
         IOpenClawLogger logger,
         DispatcherQueue dispatcherQueue,
         string dataPath,
-        Func<FrameworkElement?>? rootProvider = null)
+        Func<FrameworkElement?>? rootProvider = null,
+        SettingsManager? settings = null)
     {
         _logger = logger;
         _dispatcherQueue = dispatcherQueue;
         _dataPath = dataPath;
         _rootProvider = rootProvider ?? (() => null);
+        _settings = settings;
         _screenCaptureService = new ScreenCaptureService(logger);
         _screenRecordingService = new ScreenRecordingService(logger);
         _cameraCaptureService = new CameraCaptureService(logger);
@@ -135,46 +138,57 @@ public class NodeService : IDisposable
         _systemCapability.SetPromptHandler(new ExecApprovalPromptService(_dispatcherQueue, _rootProvider, _logger));
         _nodeClient.RegisterCapability(_systemCapability);
         
-        // Canvas capability
-        _canvasCapability = new CanvasCapability(_logger);
-        _canvasCapability.PresentRequested += OnCanvasPresent;
-        _canvasCapability.HideRequested += OnCanvasHide;
-        _canvasCapability.NavigateRequested += OnCanvasNavigate;
-        _canvasCapability.EvalRequested += OnCanvasEval;
-        _canvasCapability.SnapshotRequested += OnCanvasSnapshot;
-        _canvasCapability.A2UIPushRequested += OnCanvasA2UIPush;
-        _canvasCapability.A2UIResetRequested += OnCanvasA2UIReset;
-        _nodeClient.RegisterCapability(_canvasCapability);
+        if (_settings?.NodeCanvasEnabled != false)
+        {
+            _canvasCapability = new CanvasCapability(_logger);
+            _canvasCapability.PresentRequested += OnCanvasPresent;
+            _canvasCapability.HideRequested += OnCanvasHide;
+            _canvasCapability.NavigateRequested += OnCanvasNavigate;
+            _canvasCapability.EvalRequested += OnCanvasEval;
+            _canvasCapability.SnapshotRequested += OnCanvasSnapshot;
+            _canvasCapability.A2UIPushRequested += OnCanvasA2UIPush;
+            _canvasCapability.A2UIResetRequested += OnCanvasA2UIReset;
+            _nodeClient.RegisterCapability(_canvasCapability);
+        }
         
-        // Screen capability
-        _screenCapability = new ScreenCapability(_logger);
-        _screenCapability.CaptureRequested += OnScreenCapture;
-        _screenCapability.RecordRequested += OnScreenRecord;
-        _nodeClient.RegisterCapability(_screenCapability);
+        if (_settings?.NodeScreenEnabled != false)
+        {
+            _screenCapability = new ScreenCapability(_logger);
+            _screenCapability.CaptureRequested += OnScreenCapture;
+            _screenCapability.RecordRequested += OnScreenRecord;
+            _nodeClient.RegisterCapability(_screenCapability);
+        }
 
-        // Camera capability
-        _cameraCapability = new CameraCapability(_logger);
-        _cameraCapability.ListRequested += OnCameraList;
-        _cameraCapability.SnapRequested += OnCameraSnap;
-        _cameraCapability.ClipRequested += OnCameraClip;
-        _nodeClient.RegisterCapability(_cameraCapability);
+        if (_settings?.NodeCameraEnabled != false)
+        {
+            _cameraCapability = new CameraCapability(_logger);
+            _cameraCapability.ListRequested += OnCameraList;
+            _cameraCapability.SnapRequested += OnCameraSnap;
+            _cameraCapability.ClipRequested += OnCameraClip;
+            _nodeClient.RegisterCapability(_cameraCapability);
+        }
         
-        // Location capability
-        _locationCapability = new LocationCapability(_logger);
-        _locationCapability.GetRequested += async (args) => await GetLocationAsync(args);
-        _nodeClient.RegisterCapability(_locationCapability);
+        if (_settings?.NodeLocationEnabled != false)
+        {
+            _locationCapability = new LocationCapability(_logger);
+            _locationCapability.GetRequested += async (args) => await GetLocationAsync(args);
+            _nodeClient.RegisterCapability(_locationCapability);
+        }
 
         // Device metadata/status capability
         _deviceCapability = new DeviceCapability(_logger);
         _nodeClient.RegisterCapability(_deviceCapability);
 
-        _browserProxyCapability = new BrowserProxyCapability(
-            _logger,
-            _nodeClient.GatewayUrl,
-            _token);
-        _nodeClient.RegisterCapability(_browserProxyCapability);
-         
-        _logger.Info("All capabilities registered");
+        if (_settings?.NodeBrowserProxyEnabled != false)
+        {
+            _browserProxyCapability = new BrowserProxyCapability(
+                _logger,
+                _nodeClient.GatewayUrl,
+                _token);
+            _nodeClient.RegisterCapability(_browserProxyCapability);
+        }
+
+        _logger.Info($"Capabilities registered: {string.Join(", ", _nodeClient.Capabilities.Select(c => c.Category).Distinct(StringComparer.OrdinalIgnoreCase))}");
     }
 
     public GatewayNodeInfo? GetLocalNodeInfo()
@@ -198,12 +212,18 @@ public class NodeService : IDisposable
             Commands = commands,
             CapabilityCount = capabilities.Count,
             CommandCount = commands.Count,
-            Permissions = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["camera.capture"] = true,
-                ["screen.record"] = true
-            }
+            Permissions = BuildLocalPermissions()
         };
+    }
+
+    private Dictionary<string, bool> BuildLocalPermissions()
+    {
+        var permissions = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        if (_settings?.NodeCameraEnabled != false)
+            permissions["camera.capture"] = true;
+        if (_settings?.NodeScreenEnabled != false)
+            permissions["screen.record"] = true;
+        return permissions;
     }
     
     private void OnNodeStatusChanged(object? sender, ConnectionStatus status)

@@ -28,6 +28,11 @@ public class SettingsData
     public bool NotifyStock { get; set; } = true;
     public bool NotifyInfo { get; set; } = true;
     public bool EnableNodeMode { get; set; } = false;
+    public bool NodeCanvasEnabled { get; set; } = true;
+    public bool NodeScreenEnabled { get; set; } = true;
+    public bool NodeCameraEnabled { get; set; } = true;
+    public bool NodeLocationEnabled { get; set; } = true;
+    public bool NodeBrowserProxyEnabled { get; set; } = true;
     public bool HasSeenActivityStreamTip { get; set; } = false;
     public string? SkippedUpdateTag { get; set; }
     public bool NotifyChatResponses { get; set; } = true;

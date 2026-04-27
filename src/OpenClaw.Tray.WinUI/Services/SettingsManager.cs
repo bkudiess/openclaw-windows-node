@@ -54,6 +54,11 @@ public class SettingsManager
     
     // Node mode (enables Windows as a node, not just operator)
     public bool EnableNodeMode { get; set; } = false;
+    public bool NodeCanvasEnabled { get; set; } = true;
+    public bool NodeScreenEnabled { get; set; } = true;
+    public bool NodeCameraEnabled { get; set; } = true;
+    public bool NodeLocationEnabled { get; set; } = true;
+    public bool NodeBrowserProxyEnabled { get; set; } = true;
     public bool HasSeenActivityStreamTip { get; set; } = false;
     public string SkippedUpdateTag { get; set; } = "";
 
@@ -93,6 +98,11 @@ public class SettingsManager
                     NotifyStock = loaded.NotifyStock;
                     NotifyInfo = loaded.NotifyInfo;
                     EnableNodeMode = loaded.EnableNodeMode;
+                    NodeCanvasEnabled = loaded.NodeCanvasEnabled;
+                    NodeScreenEnabled = loaded.NodeScreenEnabled;
+                    NodeCameraEnabled = loaded.NodeCameraEnabled;
+                    NodeLocationEnabled = loaded.NodeLocationEnabled;
+                    NodeBrowserProxyEnabled = loaded.NodeBrowserProxyEnabled;
                     HasSeenActivityStreamTip = loaded.HasSeenActivityStreamTip;
                     SkippedUpdateTag = loaded.SkippedUpdateTag ?? SkippedUpdateTag;
                     NotifyChatResponses = loaded.NotifyChatResponses;
@@ -137,6 +147,11 @@ public class SettingsManager
                 NotifyStock = NotifyStock,
                 NotifyInfo = NotifyInfo,
                 EnableNodeMode = EnableNodeMode,
+                NodeCanvasEnabled = NodeCanvasEnabled,
+                NodeScreenEnabled = NodeScreenEnabled,
+                NodeCameraEnabled = NodeCameraEnabled,
+                NodeLocationEnabled = NodeLocationEnabled,
+                NodeBrowserProxyEnabled = NodeBrowserProxyEnabled,
                 HasSeenActivityStreamTip = HasSeenActivityStreamTip,
                 SkippedUpdateTag = string.IsNullOrWhiteSpace(SkippedUpdateTag) ? null : SkippedUpdateTag,
                 NotifyChatResponses = NotifyChatResponses,

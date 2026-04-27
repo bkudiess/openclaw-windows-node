@@ -380,6 +380,7 @@ After changing either `gateway.nodes.allowCommands` or `gateway.nodes.denyComman
 - [x] Accept QR images and clipboard setup content as alternate ways to enter the same bootstrap payload
 - [x] Show "auto-paired!" vs "waiting for approval" based on auth method
 - [x] Handle bootstrap token expiry gracefully when setup code payloads include expiry metadata (`expiresAt`, `expires_at`, `expires`, `expiry`, or `exp`)
+- [x] Add Settings toggles for optional Windows node capability groups (`canvas`, `screen`, `camera`, `location`, `browser.proxy`)
 
 ### 5.4 Upstream Contributions / Issues to File
 

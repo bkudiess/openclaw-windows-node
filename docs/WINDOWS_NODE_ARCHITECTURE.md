@@ -574,7 +574,7 @@ The node protocol requires a stable device identity (`device.id`) derived from a
 - [x] `device.info` / `device.status` — metadata and lightweight status payloads
 - [x] `system.run` — exec commands on Windows (PowerShell/cmd) with ICommandRunner abstraction
 - [x] `system.execApprovals.get/set` — remote-manageable exec approval policy
-- [ ] Settings UI for node capabilities (enable/disable camera, screen, etc.)
+- [x] Settings UI for node capabilities (enable/disable canvas, screen, camera, location, browser proxy)
 - [x] Resolve #9 (WebView2 ARM64) — required for canvas
 
 **Depends on:** #5 (Canvas Panel), #9 (WebView2 ARM64)

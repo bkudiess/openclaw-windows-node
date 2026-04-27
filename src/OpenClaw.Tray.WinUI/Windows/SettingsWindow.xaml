@@ -167,6 +167,23 @@
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                TextWrapping="Wrap"
                                Margin="0,-4,0,0"/>
+                    <Border AutomationProperties.AutomationId="SettingsNodeCapabilityToggles"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            CornerRadius="8"
+                            Padding="12">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="Node capability groups" FontWeight="SemiBold"/>
+                            <TextBlock Text="Disable capabilities you do not want this Windows node to advertise. System notifications, safe command execution with approvals, and device status remain available while Node Mode is on."
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       TextWrapping="Wrap"/>
+                            <ToggleSwitch x:Name="NodeCanvasToggle" AutomationProperties.AutomationId="NodeCanvasToggle" Header="Canvas / WebView2"/>
+                            <ToggleSwitch x:Name="NodeScreenToggle" AutomationProperties.AutomationId="NodeScreenToggle" Header="Screen snapshot and recording"/>
+                            <ToggleSwitch x:Name="NodeCameraToggle" AutomationProperties.AutomationId="NodeCameraToggle" Header="Camera list, snapshot, and clips"/>
+                            <ToggleSwitch x:Name="NodeLocationToggle" AutomationProperties.AutomationId="NodeLocationToggle" Header="Location"/>
+                            <ToggleSwitch x:Name="NodeBrowserProxyToggle" AutomationProperties.AutomationId="NodeBrowserProxyToggle" Header="Browser proxy bridge"/>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
                 
             </StackPanel>

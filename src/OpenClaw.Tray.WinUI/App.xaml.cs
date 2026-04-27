@@ -1179,7 +1179,8 @@ public partial class App : Application
                 new AppLogger(),
                 _dispatcherQueue,
                 DataPath,
-                () => _keepAliveWindow?.Content as FrameworkElement);
+                () => _keepAliveWindow?.Content as FrameworkElement,
+                _settings);
             _nodeService.StatusChanged += OnNodeStatusChanged;
             _nodeService.NotificationRequested += OnNodeNotificationRequested;
             _nodeService.PairingStatusChanged += OnPairingStatusChanged;

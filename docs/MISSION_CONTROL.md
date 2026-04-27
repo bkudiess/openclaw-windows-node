@@ -432,6 +432,7 @@ Deliverables:
 - Exec approval remote-policy hardening: **implemented guardrails so `system.execApprovals.set` cannot remotely switch to default allow, install broad/dangerous allow rules, or overwrite a newer local policy without a matching `baseHash`**
 - Host env sanitizer parity hardening: **implemented expanded blocking for secret-looking overrides such as tokens, passwords, API keys, access keys, private keys, client secrets, and connection strings**
 - Dangerous command opt-in guidance: **implemented copyable safety guidance for camera/screen privacy-sensitive commands without emitting one-click dangerous repair commands**
+- Node capability settings: **implemented Settings toggles for canvas, screen, camera, location, and browser proxy command groups so privacy-sensitive surfaces can be disabled before reconnecting/re-pairing**
 
 Risk: high for exec/security. Do not rush.
 

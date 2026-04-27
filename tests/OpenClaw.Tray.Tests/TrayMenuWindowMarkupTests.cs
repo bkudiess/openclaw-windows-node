@@ -58,6 +58,26 @@ public class TrayMenuWindowMarkupTests
     }
 
     [Fact]
+    public void SettingsWindow_HasNodeCapabilityToggles()
+    {
+        var xamlPath = Path.Combine(
+            GetRepositoryRoot(),
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "Windows",
+            "SettingsWindow.xaml");
+
+        var xaml = File.ReadAllText(xamlPath);
+
+        Assert.Contains(@"AutomationProperties.AutomationId=""SettingsNodeCapabilityToggles""", xaml);
+        Assert.Contains(@"AutomationProperties.AutomationId=""NodeCanvasToggle""", xaml);
+        Assert.Contains(@"AutomationProperties.AutomationId=""NodeScreenToggle""", xaml);
+        Assert.Contains(@"AutomationProperties.AutomationId=""NodeCameraToggle""", xaml);
+        Assert.Contains(@"AutomationProperties.AutomationId=""NodeLocationToggle""", xaml);
+        Assert.Contains(@"AutomationProperties.AutomationId=""NodeBrowserProxyToggle""", xaml);
+    }
+
+    [Fact]
     public void StatusDetailWindow_HasSupportDebugActions()
     {
         var xamlPath = Path.Combine(
