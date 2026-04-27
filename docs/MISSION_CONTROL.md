@@ -276,18 +276,18 @@ Keep StatusDetailWindow as the first Command Center, but plan for tabs/sections:
 
 | Mac capability | Windows today | Plan |
 |---|---|---|
-| Gateway process state | Missing | Topology/gateway card first; process manager later only for local Windows gateway |
-| Endpoint store/discovery | Missing | Add classifier, then discovery/profiles |
-| SSH tunnel robust state | Basic | Add tunnel status/error/startedAt; later Mac-equivalent SSH options/reuse |
+| Gateway process state | Implemented for detected/managed runtimes | Command Center shows topology, gateway listener process/PID, and managed/detected SSH context; process manager remains only for a future owned local Windows gateway |
+| Endpoint store/discovery | Implemented first slice | Settings topology presets and detected topology summaries classify local, SSH, WSL, and remote gateway shapes |
+| SSH tunnel robust state | Implemented | Managed SSH tunnel status/error/runtime details surface in Settings, Command Center, support context, and restart actions |
 | PortGuardian | Partial | Read-only port diagnostics identify local listeners and owning process/PID; destructive kill actions remain intentionally absent |
-| HealthStore derived states | Partial | Add topology-aware health summary |
+| HealthStore derived states | Implemented first slice | Command Center warnings include topology-aware gateway, tunnel, browser-control, channel, usage, and node health |
 | Nodes submenu copy actions | Implemented | Per-node copy and full node inventory copy include command groups, filtered commands, disabled settings, and parity gaps |
-| Session previews/settings | Partial | Add thinking/verbose submenus and richer previews |
-| Cost 30-day chart | Partial usage display | Add usage/cost section and daily bars |
+| Session previews/settings | Implemented | Tray session rows include previews plus thinking/verbose, reset, compact, and delete actions |
+| Cost 30-day chart | Implemented | Command Center renders 30-day cost bars from `usage.cost` daily totals |
 | Agent events ring | Implemented | Activity Stream keeps a 400-event rich ring and support bundle window |
 | Permissions matrix | Implemented first slice | Command Center shows safe Windows privacy settings deep links without probing devices |
-| Onboarding security banner | Partial setup wizard | Add Mac-style warning and topology choice |
-| Debug actions | Implemented first wave | Open logs/config/diagnostics, refresh health, restart managed SSH tunnel, copy support context, copy port diagnostics, and copy capability diagnostics |
+| Onboarding security banner | Implemented | Setup Wizard warns about agent control of enabled local command/screen/camera/location/browser/canvas surfaces |
+| Debug actions | Implemented | Tray, Command Center, deep links, and PowerToys expose logs/config/diagnostics, health/update actions, managed SSH restart, support context, debug bundle, browser setup, and copyable diagnostics/summaries |
 | Voice/Talk | Missing | Separate roadmap track |
 | Cron/Skills settings | Missing/limited | Separate roadmap track |
 

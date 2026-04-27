@@ -145,7 +145,7 @@ Comparing against [openclaw-menubar](https://github.com/magimetal/openclaw-menub
 | Channel status | ✅ | ✅ | Mac: Discord / Win: Telegram+WhatsApp |
 | Sessions count | ✅ | ✅ | |
 | Last check timestamp | ✅ | ✅ | Shown in tray tooltip |
-| Gateway start/stop/restart | ✅ | ⚠️ | Windows can restart the managed SSH tunnel from Command Center; external gateway process control is not implemented |
+| Gateway start/stop/restart | ✅ | ⚠️ | Windows can restart the managed SSH tunnel from tray Support & Debug and Command Center; external gateway process control is not implemented |
 | View Logs | ✅ | ✅ | |
 | Open Web UI | ✅ | ✅ | |
 | Refresh | ✅ | ✅ | Auto-refresh on menu open |
