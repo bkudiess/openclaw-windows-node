@@ -238,10 +238,28 @@ public class TrayMenuWindowMarkupTests
         Assert.Contains(@"AutomationProperties.AutomationId=""CommandCenterOpenConfigButton""", xaml);
         Assert.Contains(@"AutomationProperties.AutomationId=""CommandCenterOpenDiagnosticsButton""", xaml);
         Assert.Contains(@"AutomationProperties.AutomationId=""CommandCenterCopySupportContextButton""", xaml);
+        Assert.Contains(@"AutomationProperties.AutomationId=""CommandCenterRestartSshTunnelButton""", xaml);
         Assert.Contains(@"AutomationProperties.AutomationId=""CommandCenterUpdateStatusText""", xaml);
         Assert.Matches(
             new Regex(@"<Grid\.RowDefinitions>\s*<RowDefinition/>\s*<RowDefinition/>\s*<RowDefinition/>\s*</Grid\.RowDefinitions>\s*<StackPanel Grid\.Row=""0""", RegexOptions.Singleline),
             xaml);
+    }
+
+    [Fact]
+    public void StatusDetailWindow_WiresRestartSshTunnelRequest()
+    {
+        var sourcePath = Path.Combine(
+            GetRepositoryRoot(),
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "Windows",
+            "StatusDetailWindow.xaml.cs");
+
+        var source = File.ReadAllText(sourcePath);
+
+        Assert.Contains("RestartSshTunnelRequested", source);
+        Assert.Contains("OnRestartSshTunnel", source);
+        Assert.Contains("state.Tunnel != null", source);
     }
 
     [Fact]

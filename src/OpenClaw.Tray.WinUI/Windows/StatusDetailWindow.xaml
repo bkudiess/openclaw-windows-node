@@ -132,6 +132,11 @@
                         <Button Content="Copy Support Context"
                                 Click="OnCopySupportContext"
                                 AutomationProperties.AutomationId="CommandCenterCopySupportContextButton"/>
+                        <Button x:Name="RestartSshTunnelButton"
+                                Content="Restart SSH Tunnel"
+                                Click="OnRestartSshTunnel"
+                                AutomationProperties.AutomationId="CommandCenterRestartSshTunnelButton"
+                                Visibility="Collapsed"/>
                     </StackPanel>
                     <TextBlock x:Name="UpdateStatusText"
                                Grid.Row="2"

@@ -29,6 +29,7 @@ public sealed partial class StatusDetailWindow : WindowEx
     public event EventHandler? ActivityStreamRequested;
     public event EventHandler<string>? ChannelToggleRequested;
     public event EventHandler<string>? DashboardPathRequested;
+    public event EventHandler? RestartSshTunnelRequested;
     private GatewayCommandCenterState _state;
 
     public StatusDetailWindow(GatewayCommandCenterState state)
@@ -127,6 +128,9 @@ public sealed partial class StatusDetailWindow : WindowEx
         OverviewSessionsText.Text = $"Sessions: {state.Sessions.Count}";
         OverviewNodesText.Text = $"Nodes: {state.Nodes.Count(n => n.IsOnline)}/{state.Nodes.Count} online";
         OverviewWarningsText.Text = $"Warnings: {state.Warnings.Count}";
+        RestartSshTunnelButton.Visibility = state.Tunnel != null ? Visibility.Visible : Visibility.Collapsed;
+        RestartSshTunnelButton.IsEnabled = state.Tunnel?.Status != TunnelStatus.Starting &&
+                                           state.Tunnel?.Status != TunnelStatus.Restarting;
 
         if (state.Warnings.Count > 0)
         {
@@ -386,6 +390,11 @@ public sealed partial class StatusDetailWindow : WindowEx
     private void OnOpenConfigFolder(object sender, RoutedEventArgs e)
     {
         OpenFolder(SettingsManager.SettingsDirectoryPath, "config");
+    }
+
+    private void OnRestartSshTunnel(object sender, RoutedEventArgs e)
+    {
+        RestartSshTunnelRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnCopySupportContext(object sender, RoutedEventArgs e)

@@ -1927,6 +1927,7 @@ public partial class App : Application
             _statusDetailWindow.ActivityStreamRequested += (s, e) => ShowActivityStream();
             _statusDetailWindow.ChannelToggleRequested += (s, channelName) => ToggleChannel(channelName);
             _statusDetailWindow.DashboardPathRequested += (s, dashboardPath) => OpenDashboard(dashboardPath);
+            _statusDetailWindow.RestartSshTunnelRequested += (s, e) => RestartSshTunnel();
             _statusDetailWindow.Closed += (s, e) => _statusDetailWindow = null;
         }
         else
@@ -1934,6 +1935,58 @@ public partial class App : Application
             _statusDetailWindow.UpdateStatus(BuildCommandCenterState());
         }
         _statusDetailWindow.Activate();
+    }
+
+    private void RestartSshTunnel()
+    {
+        if (_settings?.UseSshTunnel != true)
+        {
+            ShowToast(new ToastContentBuilder()
+                .AddText("SSH tunnel")
+                .AddText("Managed SSH tunnel mode is not enabled."));
+            return;
+        }
+
+        try
+        {
+            Logger.Info("Restarting managed SSH tunnel from Command Center");
+            DiagnosticsJsonlService.Write("tunnel.restart_requested", new
+            {
+                localEndpoint = _settings.SshTunnelLocalPort > 0 ? $"127.0.0.1:{_settings.SshTunnelLocalPort}" : null,
+                remotePort = _settings.SshTunnelRemotePort
+            });
+
+            UnsubscribeGatewayEvents();
+            _gatewayClient?.Dispose();
+            _gatewayClient = null;
+            _lastGatewaySelf = null;
+
+            var oldNodeService = _nodeService;
+            _nodeService = null;
+            try { oldNodeService?.Dispose(); } catch (Exception ex) { Logger.Warn($"Node dispose error: {ex.Message}"); }
+
+            _sshTunnelService?.Stop();
+            _currentStatus = ConnectionStatus.Disconnected;
+            UpdateTrayIcon();
+
+            if (_settings.EnableNodeMode)
+                InitializeNodeService();
+            else
+                InitializeGatewayClient();
+
+            UpdateStatusDetailWindow();
+            ShowToast(new ToastContentBuilder()
+                .AddText("SSH tunnel")
+                .AddText("Restart requested."));
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"SSH tunnel restart request failed: {ex.Message}");
+            DiagnosticsJsonlService.Write("tunnel.restart_request_failed", new { ex.Message });
+            ShowToast(new ToastContentBuilder()
+                .AddText("SSH tunnel restart failed")
+                .AddText(ex.Message));
+        }
     }
 
     private async Task RefreshCommandCenterAsync()
