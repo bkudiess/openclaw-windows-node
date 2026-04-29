@@ -1384,6 +1384,84 @@ public class DeviceCapabilityTests
         Assert.False(res.Ok);
         Assert.Contains("Unknown command", res.Error);
     }
+
+    [Fact]
+    public async Task DeviceStatus_ReturnsEnhancedSections()
+    {
+        var cap = new DeviceCapability(NullLogger.Instance);
+        var req = new NodeInvokeRequest { Id = "d4", Command = "device.status", Args = Parse("""{}""") };
+
+        var res = await cap.ExecuteAsync(req);
+
+        Assert.True(res.Ok);
+        var payload = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(res.Payload));
+
+        // collectedAt is a valid ISO-8601 timestamp
+        var collectedAt = payload.GetProperty("collectedAt").GetString();
+        Assert.NotNull(collectedAt);
+        Assert.True(DateTimeOffset.TryParse(collectedAt, out _));
+
+        // os section
+        var os = payload.GetProperty("os");
+        Assert.False(string.IsNullOrWhiteSpace(os.GetProperty("version").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(os.GetProperty("architecture").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(os.GetProperty("machineName").GetString()));
+        Assert.True(os.GetProperty("uptimeSeconds").GetInt64() >= 0);
+
+        // cpu section
+        var cpu = payload.GetProperty("cpu");
+        Assert.False(string.IsNullOrWhiteSpace(cpu.GetProperty("name").GetString()));
+        Assert.True(cpu.GetProperty("logicalProcessors").GetInt32() > 0);
+        Assert.Equal(JsonValueKind.Null, cpu.GetProperty("usagePercent").ValueKind);
+
+        // memory section
+        var memory = payload.GetProperty("memory");
+        Assert.True(memory.GetProperty("totalBytes").GetInt64() >= 0);
+        Assert.True(memory.GetProperty("availableBytes").GetInt64() >= 0);
+
+        // disk section
+        var disk = payload.GetProperty("disk");
+        var drives = disk.GetProperty("drives");
+        Assert.Equal(JsonValueKind.Array, drives.ValueKind);
+        if (drives.GetArrayLength() > 0)
+        {
+            var drive = drives[0];
+            Assert.False(string.IsNullOrWhiteSpace(drive.GetProperty("name").GetString()));
+            Assert.True(drive.GetProperty("totalBytes").GetInt64() >= 0);
+            Assert.True(drive.GetProperty("freeBytes").GetInt64() >= 0);
+        }
+    }
+
+    [Fact]
+    public async Task DeviceStatus_SectionsFilter_ReturnsOnlyRequestedSections()
+    {
+        var cap = new DeviceCapability(NullLogger.Instance);
+        var req = new NodeInvokeRequest { Id = "d5", Command = "device.status", Args = Parse("""{"sections":["os","cpu"]}""") };
+
+        var res = await cap.ExecuteAsync(req);
+
+        Assert.True(res.Ok);
+        var payload = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(res.Payload));
+
+        Assert.NotEqual(JsonValueKind.Null, payload.GetProperty("os").ValueKind);
+        Assert.NotEqual(JsonValueKind.Null, payload.GetProperty("cpu").ValueKind);
+        Assert.Equal(JsonValueKind.Null, payload.GetProperty("memory").ValueKind);
+        Assert.Equal(JsonValueKind.Null, payload.GetProperty("disk").ValueKind);
+        Assert.Equal(JsonValueKind.Null, payload.GetProperty("battery").ValueKind);
+    }
+
+    [Fact]
+    public async Task DeviceStatus_SectionsFilter_RejectsUnknownSections()
+    {
+        var cap = new DeviceCapability(NullLogger.Instance);
+        var req = new NodeInvokeRequest { Id = "d6", Command = "device.status", Args = Parse("""{"sections":["os","invalid"]}""") };
+
+        var res = await cap.ExecuteAsync(req);
+
+        Assert.False(res.Ok);
+        Assert.Contains("invalid", res.Error);
+        Assert.Contains("Valid values", res.Error);
+    }
 }
 
 public class ScreenCapabilityTests
