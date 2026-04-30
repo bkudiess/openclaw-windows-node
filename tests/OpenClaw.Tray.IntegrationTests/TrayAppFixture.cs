@@ -51,6 +51,9 @@ public sealed class TrayAppFixture : IAsyncLifetime
         // (mutex, settings, tray icon, etc.) runs first.
         var deadline = DateTime.UtcNow.AddSeconds(60);
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+        var tokenPath = Path.Combine(DataDir, "mcp-token.txt");
+        string? token = null;
+        var clientHasToken = false;
         Exception? lastEx = null;
         while (DateTime.UtcNow < deadline)
         {
@@ -62,17 +65,23 @@ public sealed class TrayAppFixture : IAsyncLifetime
             }
             try
             {
+                if (token is null && File.Exists(tokenPath))
+                {
+                    token = (await File.ReadAllTextAsync(tokenPath).ConfigureAwait(false)).Trim();
+                    http.DefaultRequestHeaders.Authorization =
+                        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+                }
+
                 var resp = await http.GetAsync($"http://127.0.0.1:{McpPort}/").ConfigureAwait(false);
                 if (resp.StatusCode == HttpStatusCode.OK)
                 {
-                    // Server is up; pick up the bearer token the tray wrote and
-                    // re-issue Client with it so subsequent POSTs are authorized.
-                    var tokenPath = Path.Combine(DataDir, "mcp-token.txt");
-                    if (File.Exists(tokenPath))
+                    // Server is up; re-issue Client with the bearer token so
+                    // subsequent POSTs are authorized too.
+                    if (token is not null && !clientHasToken)
                     {
-                        var token = (await File.ReadAllTextAsync(tokenPath).ConfigureAwait(false)).Trim();
                         Client.Dispose();
                         Client = new McpClient(McpEndpoint, token);
+                        clientHasToken = true;
                     }
                     return;
                 }
