@@ -1,6 +1,6 @@
 {
-  "last_run": "2026-04-29T12:53:06Z",
-  "run_id": "25109861340",
+  "last_run": "2026-04-30T01:11:07Z",
+  "run_id": "25142147163",
   "comments_made": {
     "241": "2026-04-29T12:53:06Z",
     "240": "2026-04-29T01:11:49Z",
@@ -10,9 +10,16 @@
     "99": "prior run"
   },
   "fix_attempts": {
-    "improve-mcp-bridge-allocations-2026-04-29": {
-      "pr_branch": "repo-assist/improve-mcp-bridge-allocations-2026-04-29",
+    "test-coverage-gaps-2026-04-30": {
+      "pr_branch": "repo-assist/test-coverage-gaps-2026-04-30",
       "pr_number": null,
+      "status": "open",
+      "created": "2026-04-30T01:11:07Z",
+      "description": "Task9: 10 new tests: SshTunnelCommandLine.CanForwardBrowserProxyPort (7 boundary), whitespace trim, ExecApprovalV2Result.ToString(), McpToolBridge custom serverName/version and null arguments; all Shared + Tray pass"
+    },
+    "improve-mcp-bridge-allocations-2026-04-29": {
+      "pr_branch": "repo-assist/improve-mcp-bridge-allocations-2026-04-29-e773006a7c0f2a4c",
+      "pr_number": 243,
       "status": "open",
       "created": "2026-04-29T12:53:06Z",
       "description": "Task5: eliminate LINQ FirstOrDefault and ms.ToArray() in McpToolBridge; 964 Shared + 202 Tray pass"
@@ -52,10 +59,10 @@
     "231": "merged individually by shanselman",
     "232": "merged individually by shanselman"
   },
-  "notes": "Issue #191 (WebView2 bridge) still open but feature merged in #192 - should be closed. Issue #235 (Dependabot bundle) still open but all individual PRs merged - should be closed. Issue #240 labelled enhancement this run. PR #242 (device.status) open. PR #238 McpHttpServer Linux fix open. New McpToolBridge perf PR created this run (repo-assist/improve-mcp-bridge-allocations-2026-04-29). Large PRs open: #241 (onboarding wizard by indierawk2k2 - reviewed this run), #239 (A2UI renderer by codemonkeychris), #120 Voice Mode by NichUK - expects new PR. PR #237 was previous onboarding PR by indierawk2k2, superseded by #241.",
+  "notes": "Open Repo Assist PRs: #238 (McpHttpServer Linux fix), #242 (device.status enhance), #243 (McpToolBridge perf), new test-coverage-gaps PR (pending PR#). Community PRs: #244 (AlexAlves87: system.run input validation), #241 (indierawk2k2: onboarding wizard), #239 (codemonkeychris: A2UI native renderer + MCP security), #120 (NichUK: voice mode). Issues to close: #191 (WebView2 bridge implemented), #235 (Dependabot bundle - individual PRs merged). All 3 Repo Assist PRs clean in Task 6 - no CI failures, no conflicts.",
   "monthly_activity_issue": 127,
   "backlog_cursor": {
-    "issues": 240,
-    "prs": 241
+    "issues": 244,
+    "prs": 244
   }
 }
