@@ -12,7 +12,11 @@ namespace OpenClawTray.Windows;
 public sealed partial class SettingsWindow : WindowEx
 {
     private readonly SettingsManager _settings;
-    private readonly NodeService? _nodeService;
+    // Delegate (not captured instance) so the window always reads the current
+    // node service — the tray disposes & recreates NodeService in
+    // App.OnSettingsSaved, and the previous reference would otherwise go stale
+    // and show "Stopped" / "Failed to start" forever.
+    private readonly Func<NodeService?> _nodeServiceProvider;
     private string _manualGatewayUrl = "";
     public bool IsClosed { get; private set; }
 
@@ -20,9 +24,14 @@ public sealed partial class SettingsWindow : WindowEx
     public event EventHandler? CommandCenterRequested;
 
     public SettingsWindow(SettingsManager settings, NodeService? nodeService = null)
+        : this(settings, nodeService != null ? () => nodeService : (Func<NodeService?>)(() => null))
+    {
+    }
+
+    public SettingsWindow(SettingsManager settings, Func<NodeService?> nodeServiceProvider)
     {
         _settings = settings;
-        _nodeService = nodeService;
+        _nodeServiceProvider = nodeServiceProvider;
         InitializeComponent();
         
         Title = LocalizationHelper.GetString("WindowTitle_Settings");
@@ -90,14 +99,213 @@ public sealed partial class SettingsWindow : WindowEx
         McpUrlTextBox.Text = NodeService.McpServerUrl;
         McpServerToggle.Toggled += (_, _) => UpdateMcpStatus();
         UpdateMcpStatus();
+        UpdateMcpTokenDisplay();
+    }
+
+    // Bearer-token display state. Token is masked by default — first click of Reveal
+    // shows it, second click hides again. Copy always copies the unmasked value.
+    private bool _mcpTokenRevealed;
+
+    private void UpdateMcpTokenDisplay()
+    {
+        var token = OpenClaw.Shared.Mcp.McpAuthToken.TryLoad(NodeService.McpTokenPath);
+        var path = NodeService.McpTokenPath;
+        if (token == null)
+        {
+            // File hasn't been generated yet — only happens before the first MCP server start.
+            McpTokenTextBox.Text = LocalizationHelper.GetString("SettingsMcpToken_NotGenerated");
+            McpTokenRevealButton.IsEnabled = false;
+            McpTokenCopyButton.IsEnabled = false;
+            McpTokenResetButton.IsEnabled = true;
+            McpTokenHintText.Text = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                LocalizationHelper.GetString("SettingsMcpToken_StoredAtFormat"), path);
+            return;
+        }
+        McpTokenRevealButton.IsEnabled = true;
+        McpTokenCopyButton.IsEnabled = true;
+        McpTokenResetButton.IsEnabled = true;
+        McpTokenTextBox.Text = _mcpTokenRevealed ? token : new string('•', token.Length);
+        McpTokenRevealButton.Content = LocalizationHelper.GetString(
+            _mcpTokenRevealed ? "SettingsMcpToken_HideButton" : "SettingsMcpToken_RevealButton");
+        McpTokenHintText.Text = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+            LocalizationHelper.GetString("SettingsMcpToken_HintFormat"), path);
+    }
+
+    private void OnRevealMcpToken(object sender, RoutedEventArgs e)
+    {
+        _mcpTokenRevealed = !_mcpTokenRevealed;
+        UpdateMcpTokenDisplay();
+    }
+
+    // Auto-clear delay for the bearer token after Copy. 30s matches the
+    // Edge/Chrome password-manager default and gives the user time to switch
+    // windows and paste once. We only wipe if the clipboard *still* contains
+    // our token — copying anything else in the interim takes precedence.
+    private static readonly TimeSpan s_mcpTokenClipboardClearDelay = TimeSpan.FromSeconds(30);
+    private System.Threading.CancellationTokenSource? _mcpTokenClipboardClearCts;
+
+    private void OnCopyMcpToken(object sender, RoutedEventArgs e)
+    {
+        var token = OpenClaw.Shared.Mcp.McpAuthToken.TryLoad(NodeService.McpTokenPath);
+        if (string.IsNullOrEmpty(token)) return;
+        try
+        {
+            var pkg = new global::Windows.ApplicationModel.DataTransfer.DataPackage();
+            pkg.SetText(token);
+            global::Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(pkg);
+            ScheduleMcpTokenClipboardClear(token);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[Settings] Failed to copy MCP bearer token: {ex.Message}");
+        }
+    }
+
+    private void ScheduleMcpTokenClipboardClear(string copiedToken)
+    {
+        // Cancel any previous pending clear — we just refreshed the clipboard.
+        _mcpTokenClipboardClearCts?.Cancel();
+        _mcpTokenClipboardClearCts?.Dispose();
+        var cts = new System.Threading.CancellationTokenSource();
+        _mcpTokenClipboardClearCts = cts;
+        var dispatcherQueue = global::Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(s_mcpTokenClipboardClearDelay, cts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { return; }
+
+            // Clipboard APIs are STA-bound — marshal back to the UI thread.
+            dispatcherQueue?.TryEnqueue(() =>
+            {
+                try
+                {
+                    var current = global::Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
+                    if (current == null) return;
+                    if (!current.Contains(global::Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text)) return;
+                    string? text = null;
+                    try
+                    {
+                        text = current.GetTextAsync().AsTask().GetAwaiter().GetResult();
+                    }
+                    catch { return; }
+                    if (!string.Equals(text, copiedToken, StringComparison.Ordinal)) return; // user replaced it
+                    global::Windows.ApplicationModel.DataTransfer.Clipboard.Clear();
+                    Logger.Info("[Settings] MCP bearer token auto-cleared from clipboard");
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"[Settings] Clipboard auto-clear failed: {ex.Message}");
+                }
+            });
+        });
+    }
+
+    private async void OnResetMcpToken(object sender, RoutedEventArgs e)
+    {
+        // Reset rotates the bearer token immediately and invalidates every
+        // configured local MCP client. A single accidental click would force
+        // the user to reconfigure Claude Desktop / Cursor / Claude Code, so
+        // gate behind a confirmation dialog with Cancel as the default button.
+        if (!await ConfirmResetMcpTokenAsync()) return;
+
+        try
+        {
+            var nodeService = _nodeServiceProvider();
+            if (nodeService != null)
+                nodeService.ResetMcpToken();
+            else
+                OpenClaw.Shared.Mcp.McpAuthToken.Reset(NodeService.McpTokenPath);
+
+            _mcpTokenRevealed = false;
+            UpdateMcpTokenDisplay();
+            Logger.Info("[Settings] MCP bearer token reset");
+
+            new ToastContentBuilder()
+                .AddText(LocalizationHelper.GetString("SettingsMcpToken_ResetToastTitle"))
+                .AddText(LocalizationHelper.GetString("SettingsMcpToken_ResetToastBody"))
+                .Show();
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[Settings] Failed to reset MCP bearer token: {ex.Message}");
+            McpTokenHintText.Text = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                LocalizationHelper.GetString("SettingsMcpToken_ResetFailedFormat"), ex.Message);
+        }
+    }
+
+    private async Task<bool> ConfirmResetMcpTokenAsync()
+    {
+        // ContentDialog needs a XamlRoot to anchor against. Settings is a real
+        // WinUI window with content, so this should always succeed; if it
+        // doesn't (e.g. content not yet attached), fall back to confirming via
+        // a Win32 message box rather than silently performing the reset.
+        var xamlRoot = (this.Content as Microsoft.UI.Xaml.FrameworkElement)?.XamlRoot;
+        if (xamlRoot != null)
+        {
+            try
+            {
+                var dialog = new Microsoft.UI.Xaml.Controls.ContentDialog
+                {
+                    Title = LocalizationHelper.GetString("SettingsMcpTokenResetDialog_Title"),
+                    Content = LocalizationHelper.GetString("SettingsMcpTokenResetDialog_Body"),
+                    PrimaryButtonText = LocalizationHelper.GetString("SettingsMcpTokenResetDialog_PrimaryButton"),
+                    CloseButtonText = LocalizationHelper.GetString("SettingsMcpTokenResetDialog_CloseButton"),
+                    DefaultButton = Microsoft.UI.Xaml.Controls.ContentDialogButton.Close,
+                    XamlRoot = xamlRoot,
+                };
+                var result = await dialog.ShowAsync();
+                return result == Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[Settings] Reset confirmation dialog failed, falling back to MessageBox: {ex.Message}");
+            }
+        }
+
+        // Off-thread fallback: Win32 MessageBoxW so we never reset without confirmation.
+        return await Task.Run(() =>
+        {
+            const uint MB_OKCANCEL = 0x00000001;
+            const uint MB_ICONWARNING = 0x00000030;
+            const uint MB_DEFBUTTON2 = 0x00000100;
+            const int IDOK = 1;
+            var caption = LocalizationHelper.GetString("SettingsMcpTokenResetDialog_Title");
+            var text = LocalizationHelper.GetString("SettingsMcpTokenResetDialog_Body");
+            var rc = NativeMessageBox(IntPtr.Zero, text, caption,
+                MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2);
+            return rc == IDOK;
+        });
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "MessageBoxW",
+        CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    private static extern int NativeMessageBox(IntPtr hWnd, string text, string caption, uint type);
+
+    /// <summary>
+    /// Public refresh hook called by the host after it tears down and rebuilds
+    /// the NodeService (e.g. App.OnSettingsSaved). Re-reads the running/error
+    /// state from the current node service and refreshes the status text.
+    /// </summary>
+    public void RefreshMcpStatus()
+    {
+        try
+        {
+            UpdateMcpStatus();
+            UpdateMcpTokenDisplay();
+        }
+        catch { /* best-effort UI refresh */ }
     }
 
     private void UpdateMcpStatus()
     {
         var toggleOn = McpServerToggle.IsOn;
         var savedOn = _settings.EnableMcpServer;
-        var running = _nodeService?.IsMcpRunning == true;
-        var startupError = _nodeService?.McpStartupError;
+        var nodeService = _nodeServiceProvider();
+        var running = nodeService?.IsMcpRunning == true;
+        var startupError = nodeService?.McpStartupError;
 
         if (!toggleOn)
         {

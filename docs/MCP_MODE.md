@@ -18,7 +18,7 @@ The implementation is structured so that **adding a new node capability automati
 
 ## Non-goals (for this iteration)
 
-- **No authentication.** Loopback bind is the access control. The endpoint is unreachable from any other machine. We will revisit when we want remote MCP, multiple users on one box, or shared dev VMs.
+- **No remote authentication.** Loopback bind + Origin/Host checks keep the endpoint unreachable from any other machine. A local bearer token guards against untrusted local processes on the same box (see [Authentication](#authentication) below). We will revisit ACLs / multi-user when we want remote MCP, multiple users on one box, or shared dev VMs.
 - **No SSE / streaming.** Plain JSON-RPC request/response is enough for the synchronous capabilities we have today.
 - **No per-tool input schemas.** Capabilities don't expose schemas; MCP `inputSchema` is permissive (`{type: "object", additionalProperties: true}`). When/if `INodeCapability` grows a schema property, the MCP bridge picks it up with no other changes.
 - **No port configuration UI.** Default `8765` is hardcoded. Easy to lift into `SettingsManager` later.
@@ -74,6 +74,22 @@ The bridge takes a `Func<IReadOnlyList<INodeCapability>>` rather than a snapshot
 `OpenClaw.Shared/Mcp/McpHttpServer.cs` is `System.Net.HttpListener` bound to `http://127.0.0.1:8765/`. Loopback-only by construction; not reachable from any other machine even with firewall holes. A defensive `IPAddress.IsLoopback` check on each request acts as belt-and-suspenders.
 
 `GET /` returns a friendly text probe. `POST /` is JSON-RPC. Anything else → `405`.
+
+## Authentication
+
+The HTTP transport requires a bearer token on every `POST`. Defense-in-depth on top of loopback bind + Origin/Host checks: if an attacker can run code in *any* local user context they can reach `127.0.0.1:8765`, so we don't want the listener to be open-by-construction.
+
+**Where the token lives.** `%APPDATA%\OpenClawTray\mcp-token.txt`. The exact path is composed by `NodeService.McpTokenPath` from `SettingsManager.SettingsDirectoryPath`, so the test-suite override `OPENCLAW_TRAY_DATA_DIR` isolates the token file too. The file inherits the parent directory's ACL — by default only the current user (and SYSTEM/Administrators) can read it.
+
+**When it's created.** Lazily, on the first `NodeService.StartMcpServer()` call — i.e. the first time the user enables Local MCP Server in Settings and saves. **Until that toggle has been on at least once, the file does not exist.** This trips up users who try to grab the token before flipping the switch.
+
+**How long it is.** 32 bytes of CSPRNG output, base64url-encoded with padding stripped → **43 ASCII characters** (~256 bits of entropy). See `McpAuthToken.Generate()`.
+
+**Lifetime.** The token is **persistent across tray restarts**. It's only regenerated if the file is deleted or its contents are emptied. There is no automatic rotation.
+
+**On the wire.** Every `POST /` must carry `Authorization: Bearer <token>`. Missing or wrong token → `401 Unauthorized` with no body. `GET /` is unauthenticated (it's just a "yes I'm here" probe).
+
+**How users find it.** Settings → Developer Mode → MCP section shows the live token (masked, with Reveal/Copy buttons) and the storage path. For agents that read from disk (Claude Code, custom scripts), pointing them at `McpTokenPath` is preferable to embedding the token in their prompt or config — the path is stable, the token is a secret. For agents that only accept literal bearer values in config (Claude Desktop, Cursor), use Copy.
 
 ### Settings model
 
@@ -211,7 +227,7 @@ curl -X POST http://127.0.0.1:8765/ -H "Content-Type: application/json" -d '{"js
 These are reasonable next steps but explicitly out of scope for the initial implementation:
 
 1. **Per-tool input schemas.** Add an `IReadOnlyDictionary<string, JsonElement> InputSchemas` (or per-command descriptor) to `INodeCapability`. The MCP bridge's `HandleToolsList` picks them up automatically. Until then, MCP clients see permissive schemas and the agent has to figure out arg shapes from descriptions and trial-and-error.
-2. **Authentication.** Bearer token in the `Authorization` header, copied from a Settings button. Token rotates on tray restart. Stored in `%LOCALAPPDATA%\OpenClawTray\` like the device key.
+2. ~~**Authentication.**~~ Implemented. See [Authentication](#authentication) below.
 3. **Streamable HTTP / SSE.** For long-running tools (`screen.record`, future `audio.transcribe`), MCP supports streaming progress. The bridge needs to learn about it and the HTTP server needs to optionally upgrade.
 4. **Resource and prompt support.** MCP has `resources/*` and `prompts/*` methods we currently no-op. Notifications, recent activity, channel state could be modeled as MCP resources.
 5. **Configurable port.** Move `McpDefaultPort` into `SettingsManager`. Probably also pick a free port at startup if the default is in use, and surface the actual port in the Settings UI.

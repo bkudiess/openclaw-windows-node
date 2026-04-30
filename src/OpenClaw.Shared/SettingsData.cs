@@ -37,6 +37,12 @@ public class SettingsData
     /// <summary>Run the local MCP HTTP server. Independent of EnableNodeMode.</summary>
     public bool EnableMcpServer { get; set; } = false;
     /// <summary>
+    /// Hostnames the A2UI image renderer is allowed to fetch over HTTPS.
+    /// Empty by default — agents can still ship inline data: images. Add hosts
+    /// (e.g., "cdn.example.com") via the Settings window.
+    /// </summary>
+    public List<string>? A2UIImageHosts { get; set; }
+    /// <summary>
     /// Legacy flag (replaced by EnableMcpServer + the EnableNodeMode pair).
     /// Kept for one-time migration on Load; not written on Save.
     /// </summary>

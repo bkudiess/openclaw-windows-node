@@ -376,4 +376,62 @@ public class McpHttpServerTests
         var bridge = new McpToolBridge(() => Array.Empty<INodeCapability>());
         Assert.Throws<ArgumentNullException>(() => new McpHttpServer(bridge, 1234, null!));
     }
+
+    [Fact]
+    public async Task Auth_RequiresBearerToken_When_TokenConfigured()
+    {
+        const string token = "supersecret";
+        var port = FreePort();
+        var bridge = new McpToolBridge(() => new INodeCapability[] { new FakeCapability() });
+        using var server = new McpHttpServer(bridge, port, NullLogger.Instance, token);
+        server.Start();
+
+        using var http = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}/") };
+        var content = new StringContent(
+            """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""",
+            System.Text.Encoding.UTF8,
+            "application/json");
+
+        // No Authorization header → 401.
+        var resp = await http.PostAsync("", content);
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, resp.StatusCode);
+
+        // Wrong token → 401.
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "wrong");
+        var content2 = new StringContent(
+            """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""",
+            System.Text.Encoding.UTF8,
+            "application/json");
+        var resp2 = await http.PostAsync("", content2);
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, resp2.StatusCode);
+
+        // Correct token → 200.
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        var content3 = new StringContent(
+            """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""",
+            System.Text.Encoding.UTF8,
+            "application/json");
+        var resp3 = await http.PostAsync("", content3);
+        Assert.Equal(System.Net.HttpStatusCode.OK, resp3.StatusCode);
+    }
+
+    [Fact]
+    public async Task Auth_NoToken_AllowsAllRequests_LegacyDevMode()
+    {
+        // Constructing without an authToken keeps the prior unauthenticated
+        // contract (relying on loopback + Origin/Host gates only). Existing
+        // setups that haven't migrated to bearer auth keep working.
+        var port = FreePort();
+        var bridge = new McpToolBridge(() => new INodeCapability[] { new FakeCapability() });
+        using var server = new McpHttpServer(bridge, port, NullLogger.Instance);
+        server.Start();
+
+        using var http = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}/") };
+        var content = new StringContent(
+            """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""",
+            System.Text.Encoding.UTF8,
+            "application/json");
+        var resp = await http.PostAsync("", content);
+        Assert.Equal(System.Net.HttpStatusCode.OK, resp.StatusCode);
+    }
 }

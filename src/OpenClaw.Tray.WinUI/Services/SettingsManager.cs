@@ -10,9 +10,14 @@ namespace OpenClawTray.Services;
 /// </summary>
 public class SettingsManager
 {
-    private static readonly string SettingsDirectory = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "OpenClawTray");
+    // OPENCLAW_TRAY_DATA_DIR overrides both this and App.DataPath so an isolated test
+    // instance can run alongside the user's real tray without clobbering settings.
+    private static readonly string SettingsDirectory =
+        Environment.GetEnvironmentVariable("OPENCLAW_TRAY_DATA_DIR") is { Length: > 0 } overrideDir
+            ? overrideDir
+            : Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "OpenClawTray");
 
     private static readonly string SettingsFilePath = Path.Combine(SettingsDirectory, "settings.json");
 
@@ -61,6 +66,13 @@ public class SettingsManager
     public bool NodeBrowserProxyEnabled { get; set; } = true;
     // Local MCP HTTP server (independent of EnableNodeMode)
     public bool EnableMcpServer { get; set; } = false;
+    /// <summary>
+    /// Hostnames the A2UI image renderer is allowed to fetch over HTTPS.
+    /// Empty by default — agents can still ship inline data: images. The
+    /// runtime never bypasses this list, so it is the single switch keeping
+    /// agent JSON from issuing arbitrary outbound HTTP from the tray process.
+    /// </summary>
+    public List<string> A2UIImageHosts { get; set; } = new();
     public bool HasSeenActivityStreamTip { get; set; } = false;
     public string SkippedUpdateTag { get; set; } = "";
 
@@ -106,6 +118,7 @@ public class SettingsManager
                     NodeLocationEnabled = loaded.NodeLocationEnabled;
                     NodeBrowserProxyEnabled = loaded.NodeBrowserProxyEnabled;
                     EnableMcpServer = loaded.EnableMcpServer;
+                    A2UIImageHosts = loaded.A2UIImageHosts ?? new List<string>();
                     // Legacy McpOnlyMode migration:
                     //   true  → node off (no gateway), MCP on
                     //   false → leave MCP off; the user has not opted in to a
@@ -138,7 +151,12 @@ public class SettingsManager
         try
         {
             Directory.CreateDirectory(SettingsDirectory);
-            
+            // Lock the tray data dir to current user + SYSTEM + Administrators —
+            // it co-locates the MCP bearer token, settings.json (which embeds
+            // gateway/bootstrap credentials), and diagnostics jsonl. Other apps
+            // running as the same user could otherwise read these freely.
+            OpenClaw.Shared.Mcp.McpAuthToken.TryRestrictDataDirectoryAcl(SettingsDirectory);
+
             var data = new SettingsData
             {
                 GatewayUrl = GatewayUrl,
@@ -168,6 +186,7 @@ public class SettingsManager
                 NodeLocationEnabled = NodeLocationEnabled,
                 NodeBrowserProxyEnabled = NodeBrowserProxyEnabled,
                 EnableMcpServer = EnableMcpServer,
+                A2UIImageHosts = A2UIImageHosts.Count == 0 ? null : new List<string>(A2UIImageHosts),
                 // McpOnlyMode is legacy — never written; remains null in serialized output.
                 HasSeenActivityStreamTip = HasSeenActivityStreamTip,
                 SkippedUpdateTag = string.IsNullOrWhiteSpace(SkippedUpdateTag) ? null : SkippedUpdateTag,

@@ -153,7 +153,9 @@ public class McpToolBridge
                 tools.Add(new
                 {
                     name = cmd,
-                    description = $"{cap.Category} capability: {cmd}",
+                    description = CommandDescriptions.TryGetValue(cmd, out var desc)
+                        ? desc
+                        : $"{cap.Category} capability: {cmd}",
                     inputSchema = new
                     {
                         type = "object",
@@ -165,6 +167,69 @@ public class McpToolBridge
         }
         return new { tools };
     }
+
+    /// <summary>
+    /// Per-command descriptions advertised via <c>tools/list</c>. Sourced from
+    /// the OpenClaw docs (docs/nodes/index.md, docs/platforms/mac/canvas.md) and
+    /// the capability implementations under <c>OpenClaw.Shared.Capabilities</c>.
+    /// Unknown commands fall back to a generic <c>{category} capability: {cmd}</c>
+    /// label so newly-added capabilities still render before this table is updated.
+    /// </summary>
+    private static readonly Dictionary<string, string> CommandDescriptions = new(StringComparer.Ordinal)
+    {
+        // system.*
+        ["system.notify"] =
+            "Show a Windows toast notification on the node. Args: title (string, default 'OpenClaw'), body (string), subtitle (string), sound (bool, default true). Returns { sent: true }.",
+        ["system.run"] =
+            "Execute a shell command on the Windows node host. Args: command (string or string[] argv, required), args (string[]), shell (string), cwd (string), timeoutMs (int, default 30000), env (object). Subject to the local exec approval policy. Returns { stdout, stderr, exitCode, timedOut, durationMs }.",
+        ["system.run.prepare"] =
+            "Pre-flight a system.run invocation: returns the parsed execution plan (argv, cwd, rawCommand, agentId, sessionKey) without running anything. The gateway uses this to build its approval context before the actual run.",
+        ["system.which"] =
+            "Resolve executable names to absolute paths by searching PATH (PATHEXT-aware on Windows). Args: bins (string[], required). Returns { bins: { name: resolvedPath, ... } } including only names that were found.",
+        ["system.execApprovals.get"] =
+            "Return the current exec approval policy: { enabled, defaultAction ('allow'|'deny'|'prompt'), rules: [{ pattern, action, shells, description, enabled }, ...] }.",
+        ["system.execApprovals.set"] =
+            "Replace the exec approval policy. Args: rules (array of { pattern, action, shells?, description?, enabled? }), defaultAction (string, optional). Persisted to disk; used by future system.run calls.",
+
+        // canvas.* — agent-controlled WebView2 panel for HTML/CSS/JS, A2UI, and small interactive UI surfaces.
+        ["canvas.present"] =
+            "Show the agent-controlled Canvas window (WebView2). Args: url (string) or html (string), width (int, default 800), height (int, default 600), x/y (int, -1 = center), title (string, default 'Canvas'), alwaysOnTop (bool, default false). The Canvas is a lightweight visual workspace for HTML/CSS/JS, A2UI, and small interactive UI surfaces.",
+        ["canvas.hide"] =
+            "Hide the Canvas window without destroying its state.",
+        ["canvas.navigate"] =
+            "Navigate the existing Canvas to a new location. Args: url (string, required) — accepts http(s), file://, or local canvas paths.",
+        ["canvas.eval"] =
+            "Evaluate a JavaScript expression inside the Canvas WebView and return its result. Args: script | javaScript | javascript (string, required).",
+        ["canvas.snapshot"] =
+            "Capture the Canvas viewport as a base64-encoded image. Args: format ('png'|'jpeg', default 'png'), maxWidth (int, default 1200), quality (int 1-100, default 80). Returns { format, base64 }.",
+        ["canvas.a2ui.push"] =
+            "Push A2UI v0.8 server→client messages to the Canvas as JSONL. Supported message kinds: beginRendering, surfaceUpdate, dataModelUpdate, deleteSurface (createSurface / v0.9 is rejected). Args: jsonl (string) or jsonlPath (string, must live under the system temp directory), props (object, optional).",
+        ["canvas.a2ui.reset"] =
+            "Reset the Canvas A2UI state, clearing any rendered surfaces.",
+        ["canvas.a2ui.dump"] =
+            "READ-ALL: Return the full state of every currently-rendered A2UI surface — the component tree, every data-model entry, and any registered secret paths (values redacted). Operators granting MCP access should treat this as equivalent to a screenshot of every open surface, not a normal observability tool.",
+        ["canvas.caps"] =
+            "Report the A2UI feature flags this canvas runtime supports (component catalog, max surfaces, render depth, value-size caps). Diagnostic; no side effects.",
+        ["canvas.a2ui.pushJSONL"] =
+            "Streaming variant of canvas.a2ui.push for very large surfaces. Same protocol contract; jsonlPath argument must live under the system temp directory and is opened via FileStream + GetFinalPathNameByHandle to defeat reparse-point traversal.",
+
+        // screen.* — names match the canonical OpenClaw protocol
+        // (apps/shared/OpenClawKit/Sources/OpenClawKit/ScreenCommands.swift).
+        // No screen.list or screen.capture exist in the protocol; previous
+        // drift advertised tools that didn't actually resolve.
+        ["screen.snapshot"] =
+            "Capture a screenshot of the specified display. Args: format ('png'|'jpeg', default 'png'), maxWidth (int, default 1920), quality (int 1-100, default 80), monitor / screenIndex (int, default 0 = primary), includePointer (bool, default true). Returns { format, width, height, base64, image } where image is a data: URL.",
+        ["screen.record"] =
+            "Record the specified display for a bounded duration. Args: durationMs (int, required, max 300000), format ('mp4'|'webm', default 'mp4'), monitor / screenIndex (int, default 0 = primary), maxWidth (int, default 1920), fps (int, default 30). Returns { format, durationMs, base64 }.",
+
+        // camera.*
+        ["camera.list"] =
+            "List cameras attached to the Windows node. Returns { cameras: [{ deviceId, name, isDefault }, ...] }.",
+        ["camera.snap"] =
+            "Capture a still photo from a camera. Args: deviceId (string, optional — defaults to system default camera), format ('jpeg'|'png', default 'jpeg'), maxWidth (int, default 1280), quality (int 1-100, default 80). Returns { format, width, height, base64 }.",
+        ["camera.clip"] =
+            "Record a short clip from a camera. Args: deviceId (string, optional), durationMs (int, required, max 60000), format ('mp4'|'webm', default 'mp4'), maxWidth (int, default 1280). Returns { format, durationMs, base64 }.",
+    };
 
     private async Task<object> HandleToolsCallAsync(JsonElement parameters, CancellationToken cancellationToken)
     {
@@ -199,15 +264,15 @@ public class McpToolBridge
         };
 
         _logger.Debug($"[MCP] tools/call {name}");
-        // INodeCapability does not yet take a CancellationToken (changing it
-        // would touch every gateway capability). WaitAsync gives the bridge a
-        // hard deadline: when the request CT fires we abandon waiting and
-        // return a tool error to free the handler slot. The capability's
-        // underlying work may continue but cannot pin the MCP server.
+        // Pass the cancellation token through. Capabilities that override the
+        // CT-aware overload (long-running screen/camera capture) will stop
+        // their underlying pipeline on timeout; legacy capabilities fall back
+        // to the no-CT signature and still benefit from WaitAsync freeing the
+        // bridge's handler slot.
         NodeInvokeResponse response;
         try
         {
-            response = await capability.ExecuteAsync(request).WaitAsync(cancellationToken);
+            response = await capability.ExecuteAsync(request, cancellationToken).WaitAsync(cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

@@ -101,9 +101,14 @@ public partial class App : Application
 
     private string[]? _startupArgs;
     private string? _pendingProtocolUri;
-    private static readonly string DataPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "OpenClawTray");
+    // OPENCLAW_TRAY_DATA_DIR isolates a test instance: settings, logs, run marker,
+    // crash log, exec approvals, and the single-instance mutex name all derive from it.
+    private static readonly string? DataDirOverride =
+        Environment.GetEnvironmentVariable("OPENCLAW_TRAY_DATA_DIR") is { Length: > 0 } v ? v : null;
+    private static readonly string DataPath = DataDirOverride
+        ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "OpenClawTray");
     private static readonly string CrashLogPath = Path.Combine(DataPath, "crash.log");
     private static readonly string RunMarkerPath = Path.Combine(DataPath, "run.marker");
 
@@ -238,8 +243,21 @@ public partial class App : Application
         // Check for protocol activation (MSIX packaged apps receive deep links this way)
         string? protocolUri = GetProtocolActivationUri();
 
-        // Single instance check - keep mutex alive for app lifetime
-        _mutex = new Mutex(true, "OpenClawTray", out bool createdNew);
+        // Single instance check - keep mutex alive for app lifetime.
+        // When running with an isolated data dir (tests), suffix the mutex name so
+        // the test instance does not collide with the user's regular tray app.
+        // String.GetHashCode() is randomized per process since .NET Core 2.1, so
+        // two test runs against the same data dir would otherwise pick different
+        // mutex names — and `Math.Abs(int.MinValue)` overflows. Use a stable
+        // SHA-256 prefix instead.
+        var mutexName = "OpenClawTray";
+        if (DataDirOverride is not null)
+        {
+            var hash = System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(DataDirOverride));
+            mutexName = $"OpenClawTray-{Convert.ToHexString(hash, 0, 4)}";
+        }
+        _mutex = new Mutex(true, mutexName, out bool createdNew);
         if (!createdNew)
         {
             // Forward deep link args to running instance (command-line or protocol activation)
@@ -269,12 +287,16 @@ public partial class App : Application
         // Register URI scheme on first run
         DeepLinkHandler.RegisterUriScheme();
 
-        // Check for updates before launching
-        var shouldLaunch = await CheckForUpdatesAsync();
-        if (!shouldLaunch)
+        // Check for updates before launching. Skip in test instances — no UI dialogs,
+        // no network calls, no startup delay.
+        if (DataDirOverride is null)
         {
-            Exit();
-            return;
+            var shouldLaunch = await CheckForUpdatesAsync();
+            if (!shouldLaunch)
+            {
+                Exit();
+                return;
+            }
         }
 
         // Register toast activation handler
@@ -1858,7 +1880,9 @@ public partial class App : Application
     {
         if (_settingsWindow == null || _settingsWindow.IsClosed)
         {
-            _settingsWindow = new SettingsWindow(_settings!, _nodeService);
+            // Pass a delegate so the settings window sees the current NodeService
+            // even after OnSettingsSaved disposes/recreates it (M31).
+            _settingsWindow = new SettingsWindow(_settings!, () => _nodeService);
             _settingsWindow.Closed += (s, e) => 
             {
                 _settingsWindow.SettingsSaved -= OnSettingsSaved;
@@ -1903,6 +1927,15 @@ public partial class App : Application
         else
         {
             InitializeGatewayClient();
+        }
+
+        // Refresh the open settings window's MCP status — the new node service
+        // is now wired and the window should show "Listening" / startup error
+        // for the new instance, not stale text from the disposed one (M31).
+        if (_settingsWindow != null && !_settingsWindow.IsClosed)
+        {
+            try { _settingsWindow.RefreshMcpStatus(); }
+            catch (Exception ex) { Logger.Warn($"Settings refresh error: {ex.Message}"); }
         }
 
         // Update global hotkey
