@@ -41,6 +41,31 @@ public class WindowsNodeClientTests
         }
     }
 
+    [Fact]
+    public void Constructor_AllowsStoredDeviceTokenWithoutGatewayOrBootstrapToken()
+    {
+        var dataPath = Path.Combine(Path.GetTempPath(), $"openclaw-node-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dataPath);
+
+        try
+        {
+            var identity = new DeviceIdentity(dataPath);
+            identity.Initialize();
+            identity.StoreDeviceToken("stored-device-token");
+
+            using var client = new WindowsNodeClient("ws://localhost:18789", "", dataPath);
+
+            Assert.True(client.IsPaired);
+        }
+        finally
+        {
+            if (Directory.Exists(dataPath))
+            {
+                Directory.Delete(dataPath, true);
+            }
+        }
+    }
+
     /// <summary>
     /// Regression test: when hello-ok includes auth.deviceToken, PairingStatusChanged must
     /// fire exactly once — not twice (once from the token block and again from the DeviceToken

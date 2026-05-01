@@ -7,6 +7,7 @@ using OpenClawTray.Dialogs;
 using OpenClawTray.Helpers;
 using OpenClawTray.Services;
 using OpenClawTray.Windows;
+using OpenClawTray.Onboarding;
 using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
@@ -35,6 +36,31 @@ public partial class App : Application
 
     private TrayIcon? _trayIcon;
     private OpenClawGatewayClient? _gatewayClient;
+
+    /// <summary>The persistent gateway client. Used by the onboarding wizard for RPC calls.</summary>
+    public OpenClawGatewayClient? GatewayClient => _gatewayClient;
+
+    /// <summary>
+    /// Ensures the managed SSH tunnel is started using the current settings.
+    /// Used by the onboarding ConnectionPage when the user picks the SSH topology.
+    /// </summary>
+    public void EnsureSshTunnelStarted() => _sshTunnelService?.EnsureStarted(_settings);
+
+    /// <summary>
+    /// Returns the HWND of the active onboarding window, or IntPtr.Zero if none.
+    /// Used by onboarding pages that need to host file pickers / dialogs.
+    /// </summary>
+    public IntPtr GetOnboardingWindowHandle()
+        => _onboardingWindow != null
+            ? WinRT.Interop.WindowNative.GetWindowHandle(_onboardingWindow)
+            : IntPtr.Zero;
+
+    /// <summary>
+    /// Reinitializes the gateway client with current settings.
+    /// Called by the onboarding wizard after saving URL + Token.
+    /// </summary>
+    public void ReinitializeGatewayClient(bool useBootstrapHandoffAuth = false) =>
+        InitializeGatewayClient(useBootstrapHandoffAuth);
     private SettingsManager? _settings;
     private SshTunnelService? _sshTunnelService;
     private GlobalHotkeyService? _globalHotkey;
@@ -114,6 +140,18 @@ public partial class App : Application
 
     public App()
     {
+        // Language override for localization testing (e.g., OPENCLAW_LANGUAGE=zh-CN)
+        var langOverride = Environment.GetEnvironmentVariable("OPENCLAW_LANGUAGE");
+        if (!string.IsNullOrEmpty(langOverride))
+        {
+            // SECURITY: Whitelist known locale codes to prevent locale injection
+            string[] allowedLocales = ["en-us", "fr-fr", "nl-nl", "zh-cn", "zh-tw"];
+            if (allowedLocales.Contains(langOverride.ToLowerInvariant()))
+                LocalizationHelper.SetLanguageOverride(langOverride);
+            else
+                Logger.Warn($"[App] Ignoring invalid OPENCLAW_LANGUAGE value: {langOverride}");
+        }
+
         InitializeComponent();
         
         CheckPreviousRun();
@@ -289,7 +327,8 @@ public partial class App : Application
 
         // Check for updates before launching. Skip in test instances — no UI dialogs,
         // no network calls, no startup delay.
-        if (DataDirOverride is null)
+        if (DataDirOverride is null &&
+            Environment.GetEnvironmentVariable("OPENCLAW_SKIP_UPDATE_CHECK") != "1")
         {
             var shouldLaunch = await CheckForUpdatesAsync();
             if (!shouldLaunch)
@@ -305,10 +344,11 @@ public partial class App : Application
         _sshTunnelService = new SshTunnelService(new AppLogger());
         _sshTunnelService.TunnelExited += OnSshTunnelExited;
 
-        // First-run check
-        if (RequiresSetup(_settings))
+        // First-run check (also supports forced onboarding for testing)
+        if (RequiresSetup(_settings) ||
+            Environment.GetEnvironmentVariable("OPENCLAW_FORCE_ONBOARDING") == "1")
         {
-            await ShowSetupWizardAsync();
+            await ShowOnboardingAsync();
         }
 
         // Initialize tray icon (window-less pattern from WinUIEx)
@@ -401,107 +441,6 @@ public partial class App : Application
         ShowTrayMenuPopup();
     }
 
-    private MenuFlyout BuildTrayMenuFlyout()
-    {
-        // Pre-fetch data (fire and forget - flyout will show with cached data)
-        if (_gatewayClient != null && _currentStatus == ConnectionStatus.Connected)
-        {
-            try
-            {
-                _ = _gatewayClient.CheckHealthAsync();
-                _ = _gatewayClient.RequestSessionsAsync();
-                _ = _gatewayClient.RequestUsageAsync();
-            }
-            catch { /* ignore */ }
-        }
-
-        var flyout = new MenuFlyout();
-        
-        // Brand header
-        var header = new MenuFlyoutItem { Text = "🦞 Molty", IsEnabled = false };
-        header.FontWeight = Microsoft.UI.Text.FontWeights.Bold;
-        flyout.Items.Add(header);
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        // Status
-        var statusIcon = MenuDisplayHelper.GetStatusIcon(_currentStatus);
-        var statusItem = new MenuFlyoutItem { Text = $"{statusIcon} Status: {_currentStatus}" };
-        statusItem.Click += (s, e) => ShowStatusDetail();
-        flyout.Items.Add(statusItem);
-
-        // Activity (if any)
-        if (_currentActivity != null && _currentActivity.Kind != OpenClaw.Shared.ActivityKind.Idle)
-        {
-            flyout.Items.Add(new MenuFlyoutItem 
-            { 
-                Text = $"{_currentActivity.Glyph} {_currentActivity.DisplayText}", 
-                IsEnabled = false 
-            });
-        }
-
-        // Usage
-        if (_lastUsage != null)
-        {
-            flyout.Items.Add(new MenuFlyoutItem 
-            { 
-                Text = $"📊 {_lastUsage.DisplayText}", 
-                IsEnabled = false 
-            });
-        }
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        // Sessions
-        if (_lastSessions.Length > 0)
-        {
-            var sessionsMenu = new MenuFlyoutSubItem { Text = $"📋 {string.Format(LocalizationHelper.GetString("Menu_SessionsFormat"), _lastSessions.Length)}" };
-            foreach (var session in _lastSessions.Take(5))
-            {
-                var sessionItem = new MenuFlyoutItem { Text = session.DisplayText };
-                var sessionKey = session.Key;
-                sessionItem.Click += (s, e) => OpenDashboard($"sessions/{sessionKey}");
-                sessionsMenu.Items.Add(sessionItem);
-            }
-            flyout.Items.Add(sessionsMenu);
-        }
-
-        // Quick actions
-        var dashboardItem = new MenuFlyoutItem { Text = "🌐 Open Dashboard" };
-        dashboardItem.Click += (s, e) => OpenDashboard();
-        flyout.Items.Add(dashboardItem);
-
-        var chatItem = new MenuFlyoutItem { Text = "💬 Web Chat" };
-        chatItem.Click += (s, e) => ShowWebChat();
-        flyout.Items.Add(chatItem);
-
-        var quickSendItem = new MenuFlyoutItem { Text = "✉️ Quick Send" };
-        quickSendItem.Click += (s, e) => ShowQuickSend();
-        flyout.Items.Add(quickSendItem);
-
-        var historyItem = new MenuFlyoutItem { Text = "📜 Notification History" };
-        historyItem.Click += (s, e) => ShowNotificationHistory();
-        flyout.Items.Add(historyItem);
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        // Settings & Exit
-        var settingsItem = new MenuFlyoutItem { Text = "⚙️ Settings" };
-        settingsItem.Click += (s, e) => ShowSettings();
-        flyout.Items.Add(settingsItem);
-
-        var logItem = new MenuFlyoutItem { Text = "📄 View Log" };
-        logItem.Click += (s, e) => OpenLogFile();
-        flyout.Items.Add(logItem);
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        var exitItem = new MenuFlyoutItem { Text = "❌ Exit" };
-        exitItem.Click += (s, e) => ExitApplication();
-        flyout.Items.Add(exitItem);
-
-        return flyout;
-    }
-
     private async void ShowTrayMenuPopup()
     {
         try
@@ -576,7 +515,7 @@ public partial class App : Application
             case "healthcheck": _ = RunHealthCheckAsync(userInitiated: true); break;
             case "checkupdates": _ = CheckForUpdatesUserInitiatedAsync(); break;
             case "settings": ShowSettings(); break;
-            case "setup": _ = ShowSetupWizardAsync(); break;
+            case "setup": _ = ShowOnboardingAsync(); break;
             case "autostart": ToggleAutoStart(); break;
             case "log": OpenLogFile(); break;
             case "logfolder": OpenLogFolder(); break;
@@ -1037,155 +976,36 @@ public partial class App : Application
         menu.AddMenuItem(LocalizationHelper.GetString("Menu_Exit"), "❌", "exit");
     }
 
-    // Keep the old MenuFlyout method for reference but it won't be used
-    private void BuildTrayMenu(MenuFlyout flyout)
-    {
-        // Brand header
-        var brandItem = new MenuFlyoutItem
-        {
-            Text = "🦞 OpenClaw Tray",
-            IsEnabled = false
-        };
-        flyout.Items.Add(brandItem);
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        // Status
-        var statusIcon = MenuDisplayHelper.GetStatusIcon(_currentStatus);
-        var statusItem = new MenuFlyoutItem
-        {
-            Text = $"{statusIcon} Status: {_currentStatus}"
-        };
-        statusItem.Click += (s, e) => ShowStatusDetail();
-        flyout.Items.Add(statusItem);
-
-        // Activity (if any)
-        if (_currentActivity != null && _currentActivity.Kind != OpenClaw.Shared.ActivityKind.Idle)
-        {
-            var activityItem = new MenuFlyoutItem
-            {
-                Text = $"{_currentActivity.Glyph} {_currentActivity.DisplayText}",
-                IsEnabled = false
-            };
-            flyout.Items.Add(activityItem);
-        }
-
-        // Usage
-        if (_lastUsage != null)
-        {
-            var usageItem = new MenuFlyoutItem
-            {
-                Text = $"📊 {_lastUsage.DisplayText}",
-                IsEnabled = false
-            };
-            flyout.Items.Add(usageItem);
-        }
-
-        // Sessions
-        if (_lastSessions.Length > 0)
-        {
-            flyout.Items.Add(new MenuFlyoutSeparator());
-            var sessionsHeader = new MenuFlyoutItem
-            {
-                Text = $"💬 {string.Format(LocalizationHelper.GetString("Menu_SessionsFormat"), _lastSessions.Length)}"
-            };
-            sessionsHeader.Click += (s, e) => OpenDashboard("sessions");
-            flyout.Items.Add(sessionsHeader);
-
-            foreach (var session in _lastSessions.Take(5))
-            {
-                var sessionItem = new MenuFlyoutItem
-                {
-                    Text = $"   • {session.DisplayText}"
-                };
-                sessionItem.Click += (s, e) => OpenDashboard($"sessions/{session.Key}");
-                flyout.Items.Add(sessionItem);
-            }
-        }
-
-        // Channels
-        if (_lastChannels.Length > 0)
-        {
-            flyout.Items.Add(new MenuFlyoutSeparator());
-            var channelsHeader = new MenuFlyoutItem
-            {
-                Text = "📡 Channels",
-                IsEnabled = false
-            };
-            flyout.Items.Add(channelsHeader);
-
-            foreach (var channel in _lastChannels)
-            {
-                var channelIcon = MenuDisplayHelper.GetChannelStatusIcon(channel.Status);
-                var channelItem = new MenuFlyoutItem
-                {
-                    Text = $"   {channelIcon} {channel.Name}"
-                };
-                channelItem.Click += (s, e) => ToggleChannel(channel.Name);
-                flyout.Items.Add(channelItem);
-            }
-        }
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        // Actions
-        var dashboardItem = new MenuFlyoutItem { Text = "🌐 Open Dashboard" };
-        dashboardItem.Click += (s, e) => OpenDashboard();
-        flyout.Items.Add(dashboardItem);
-
-        var webChatItem = new MenuFlyoutItem { Text = "💬 Open Web Chat" };
-        webChatItem.Click += (s, e) => ShowWebChat();
-        flyout.Items.Add(webChatItem);
-
-        var quickSendItem = new MenuFlyoutItem { Text = "📤 Quick Send..." };
-        quickSendItem.Click += (s, e) => ShowQuickSend();
-        flyout.Items.Add(quickSendItem);
-
-        var historyItem = new MenuFlyoutItem { Text = "📋 Notification History..." };
-        historyItem.Click += (s, e) => ShowNotificationHistory();
-        flyout.Items.Add(historyItem);
-
-        var healthCheckItem = new MenuFlyoutItem { Text = "🔄 Run Health Check" };
-        healthCheckItem.Click += async (s, e) => await RunHealthCheckAsync(userInitiated: true);
-        flyout.Items.Add(healthCheckItem);
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        // Settings
-        var settingsItem = new MenuFlyoutItem { Text = "⚙️ Settings..." };
-        settingsItem.Click += (s, e) => ShowSettings();
-        flyout.Items.Add(settingsItem);
-
-        var autoStartItem = new ToggleMenuFlyoutItem
-        {
-            Text = "🚀 Auto-start",
-            IsChecked = _settings?.AutoStart ?? false
-        };
-        autoStartItem.Click += (s, e) => ToggleAutoStart();
-        flyout.Items.Add(autoStartItem);
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        var logItem = new MenuFlyoutItem { Text = "📄 Open Log File" };
-        logItem.Click += (s, e) => OpenLogFile();
-        flyout.Items.Add(logItem);
-
-        var exitItem = new MenuFlyoutItem { Text = "❌ Exit" };
-        exitItem.Click += (s, e) => ExitApplication();
-        flyout.Items.Add(exitItem);
-    }
-
     #region Gateway Client
 
-    private void InitializeGatewayClient()
+    private void InitializeGatewayClient(bool useBootstrapHandoffAuth = false)
     {
         if (_settings == null) return;
         if (!EnsureSshTunnelConfigured()) return;
+
+        // Guard against empty gateway URL (e.g., fresh install before onboarding)
+        var gatewayUrl = _settings.GetEffectiveGatewayUrl();
+        if (string.IsNullOrWhiteSpace(gatewayUrl))
+        {
+            Logger.Info("Gateway URL not configured — skipping client initialization");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_settings.Token))
+        {
+            Logger.Info("Gateway token not configured — skipping operator client initialization");
+            return;
+        }
 
         // Unsubscribe from old client if exists
         UnsubscribeGatewayEvents();
         _lastGatewaySelf = null;
 
-        _gatewayClient = new OpenClawGatewayClient(_settings.GetEffectiveGatewayUrl(), _settings.Token, new AppLogger());
+        _gatewayClient = new OpenClawGatewayClient(
+            gatewayUrl,
+            _settings.Token,
+            new AppLogger(),
+            useBootstrapHandoffAuth);
         _gatewayClient.SetUserRules(_settings.UserRules.Count > 0 ? _settings.UserRules : null);
         _gatewayClient.SetPreferStructuredCategories(_settings.PreferStructuredCategories);
         _gatewayClient.StatusChanged += OnConnectionStatusChanged;
@@ -1233,9 +1053,8 @@ public partial class App : Application
         var enableMcp = _settings.EnableMcpServer;
         if (!enableNode && !enableMcp) return;
 
-        // Gateway connection requires auth (token or bootstrap token); MCP doesn't.
-        var canRunGateway = enableNode
-            && (!string.IsNullOrWhiteSpace(_settings.Token) || !string.IsNullOrWhiteSpace(_settings.BootstrapToken));
+        // Gateway connection requires auth (operator token, bootstrap token, or stored device token); MCP doesn't.
+        var canRunGateway = StartupSetupState.CanStartNodeGateway(_settings, DataPath);
 
         if (enableNode && !canRunGateway && !enableMcp)
         {
@@ -1247,7 +1066,7 @@ public partial class App : Application
         // they enabled both but only MCP comes up.
         if (enableNode && !canRunGateway && enableMcp)
         {
-            Logger.Warn("Node mode enabled but gateway prerequisites missing (token/tunnel) — running MCP-only.");
+            Logger.Warn("Node mode enabled but gateway auth is missing — running MCP-only.");
         }
 
         try
@@ -1285,12 +1104,7 @@ public partial class App : Application
 
     private static bool RequiresSetup(SettingsManager settings)
     {
-        if (!string.IsNullOrWhiteSpace(settings.Token))
-        {
-            return false;
-        }
-
-        return !(settings.EnableNodeMode && !string.IsNullOrWhiteSpace(settings.BootstrapToken));
+        return StartupSetupState.RequiresSetup(settings, DataPath);
     }
     
     private void OnNodeStatusChanged(object? sender, ConnectionStatus status)
@@ -1327,16 +1141,7 @@ public partial class App : Application
         {
             if (args.Status == OpenClaw.Shared.PairingStatus.Pending)
             {
-                AddRecentActivity("Node pairing pending", category: "node", dashboardPath: "nodes", nodeId: args.DeviceId);
-                var approvalCommand = $"openclaw devices approve {args.DeviceId}";
-                // Show toast with approval instructions
-                ShowToast(new ToastContentBuilder()
-                    .AddText(LocalizationHelper.GetString("Toast_PairingPending"))
-                    .AddText(string.Format(LocalizationHelper.GetString("Toast_PairingPendingDetail"), args.DeviceId.Substring(0, 16)))
-                    .AddButton(new ToastButton()
-                        .SetContent(LocalizationHelper.GetString("Toast_CopyPairingCommand"))
-                        .AddArgument("action", "copy_pairing_command")
-                        .AddArgument("command", approvalCommand)));
+                ShowPairingPendingNotification(args.DeviceId);
             }
             else if (args.Status == OpenClaw.Shared.PairingStatus.Paired)
             {
@@ -1354,6 +1159,24 @@ public partial class App : Application
             }
         }
         catch { /* ignore */ }
+    }
+
+    public static string BuildPairingApprovalCommand(string deviceId) =>
+        $"openclaw devices approve {deviceId}";
+
+    public void ShowPairingPendingNotification(string deviceId, string? approvalCommand = null)
+    {
+        var command = approvalCommand ?? BuildPairingApprovalCommand(deviceId);
+        var shortDeviceId = deviceId.Length > 16 ? deviceId[..16] : deviceId;
+
+        AddRecentActivity("Node pairing pending", category: "node", dashboardPath: "nodes", nodeId: deviceId);
+        ShowToast(new ToastContentBuilder()
+            .AddText(LocalizationHelper.GetString("Toast_PairingPending"))
+            .AddText(string.Format(LocalizationHelper.GetString("Toast_PairingPendingDetail"), shortDeviceId))
+            .AddButton(new ToastButton()
+                .SetContent(LocalizationHelper.GetString("Toast_CopyPairingCommand"))
+                .AddArgument("action", "copy_pairing_command")
+                .AddArgument("command", command)));
     }
     
     private void OnNodeNotificationRequested(object? sender, OpenClaw.Shared.Capabilities.SystemNotifyArgs args)
@@ -1714,6 +1537,15 @@ public partial class App : Application
         // Chat toggle: suppress all chat responses if disabled
         if (notification.IsChat && !_settings.NotifyChatResponses)
             return false;
+
+        // Suppress chat notifications when a chat window is already showing them
+        if (notification.IsChat)
+        {
+            if (_webChatWindow != null && !_webChatWindow.IsClosed)
+                return false;
+            if (_onboardingWindow != null)
+                return false; // Onboarding window has chat overlay
+        }
 
         var type = notification.Type;
         if (type == null) return true;
@@ -2542,24 +2374,31 @@ public partial class App : Application
         _activityStreamWindow.Activate();
     }
 
-    private SetupWizardWindow? _setupWizard;
+    private OnboardingWindow? _onboardingWindow;
 
-    private async Task ShowSetupWizardAsync()
+    private async Task ShowOnboardingAsync()
     {
         if (_settings == null) return;
 
-        if (_setupWizard != null)
+        if (_onboardingWindow != null)
         {
-            try { _setupWizard.Activate(); return; } catch { _setupWizard = null; }
+            try { _onboardingWindow.Activate(); return; } catch { _onboardingWindow = null; }
         }
 
-        _setupWizard = new SetupWizardWindow(_settings);
-        _setupWizard.SetupCompleted += (s, e) =>
+        _onboardingWindow = new OnboardingWindow(_settings);
+        _onboardingWindow.OnboardingCompleted += (s, e) =>
         {
-            Logger.Info("Setup wizard completed, reinitializing connections");
-            _setupWizard = null;
+            Logger.Info("Onboarding completed");
+            _onboardingWindow = null;
 
-            // Mirror OnSettingsSaved — clean up both, then start only one
+            // If the persistent client was already initialized during onboarding, keep it
+            if (_gatewayClient?.IsConnectedToGateway == true)
+            {
+                Logger.Info("Gateway client already connected from onboarding — keeping");
+                return;
+            }
+
+            // Otherwise reinitialize with saved settings
             UnsubscribeGatewayEvents();
             _gatewayClient?.Dispose();
             _gatewayClient = null;
@@ -2575,8 +2414,8 @@ public partial class App : Application
             else
                 InitializeGatewayClient();
         };
-        _setupWizard.Closed += (s, e) => _setupWizard = null;
-        _setupWizard.Activate();
+        _onboardingWindow.Closed += (s, e) => _onboardingWindow = null;
+        _onboardingWindow.Activate();
     }
 
     private void ShowSurfaceImprovementsTipIfNeeded()
@@ -3081,7 +2920,7 @@ public partial class App : Application
         DeepLinkHandler.Handle(uri, new DeepLinkActions
         {
             OpenSettings = ShowSettings,
-            OpenSetup = () => _ = ShowSetupWizardAsync(),
+            OpenSetup = () => _ = ShowOnboardingAsync(),
             RunHealthCheck = () => RunHealthCheckAsync(userInitiated: true),
             CheckForUpdates = CheckForUpdatesUserInitiatedAsync,
             OpenLogFile = OpenLogFile,
@@ -3100,6 +2939,7 @@ public partial class App : Application
             RestartSshTunnel = RestartSshTunnel,
             OpenChat = ShowWebChat,
             OpenCommandCenter = ShowStatusDetail,
+            OpenTrayMenu = ShowTrayMenuPopup,
             OpenActivityStream = ShowActivityStream,
             OpenNotificationHistory = ShowNotificationHistory,
             OpenDashboard = OpenDashboard,
@@ -3171,7 +3011,7 @@ public partial class App : Application
         }
     }
 
-    private static void CopyTextToClipboard(string text)
+    public static void CopyTextToClipboard(string text)
     {
         var dataPackage = new global::Windows.ApplicationModel.DataTransfer.DataPackage();
         dataPackage.SetText(text);

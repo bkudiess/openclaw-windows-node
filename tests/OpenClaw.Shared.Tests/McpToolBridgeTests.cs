@@ -78,6 +78,7 @@ public class McpToolBridgeTests
             new FakeCapability("canvas", "canvas.a2ui.push"),
             new FakeCapability("screen", "screen.snapshot"),
             new FakeCapability("camera", "camera.snap"),
+            new FakeCapability("tts", "tts.speak"),
             new FakeCapability("custom", "custom.unknown"),
         };
         var bridge = CreateBridge(caps);
@@ -95,6 +96,7 @@ public class McpToolBridgeTests
         Assert.Contains("A2UI v0.8", byName["canvas.a2ui.push"]);
         Assert.Contains("screenshot", byName["screen.snapshot"]);
         Assert.Contains("camera", byName["camera.snap"], System.StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Speak text", byName["tts.speak"]);
 
         // Unknown commands keep the generic fallback so newly-added capabilities still render.
         Assert.Equal("custom capability: custom.unknown", byName["custom.unknown"]);
@@ -348,5 +350,35 @@ public class McpToolBridgeTests
         var error = doc.RootElement.GetProperty("error");
         Assert.Equal(-32603, error.GetProperty("code").GetInt32());
         Assert.DoesNotContain("secret-internal-detail", error.GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public async Task Initialize_ReturnsCustomServerNameAndVersion()
+    {
+        var bridge = new McpToolBridge(
+            () => new List<INodeCapability>(),
+            serverName: "my-mcp-server",
+            serverVersion: "1.2.3");
+
+        var resp = await bridge.HandleRequestAsync(@"{""jsonrpc"":""2.0"",""id"":1,""method"":""initialize""}");
+
+        using var doc = JsonDocument.Parse(resp!);
+        var serverInfo = doc.RootElement.GetProperty("result").GetProperty("serverInfo");
+        Assert.Equal("my-mcp-server", serverInfo.GetProperty("name").GetString());
+        Assert.Equal("1.2.3", serverInfo.GetProperty("version").GetString());
+    }
+
+    [Fact]
+    public async Task ToolsCall_NullArguments_IsAccepted()
+    {
+        var fake = new FakeCapability("alpha", "alpha.echo");
+        var bridge = CreateBridge(new List<INodeCapability> { fake });
+
+        var resp = await bridge.HandleRequestAsync(
+            @"{""jsonrpc"":""2.0"",""id"":1,""method"":""tools/call"",""params"":{""name"":""alpha.echo"",""arguments"":null}}");
+
+        using var doc = JsonDocument.Parse(resp!);
+        Assert.True(doc.RootElement.TryGetProperty("result", out var result));
+        Assert.False(result.GetProperty("isError").GetBoolean());
     }
 }

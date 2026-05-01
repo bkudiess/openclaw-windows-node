@@ -170,6 +170,25 @@ public class SshTunnelCommandLineTests
         Assert.ThrowsAny<ArgumentException>(() =>
             SshTunnelCommandLine.BuildArguments(user, host, remotePort, localPort));
     }
+
+    [Fact]
+    public void BuildArguments_TrimsWhitespaceFromUserAndHost()
+    {
+        var args = SshTunnelCommandLine.BuildArguments("  scott  ", "  mac-mini.local  ", 18789, 28789);
+        Assert.EndsWith("scott@mac-mini.local", args);
+    }
+
+    [Theory]
+    [InlineData(1, 1, true)]
+    [InlineData(18789, 28789, true)]
+    [InlineData(65533, 65533, true)]
+    [InlineData(65534, 28789, false)]
+    [InlineData(28789, 65534, false)]
+    [InlineData(0, 28789, false)]
+    public void CanForwardBrowserProxyPort_ReturnsExpected(int remotePort, int localPort, bool expected)
+    {
+        Assert.Equal(expected, SshTunnelCommandLine.CanForwardBrowserProxyPort(remotePort, localPort));
+    }
 }
 
 public class GatewaySelfInfoTests
@@ -918,6 +937,8 @@ public class CommandCenterModelTests
         Assert.Contains("device.info", CommandCenterCommandGroups.SafeCompanionCommands);
         Assert.Contains("device.status", CommandCenterCommandGroups.SafeCompanionCommands);
         Assert.Contains("screen.record", CommandCenterCommandGroups.DangerousCommands);
+        Assert.Contains("tts.speak", CommandCenterCommandGroups.DangerousCommands);
+        Assert.DoesNotContain("tts.speak", CommandCenterCommandGroups.MacNodeParityCommands);
         Assert.Contains("browser.proxy", CommandCenterCommandGroups.BrowserCommands);
         Assert.Contains("browser.proxy", CommandCenterCommandGroups.MacNodeParityCommands);
     }

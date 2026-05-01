@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -169,6 +168,13 @@ public class McpToolBridge
     }
 
     /// <summary>
+    /// The complete set of commands documented in <see cref="CommandDescriptions"/>.
+    /// Exposed as a stable surface so out-of-process documentation (winnode's
+    /// skill.md) can be drift-tested against the canonical capability surface.
+    /// </summary>
+    public static IReadOnlyCollection<string> KnownCommands => CommandDescriptions.Keys;
+
+    /// <summary>
     /// Per-command descriptions advertised via <c>tools/list</c>. Sourced from
     /// the OpenClaw docs (docs/nodes/index.md, docs/platforms/mac/canvas.md) and
     /// the capability implementations under <c>OpenClaw.Shared.Capabilities</c>.
@@ -229,6 +235,10 @@ public class McpToolBridge
             "Capture a still photo from a camera. Args: deviceId (string, optional — defaults to system default camera), format ('jpeg'|'png', default 'jpeg'), maxWidth (int, default 1280), quality (int 1-100, default 80). Returns { format, width, height, base64 }.",
         ["camera.clip"] =
             "Record a short clip from a camera. Args: deviceId (string, optional), durationMs (int, required, max 60000), format ('mp4'|'webm', default 'mp4'), maxWidth (int, default 1280). Returns { format, durationMs, base64 }.",
+
+        // tts.*
+        ["tts.speak"] =
+            "Speak text aloud on the Windows node. Args: text (string, required), provider ('windows'|'elevenlabs', optional), voiceId (string, optional), model (string, optional), interrupt (bool, default false). Returns { spoken, provider, contentType, durationMs }.",
     };
 
     private async Task<object> HandleToolsCallAsync(JsonElement parameters, CancellationToken cancellationToken)
@@ -252,7 +262,13 @@ public class McpToolBridge
         }
 
         var caps = _capabilityProvider();
-        var capability = caps.FirstOrDefault(c => c.CanHandle(name));
+        INodeCapability? capability = null;
+        foreach (var c in caps)
+        {
+            if (!c.CanHandle(name)) continue;
+            capability = c;
+            break;
+        }
         if (capability == null)
             throw new McpToolException($"Unknown tool: {name}");
 
@@ -309,7 +325,7 @@ public class McpToolBridge
             JsonSerializer.Serialize(w, result, PayloadJsonOptions);
             w.WriteEndObject();
         }
-        return System.Text.Encoding.UTF8.GetString(ms.ToArray());
+        return System.Text.Encoding.UTF8.GetString(ms.GetBuffer(), 0, (int)ms.Length);
     }
 
     private static string WriteError(JsonElement? id, int code, string message)
@@ -326,7 +342,7 @@ public class McpToolBridge
             w.WriteEndObject();
             w.WriteEndObject();
         }
-        return System.Text.Encoding.UTF8.GetString(ms.ToArray());
+        return System.Text.Encoding.UTF8.GetString(ms.GetBuffer(), 0, (int)ms.Length);
     }
 
     /// <summary>
