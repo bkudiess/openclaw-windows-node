@@ -90,6 +90,24 @@ public class ExecApprovalPolicyTests : IDisposable
         var result = policy.Evaluate("whoami");
         Assert.True(result.Allowed);
     }
+
+    [Theory]
+    [InlineData("ipconfig")]
+    [InlineData("ipconfig /all")]
+    [InlineData("ping 8.8.8.8")]
+    [InlineData("dir")]
+    [InlineData("dir C:\\")]
+    [InlineData("cat README.md")]
+    [InlineData("type README.md")]
+    public void DefaultPolicy_AllowsCommonDiagCommandsWithAndWithoutArgs(string command)
+    {
+        // Patterns like "ipconfig*" (no space before wildcard) must match both
+        // the no-arg invocation ("ipconfig") and the with-args form ("ipconfig /all").
+        var policy = CreatePolicy();
+        var shell = command.StartsWith("type") ? "cmd" : null;
+        var result = shell != null ? policy.Evaluate(command, shell) : policy.Evaluate(command);
+        Assert.True(result.Allowed, $"Expected '{command}' to be allowed by default policy");
+    }
     
     [Fact]
     public void CustomRules_FirstMatchWins()

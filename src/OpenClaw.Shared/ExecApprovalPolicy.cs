@@ -269,17 +269,19 @@ public class ExecApprovalPolicy
     {
         return new List<ExecApprovalRule>
         {
-            // Allow common read-only / diagnostic commands
+            // Allow common read-only / diagnostic commands.
+            // Patterns use stem* (no space before wildcard) so that the command
+            // also matches when invoked without arguments (e.g. "ipconfig" alone).
             new() { Pattern = "echo *", Action = ExecApprovalAction.Allow, Description = "Echo commands" },
             new() { Pattern = "Get-*", Action = ExecApprovalAction.Allow, Shells = new[] { "powershell", "pwsh" }, Description = "PowerShell Get- cmdlets (read-only)" },
-            new() { Pattern = "dir *", Action = ExecApprovalAction.Allow, Description = "Directory listing" },
+            new() { Pattern = "dir*", Action = ExecApprovalAction.Allow, Description = "Directory listing" },
             new() { Pattern = "hostname", Action = ExecApprovalAction.Allow, Description = "Hostname query" },
             new() { Pattern = "whoami", Action = ExecApprovalAction.Allow, Description = "Current user" },
             new() { Pattern = "systeminfo", Action = ExecApprovalAction.Allow, Description = "System info" },
-            new() { Pattern = "ipconfig *", Action = ExecApprovalAction.Allow, Description = "Network config" },
-            new() { Pattern = "ping *", Action = ExecApprovalAction.Allow, Description = "Ping" },
-            new() { Pattern = "type *", Action = ExecApprovalAction.Allow, Shells = new[] { "cmd" }, Description = "Read file (cmd)" },
-            new() { Pattern = "cat *", Action = ExecApprovalAction.Allow, Description = "Read file" },
+            new() { Pattern = "ipconfig*", Action = ExecApprovalAction.Allow, Description = "Network config" },
+            new() { Pattern = "ping*", Action = ExecApprovalAction.Allow, Description = "Ping" },
+            new() { Pattern = "type*", Action = ExecApprovalAction.Allow, Shells = new[] { "cmd" }, Description = "Read file (cmd)" },
+            new() { Pattern = "cat*", Action = ExecApprovalAction.Allow, Description = "Read file" },
             
             // Deny dangerous patterns explicitly
             new() { Pattern = "Remove-Item *", Action = ExecApprovalAction.Deny, Description = "Block file deletion" },
