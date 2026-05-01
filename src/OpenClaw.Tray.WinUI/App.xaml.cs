@@ -991,6 +991,12 @@ public partial class App : Application
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(_settings.Token))
+        {
+            Logger.Info("Gateway token not configured — skipping operator client initialization");
+            return;
+        }
+
         // Unsubscribe from old client if exists
         UnsubscribeGatewayEvents();
         _lastGatewaySelf = null;
@@ -1047,9 +1053,8 @@ public partial class App : Application
         var enableMcp = _settings.EnableMcpServer;
         if (!enableNode && !enableMcp) return;
 
-        // Gateway connection requires auth (token or bootstrap token); MCP doesn't.
-        var canRunGateway = enableNode
-            && (!string.IsNullOrWhiteSpace(_settings.Token) || !string.IsNullOrWhiteSpace(_settings.BootstrapToken));
+        // Gateway connection requires auth (operator token, bootstrap token, or stored device token); MCP doesn't.
+        var canRunGateway = StartupSetupState.CanStartNodeGateway(_settings, DataPath);
 
         if (enableNode && !canRunGateway && !enableMcp)
         {
@@ -1061,7 +1066,7 @@ public partial class App : Application
         // they enabled both but only MCP comes up.
         if (enableNode && !canRunGateway && enableMcp)
         {
-            Logger.Warn("Node mode enabled but gateway prerequisites missing (token/tunnel) — running MCP-only.");
+            Logger.Warn("Node mode enabled but gateway auth is missing — running MCP-only.");
         }
 
         try
@@ -1099,12 +1104,7 @@ public partial class App : Application
 
     private static bool RequiresSetup(SettingsManager settings)
     {
-        if (!string.IsNullOrWhiteSpace(settings.Token))
-        {
-            return false;
-        }
-
-        return !(settings.EnableNodeMode && !string.IsNullOrWhiteSpace(settings.BootstrapToken));
+        return StartupSetupState.RequiresSetup(settings, DataPath);
     }
     
     private void OnNodeStatusChanged(object? sender, ConnectionStatus status)

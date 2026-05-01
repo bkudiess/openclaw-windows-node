@@ -820,9 +820,11 @@ public sealed class SetupWizardWindow : WindowEx
     {
         try
         {
-            var dataPath = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "OpenClawTray");
+            var dataPath = Environment.GetEnvironmentVariable("OPENCLAW_TRAY_DATA_DIR") is { Length: > 0 } overridePath
+                ? overridePath
+                : System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "OpenClawTray");
             var identity = new DeviceIdentity(dataPath);
             identity.Initialize();
             var fullId = identity.PublicKeyBase64Url;
