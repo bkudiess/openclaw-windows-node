@@ -24,6 +24,43 @@ public class DeviceIdentity
     public string DeviceId => _deviceId ?? throw new InvalidOperationException("Device not initialized");
     public string PublicKeyBase64Url => _publicKey != null ? Base64UrlEncode(_publicKey.Export(KeyBlobFormat.RawPublicKey)) : throw new InvalidOperationException("Device not initialized");
     public string? DeviceToken => _deviceToken;
+
+    public static string? TryReadStoredDeviceToken(string dataPath, IOpenClawLogger? logger = null)
+    {
+        var keyPath = Path.Combine(dataPath, "device-key-ed25519.json");
+        if (!File.Exists(keyPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(keyPath));
+            if (doc.RootElement.TryGetProperty(nameof(DeviceKeyData.DeviceToken), out var deviceToken) &&
+                deviceToken.ValueKind == JsonValueKind.String)
+            {
+                var value = deviceToken.GetString();
+                return string.IsNullOrWhiteSpace(value) ? null : value;
+            }
+        }
+        catch (IOException ex)
+        {
+            logger?.Warn($"Failed to read stored device token: {ex.Message}");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            logger?.Warn($"Failed to read stored device token: {ex.Message}");
+        }
+        catch (JsonException ex)
+        {
+            logger?.Warn($"Failed to read stored device token: {ex.Message}");
+        }
+
+        return null;
+    }
+
+    public static bool HasStoredDeviceToken(string dataPath, IOpenClawLogger? logger = null) =>
+        !string.IsNullOrWhiteSpace(TryReadStoredDeviceToken(dataPath, logger));
     
     public DeviceIdentity(string dataPath, IOpenClawLogger? logger = null)
     {

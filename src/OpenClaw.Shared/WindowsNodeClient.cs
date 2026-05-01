@@ -74,7 +74,7 @@ public class WindowsNodeClient : WebSocketClientBase
     protected override string ClientRole => "node";
     
     public WindowsNodeClient(string gatewayUrl, string token, string dataPath, IOpenClawLogger? logger = null, string? bootstrapToken = null)
-        : base(gatewayUrl, ResolveRequiredCredential(token, bootstrapToken), logger)
+        : base(gatewayUrl, ResolveRequiredCredential(token, bootstrapToken, dataPath), logger)
     {
         _gatewayToken = NormalizeOptionalCredential(token);
         _bootstrapToken = NormalizeOptionalCredential(bootstrapToken);
@@ -98,7 +98,7 @@ public class WindowsNodeClient : WebSocketClientBase
         return string.IsNullOrWhiteSpace(credential) ? string.Empty : credential;
     }
 
-    private static string ResolveRequiredCredential(string? token, string? bootstrapToken)
+    private static string ResolveRequiredCredential(string? token, string? bootstrapToken, string dataPath)
     {
         var gatewayToken = NormalizeOptionalCredential(token);
         if (!string.IsNullOrEmpty(gatewayToken))
@@ -110,6 +110,12 @@ public class WindowsNodeClient : WebSocketClientBase
         if (!string.IsNullOrEmpty(bootstrap))
         {
             return bootstrap;
+        }
+
+        var storedDeviceToken = DeviceIdentity.TryReadStoredDeviceToken(dataPath);
+        if (!string.IsNullOrEmpty(storedDeviceToken))
+        {
+            return storedDeviceToken;
         }
 
         throw new ArgumentException("Token or bootstrap token is required.", nameof(token));
