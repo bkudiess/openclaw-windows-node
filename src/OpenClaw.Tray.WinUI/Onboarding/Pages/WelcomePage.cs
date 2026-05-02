@@ -57,7 +57,7 @@ public sealed class WelcomePage : Component
                 ).Padding(14)
             )
             .CornerRadius(8)
-            .Background("#FFF4E0")
+            .BackgroundResource("SystemFillColorCautionBackgroundBrush")
             .Margin(0, 12, 0, 0)
         )
         .HAlign(HorizontalAlignment.Center)

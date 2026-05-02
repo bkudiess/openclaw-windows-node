@@ -42,6 +42,44 @@ public class TrayMenuWindowMarkupTests
     }
 
     [Fact]
+    public void Onboarding_UsesThemeAwareBackgroundResources()
+    {
+        var onboardingPath = Path.Combine(
+            GetRepositoryRoot(),
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "Onboarding");
+
+        var sources = Directory.GetFiles(onboardingPath, "*.cs", SearchOption.AllDirectories)
+            .Select(path => (Path: path, Source: File.ReadAllText(path)))
+            .ToList();
+
+        foreach (var source in sources.Select(file => file.Source))
+        {
+            Assert.DoesNotContain(".Background(\"#", source);
+        }
+
+        Assert.Contains(sources, file => file.Source.Contains("CardBackgroundFillColorDefaultBrush"));
+        Assert.Contains(sources, file => file.Source.Contains("SystemFillColorCautionBackgroundBrush"));
+        Assert.Contains(sources, file => file.Source.Contains("SystemFillColorAttentionBackgroundBrush"));
+
+        var onboardingWindowSource = File.ReadAllText(Path.Combine(
+            onboardingPath,
+            "OnboardingWindow.cs"));
+        Assert.Contains("SolidBackgroundFillColorBaseBrush", onboardingWindowSource);
+        Assert.DoesNotContain("Microsoft.UI.Colors.White", onboardingWindowSource);
+
+        var functionalUiSource = File.ReadAllText(Path.Combine(
+            GetRepositoryRoot(),
+            "src",
+            "OpenClawTray.FunctionalUI",
+            "FunctionalUI.cs"));
+        Assert.Contains("BackgroundResource", functionalUiSource);
+        Assert.Contains("SolidBackgroundFillColorBaseBrush", functionalUiSource);
+        Assert.DoesNotContain("Colors.White", functionalUiSource);
+    }
+
+    [Fact]
     public void SettingsWindow_HasCommandCenterEntryPoint()
     {
         var xamlPath = Path.Combine(

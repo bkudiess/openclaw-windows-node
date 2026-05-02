@@ -5,7 +5,7 @@ using static OpenClawTray.FunctionalUI.Factories;
 namespace OpenClawTray.Onboarding.Widgets;
 
 /// <summary>
-/// Reusable card with rounded corners, white background, and padding.
+/// Reusable theme-aware card with rounded corners and padding.
 /// Props: the child <see cref="Element"/> to render inside the card.
 /// </summary>
 public sealed class OnboardingCard : Component<Element>
@@ -16,7 +16,7 @@ public sealed class OnboardingCard : Component<Element>
             Props
         )
         .CornerRadius(12)
-        .Background("#FFFFFF")
+        .BackgroundResource("CardBackgroundFillColorDefaultBrush")
         .Padding(20, 20, 20, 20);
     }
 }

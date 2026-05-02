@@ -30,6 +30,7 @@ public sealed class ElementModifiers
     public HorizontalAlignment? HorizontalAlignment { get; set; }
     public VerticalAlignment? VerticalAlignment { get; set; }
     public Brush? Background { get; set; }
+    public string? BackgroundResourceKey { get; set; }
     public CornerRadius? CornerRadius { get; set; }
     public double? FontSize { get; set; }
     public FontWeight? FontWeight { get; set; }
@@ -40,6 +41,23 @@ public sealed class ElementModifiers
     public double? Opacity { get; set; }
     public ScrollMode? HorizontalScrollMode { get; set; }
     public RoutedEventHandler? GotFocus { get; set; }
+}
+
+internal static class ThemeResources
+{
+    public static Brush ResolveBrush(string resourceKey)
+    {
+        if (string.IsNullOrWhiteSpace(resourceKey))
+            throw new ArgumentException("Resource key is required.", nameof(resourceKey));
+
+        if (Application.Current is not { Resources: { } resources })
+            throw new InvalidOperationException("Application resources are unavailable.");
+
+        if (resources.TryGetValue(resourceKey, out var resource) && resource is Brush brush)
+            return brush;
+
+        throw new InvalidOperationException($"Brush resource '{resourceKey}' was not found.");
+    }
 }
 
 public sealed record GridPosition(int Row, int Column, int RowSpan = 1, int ColumnSpan = 1);
@@ -356,6 +374,8 @@ public static class ElementExtensions
         element.Apply(e => e.Modifiers.Background = new SolidColorBrush(ParseColor(hex)));
     public static T Background<T>(this T element, Color color) where T : Element =>
         element.Apply(e => e.Modifiers.Background = new SolidColorBrush(color));
+    public static T BackgroundResource<T>(this T element, string resourceKey) where T : Element =>
+        element.Apply(e => e.Modifiers.BackgroundResourceKey = resourceKey);
     public static T CornerRadius<T>(this T element, double value) where T : Element =>
         element.Apply(e => e.Modifiers.CornerRadius = new CornerRadius(value));
     public static T FontSize<T>(this T element, double value) where T : Element =>
@@ -439,7 +459,7 @@ public sealed class FunctionalHostControl : ContentControl, IDisposable
         _renderer = new UiRenderer(RequestRender);
         HorizontalContentAlignment = HorizontalAlignment.Stretch;
         VerticalContentAlignment = VerticalAlignment.Stretch;
-        Background = new SolidColorBrush(Microsoft.UI.Colors.White);
+        Background = ThemeResources.ResolveBrush("SolidBackgroundFillColorBaseBrush");
         IsTabStop = false;
         Unloaded += (_, _) => Dispose();
     }
@@ -908,7 +928,10 @@ internal sealed class UiRenderer(Action requestRender)
                 break;
             case Border b:
                 if (m.Padding is { } borderPadding) b.Padding = borderPadding;
-                if (m.Background is { } bg) b.Background = bg;
+                if (m.BackgroundResourceKey is { } backgroundResourceKey)
+                    b.Background = ThemeResources.ResolveBrush(backgroundResourceKey);
+                else if (m.Background is { } bg)
+                    b.Background = bg;
                 if (m.CornerRadius is { } radius) b.CornerRadius = radius;
                 break;
         }

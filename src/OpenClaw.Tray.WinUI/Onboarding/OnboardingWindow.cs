@@ -102,7 +102,7 @@ public sealed class OnboardingWindow : WindowEx
         // Root grid: functional UI host fills everything, overlay sits on top (except nav bar)
         _rootGrid = new Grid
         {
-            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White)
+            Background = GetThemeBrush("SolidBackgroundFillColorBaseBrush")
         };
         _rootGrid.Children.Add(_host);
         _rootGrid.Children.Add(_chatOverlay);
@@ -146,19 +146,10 @@ public sealed class OnboardingWindow : WindowEx
 
     private Grid BuildChatOverlay()
     {
-        var grid = new Grid();
-
-        // Try to use theme-aware brush, fall back to white
-        try
+        var grid = new Grid
         {
-            grid.Background = (Microsoft.UI.Xaml.Media.Brush)
-                Microsoft.UI.Xaml.Application.Current.Resources["SolidBackgroundFillColorBaseBrush"];
-        }
-        catch
-        {
-            grid.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(
-                Microsoft.UI.Colors.White);
-        }
+            Background = GetThemeBrush("SolidBackgroundFillColorBaseBrush")
+        };
 
         // Match the functional UI layout: 20px padding, header + WebView2 content
         grid.Padding = new Thickness(20, 0, 20, 0);
@@ -216,6 +207,17 @@ public sealed class OnboardingWindow : WindowEx
         grid.Children.Add(chatArea);
 
         return grid;
+    }
+
+    private static Brush GetThemeBrush(string resourceKey)
+    {
+        if (Application.Current?.Resources.TryGetValue(resourceKey, out var resource) == true &&
+            resource is Brush brush)
+        {
+            return brush;
+        }
+
+        throw new InvalidOperationException($"Brush resource '{resourceKey}' was not found.");
     }
 
     private void OnRouteChanged(object? sender, OnboardingRoute route)

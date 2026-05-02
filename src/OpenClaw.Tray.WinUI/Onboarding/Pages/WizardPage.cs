@@ -571,7 +571,7 @@ public sealed class WizardPage : Component<OnboardingState>
                     ).Padding(12)
                 )
                 .CornerRadius(6)
-                .Background("#E8F4FD")
+                .BackgroundResource("SystemFillColorAttentionBackgroundBrush")
                 .HAlign(HorizontalAlignment.Center);
             }
         }
@@ -615,7 +615,7 @@ public sealed class WizardPage : Component<OnboardingState>
                 ).HorizontalScrollMode(Microsoft.UI.Xaml.Controls.ScrollMode.Disabled)
             )
             .CornerRadius(8)
-            .Background("#FFFFFF")
+            .BackgroundResource("CardBackgroundFillColorDefaultBrush")
             .MaxHeight(350),
 
             // Device code display (large, copyable — for auth flows)

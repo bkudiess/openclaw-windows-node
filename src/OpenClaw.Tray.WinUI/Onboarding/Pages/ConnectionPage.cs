@@ -659,7 +659,7 @@ public sealed class ConnectionPage : Component<OnboardingState>
                         ).Padding(12)
                     )
                     .CornerRadius(6)
-                    .Background("#FFFFFF")
+                    .BackgroundResource("CardBackgroundFillColorDefaultBrush")
                 );
             }
 
@@ -737,7 +737,7 @@ public sealed class ConnectionPage : Component<OnboardingState>
                 )
                 .MinHeight(40)
                 .CornerRadius(4)
-                .Background("#FFFFFF")
+                .BackgroundResource("CardBackgroundFillColorDefaultBrush")
             );
         }
         else
@@ -757,7 +757,7 @@ public sealed class ConnectionPage : Component<OnboardingState>
                 VStack(8, cardChildren.ToArray()).Padding(12)
             )
             .CornerRadius(8)
-            .Background("#FFFFFF")
+            .BackgroundResource("CardBackgroundFillColorDefaultBrush")
             .Margin(0, 4, 0, 0)
         );
 

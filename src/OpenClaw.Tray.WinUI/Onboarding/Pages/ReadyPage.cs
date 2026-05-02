@@ -45,7 +45,7 @@ public sealed class ReadyPage : Component<OnboardingState>
                     ).Padding(12)
                 )
                 .CornerRadius(8)
-                .Background("#FFFFFF"),
+                .BackgroundResource("CardBackgroundFillColorDefaultBrush"),
 
                 // Launch at Login toggle
                 HStack(8,
@@ -79,7 +79,7 @@ public sealed class ReadyPage : Component<OnboardingState>
                 ).Padding(12)
             )
             .CornerRadius(8)
-            .Background("#FFF3E0")
+            .BackgroundResource("SystemFillColorCautionBackgroundBrush")
             .Margin(0, 8, 0, 0);
         }
 
@@ -106,7 +106,7 @@ public sealed class ReadyPage : Component<OnboardingState>
             TextBlock(message).FontSize(12).Opacity(0.8).TextWrapping().Padding(12)
         )
         .CornerRadius(8)
-        .Background("#E8F4FD")
+        .BackgroundResource("SystemFillColorAttentionBackgroundBrush")
         .Margin(0, 8, 0, 0);
     }
 
