@@ -1,92 +1,30 @@
 {
-  "last_run": "2026-05-01T02:00:00Z",
-  "run_id": "25214526019",
-  "comments_made": {
-    "246": "2026-05-01T01:17:47Z",
-    "252": "2026-05-01T01:17:47Z",
-    "241": "2026-04-29T12:53:06Z",
-    "240": "2026-04-29T01:11:49Z",
-    "237": "2026-04-28T12:57:08Z",
-    "191": "2026-04-21T01:14:09Z",
-    "120": "2026-04-19T12:29:00Z",
-    "99": "prior run"
-  },
-  "fix_attempts": {
-    "fix-execapproval-dangerous-wildcard-stem-2026-05-01": {
-      "pr_branch": "repo-assist/fix-execapproval-dangerous-wildcard-stem-2026-05-01",
-      "pr_number": "aw_pr3fix",
-      "status": "open",
-      "created": "2026-05-01T02:00:00Z",
-      "description": "Task3/security: stem+wildcard bypass in ValidateExecApprovalRules — 'rm*' passes 'rm ' contains-check but matches rm -rf /; fix checks stem+'*' and stem+'?' for each trailing-space dangerous fragment; +7 InlineData tests"
-    },
-    "improve-default-exec-rules-noarg-2026-05-01": {
-      "pr_branch": "repo-assist/improve-default-exec-rules-noarg-2026-05-01",
-      "pr_number": "aw_pr5imp",
-      "status": "open",
-      "created": "2026-05-01T02:00:00Z",
-      "description": "Task5: default exec approval patterns 'ipconfig *','ping *','dir *','cat *','type *' require at least one arg; changed to 'ipconfig*','ping*','dir*','cat*','type*' so no-arg usage also matches; +7 InlineData tests"
-    },
-    "fix-execapproval-wildcard-bypass-2026-04-30": {
-      "pr_branch": "repo-assist/fix-execapproval-wildcard-bypass-2026-04-30",
-      "pr_number": 247,
-      "status": "open",
-      "created": "2026-04-30T12:58:00Z",
-      "description": "Task3/security: wildcard-only allow patterns (**,***,?) bypass ValidateExecApprovalRules; fix strips */?/whitespace and rejects if empty; +5 InlineData tests"
-    },
-    "improve-device-battery-2026-04-30": {
-      "pr_branch": "repo-assist/improve-device-battery-2026-04-30",
-      "pr_number": 248,
-      "status": "open",
-      "created": "2026-04-30T12:58:00Z",
-      "description": "Task10: BatteryStatusRequested Func<Task<DeviceBatteryStatus?>>? event on DeviceCapability; DeviceBatteryStatus class; HandleStatusAsync; graceful fallback; +4 tests"
-    },
-    "test-coverage-gaps-2026-04-30": {
-      "pr_branch": "repo-assist/test-coverage-gaps-2026-04-30",
-      "pr_number": 245,
-      "status": "open",
-      "created": "2026-04-30T01:11:07Z",
-      "description": "Task9: 10 new tests: SshTunnelCommandLine.CanForwardBrowserProxyPort (7 boundary), whitespace trim, ExecApprovalV2Result.ToString(), McpToolBridge custom serverName/version and null arguments"
-    },
-    "improve-mcp-bridge-allocations-2026-04-29": {
-      "pr_branch": "repo-assist/improve-mcp-bridge-allocations-2026-04-29-e773006a7c0f2a4c",
-      "pr_number": 243,
-      "status": "open",
-      "created": "2026-04-29T12:53:06Z",
-      "description": "Task5: eliminate LINQ FirstOrDefault and ms.ToArray() in McpToolBridge"
-    },
-    "improve-device-status-2026-04-29": {
-      "pr_branch": "repo-assist/improve-device-status-2026-04-29-72bbd3eeb0eefe99",
-      "pr_number": 242,
-      "status": "open-superseded",
-      "created": "2026-04-29T01:11:49Z",
-      "description": "Task3: enhance device.status. SUPERSEDED by community PR #249 (RBrid). Commented to request closure."
-    },
-    "mcp-linux-tests-2026-04-28": {
-      "pr_branch": "repo-assist/fix-mcp-linux-tests-2026-04-28-0aa02d44cd756bd8",
-      "pr_number": 238,
-      "status": "open",
-      "created": "2026-04-28T12:57:08Z",
-      "description": "Task4: fix McpHttpServer to register localhost prefix + fix 3 Linux HttpListener test failures"
-    }
-  },
-  "closed_items": {
-    "127": "closed 2026-05-01 - April monthly summary superseded by new May issue",
-    "233": "closed - superseded by #236",
-    "236": "closed - test rebase PR from 2026-04-28 run",
-    "192": "merged 2026-04-28 by shanselman: WebView2 bridge",
-    "159": "closed 2026-04-27 - screen recording implemented by shanselman",
-    "218": "merged 2026-04-27 by shanselman",
-    "234": "merged 2026-04-27 by shanselman: local MCP server mode",
-    "228": "merged individually by shanselman",
-    "229": "merged individually by shanselman",
-    "230": "merged individually by shanselman",
-    "231": "merged individually by shanselman",
-    "232": "merged individually by shanselman"
-  },
-  "notes": "Open Repo Assist PRs: #238 (McpHttpServer Linux fix), #243 (McpToolBridge perf), #245 (test coverage gaps), #247 (all-wildcard bypass), aw_pr3fix (dangerous stem+wildcard bypass — complements #247), #248 (battery event), aw_pr5imp (default exec rules no-arg). #242 superseded by community PR #249 (commented to close). Community PRs: #249 (RBrid: device.status), #250 (codemonkeychris: winnode CLI), #251 (AlexAlves87: tray refactor), #253 (RBrid: TTS - implements #252), #244 (AlexAlves87: system.run input validation), #241 (indierawk2k2: onboarding wizard), #120 (NichUK: voice mode). Issues to close: #191 (WebView2 bridge implemented), #235 (Dependabot bundle merged). Future: wire NodeService.cs BatteryStatusRequested to WinRT Battery.AggregateBattery; monitor packaging decision on #246.",
-  "monthly_activity_issue": "issue #254 updated this run (2026-05-01 02:00 UTC)",
+  "last_run": "2026-05-02T04:13:00Z",
+  "last_run_id": "25239901740",
+  "monthly_summary_issue": 254,
+  "monthly_summary_month": "2026-05",
   "backlog_cursor": {
     "issues": 254,
-    "prs": 253
-  }
+    "prs": 261
+  },
+  "open_repo_assist_prs": [
+    {"number": "aw_pr7v2", "title": "feat: implement ExecApprovalV2PolicyHandler (PR7 coordinator)", "branch": "repo-assist/feat-exec-v2-policy-handler-2026-05-02"}
+  ],
+  "comments_made": {
+    "246": {"comment_id": "4408284034", "date": "2026-05-01"},
+    "252": {"date": "2026-05-01"},
+    "242": {"date": "2026-05-01"}
+  },
+  "fix_attempts": {
+    "exec-v2-policy-handler": {"status": "pr_created", "pr": "aw_pr7v2", "date": "2026-05-02"}
+  },
+  "notes": [
+    "PR #260 (AlexAlves87) normalization step must land before ExecApprovalV2PolicyHandler can be wired to production",
+    "Issue #235 (Dependabot bundle) still open; individual PRs merged; suggest closing",
+    "Issue #246 packaging strategy still open and unresolved",
+    "Issue #191 WebView2 bridge: PR #259 implements CanvasWindow half; WebChatWindow half still open",
+    "Pre-existing test failures: CanvasCapabilityTests.A2UIPush_WithJsonlPath_ReadsFile and A2UICapabilitySecurityTests.A2UIPush_FileJsonl_OverCap_ReturnsError - do not fix",
+    "Test baseline after this run: Shared 1165/1187 (2 pre-existing failures, 20 skipped), Tray 407"
+  ],
+  "checked_off_by_maintainer": []
 }
