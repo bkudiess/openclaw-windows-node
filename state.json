@@ -1,16 +1,18 @@
 {
-  "last_run": "2026-05-03T01:20:00Z",
-  "last_run_id": "25266415933",
+  "last_run": "2026-05-03T12:35:34Z",
+  "last_run_id": "25279294162",
   "monthly_summary_issue": 254,
   "monthly_summary_month": "2026-05",
   "backlog_cursor": {
     "issues": 254,
-    "prs": 262
+    "prs": 263
   },
   "open_repo_assist_prs": [
+    {"number": "pending-264", "title": "[Repo Assist] fix(canvas): skip GetFinalPathFromHandle containment check on non-Windows", "branch": "repo-assist/fix-canvas-jsonl-linux-2026-05-03"},
+    {"number": "pending-265", "title": "[Repo Assist] test(tray): add WindowsFactAttribute; skip DPAPI test on non-Windows", "branch": "repo-assist/eng-windows-fact-attr-2026-05-03"},
+    {"number": 263, "title": "[Repo Assist] test: expand TokenSanitizer coverage + refactor ExecApprovalPolicy.Save()", "branch": "repo-assist/improve-token-sanitizer-tests-2026-05-03-556e394c7be6c0c7"},
     {"number": 262, "title": "[Repo Assist] feat(mcp): add per-command JSON Schema to tools/list", "branch": "repo-assist/feat-mcp-input-schemas-2026-05-02-c3518e3a54a6ee1b"},
-    {"number": 261, "title": "[Repo Assist] feat: implement ExecApprovalV2PolicyHandler (PR7 coordinator)", "branch": "repo-assist/feat-exec-v2-policy-handler-2026-05-02-577afdafa278a1d6"},
-    {"number": "pending", "title": "[Repo Assist] test: expand TokenSanitizer coverage + refactor ExecApprovalPolicy.Save()", "branch": "repo-assist/improve-token-sanitizer-tests-2026-05-03"}
+    {"number": 261, "title": "[Repo Assist] feat: implement ExecApprovalV2PolicyHandler (PR7 coordinator)", "branch": "repo-assist/feat-exec-v2-policy-handler-2026-05-02-577afdafa278a1d6"}
   ],
   "comments_made": {
     "246": {"comment_id": "4408284034", "date": "2026-05-01"},
@@ -18,28 +20,35 @@
     "242": {"date": "2026-05-01"}
   },
   "fix_attempts": {
+    "canvas-jsonl-linux": {"status": "pr_created", "branch": "repo-assist/fix-canvas-jsonl-linux-2026-05-03", "date": "2026-05-03", "description": "Fix GetFinalPathFromHandle empty-string check on non-Windows"},
+    "windows-fact-attr": {"status": "pr_created", "branch": "repo-assist/eng-windows-fact-attr-2026-05-03", "date": "2026-05-03", "description": "Add WindowsFactAttribute for DPAPI-requiring tests"},
     "exec-v2-policy-handler": {"status": "pr_created", "pr": 261, "date": "2026-05-02"},
     "mcp-input-schemas": {"status": "pr_created", "pr": 262, "date": "2026-05-02"},
-    "token-sanitizer-tests": {"status": "pr_created", "pr": "pending", "branch": "repo-assist/improve-token-sanitizer-tests-2026-05-03", "date": "2026-05-03"}
+    "token-sanitizer-tests": {"status": "pr_created", "pr": 263, "date": "2026-05-03"}
   },
   "notes": [
     "PR #260 (AlexAlves87) normalization step must land before ExecApprovalV2PolicyHandler can be wired to production",
     "PR #261 (Repo Assist) ExecApprovalV2PolicyHandler — awaiting review",
     "PR #262 (Repo Assist) MCP input schemas — awaiting review",
+    "PR #263 (Repo Assist) TokenSanitizer tests — awaiting review",
+    "PR pending-264 (Repo Assist) canvas jsonl Linux fix — awaiting PR number assignment",
+    "PR pending-265 (Repo Assist) WindowsFactAttribute — awaiting PR number assignment",
     "Issue #235 (Dependabot bundle) still open; individual PRs merged; suggest closing",
     "Issue #246 packaging strategy still open and unresolved",
     "Issue #191 WebView2 bridge: PR #259 closes the remaining CanvasWindow item; awaiting merge",
-    "Pre-existing test failures: CanvasCapabilityTests.A2UIPush_WithJsonlPath_ReadsFile and A2UICapabilitySecurityTests.A2UIPush_FileJsonl_OverCap_ReturnsError - do not fix",
-    "TokenSanitizer test coverage expanded from 3 to 24 tests; ExecApprovalPolicy.Save() refactored to reuse GetPolicyData()",
+    "Pre-existing test failures FIXED this run: CanvasCapabilityTests.A2UIPush_WithJsonlPath_ReadsFile and A2UICapabilitySecurityTests.A2UIPush_FileJsonl_OverCap_ReturnsError",
+    "Tray DPAPI test now skipped on Linux via WindowsFactAttribute (was failing)",
     "Next V2 exec approval step: wire ExecApprovalV2PolicyHandler in production once PR #260 AND PR #261 are merged"
   ],
   "checked_off_by_maintainer": [],
   "test_baseline": {
-    "shared_passed": 1189,
-    "shared_failed": 2,
+    "shared_passed": 1152,
+    "shared_failed": 0,
     "shared_skipped": 20,
-    "shared_total": 1211,
-    "tray_passed": 407,
-    "note": "2 pre-existing failures in CanvasCapability/A2UI jsonl tests unrelated to our changes; +24 new TokenSanitizer tests this run"
+    "shared_total": 1172,
+    "tray_passed": 406,
+    "tray_skipped": 1,
+    "tray_failed": 0,
+    "note": "All tests now pass/skip cleanly on Linux. Two canvas jsonl tests fixed this run. Tray DPAPI test skipped via WindowsFactAttribute."
   }
 }
