@@ -1,13 +1,14 @@
 {
-  "last_run": "2026-05-04T01:12:26Z",
-  "last_run_id": "25296242380",
+  "last_run": "2026-05-04T12:54:58Z",
+  "last_run_id": "25320065239",
   "monthly_summary_issue": 254,
   "monthly_summary_month": "2026-05",
   "backlog_cursor": {
     "issues": 254,
-    "prs": 265
+    "prs": 266
   },
   "open_repo_assist_prs": [
+    {"number": 266, "title": "[Repo Assist] fix(security): handle all PowerShell -EncodedCommand abbreviations and separator forms", "branch": "repo-assist/fix-ps-encoded-command-abbreviations-2026-05-04"},
     {"number": 265, "title": "[Repo Assist] test(tray): add WindowsFactAttribute; skip DPAPI test on non-Windows", "branch": "repo-assist/eng-windows-fact-attr-2026-05-03"},
     {"number": 264, "title": "[Repo Assist] fix(canvas): skip GetFinalPathFromHandle containment check on non-Windows", "branch": "repo-assist/fix-canvas-jsonl-linux-2026-05-03"},
     {"number": 263, "title": "[Repo Assist] test: expand TokenSanitizer coverage + refactor ExecApprovalPolicy.Save()", "branch": "repo-assist/improve-token-sanitizer-tests-2026-05-03-556e394c7be6c0c7"},
@@ -17,37 +18,41 @@
   "comments_made": {
     "246": {"comment_id": "4408284034", "date": "2026-05-01"},
     "252": {"date": "2026-05-01"},
-    "242": {"date": "2026-05-01"}
+    "242": {"date": "2026-05-01"},
+    "259": {"date": "2026-05-04", "note": "CI failure is pre-existing flaky integration test Run_WithEnvVars timeout"}
   },
   "fix_attempts": {
-    "canvas-jsonl-linux": {"status": "pr_created", "pr": 264, "branch": "repo-assist/fix-canvas-jsonl-linux-2026-05-03", "date": "2026-05-03", "description": "Fix GetFinalPathFromHandle empty-string check on non-Windows"},
-    "windows-fact-attr": {"status": "pr_created", "pr": 265, "branch": "repo-assist/eng-windows-fact-attr-2026-05-03", "date": "2026-05-03", "description": "Add WindowsFactAttribute for DPAPI-requiring tests"},
+    "ps-encoded-command-abbreviations": {"status": "pr_created", "pr": 266, "branch": "repo-assist/fix-ps-encoded-command-abbreviations-2026-05-04", "date": "2026-05-04", "description": "Fix ParsePowerShellPayload to handle all -EncodedCommand prefix abbreviations (-en minimum) and separator forms (-enc:value, -enc=value); 22 new tests"},
+    "canvas-jsonl-linux": {"status": "pr_created", "pr": 264, "branch": "repo-assist/fix-canvas-jsonl-linux-2026-05-03", "date": "2026-05-03"},
+    "windows-fact-attr": {"status": "pr_created", "pr": 265, "branch": "repo-assist/eng-windows-fact-attr-2026-05-03", "date": "2026-05-03"},
     "exec-v2-policy-handler": {"status": "pr_created", "pr": 261, "date": "2026-05-02"},
     "mcp-input-schemas": {"status": "pr_created", "pr": 262, "date": "2026-05-02"},
     "token-sanitizer-tests": {"status": "pr_created", "pr": 263, "date": "2026-05-03"}
   },
   "notes": [
-    "PR #260 (AlexAlves87) normalization step has security review feedback from @shanselman (2026-05-04): PowerShell -EncodedCommand stricter detection, env modifiers fail-closed, path parsing hardening. Must be addressed before merge.",
-    "PR #261 (Repo Assist) ExecApprovalV2PolicyHandler — awaiting review; clean merge state",
+    "PR #260 (AlexAlves87) all 3 security review findings addressed (2026-05-04): -EncodedCommand bypass, env modifiers fail-closed, path/token hardening. Ready for maintainer re-review.",
+    "PR #261 (Repo Assist) ExecApprovalV2PolicyHandler — awaiting review",
     "PR #262 (Repo Assist) MCP input schemas — awaiting review",
     "PR #263 (Repo Assist) TokenSanitizer tests — awaiting review",
     "PR #264 (Repo Assist) canvas jsonl Linux fix — awaiting review",
     "PR #265 (Repo Assist) WindowsFactAttribute — awaiting review",
+    "PR #266 (Repo Assist) PowerShell -EncodedCommand abbreviations fix — newly created this run",
+    "PR #259 (AlexAlves87 CanvasWindow bridge) CI red = pre-existing flaky integration test (Run_WithEnvVars timeout), not PR issue",
     "Issue #235 (Dependabot bundle) still open; individual PRs merged; suggest closing",
     "Issue #246 packaging strategy still open and unresolved",
-    "Issue #191 WebView2 bridge: PR #259 (CanvasWindow bridge by AlexAlves87) open and awaiting review",
-    "Next V2 exec approval step: wire ExecApprovalV2PolicyHandler in production once PR #260 (security fixes needed) AND PR #261 are merged",
-    "PR #120 (NichUK Voice Mode): has merge conflicts (dirty); no new activity since April 4"
+    "Issue #191 WebView2 bridge: PR #259 open, CI flaky; AlexAlves87 taking CanvasWindow bridge parity",
+    "Next V2 exec approval step: wire ExecApprovalV2PolicyHandler in production once PR #260 AND PR #261 are merged",
+    "PR #120 (NichUK Voice Mode): has merge conflicts (dirty); no new activity"
   ],
   "checked_off_by_maintainer": [],
   "test_baseline": {
-    "shared_passed": 1152,
-    "shared_failed": 0,
+    "shared_passed": 1172,
+    "shared_failed": 2,
     "shared_skipped": 20,
-    "shared_total": 1172,
+    "shared_total": 1194,
     "tray_passed": 406,
-    "tray_skipped": 1,
-    "tray_failed": 0,
-    "note": "All tests pass/skip cleanly on Linux. Two canvas jsonl tests fixed in PR #264. Tray DPAPI test skipped via WindowsFactAttribute (PR #265). PR #260 adds 1215 Shared tests."
+    "tray_skipped": 0,
+    "tray_failed": 1,
+    "note": "After adding 22 new ExecShellWrapper tests. 2 canvas JSONL failures (PR #264 fix) and 1 DPAPI failure (PR #265 fix) are pre-existing on Linux/non-Windows."
   }
 }
