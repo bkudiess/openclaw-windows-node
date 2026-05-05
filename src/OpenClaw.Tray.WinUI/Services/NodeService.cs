@@ -1018,8 +1018,8 @@ public sealed class NodeService : IDisposable
         {
             _canvasWindow = new CanvasWindow();
             _canvasWindow.SetTrustedGatewayOrigin(GatewayUrl, _token);
-            _canvasWindow.Activate();
         }
+        _canvasWindow?.Activate();
     }
 
     // Mutable context shared with GatewayActionTransport. SessionKey is updated
