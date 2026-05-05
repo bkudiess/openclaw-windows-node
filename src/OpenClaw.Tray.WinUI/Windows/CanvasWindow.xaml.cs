@@ -212,6 +212,8 @@ public sealed partial class CanvasWindow : WindowEx
     public CanvasWindow()
     {
         this.InitializeComponent();
+        ExtendsContentIntoTitleBar = true;
+        SetTitleBar(AppTitleBar);
         this.SetIcon("Assets\\openclaw.ico");
         this.Closed += OnWindowClosed;
         

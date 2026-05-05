@@ -81,6 +81,7 @@ public class SettingsManager
     public List<string> A2UIImageHosts { get; set; } = new();
     public bool HasSeenActivityStreamTip { get; set; } = false;
     public string SkippedUpdateTag { get; set; } = "";
+    public string? PreferredGatewayId { get; set; }
 
     public SettingsManager() : this(DefaultSettingsDirectory)
     {
@@ -162,6 +163,7 @@ public class SettingsManager
                     }
                     HasSeenActivityStreamTip = loaded.HasSeenActivityStreamTip;
                     SkippedUpdateTag = loaded.SkippedUpdateTag ?? SkippedUpdateTag;
+                    PreferredGatewayId = loaded.PreferredGatewayId ?? PreferredGatewayId;
                     NotifyChatResponses = loaded.NotifyChatResponses;
                     PreferStructuredCategories = loaded.PreferStructuredCategories;
                     if (loaded.UserRules != null)
@@ -224,6 +226,7 @@ public class SettingsManager
                 // McpOnlyMode is legacy — never written; remains null in serialized output.
                 HasSeenActivityStreamTip = HasSeenActivityStreamTip,
                 SkippedUpdateTag = string.IsNullOrWhiteSpace(SkippedUpdateTag) ? null : SkippedUpdateTag,
+                PreferredGatewayId = string.IsNullOrWhiteSpace(PreferredGatewayId) ? null : PreferredGatewayId,
                 NotifyChatResponses = NotifyChatResponses,
                 PreferStructuredCategories = PreferStructuredCategories,
                 UserRules = UserRules
