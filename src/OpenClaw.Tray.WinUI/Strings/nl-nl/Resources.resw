@@ -2238,6 +2238,9 @@ Voer op uw gateway-host (Mac/Linux) uit:
   <data name="CanvasWindowReloadToolTip.Content" xml:space="preserve">
     <value>Opnieuw laden</value>
   </data>
+  <data name="CanvasReloadButton_AutomationName" xml:space="preserve">
+    <value>Canvas opnieuw laden</value>
+  </data>
   <data name="TrayMenuWindow_winexWindowEx_2.Title" xml:space="preserve">
     <value>OpenClaw Menu</value>
   </data>
