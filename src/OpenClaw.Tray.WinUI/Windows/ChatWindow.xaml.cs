@@ -127,6 +127,7 @@ public sealed partial class ChatWindow : WindowEx
 
         this.Show();
         SetForegroundWindow(hwnd);
+        RequestChatInputFocus();
     }
 
     /// <summary>Show near tray. No animation — WebView2 doesn't participate in composition animations.</summary>
@@ -193,6 +194,7 @@ public sealed partial class ChatWindow : WindowEx
                     // Successful navigation — ensure we're in the right visual state (e.g. after retry)
                     ErrorPanel.Visibility = Visibility.Collapsed;
                     WebView.Visibility = Visibility.Visible;
+                    RequestChatInputFocus();
                 }
             };
 
@@ -246,5 +248,57 @@ public sealed partial class ChatWindow : WindowEx
     {
         if (!string.IsNullOrEmpty(_chatUrl))
             try { Process.Start(new ProcessStartInfo(_chatUrl) { UseShellExecute = true }); } catch { }
+    }
+
+    private void RequestChatInputFocus()
+    {
+        WebView.Focus(FocusState.Programmatic);
+
+        if (!_webViewInitialized || WebView.CoreWebView2 == null)
+        {
+            return;
+        }
+
+        _ = FocusChatInputAsync();
+    }
+
+    private async Task FocusChatInputAsync()
+    {
+        try
+        {
+            await WebView.CoreWebView2.ExecuteScriptAsync("""
+                (() => {
+                    const selectors = [
+                        'textarea:not([disabled])',
+                        'input[type="text"]:not([disabled])',
+                        'input:not([type]):not([disabled])',
+                        '[contenteditable="true"]',
+                        '[role="textbox"]'
+                    ];
+                    const isVisible = element =>
+                        !!(element.offsetWidth || element.offsetHeight || element.getClientRects().length);
+                    const target = selectors
+                        .flatMap(selector => Array.from(document.querySelectorAll(selector)))
+                        .find(isVisible);
+                    if (!target) {
+                        return false;
+                    }
+                    target.focus({ preventScroll: true });
+                    return document.activeElement === target || target.contains(document.activeElement);
+                })();
+                """);
+        }
+        catch (ObjectDisposedException ex)
+        {
+            Logger.Warn($"Failed to focus chat input: {ex.Message}");
+        }
+        catch (InvalidOperationException ex)
+        {
+            Logger.Warn($"Failed to focus chat input: {ex.Message}");
+        }
+        catch (COMException ex)
+        {
+            Logger.Warn($"Failed to focus chat input: {ex.Message}");
+        }
     }
 }
