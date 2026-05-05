@@ -18,6 +18,8 @@ namespace OpenClawTray.Windows;
 /// </summary>
 public sealed partial class TrayMenuWindow : WindowEx
 {
+    private const int MenuWidthViewUnits = 320;
+
     #region Win32 Imports
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -111,6 +113,8 @@ public sealed partial class TrayMenuWindow : WindowEx
     private string? _activeFlyoutKey;
     private bool _isShown;
     private global::Windows.Graphics.RectInt32? _lastMoveAndResizeRect;
+    private uint _lastMeasureDpi;
+    private double _lastMeasureRasterizationScale;
 
     public TrayMenuWindow() : this(ownerMenu: null)
     {
@@ -188,28 +192,11 @@ public sealed partial class TrayMenuWindow : WindowEx
             var monitorInfo = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
             GetMonitorInfo(hMonitor, ref monitorInfo);
             var workArea = monitorInfo.rcWork;
-
-            int menuWidthPx;
-            int menuHeightPx;
-            try
-            {
-                menuWidthPx = this.AppWindow.Size.Width;
-                menuHeightPx = this.AppWindow.Size.Height;
-            }
-            catch
-            {
-                menuWidthPx = 0;
-                menuHeightPx = 0;
-            }
-
-            if (menuWidthPx <= 0 || menuHeightPx <= 0)
-            {
-                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-                uint dpi = GetEffectiveMonitorDpi(hMonitor, hwnd);
-                double scale = dpi / 96.0;
-                menuWidthPx = (int)(320 * scale);
-                menuHeightPx = (int)(_menuHeight * scale);
-            }
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            var dpi = GetEffectiveMonitorDpi(hMonitor, hwnd);
+            SizeToContent(workArea.Bottom - workArea.Top, dpi);
+            var menuWidthPx = ConvertViewUnitsToPixels(MenuWidthViewUnits, dpi);
+            var menuHeightPx = ConvertViewUnitsToPixels(_menuHeight, dpi);
 
             const int margin = 8;
 
@@ -219,7 +206,16 @@ public sealed partial class TrayMenuWindow : WindowEx
                 workArea.Left, workArea.Top, workArea.Right, workArea.Bottom,
                 margin);
 
-            this.Move(x, y);
+            var targetRect = new global::Windows.Graphics.RectInt32(x, y, menuWidthPx, menuHeightPx);
+            if (!RectEquals(_lastMoveAndResizeRect, targetRect))
+            {
+                AppWindow.MoveAndResize(targetRect);
+                _lastMoveAndResizeRect = targetRect;
+            }
+        }
+        else
+        {
+            SizeToContent();
         }
 
         ApplyRoundedWindowRegion();
@@ -251,6 +247,7 @@ public sealed partial class TrayMenuWindow : WindowEx
 
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         var dpi = GetEffectiveMonitorDpi(hMonitor, hwnd);
+        SizeToContent(monitorInfo.rcWork.Bottom - monitorInfo.rcWork.Top, dpi);
         var submenuWidthPx = ConvertViewUnitsToPixels(280, dpi);
         var submenuHeightPx = ConvertViewUnitsToPixels(_menuHeight, dpi);
 
@@ -523,22 +520,58 @@ public sealed partial class TrayMenuWindow : WindowEx
     /// </summary>
     public void SizeToContent()
     {
+        if (TryGetCurrentMonitorMetrics(out var workAreaHeightPx, out var dpi))
+        {
+            SizeToContent(workAreaHeightPx, dpi);
+            return;
+        }
+
+        SizeToContent(0, 96);
+    }
+
+    private void SizeToContent(int workAreaHeightPx, uint dpi)
+    {
+        PrepareLayoutForMeasurement(dpi);
+
         // Measure the actual content size instead of estimating
-        MenuPanel.Measure(new global::Windows.Foundation.Size(320, double.PositiveInfinity));
+        MenuPanel.Measure(new global::Windows.Foundation.Size(MenuWidthViewUnits, double.PositiveInfinity));
         var desiredHeight = MenuPanel.DesiredSize.Height;
         
         // Add border chrome (1px border top+bottom = 2px, plus small rounding buffer)
         var contentHeight = (int)Math.Ceiling(desiredHeight) + 4;
         _menuHeight = Math.Max(contentHeight, 100);
 
-        if (TryGetCurrentMonitorMetrics(out var workAreaHeightPx, out var dpi))
+        if (workAreaHeightPx > 0)
         {
             var workAreaHeight = MenuSizingHelper.ConvertPixelsToViewUnits(workAreaHeightPx, dpi);
             _menuHeight = MenuSizingHelper.CalculateWindowHeight(_menuHeight, workAreaHeight);
         }
 
-        this.SetWindowSize(320, _menuHeight);
+        this.SetWindowSize(MenuWidthViewUnits, _menuHeight);
         ApplyRoundedWindowRegion();
+    }
+
+    private void PrepareLayoutForMeasurement(uint dpi)
+    {
+        dpi = dpi == 0 ? 96 : dpi;
+        var rasterizationScale = RootGrid.XamlRoot?.RasterizationScale ?? dpi / 96.0;
+        var dpiChanged = _lastMeasureDpi != 0
+            && MenuSizingHelper.HasDpiOrScaleChanged(_lastMeasureDpi, _lastMeasureRasterizationScale, dpi, rasterizationScale);
+
+        _lastMeasureDpi = dpi;
+        _lastMeasureRasterizationScale = rasterizationScale;
+
+        if (dpiChanged)
+        {
+            _lastMoveAndResizeRect = null;
+            HideActiveFlyout();
+        }
+
+        RootGrid.InvalidateMeasure();
+        RootGrid.InvalidateArrange();
+        MenuPanel.InvalidateMeasure();
+        MenuPanel.InvalidateArrange();
+        RootGrid.UpdateLayout();
     }
 
     private bool TryGetCurrentMonitorMetrics(out int workAreaHeight, out uint dpi)
@@ -685,7 +718,6 @@ public sealed partial class TrayMenuWindow : WindowEx
                 }
             }
 
-            flyoutWindow.SizeToContent();
             _activeFlyoutOwner = ownerButton;
             _activeFlyoutKey = flyoutKey;
         }
