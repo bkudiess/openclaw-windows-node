@@ -25,6 +25,9 @@ public sealed class NodeService : IDisposable
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly Func<FrameworkElement?> _rootProvider;
     private readonly SettingsManager? _settings;
+    private readonly SemaphoreSlim _consentLock = new(1, 1);
+    private TaskCompletionSource<bool>? _screenConsentInFlight;
+    private TaskCompletionSource<bool>? _cameraConsentInFlight;
     private WindowsNodeClient? _nodeClient;
     private CanvasWindow? _canvasWindow;
     // Invariant: _a2uiCanvasWindow is only read/written from the UI dispatcher
@@ -137,7 +140,12 @@ public sealed class NodeService : IDisposable
     public event EventHandler<ChannelHealth[]>? ChannelHealthUpdated;
     public event EventHandler<NodeInvokeCompletedEventArgs>? InvokeCompleted;
     public event EventHandler<GatewaySelfInfo>? GatewaySelfUpdated;
+    public event EventHandler<RecordingStateEventArgs>? RecordingStateChanged;
     
+    public bool IsScreenRecording { get; private set; }
+    public bool IsCameraRecording { get; private set; }
+    public bool IsAnyRecording => IsScreenRecording || IsCameraRecording;
+
     public bool IsConnected => _nodeClient?.IsConnected ?? false;
     public string? NodeId => _nodeClient?.NodeId;
     public bool IsPendingApproval => _nodeClient?.IsPendingApproval ?? false;
@@ -1210,27 +1218,39 @@ public sealed class NodeService : IDisposable
         if ((now - _lastScreenCaptureNotification).TotalSeconds > 10)
         {
             _lastScreenCaptureNotification = now;
-            try
-            {
-                new ToastContentBuilder()
-                    .AddText(LocalizationHelper.GetString("Toast_ScreenCaptured"))
-                    .AddText(LocalizationHelper.GetString("Toast_ScreenCapturedDetail"))
-                    .Show();
-            }
-            catch { /* ignore notification errors */ }
+            ShowToast("Toast_ScreenCaptured", "Toast_ScreenCapturedDetail");
         }
         
         return await _screenCaptureService.CaptureAsync(args);
     }
 
-    private Task<ScreenRecordResult> OnScreenRecord(ScreenRecordArgs args)
+    private async Task<ScreenRecordResult> OnScreenRecord(ScreenRecordArgs args)
     {
         if (_screenRecordingService == null)
         {
             throw new InvalidOperationException("Screen recording service not available");
         }
 
-        return _screenRecordingService.RecordAsync(args);
+        await EnsureRecordingConsentAsync(RecordingType.Screen);
+        await ShowRecordingCountdownAsync();
+
+        SetRecordingState(RecordingType.Screen, true, args.DurationMs);
+        try
+        {
+            ShowToast("Toast_ScreenRecordingStarted", "Toast_ScreenRecordingStartedDetail");
+            var result = await _screenRecordingService.RecordAsync(args);
+            ShowToast("Toast_ScreenRecordingComplete", "Toast_ScreenRecordingCompleteDetail");
+            return result;
+        }
+        catch (Exception ex) when (ex is not InvalidOperationException)
+        {
+            ShowToast("Toast_ScreenRecordingFailed", "Toast_ScreenRecordingFailedDetail");
+            throw;
+        }
+        finally
+        {
+            SetRecordingState(RecordingType.Screen, false);
+        }
     }
     
     #endregion
@@ -1281,10 +1301,17 @@ public sealed class NodeService : IDisposable
         {
             throw new InvalidOperationException("Camera capture service not available");
         }
-        
+
+        await EnsureRecordingConsentAsync(RecordingType.Camera);
+        await ShowRecordingCountdownAsync();
+
+        SetRecordingState(RecordingType.Camera, true, args.DurationMs);
         try
         {
-            return await _cameraCaptureService.ClipAsync(args);
+            ShowToast("Toast_CameraRecordingStarted", "Toast_CameraRecordingStartedDetail");
+            var result = await _cameraCaptureService.ClipAsync(args);
+            ShowToast("Toast_CameraRecordingComplete", "Toast_CameraRecordingCompleteDetail");
+            return result;
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -1300,6 +1327,10 @@ public sealed class NodeService : IDisposable
             throw new InvalidOperationException(
                 "Camera access blocked. Enable camera access for desktop apps in Windows Privacy settings.",
                 ex);
+        }
+        finally
+        {
+            SetRecordingState(RecordingType.Camera, false);
         }
     }
     
@@ -1437,6 +1468,185 @@ public sealed class NodeService : IDisposable
     }
     
     #endregion
+
+    #region Recording State
+
+    private void SetRecordingState(RecordingType type, bool isActive, int durationMs = 0)
+    {
+        switch (type)
+        {
+            case RecordingType.Screen: IsScreenRecording = isActive; break;
+            case RecordingType.Camera: IsCameraRecording = isActive; break;
+        }
+
+        RecordingStateChanged?.Invoke(this, new RecordingStateEventArgs
+        {
+            Type = type,
+            IsActive = isActive,
+            DurationMs = durationMs
+        });
+    }
+
+    private async Task EnsureRecordingConsentAsync(RecordingType type)
+    {
+        if (HasRecordingConsent(type)) return;
+
+        Task<bool>? existingConsentPrompt = null;
+        TaskCompletionSource<bool>? ownedConsentPrompt = null;
+
+        await _consentLock.WaitAsync();
+        try
+        {
+            // Re-check after acquiring lock: a prior caller may have resolved consent.
+            if (HasRecordingConsent(type)) return;
+
+            var inFlight = GetConsentPrompt(type);
+            if (inFlight != null)
+            {
+                existingConsentPrompt = inFlight.Task;
+            }
+            else
+            {
+                ownedConsentPrompt = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                SetConsentPrompt(type, ownedConsentPrompt);
+            }
+        }
+        finally
+        {
+            _consentLock.Release();
+        }
+
+        if (existingConsentPrompt != null)
+        {
+            if (!await existingConsentPrompt)
+                throw new InvalidOperationException("Recording denied: user has not given consent");
+            return;
+        }
+
+        try
+        {
+            var consented = await ShowRecordingConsentDialogAsync(type);
+            ownedConsentPrompt!.TrySetResult(consented);
+
+            if (!consented)
+                throw new InvalidOperationException("Recording denied: user has not given consent");
+        }
+        catch
+        {
+            ownedConsentPrompt!.TrySetResult(false);
+            throw;
+        }
+        finally
+        {
+            await _consentLock.WaitAsync();
+            try
+            {
+                if (ReferenceEquals(GetConsentPrompt(type), ownedConsentPrompt))
+                    SetConsentPrompt(type, null);
+            }
+            finally
+            {
+                _consentLock.Release();
+            }
+        }
+    }
+
+    private bool HasRecordingConsent(RecordingType type)
+    {
+        return type == RecordingType.Screen
+            ? _settings?.ScreenRecordingConsentGiven == true
+            : _settings?.CameraRecordingConsentGiven == true;
+    }
+
+    private TaskCompletionSource<bool>? GetConsentPrompt(RecordingType type)
+    {
+        return type == RecordingType.Screen
+            ? _screenConsentInFlight
+            : _cameraConsentInFlight;
+    }
+
+    private void SetConsentPrompt(RecordingType type, TaskCompletionSource<bool>? prompt)
+    {
+        if (type == RecordingType.Screen)
+            _screenConsentInFlight = prompt;
+        else
+            _cameraConsentInFlight = prompt;
+    }
+
+    private Task<bool> ShowRecordingConsentDialogAsync(RecordingType type)
+    {
+        var dialogTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        if (!_dispatcherQueue.TryEnqueue(async () =>
+        {
+            try
+            {
+                var dialog = new Dialogs.RecordingConsentDialog(type);
+                var consented = await dialog.ShowAsync();
+
+                if (consented && _settings != null)
+                {
+                    if (type == RecordingType.Screen)
+                        _settings.ScreenRecordingConsentGiven = true;
+                    else
+                        _settings.CameraRecordingConsentGiven = true;
+                    _settings.Save();
+                }
+
+                dialogTcs.TrySetResult(consented);
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"[RecordingConsent] Dialog error: {ex.Message}");
+                dialogTcs.TrySetResult(false);
+            }
+        }))
+        {
+            throw new InvalidOperationException("Recording denied: unable to show consent prompt");
+        }
+
+        return dialogTcs.Task;
+    }
+
+    private async Task ShowRecordingCountdownAsync()
+    {
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        if (!_dispatcherQueue.TryEnqueue(async () =>
+        {
+            try
+            {
+                var countdown = new Dialogs.RecordingCountdownWindow(3);
+                await countdown.ShowCountdownAsync();
+                tcs.TrySetResult();
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"[RecordingCountdown] Error: {ex.Message}");
+                tcs.TrySetResult(); // Don't block recording if countdown fails
+            }
+        }))
+        {
+            // If we can't show the countdown, proceed anyway
+            return;
+        }
+
+        await tcs.Task;
+    }
+
+    private static void ShowToast(string titleKey, string detailKey)
+    {
+        try
+        {
+            new ToastContentBuilder()
+                .AddText(LocalizationHelper.GetString(titleKey))
+                .AddText(LocalizationHelper.GetString(detailKey))
+                .Show();
+        }
+        catch { /* ignore notification errors */ }
+    }
+
+    #endregion
     
     public void Dispose()
     {
@@ -1477,4 +1687,17 @@ public sealed class NodeService : IDisposable
             _dispatcherQueue.TryEnqueue(() => { try { window?.Close(); } catch { } });
         }
     }
+}
+
+public enum RecordingType
+{
+    Screen,
+    Camera
+}
+
+public sealed class RecordingStateEventArgs : EventArgs
+{
+    public RecordingType Type { get; init; }
+    public bool IsActive { get; init; }
+    public int DurationMs { get; init; }
 }

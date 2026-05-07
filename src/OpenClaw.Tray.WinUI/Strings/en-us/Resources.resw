@@ -688,6 +688,116 @@ Use one of these options:
   <data name="Toast_CameraBlockedDetail" xml:space="preserve">
     <value>Enable camera access in Windows Privacy settings for OpenClaw Tray</value>
   </data>
+
+  <!-- ==================== Toast: Recording ==================== -->
+
+  <data name="Toast_ScreenRecordingStarted" xml:space="preserve">
+    <value>🔴 Screen Recording Started</value>
+  </data>
+  <data name="Toast_ScreenRecordingStartedDetail" xml:space="preserve">
+    <value>OpenClaw agent is recording your screen</value>
+  </data>
+  <data name="Toast_ScreenRecordingComplete" xml:space="preserve">
+    <value>✅ Screen Recording Complete</value>
+  </data>
+  <data name="Toast_ScreenRecordingCompleteDetail" xml:space="preserve">
+    <value>Screen recording has been sent to the agent</value>
+  </data>
+  <data name="Toast_ScreenRecordingFailed" xml:space="preserve">
+    <value>❌ Screen Recording Failed</value>
+  </data>
+  <data name="Toast_ScreenRecordingFailedDetail" xml:space="preserve">
+    <value>An error occurred while recording the screen</value>
+  </data>
+  <data name="Toast_CameraRecordingStarted" xml:space="preserve">
+    <value>🔴 Camera Recording Started</value>
+  </data>
+  <data name="Toast_CameraRecordingStartedDetail" xml:space="preserve">
+    <value>OpenClaw agent is recording from your camera</value>
+  </data>
+  <data name="Toast_CameraRecordingComplete" xml:space="preserve">
+    <value>✅ Camera Recording Complete</value>
+  </data>
+  <data name="Toast_CameraRecordingCompleteDetail" xml:space="preserve">
+    <value>Camera clip has been sent to the agent</value>
+  </data>
+
+  <!-- ==================== Recording Consent Dialog ==================== -->
+
+  <data name="RecordingConsent_WindowTitle" xml:space="preserve">
+    <value>OpenClaw · Permission Request</value>
+  </data>
+  <data name="RecordingConsent_ScreenTitle" xml:space="preserve">
+    <value>Allow screen recording?</value>
+  </data>
+  <data name="RecordingConsent_CameraTitle" xml:space="preserve">
+    <value>Allow camera recording?</value>
+  </data>
+  <data name="RecordingConsent_ScreenDescription" xml:space="preserve">
+    <value>An agent is requesting to record your screen. This will capture video from your display and send it to the agent. Your choice will be remembered for future requests until you change it in Settings.</value>
+  </data>
+  <data name="RecordingConsent_CameraDescription" xml:space="preserve">
+    <value>An agent is requesting to record from your camera. This will capture video from your webcam and send it to the agent. Your choice will be remembered for future requests until you change it in Settings.</value>
+  </data>
+  <data name="RecordingConsent_Privacy" xml:space="preserve">
+    <value>You can change this later in Settings.</value>
+  </data>
+  <data name="RecordingConsent_Allow" xml:space="preserve">
+    <value>Allow recording</value>
+  </data>
+  <data name="RecordingConsent_Deny" xml:space="preserve">
+    <value>Deny</value>
+  </data>
+
+  <!-- ==================== Settings: Privacy ==================== -->
+
+  <data name="Settings_PrivacyHeader" xml:space="preserve">
+    <value>Privacy</value>
+  </data>
+  <data name="Settings_PrivacyDescription" xml:space="preserve">
+    <value>Control which capabilities agents can use on this device.</value>
+  </data>
+  <data name="Settings_AllowScreenRecording" xml:space="preserve">
+    <value>Allow screen recording</value>
+  </data>
+  <data name="Settings_AllowCameraRecording" xml:space="preserve">
+    <value>Allow camera recording</value>
+  </data>
+  <data name="SettingsPrivacyHeader.Text" xml:space="preserve">
+    <value>Privacy</value>
+  </data>
+  <data name="SettingsPrivacyDescription.Text" xml:space="preserve">
+    <value>Pre-approve capabilities so agents can use them without a permission prompt each time. You'll still see a countdown before recording starts.</value>
+  </data>
+  <data name="ScreenRecordingToggle.Header" xml:space="preserve">
+    <value>Allow screen recording</value>
+  </data>
+  <data name="CameraRecordingToggle.Header" xml:space="preserve">
+    <value>Allow camera recording</value>
+  </data>
+
+  <!-- ==================== Activity Stream: Recording ==================== -->
+
+  <data name="Activity_ScreenRecordingStarted" xml:space="preserve">
+    <value>Screen recording started</value>
+  </data>
+  <data name="Activity_ScreenRecordingComplete" xml:space="preserve">
+    <value>Screen recording complete</value>
+  </data>
+  <data name="Activity_CameraRecordingStarted" xml:space="preserve">
+    <value>Camera recording started</value>
+  </data>
+  <data name="Activity_CameraRecordingComplete" xml:space="preserve">
+    <value>Camera recording complete</value>
+  </data>
+  <data name="Activity_RecordingRequestedByAgent" xml:space="preserve">
+    <value>{0} recording requested by agent</value>
+  </data>
+  <data name="Activity_RecordingSentToAgent" xml:space="preserve">
+    <value>{0} recording sent to agent</value>
+  </data>
+
+  <!-- ==================== Toast: Activity Stream Tip ==================== -->
   <data name="Toast_ActivityStreamTip" xml:space="preserve">
     <value>⚡ New: Activity Stream</value>
   </data>

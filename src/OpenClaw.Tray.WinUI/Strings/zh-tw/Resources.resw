@@ -688,6 +688,116 @@
   <data name="Toast_CameraBlockedDetail" xml:space="preserve">
     <value>請在 Windows 隱私設定中為 OpenClaw Tray 啟用相機訪問</value>
   </data>
+
+  <!-- ==================== Toast: Recording ==================== -->
+
+  <data name="Toast_ScreenRecordingStarted" xml:space="preserve">
+    <value>🔴 螢幕錄製已開始</value>
+  </data>
+  <data name="Toast_ScreenRecordingStartedDetail" xml:space="preserve">
+    <value>OpenClaw 代理正在錄製您的螢幕</value>
+  </data>
+  <data name="Toast_ScreenRecordingComplete" xml:space="preserve">
+    <value>✅ 螢幕錄製已完成</value>
+  </data>
+  <data name="Toast_ScreenRecordingCompleteDetail" xml:space="preserve">
+    <value>螢幕錄製已傳送給代理</value>
+  </data>
+  <data name="Toast_ScreenRecordingFailed" xml:space="preserve">
+    <value>❌ 螢幕錄製失敗</value>
+  </data>
+  <data name="Toast_ScreenRecordingFailedDetail" xml:space="preserve">
+    <value>錄製螢幕時發生錯誤</value>
+  </data>
+  <data name="Toast_CameraRecordingStarted" xml:space="preserve">
+    <value>🔴 攝影機錄製已開始</value>
+  </data>
+  <data name="Toast_CameraRecordingStartedDetail" xml:space="preserve">
+    <value>OpenClaw 代理正在從您的攝影機錄製</value>
+  </data>
+  <data name="Toast_CameraRecordingComplete" xml:space="preserve">
+    <value>✅ 攝影機錄製已完成</value>
+  </data>
+  <data name="Toast_CameraRecordingCompleteDetail" xml:space="preserve">
+    <value>攝影機錄製片段已傳送給代理</value>
+  </data>
+
+  <!-- ==================== Recording Consent Dialog ==================== -->
+
+  <data name="RecordingConsent_WindowTitle" xml:space="preserve">
+    <value>OpenClaw · 權限請求</value>
+  </data>
+  <data name="RecordingConsent_ScreenTitle" xml:space="preserve">
+    <value>允許螢幕錄製？</value>
+  </data>
+  <data name="RecordingConsent_CameraTitle" xml:space="preserve">
+    <value>允許攝影機錄製？</value>
+  </data>
+  <data name="RecordingConsent_ScreenDescription" xml:space="preserve">
+    <value>代理正在請求錄製您的螢幕。這將從您的顯示器擷取視訊並傳送給代理。您的選擇將被記住用於以後的請求，直到您在設定中變更。</value>
+  </data>
+  <data name="RecordingConsent_CameraDescription" xml:space="preserve">
+    <value>代理正在請求從您的攝影機錄製。這將從您的網路攝影機擷取視訊並傳送給代理。您的選擇將被記住用於以後的請求，直到您在設定中變更。</value>
+  </data>
+  <data name="RecordingConsent_Privacy" xml:space="preserve">
+    <value>您可以稍後在設定中變更此項。</value>
+  </data>
+  <data name="RecordingConsent_Allow" xml:space="preserve">
+    <value>允許錄製</value>
+  </data>
+  <data name="RecordingConsent_Deny" xml:space="preserve">
+    <value>拒絕</value>
+  </data>
+
+  <!-- ==================== Settings: Privacy ==================== -->
+
+  <data name="Settings_PrivacyHeader" xml:space="preserve">
+    <value>隱私</value>
+  </data>
+  <data name="Settings_PrivacyDescription" xml:space="preserve">
+    <value>控制代理可以在此裝置上使用哪些功能。</value>
+  </data>
+  <data name="Settings_AllowScreenRecording" xml:space="preserve">
+    <value>允許螢幕錄製</value>
+  </data>
+  <data name="Settings_AllowCameraRecording" xml:space="preserve">
+    <value>允許攝影機錄製</value>
+  </data>
+  <data name="SettingsPrivacyHeader.Text" xml:space="preserve">
+    <value>隱私</value>
+  </data>
+  <data name="SettingsPrivacyDescription.Text" xml:space="preserve">
+    <value>預先核准功能，以便代理無需每次都請求權限。錄製開始前仍會顯示倒數計時。</value>
+  </data>
+  <data name="ScreenRecordingToggle.Header" xml:space="preserve">
+    <value>允許螢幕錄製</value>
+  </data>
+  <data name="CameraRecordingToggle.Header" xml:space="preserve">
+    <value>允許攝影機錄製</value>
+  </data>
+
+  <!-- ==================== Activity Stream: Recording ==================== -->
+
+  <data name="Activity_ScreenRecordingStarted" xml:space="preserve">
+    <value>螢幕錄製已開始</value>
+  </data>
+  <data name="Activity_ScreenRecordingComplete" xml:space="preserve">
+    <value>螢幕錄製已完成</value>
+  </data>
+  <data name="Activity_CameraRecordingStarted" xml:space="preserve">
+    <value>攝影機錄製已開始</value>
+  </data>
+  <data name="Activity_CameraRecordingComplete" xml:space="preserve">
+    <value>攝影機錄製已完成</value>
+  </data>
+  <data name="Activity_RecordingRequestedByAgent" xml:space="preserve">
+    <value>{0}錄製由代理請求</value>
+  </data>
+  <data name="Activity_RecordingSentToAgent" xml:space="preserve">
+    <value>{0}錄製已傳送給代理</value>
+  </data>
+
+  <!-- ==================== Toast: Activity Stream Tip ==================== -->
   <data name="Toast_ActivityStreamTip" xml:space="preserve">
     <value>⚡ 新功能: 串流活動</value>
   </data>

@@ -760,6 +760,7 @@ public partial class App : Application
     private void AddRecentActivity(
         string line,
         string category = "general",
+        string? icon = null,
         string? dashboardPath = null,
         string? details = null,
         string? sessionKey = null,
@@ -768,6 +769,7 @@ public partial class App : Application
         ActivityStreamService.Add(
             category: category,
             title: line,
+            icon: icon,
             details: details,
             dashboardPath: dashboardPath,
             sessionKey: sessionKey,
@@ -1670,6 +1672,7 @@ public partial class App : Application
             _nodeService.ChannelHealthUpdated += OnChannelHealthUpdated;
             _nodeService.InvokeCompleted += OnNodeInvokeCompleted;
             _nodeService.GatewaySelfUpdated += OnGatewaySelfUpdated;
+            _nodeService.RecordingStateChanged += OnRecordingStateChanged;
 
             if (canRunGateway)
             {
@@ -1866,6 +1869,30 @@ public partial class App : Application
         }
     }
     
+    private void OnRecordingStateChanged(object? sender, RecordingStateEventArgs args)
+    {
+        var source = args.Type == RecordingType.Screen ? "Screen" : "Camera";
+        if (args.IsActive)
+        {
+            var title = args.Type == RecordingType.Screen
+                ? LocalizationHelper.GetString("Activity_ScreenRecordingStarted")
+                : LocalizationHelper.GetString("Activity_CameraRecordingStarted");
+            var duration = args.DurationMs > 0 ? $" ({args.DurationMs / 1000.0:0.#}s)" : "";
+            AddRecentActivity($"{title}{duration}", category: "node",
+                icon: "🔴",
+                details: string.Format(LocalizationHelper.GetString("Activity_RecordingRequestedByAgent"), source));
+        }
+        else
+        {
+            var title = args.Type == RecordingType.Screen
+                ? LocalizationHelper.GetString("Activity_ScreenRecordingComplete")
+                : LocalizationHelper.GetString("Activity_CameraRecordingComplete");
+            AddRecentActivity(title, category: "node",
+                icon: "✅",
+                details: string.Format(LocalizationHelper.GetString("Activity_RecordingSentToAgent"), source));
+        }
+    }
+
     private void OnPairingStatusChanged(object? sender, OpenClaw.Shared.PairingStatusEventArgs args)
     {
         Logger.Info($"Pairing status: {args.Status}");
