@@ -1,14 +1,16 @@
 {
-  "last_run": "2026-05-06T12:58:32Z",
-  "last_run_id": "25436576004",
+  "last_run": "2026-05-07T01:11:02Z",
+  "last_run_id": "25470178209",
   "monthly_summary_issue": 254,
   "monthly_summary_month": "2026-05",
   "backlog_cursor": {
     "issues": 283,
-    "prs": 285
+    "prs": 288
   },
   "open_repo_assist_prs": [
-    {"number": 0, "title": "[Repo Assist] perf: pre-compile 11 regex calls in CommandCenterTextHelper, WizardPage, SchemaConfigEditor, QuickSendDialog", "branch": "repo-assist/perf-precompile-redaction-regexes-2026-05-06", "note": "PR number unknown — created this run"},
+    {"number": 0, "title": "[Repo Assist] perf: vectorize ASCII control/whitespace scan in ExecEnvSanitizer.IsBlocked", "branch": "repo-assist/perf-env-sanitizer-vectorize-2026-05-07", "note": "PR number unknown — created this run"},
+    {"number": 0, "title": "[Repo Assist] refactor: extract BaseOptions constant in SshTunnelCommandLine", "branch": "repo-assist/improve-ssh-constant-options-2026-05-07", "note": "PR number unknown — created this run"},
+    {"number": 286, "title": "[Repo Assist] perf: pre-compile redaction and UI regexes (CommandCenterTextHelper, WizardPage, SchemaConfigEditor, QuickSendDialog)", "branch": "repo-assist/perf-precompile-redaction-regexes-2026-05-06"},
     {"number": 282, "title": "[Repo Assist] chore(deps): bump Microsoft.Windows.SDK.BuildTools to 10.0.28000.1839", "branch": "repo-assist/eng-sdk-buildtools-28000-2026-05-06"},
     {"number": 270, "title": "[Repo Assist] fix(security): handle all PowerShell -EncodedCommand abbreviations and separator forms", "branch": "repo-assist/fix-ps-encoded-command-abbreviations-2026-05-04"},
     {"number": 262, "title": "[Repo Assist] feat(mcp): add per-command JSON Schema to tools/list", "branch": "repo-assist/feat-mcp-input-schemas-2026-05-02-c3518e3a54a6ee1b"},
@@ -23,7 +25,9 @@
     "283": {"date": "2026-05-06", "note": "Confirmed root cause: missing ExtendsContentIntoTitleBar + repeated TryBringToFront on activation. Linked to PR #285."}
   },
   "fix_attempts": {
-    "perf-precompile-regexes": {"status": "pr_created", "branch": "repo-assist/perf-precompile-redaction-regexes-2026-05-06", "date": "2026-05-06", "description": "Pre-compile 11 regex calls in CommandCenterTextHelper (8), WizardPage (2), SchemaConfigEditor (1), QuickSendDialog (1)."},
+    "perf-env-sanitizer-vectorize": {"status": "pr_created", "branch": "repo-assist/perf-env-sanitizer-vectorize-2026-05-07", "date": "2026-05-07", "description": "Vectorize ASCII control/whitespace scan in ExecEnvSanitizer.IsBlocked using IndexOfAnyInRange."},
+    "improve-ssh-constant-options": {"status": "pr_created", "branch": "repo-assist/improve-ssh-constant-options-2026-05-07", "date": "2026-05-07", "description": "Extract BaseOptions constant in SshTunnelCommandLine to consolidate fixed SSH connection options."},
+    "perf-precompile-regexes": {"status": "pr_created", "pr": 286, "branch": "repo-assist/perf-precompile-redaction-regexes-2026-05-06", "date": "2026-05-06", "description": "Pre-compile 11 regex calls in CommandCenterTextHelper (8), WizardPage (2), SchemaConfigEditor (1), QuickSendDialog (1)."},
     "sdk-buildtools-28000": {"status": "pr_created", "pr": 282, "branch": "repo-assist/eng-sdk-buildtools-28000-2026-05-06", "date": "2026-05-06", "description": "Bump Microsoft.Windows.SDK.BuildTools to 10.0.28000.1839 in all 3 csproj files. Supersedes Dependabot PR #268."},
     "ps-encoded-command-abbreviations": {"status": "pr_created", "pr": 270, "branch": "repo-assist/fix-ps-encoded-command-abbreviations-2026-05-04", "date": "2026-05-04"},
     "exec-v2-policy-handler": {"status": "pr_created", "pr": 261, "date": "2026-05-02"},
@@ -37,17 +41,22 @@
     "PR #270 (Repo Assist) PowerShell -EncodedCommand abbreviations fix — awaiting review",
     "PR #282 (Repo Assist) SDK.BuildTools bump — awaiting review",
     "PR #285 (Copilot) Quick Send fix — draft, closes #283",
+    "PR #286 (Repo Assist) pre-compile regexes — awaiting review",
+    "PR #288 (community) Whisper STT + Piper TTS — new PR, needs review/comment",
+    "PR perf-env-sanitizer-vectorize-2026-05-07 (Repo Assist) — awaiting PR number after this run",
+    "PR improve-ssh-constant-options-2026-05-07 (Repo Assist) — awaiting PR number after this run",
     "Issue #283 (christineyan4) Quick Send titlebar+focus — commented with root cause analysis",
     "Issue #281 (WSL onboarding blockers) — commented with code-level root cause for item #1 (OPENCLAW_TRAY_DATA_DIR mismatch). PR #274 from fork indierawk2k2 cannot be pushed to directly.",
     "PR #274 (indierawk2k2 WSL gateway clean port) — draft, 8879 additions, 25 commits. Blocked by #281 issues.",
     "Issue #235 (Dependabot bundle) still open; individual PRs merged; suggest closing",
     "PR #120 (NichUK Voice Mode): has merge conflicts (dirty); no new activity",
-    "Next V2 exec approval step: wire ExecApprovalV2PolicyHandler in production once PR #260 AND PR #261 are merged"
+    "Next V2 exec approval step: wire ExecApprovalV2PolicyHandler in production once PR #260 AND PR #261 are merged",
+    "Next run: comment on PR #288 (Whisper STT + Piper TTS) — new community contribution needs Repo Assist review"
   ],
   "checked_off_by_maintainer": [],
   "test_baseline": {
-    "shared_tests": "1219 passed, 1 pre-existing fail (McpHttpServerTests.Post_WithLocalhostHost_Accepted), 20 skipped",
-    "tray_tests": "392 passed, 1 skipped (Windows DPAPI)",
+    "shared_tests": "exit 0 (1219+ passed, 1 pre-existing fail McpHttpServerTests, 20 skipped)",
+    "tray_tests": "exit 0 (392+ passed, 1 skipped Windows DPAPI)",
     "note": "Both test suites run on Linux. build.ps1 requires Windows."
   }
 }
