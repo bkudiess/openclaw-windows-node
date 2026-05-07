@@ -380,6 +380,7 @@ public partial class App : Application
         {
             _globalHotkey = new GlobalHotkeyService();
             _globalHotkey.HotkeyPressed += OnGlobalHotkeyPressed;
+            _globalHotkey.VoiceHotkeyPressed += OnVoiceHotkeyPressed;
             _globalHotkey.Register();
         }
 
@@ -454,6 +455,49 @@ public partial class App : Application
         }
     }
 
+    private VoiceOverlayWindow? _voiceOverlayWindow;
+    private VoiceService? _standaloneVoiceService;
+
+    private void ShowVoiceOverlay()
+    {
+        var voiceService = _nodeService?.VoiceService ?? EnsureStandaloneVoiceService();
+        if (voiceService == null)
+        {
+            // STT not enabled — show settings
+            ShowHub("voice");
+            return;
+        }
+
+        if (_voiceOverlayWindow == null || _voiceOverlayWindow.AppWindow == null)
+        {
+            _voiceOverlayWindow = new VoiceOverlayWindow(voiceService, new AppLogger());
+            _voiceOverlayWindow.Closed += (_, _) => _voiceOverlayWindow = null;
+            // Wire transcription to gateway chat when connected
+            _voiceOverlayWindow.TextSubmitted += text =>
+            {
+                if (_gatewayClient != null && _currentStatus == ConnectionStatus.Connected)
+                {
+                    _ = _gatewayClient.SendChatMessageAsync(text);
+                }
+            };
+            // Wire Settings button → open the Hub on the Voice & Audio page.
+            _voiceOverlayWindow.SettingsRequested += () =>
+            {
+                _dispatcherQueue?.TryEnqueue(() => ShowHub("voice"));
+            };
+        }
+
+        _voiceOverlayWindow.Activate();
+    }
+
+    private VoiceService? EnsureStandaloneVoiceService()
+    {
+        if (_settings?.NodeSttEnabled != true)
+            return null;
+
+        return _standaloneVoiceService ??= new VoiceService(new AppLogger(), _settings);
+    }
+
     private void OnTrayContextMenu(TrayIcon sender, TrayIconEventArgs e)
     {
         // Right-click: show menu
@@ -503,6 +547,7 @@ public partial class App : Application
             case "dashboard": OpenDashboard(); break;
             case "canvas": _nodeService?.ShowCanvasWindow(); break;
             case "openchat": ShowChatWindow(); break;
+            case "voice": ShowVoiceOverlay(); break;
             case "webchat": ShowWebChat(); break;
             case "hub": ShowHub(); break;
             case "companion":
@@ -1031,6 +1076,7 @@ public partial class App : Application
         menu.AddMenuItem("Dashboard", "🌐", "dashboard");
         menu.AddMenuItem("Chat", "💬", "openchat");
         menu.AddMenuItem("Canvas", "🎨", "canvas");
+        menu.AddMenuItem("Voice", "🎙️", "voice");
         menu.AddMenuItem("Companion", "🦞", "companion");
         menu.AddMenuItem(LocalizationHelper.GetString("Menu_QuickSend"), "📤", "quicksend");
 
@@ -1863,6 +1909,7 @@ public partial class App : Application
             _hubWindow.NodeIsPendingApproval = _nodeService.IsPendingApproval;
             _hubWindow.NodeShortDeviceId = _nodeService.ShortDeviceId;
             _hubWindow.NodeFullDeviceId = _nodeService.FullDeviceId;
+            _hubWindow.VoiceServiceInstance = _nodeService.VoiceService;
         }
         else
         {
@@ -2318,6 +2365,32 @@ public partial class App : Application
             $"{notification.Type ?? "info"}: {notification.Title ?? "notification"}",
             category: "notification",
             details: notification.Message);
+
+        // Voice overlay: show agent chat responses, and (independently) speak them
+        // if the user enabled "Read responses aloud". TTS used to be gated on
+        // an active voice overlay session — we want the toggle to honor every
+        // chat reply now that voice and text chat will eventually share one UI.
+        if (notification.IsChat && !string.IsNullOrEmpty(notification.Message))
+        {
+            if (_voiceOverlayWindow != null)
+            {
+                _dispatcherQueue?.TryEnqueue(() =>
+                {
+                    try
+                    {
+                        _voiceOverlayWindow?.AddAgentResponse(notification.Message);
+                    }
+                    catch { }
+                });
+            }
+
+            // TTS: read response aloud whenever the toggle is on (any chat surface).
+            if (_settings?.VoiceTtsEnabled == true)
+            {
+                _ = SpeakResponseAsync(notification.Message);
+            }
+        }
+
         if (_settings?.ShowNotifications != true) return;
         if (!ShouldShowNotification(notification)) return;
 
@@ -2519,7 +2592,7 @@ public partial class App : Application
 
     #region Window Management
 
-    private void ShowHub(string? navigateTo = null)
+    private void ShowHub(string? navigateTo = null, bool activate = true)
     {
         if (_hubWindow == null || _hubWindow.IsClosed)
         {
@@ -2561,6 +2634,7 @@ public partial class App : Application
                 _hubWindow.NodeShortDeviceId = _nodeService.ShortDeviceId;
                 _hubWindow.NodeFullDeviceId = _nodeService.FullDeviceId;
             }
+            _hubWindow.VoiceServiceInstance = _nodeService?.VoiceService ?? _standaloneVoiceService;
             _hubWindow.SettingsSaved += OnSettingsSaved;
             _hubWindow.Closed += (s, e) =>
             {
@@ -2578,6 +2652,7 @@ public partial class App : Application
         _hubWindow.Settings = _settings;
         _hubWindow.GatewayClient = _gatewayClient;
         _hubWindow.CurrentStatus = _currentStatus;
+        _hubWindow.VoiceServiceInstance = _nodeService?.VoiceService ?? _standaloneVoiceService;
         if (_nodeService != null)
         {
             _hubWindow.NodeIsConnected = _nodeService.IsConnected;
@@ -2594,7 +2669,29 @@ public partial class App : Application
         {
             _hubWindow.NavigateTo(navigateTo);
         }
-        _hubWindow.Activate();
+        if (activate)
+        {
+            _hubWindow.Activate();
+        }
+        else
+        {
+            // Show without stealing focus — used by right-click on the
+            // tray icon where the popup needs to remain the foreground
+            // window (popups light-dismiss if focus moves away).
+            // If the Hub was minimized, restore it first so it actually
+            // becomes visible behind the popup; otherwise Show(false)
+            // is a no-op on a minimized window.
+            try
+            {
+                if (_hubWindow.AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter op
+                    && op.State == Microsoft.UI.Windowing.OverlappedPresenterState.Minimized)
+                {
+                    op.Restore(activateWindow: false);
+                }
+                _hubWindow.AppWindow.Show(activateWindow: false);
+            }
+            catch { /* swallow */ }
+        }
     }
 
     private void SeedHubCachedData()
@@ -3637,8 +3734,6 @@ public partial class App : Application
 
     private void OnGlobalHotkeyPressed(object? sender, EventArgs e)
     {
-        // Hotkey events are raised from a dedicated Win32 message-loop thread.
-        // Creating/activating WinUI windows must happen on the app's UI thread.
         if (_dispatcherQueue == null)
         {
             Logger.Warn("Hotkey pressed but DispatcherQueue is null");
@@ -3650,6 +3745,12 @@ public partial class App : Application
         {
             Logger.Warn("Hotkey pressed but failed to enqueue QuickSend on UI thread");
         }
+    }
+
+    private void OnVoiceHotkeyPressed(object? sender, EventArgs e)
+    {
+        if (_dispatcherQueue == null) return;
+        _dispatcherQueue.TryEnqueue(() => ShowVoiceOverlay());
     }
 
     #endregion
@@ -3871,6 +3972,8 @@ public partial class App : Application
             OpenDashboard = OpenDashboard,
             OpenQuickSend = ShowQuickSend,
             OpenHub = (page) => ShowHub(page),
+            OpenVoice = () => ShowVoiceOverlay(),
+            StopVoice = () => _ = StopVoiceAsync(),
             SendMessage = async (msg) =>
             {
                 if (_gatewayClient != null)
@@ -3879,6 +3982,58 @@ public partial class App : Application
                 }
             }
         });
+    }
+
+    private async Task StopVoiceAsync()
+    {
+        var voiceService = _nodeService?.VoiceService;
+        if (voiceService != null)
+            await voiceService.StopAsync();
+    }
+
+    private int _ttsMuteCount;
+
+    private async Task SpeakResponseAsync(string text)
+    {
+        var voiceService = _nodeService?.VoiceService;
+        var ttsService = _nodeService?.TextToSpeech;
+        try
+        {
+            if (voiceService == null || _settings == null || ttsService == null) return;
+
+            // Increment mute counter — multiple concurrent TTS won't unmute prematurely
+            Interlocked.Increment(ref _ttsMuteCount);
+            voiceService.IsMutedForPlayback = true;
+
+            var speakText = text.Length > 500 ? text[..500] + "..." : text;
+
+            // Don't pass VoiceId here. The shared TextToSpeechService picks
+            // the right per-provider voice from settings (TtsPiperVoiceId,
+            // TtsWindowsVoiceId, TtsElevenLabsVoiceId). Cross-provider
+            // voice IDs would otherwise leak across providers.
+            var speakArgs = new OpenClaw.Shared.Capabilities.TtsSpeakArgs
+            {
+                Text = speakText,
+                Provider = _settings.TtsProvider ?? TtsCapability.PiperProvider,
+                Interrupt = true
+            };
+
+            await ttsService.SpeakAsync(speakArgs);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"TTS response playback failed: {ex.Message}");
+        }
+        finally
+        {
+            // Only unmute when all concurrent TTS operations have finished
+            if (voiceService != null)
+            {
+                await Task.Delay(300);
+                if (Interlocked.Decrement(ref _ttsMuteCount) <= 0)
+                    voiceService.IsMutedForPlayback = false;
+            }
+        }
     }
 
     private static void SendDeepLinkToRunningInstance(string uri)
@@ -3986,6 +4141,12 @@ public partial class App : Application
         {
             _nodeService?.Dispose();
             _nodeService = null;
+        });
+
+        SafeShutdownStep("standalone voice service", () =>
+        {
+            _standaloneVoiceService?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            _standaloneVoiceService = null;
         });
 
         SafeShutdownStep("ssh tunnel service", () =>

@@ -60,6 +60,11 @@ public sealed class NodeService : IDisposable
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _navigationDenyCooldown =
         new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan NavigationDenyCooldownDuration = TimeSpan.FromSeconds(30);
+
+    // STT: rate-limit successive stt.listen invocations to prevent a
+    // compromised gateway from looping mic capture at the 120 s cap.
+    private static readonly TimeSpan SttListenMinInterval = TimeSpan.FromSeconds(1);
+    private DateTimeOffset _lastSttListenStartUtc = DateTimeOffset.MinValue;
     
     // Capabilities
     private SystemCapability? _systemCapability;
@@ -70,8 +75,10 @@ public sealed class NodeService : IDisposable
     private DeviceCapability? _deviceCapability;
     private DeviceStatusProvider? _deviceStatusProvider;
     private BrowserProxyCapability? _browserProxyCapability;
+    private SttCapability? _sttCapability;
     private TtsCapability? _ttsCapability;
     private TextToSpeechService? _textToSpeechService;
+    private VoiceService? _voiceService;
     private AppCapability? _appCapability;
     private readonly string _dataPath;
     private string? _token;
@@ -117,6 +124,8 @@ public sealed class NodeService : IDisposable
     private string? _mcpStartupError;
     public bool IsMcpRunning => _mcpServer != null;
     public AppCapability? AppCapability => _appCapability;
+    public VoiceService? VoiceService => _voiceService;
+    public TextToSpeechService? TextToSpeech => _textToSpeechService;
     public string McpEndpoint => McpServerUrl;
     /// <summary>Last MCP server startup error, or null if it started cleanly. Surfaced by Settings UI.</summary>
     public string? McpStartupError => _mcpStartupError;
@@ -258,7 +267,7 @@ public sealed class NodeService : IDisposable
         _systemCapability.SetPromptHandler(new ExecApprovalPromptService(_dispatcherQueue, _rootProvider, _logger));
         Register(_systemCapability);
 
-        if (_settings?.NodeCanvasEnabled != false)
+        if (NodeCapabilityGating.ShouldRegisterCanvas(_settings))
         {
             _canvasCapability = new CanvasCapability(_logger);
             _canvasCapability.PresentRequested += OnCanvasPresent;
@@ -273,7 +282,7 @@ public sealed class NodeService : IDisposable
             Register(_canvasCapability);
         }
 
-        if (_settings?.NodeScreenEnabled != false)
+        if (NodeCapabilityGating.ShouldRegisterScreen(_settings))
         {
             _screenCapability = new ScreenCapability(_logger);
             _screenCapability.CaptureRequested += OnScreenCapture;
@@ -281,7 +290,7 @@ public sealed class NodeService : IDisposable
             Register(_screenCapability);
         }
 
-        if (_settings?.NodeCameraEnabled != false)
+        if (NodeCapabilityGating.ShouldRegisterCamera(_settings))
         {
             _cameraCapability = new CameraCapability(_logger);
             _cameraCapability.ListRequested += OnCameraList;
@@ -290,19 +299,36 @@ public sealed class NodeService : IDisposable
             Register(_cameraCapability);
         }
 
-        if (_settings?.NodeLocationEnabled != false)
+        if (NodeCapabilityGating.ShouldRegisterLocation(_settings))
         {
             _locationCapability = new LocationCapability(_logger);
             _locationCapability.GetRequested += async (args) => await GetLocationAsync(args);
             Register(_locationCapability);
         }
 
-        if (_settings?.NodeTtsEnabled == true)
+        if (NodeCapabilityGating.ShouldRegisterTts(_settings))
         {
             _textToSpeechService ??= new TextToSpeechService(_logger, _settings);
             _ttsCapability = new TtsCapability(_logger);
             _ttsCapability.SpeakRequested += OnTtsSpeakAsync;
             Register(_ttsCapability);
+        }
+
+        if (NodeCapabilityGating.ShouldRegisterStt(_settings))
+        {
+            // Whisper is the only STT engine. The legacy WinRT
+            // SpeechRecognizer + desktop SAPI fallback was removed —
+            // both stacks are old, can leak audio to the Microsoft
+            // cloud (online speech), and don't activate in unpackaged
+            // builds. When the Whisper model isn't downloaded yet, the
+            // handlers return a clear error pointing the caller at the
+            // Voice Settings page; there is no automatic fallback.
+            _voiceService ??= new VoiceService(_logger, _settings);
+            _sttCapability = new SttCapability(_logger);
+            _sttCapability.TranscribeRequested += OnSttTranscribeAsync;
+            _sttCapability.ListenRequested += OnSttListenAsync;
+            _sttCapability.StatusRequested += OnSttStatusAsync;
+            Register(_sttCapability);
         }
 
         // Device metadata/status capability - dispose previous provider on re-registration
@@ -313,7 +339,7 @@ public sealed class NodeService : IDisposable
         Register(_deviceCapability);
 
         // BrowserProxy needs a live gateway connection — only register when gateway is up.
-        if (_nodeClient != null && _settings?.NodeBrowserProxyEnabled != false)
+        if (_nodeClient != null && NodeCapabilityGating.ShouldRegisterBrowserProxy(_settings))
         {
             _browserProxyCapability = new BrowserProxyCapability(
                 _logger,
@@ -473,8 +499,12 @@ public sealed class NodeService : IDisposable
             disabled.AddRange(CommandCenterCommandGroups.SafeCompanionCommands.Where(command => command.StartsWith("location.", StringComparison.OrdinalIgnoreCase)));
         if (_settings?.NodeBrowserProxyEnabled == false)
             disabled.Add("browser.proxy");
+        if (_settings?.NodeSttEnabled != true)
+            disabled.Add(SttCapability.TranscribeCommand);
         if (_settings?.NodeTtsEnabled != true)
             disabled.AddRange(CommandCenterCommandGroups.DangerousCommands.Where(command => command.StartsWith("tts.", StringComparison.OrdinalIgnoreCase)));
+        if (_settings?.NodeSttEnabled != true)
+            disabled.AddRange(new[] { "stt.listen", "stt.status" });
         return disabled;
     }
 
@@ -1301,6 +1331,110 @@ public sealed class NodeService : IDisposable
 
         return _textToSpeechService.SpeakAsync(args, cancellationToken);
     }
+
+    // ============================================================
+    // ============================================================
+    // STT handlers
+    //
+    // Single engine: VoiceService (Whisper.net + NAudio + Silero VAD).
+    // The legacy WinRT/SAPI engine and the engine selector have been
+    // removed — see Audio_FollowUps.md for the rationale.
+    //
+    // When the Whisper model isn't downloaded yet, every stt.* call
+    // returns a clear error pointing the caller at the Voice Settings
+    // page download button. There is no automatic fallback engine.
+    //
+    // Privacy: handlers never include caller-supplied args or runtime
+    // details in error messages. SttCapability already wraps the
+    // response surface; this layer only logs locally on failure.
+    // ============================================================
+
+    private bool IsWhisperReady() => _voiceService != null && _voiceService.IsWhisperReady;
+
+    private static string ResolveListenLanguage(string? configured)
+    {
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            var normalized = SttCapability.NormalizeLanguageTag(configured!);
+            if (normalized != null) return normalized;
+        }
+        return SttCapability.AutoLanguage;
+    }
+
+    private async Task<SttTranscribeResult> OnSttTranscribeAsync(
+        SttTranscribeArgs args,
+        CancellationToken cancellationToken)
+    {
+        if (_voiceService == null)
+            throw new InvalidOperationException("Voice service not available");
+        // Check the file on disk, NOT IsWhisperReady (which is "loaded into
+        // memory"). The TranscribeFixedDurationAsync path calls
+        // EnsureInitializedAsync internally; that triggers the lazy
+        // file→memory load. Failing here on a freshly-launched tray that
+        // has the file but hasn't loaded it yet would be a paper cut for
+        // every MCP caller.
+        if (!_voiceService.IsModelDownloaded)
+            throw new InvalidOperationException("Whisper model not downloaded");
+
+        // True fixed-duration capture (no VAD-based early termination) so
+        // the contract advertised by skill.md / McpToolBridge holds: callers
+        // get exactly maxDurationMs of audio, transcribed in full. For
+        // "stop when the user pauses" semantics, callers should use
+        // stt.listen instead.
+        var transcribeArgs = new SttTranscribeArgs
+        {
+            MaxDurationMs = args.MaxDurationMs,
+            Language = !string.IsNullOrWhiteSpace(args.Language)
+                ? args.Language!
+                : ResolveListenLanguage(_settings?.SttLanguage)
+        };
+        return await _voiceService.TranscribeFixedDurationAsync(transcribeArgs, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<SttListenResult> OnSttListenAsync(
+        SttListenArgs args,
+        CancellationToken cancellationToken)
+    {
+        // Defense-in-depth rate-limit: a compromised gateway could otherwise
+        // loop stt.listen at the max 120 s window indefinitely.
+        var now = DateTimeOffset.UtcNow;
+        var sinceLast = now - _lastSttListenStartUtc;
+        if (sinceLast < SttListenMinInterval)
+        {
+            throw new InvalidOperationException("Listen rate limit");
+        }
+        _lastSttListenStartUtc = now;
+
+        if (_voiceService == null)
+            throw new InvalidOperationException("Voice service not available");
+        // See the OnSttTranscribeAsync comment: gate on file presence, not
+        // on the in-memory load state. ListenOnceAsync handles the lazy load.
+        if (!_voiceService.IsModelDownloaded)
+            throw new InvalidOperationException("Whisper model not downloaded");
+
+        var result = await _voiceService.ListenOnceAsync(args, cancellationToken).ConfigureAwait(false);
+        result.EngineEffective = SttCapability.EngineWhisper;
+        return result;
+    }
+
+    private Task<SttStatusResult> OnSttStatusAsync(CancellationToken cancellationToken)
+    {
+        var ready = IsWhisperReady();
+        var readiness = ready ? "ready"
+            : _voiceService == null ? "unavailable"
+            : _voiceService.IsWhisperDownloadingModel ? "model-downloading"
+            : _voiceService.IsModelDownloaded ? "initializing"
+            : "model-not-downloaded";
+
+        return Task.FromResult(new SttStatusResult
+        {
+            Engine = SttCapability.EngineWhisper,
+            Readiness = readiness,
+            ModelDownloadProgress = _voiceService?.WhisperModelDownloadProgress,
+            IsListenWithVadSupported = ready,
+            IsBoundedTranscribeSupported = ready
+        });
+    }
     
     #endregion
     
@@ -1315,6 +1449,7 @@ public sealed class NodeService : IDisposable
         try { _cameraCaptureService?.Dispose(); } catch { /* ignore */ }
         try { _screenRecordingService?.Dispose(); } catch { /* ignore */ }
         try { _textToSpeechService?.Dispose(); } catch { /* ignore */ }
+        try { _voiceService?.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { /* ignore */ }
         // MediaResolver owns SocketsHttpHandler + HttpClient (disposeHandler:true);
         // without disposal the connection pool survives node teardown/recreate.
         try { _mediaResolver?.Dispose(); } catch { /* ignore */ }
