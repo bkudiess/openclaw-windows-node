@@ -1,21 +1,14 @@
 {
-  "last_run": "2026-05-07T12:58:24Z",
-  "last_run_id": "25497143196",
+  "last_run": "2026-05-08T01:11:21Z",
+  "last_run_id": "25530886637",
   "monthly_summary_issue": 254,
   "monthly_summary_month": "2026-05",
   "backlog_cursor": {
     "issues": 283,
-    "prs": 290
+    "prs": 293
   },
   "open_repo_assist_prs": [
-    {"number": 0, "title": "[Repo Assist] fix(security): stop echoing ex.Message into node capability error responses", "branch": "repo-assist/fix-capability-exception-message-leaks-2026-05-07", "note": "PR number unknown — created this run"},
-    {"number": 290, "title": "[Repo Assist] refactor: extract BaseOptions constant in SshTunnelCommandLine", "branch": "repo-assist/improve-ssh-constant-options-2026-05-07"},
-    {"number": 289, "title": "[Repo Assist] perf: vectorize ASCII control/whitespace scan in ExecEnvSanitizer.IsBlocked", "branch": "repo-assist/perf-env-sanitizer-vectorize-2026-05-07"},
-    {"number": 286, "title": "[Repo Assist] perf: pre-compile redaction and UI regexes", "branch": "repo-assist/perf-precompile-redaction-regexes-2026-05-06"},
-    {"number": 282, "title": "[Repo Assist] chore(deps): bump Microsoft.Windows.SDK.BuildTools to 10.0.28000.1839", "branch": "repo-assist/eng-sdk-buildtools-28000-2026-05-06"},
-    {"number": 270, "title": "[Repo Assist] fix(security): handle all PowerShell -EncodedCommand abbreviations", "branch": "repo-assist/fix-ps-encoded-command-abbreviations-2026-05-04"},
-    {"number": 262, "title": "[Repo Assist] feat(mcp): add per-command JSON Schema to tools/list", "branch": "repo-assist/feat-mcp-input-schemas-2026-05-02-c3518e3a54a6ee1b"},
-    {"number": 261, "title": "[Repo Assist] feat: implement ExecApprovalV2PolicyHandler (PR7 coordinator)", "branch": "repo-assist/feat-exec-v2-policy-handler-2026-05-02-577afdafa278a1d6"}
+    {"number": 0, "title": "[Repo Assist] fix(security): stop leaking ex.Message in CanvasCapability and BrowserProxyCapability", "branch": "repo-assist/fix-canvas-proxy-exception-message-leaks-2026-05-08", "note": "PR number unknown — created this run"}
   ],
   "comments_made": {
     "246": {"comment_id": "4408284034", "date": "2026-05-01"},
@@ -27,39 +20,30 @@
     "288": {"date": "2026-05-07", "note": "Review comment: HttpClient anti-pattern, dependency surface, TtsCapability conflict"}
   },
   "fix_attempts": {
-    "capability-ex-message-leaks": {"status": "pr_created", "branch": "repo-assist/fix-capability-exception-message-leaks-2026-05-07", "date": "2026-05-07", "description": "Stop echoing ex.Message into node capability error responses: SystemCapability (exec/policy), CameraCapability, ScreenCapability, LocationCapability. TtsCapability excluded (already fixed by PR #288)."},
-    "perf-env-sanitizer-vectorize": {"status": "pr_created", "pr": 289, "branch": "repo-assist/perf-env-sanitizer-vectorize-2026-05-07", "date": "2026-05-07"},
-    "improve-ssh-constant-options": {"status": "pr_created", "pr": 290, "branch": "repo-assist/improve-ssh-constant-options-2026-05-07", "date": "2026-05-07"},
-    "perf-precompile-regexes": {"status": "pr_created", "pr": 286, "date": "2026-05-06"},
-    "sdk-buildtools-28000": {"status": "pr_created", "pr": 282, "date": "2026-05-06"},
-    "ps-encoded-command-abbreviations": {"status": "pr_created", "pr": 270, "date": "2026-05-04"},
-    "exec-v2-policy-handler": {"status": "pr_created", "pr": 261, "date": "2026-05-02"},
-    "mcp-input-schemas": {"status": "pr_created", "pr": 262, "date": "2026-05-02"}
+    "canvas-proxy-exception-message-leaks": {"status": "pr_created", "branch": "repo-assist/fix-canvas-proxy-exception-message-leaks-2026-05-08", "date": "2026-05-08", "description": "CanvasCapability (navigate, eval, snapshot, a2ui.dump, a2ui.caps) and BrowserProxyCapability (HttpRequestException, JsonException, IOException, UnauthorizedAccessException) ex.Message leaks fixed."},
+    "capability-ex-message-leaks": {"status": "merged", "pr": 291, "branch": "repo-assist/fix-capability-exception-message-leaks-2026-05-07", "date": "2026-05-07"},
+    "perf-env-sanitizer-vectorize": {"status": "merged", "pr": 289, "date": "2026-05-07"},
+    "improve-ssh-constant-options": {"status": "merged", "pr": 290, "date": "2026-05-07"},
+    "perf-precompile-regexes": {"status": "merged", "pr": 286, "date": "2026-05-06"},
+    "sdk-buildtools-28000": {"status": "merged", "pr": 282, "date": "2026-05-06"},
+    "ps-encoded-command-abbreviations": {"status": "merged", "pr": 270, "date": "2026-05-04"},
+    "exec-v2-policy-handler": {"status": "closed_not_merged", "pr": 261, "date": "2026-05-02"},
+    "mcp-input-schemas": {"status": "closed_not_merged", "pr": 262, "date": "2026-05-02"}
   },
   "notes": [
-    "PR #260 (AlexAlves87) all 3 security review findings addressed. Ready for merge.",
-    "PR #261 (Repo Assist) ExecApprovalV2PolicyHandler — awaiting review",
-    "PR #262 (Repo Assist) MCP input schemas — awaiting review",
-    "PR #268 (Dependabot) SDK.BuildTools — superseded by PR #282",
-    "PR #270 (Repo Assist) PowerShell -EncodedCommand abbreviations fix — awaiting review",
-    "PR #282 (Repo Assist) SDK.BuildTools bump — awaiting review",
-    "PR #285 (Copilot) Quick Send fix — draft, closes #283",
-    "PR #286 (Repo Assist) pre-compile regexes — awaiting review",
-    "PR #288 (RBrid) Whisper STT + Piper TTS — reviewed this run; HttpClient concern noted",
-    "PR #289 (Repo Assist) perf: ExecEnvSanitizer vectorize — awaiting review",
-    "PR #290 (Repo Assist) refactor: SshTunnelCommandLine BaseOptions — awaiting review",
-    "PR cap-ex-message-leaks (Repo Assist) — awaiting PR number after this run",
-    "PR #288 also fixes TtsCapability ex.Message leak — will conflict with cap-ex-message-leaks PR on TtsCapability.cs (excluded from our PR to avoid conflict)",
-    "Issue #283 labelled bug this run",
-    "Issue #235 (Dependabot bundle) still open; individual PRs merged; suggest closing",
-    "PR #120 (NichUK Voice Mode): has merge conflicts (dirty); no new activity",
-    "Next V2 exec approval step: wire ExecApprovalV2PolicyHandler in production once PR #260 AND PR #261 are merged",
-    "CanvasCapability still has ex.Message leaks in navigate/eval/snapshot/jsonlPath/dump/caps — deferred for next run"
+    "PR #274 (indierawk2k2) WSL local gateway setup — open, needs review/merge",
+    "PR canvas-proxy-exception-message-leaks (Repo Assist) — awaiting PR number after this run",
+    "Issue #281 comment made May 6 — no new human comments yet",
+    "Issue #191 open as tracker for remaining bridge integration (gateway SPA listener, openclaw/openclaw#69633)",
+    "Issue #235 (Dependabot bundle) still open — suggest closing",
+    "ExecApprovalV2PolicyHandler closed without merge: functionally covered by PR #274 which includes V2 wiring",
+    "MCP input schemas PR #262 closed without merge: likely superseded by PR #274 which includes comprehensive MCP work",
+    "Next engineering candidate: DeviceCapability SafeCollect also has ex.Message in { error = ex.Message } return — lower priority since section-level fallback"
   ],
   "checked_off_by_maintainer": [],
   "test_baseline": {
-    "shared_tests": "exit 0 (1219+ passed, 1 pre-existing fail McpHttpServerTests, 20 skipped)",
-    "tray_tests": "exit 0 (392+ passed, 1 skipped Windows DPAPI)",
+    "shared_tests": "exit 0 (1405 passed, 4 pre-existing failures: ExecApprovalV2Normalization x3 + McpHttpServer x1, 20 skipped)",
+    "tray_tests": "exit 0 (465 passed, 1 skipped Windows DPAPI)",
     "note": "Both test suites run on Linux. build.ps1 requires Windows."
   }
 }
