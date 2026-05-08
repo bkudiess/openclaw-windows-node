@@ -416,6 +416,9 @@
   <data name="Menu_SetupGuide" xml:space="preserve">
     <value>设置指南...</value>
   </data>
+  <data name="Menu_Reconfigure" xml:space="preserve">
+    <value>重新配置…</value>
+  </data>
   <data name="Menu_SupportDebugHeader" xml:space="preserve">
     <value>🧰 支持和调试</value>
   </data>
@@ -1152,9 +1155,6 @@
   <data name="Onboarding_Ready_RemoteInfo" xml:space="preserve">
     <value>请确保您的远程网关正在运行且可以访问。</value>
   </data>
-  <data name="Onboarding_Welcome_GetConnected" xml:space="preserve">
-    <value>只需几步即可完成连接。</value>
-  </data>
   <data name="Onboarding_Connection_SetupCode" xml:space="preserve">
     <value>配置码</value>
   </data>
@@ -1406,6 +1406,72 @@
   </data>
   <data name="Onboarding_Connection_LaterStatus" xml:space="preserve">
     <value>您可以稍后在“设置”中配置网关。</value>
+  </data>
+
+  <data name="Onboarding_SetupWarning_Title" xml:space="preserve">
+    <value>设置 OpenClaw</value>
+  </data>
+  <data name="Onboarding_SetupWarning_Body" xml:space="preserve">
+    <value>OpenClaw 允许代理在此电脑上运行命令、读写文件以及捕获屏幕截图。仅在您信任的计算机上进行设置。
+
+⚠️ 本地设置将安装一个专用于 OpenClaw 的小型 WSL Linux 实例。如果您希望连接到现有或远程网关，请选择“高级设置”。</value>
+  </data>
+  <data name="Onboarding_SetupWarning_SetupLocally" xml:space="preserve">
+    <value>本地设置</value>
+  </data>
+  <data name="Onboarding_SetupWarning_Advanced" xml:space="preserve">
+    <value>高级设置</value>
+  </data>
+  <data name="Onboarding_SetupWarning_ReplaceHeading" xml:space="preserve">
+    <value>⚠️ 替换现有配置？</value>
+  </data>
+  <data name="Onboarding_SetupWarning_ReplaceBody" xml:space="preserve">
+    <value>继续操作将断开与当前网关的连接并丢失所有设置。</value>
+  </data>
+  <data name="Onboarding_SetupWarning_ReplaceConfirm" xml:space="preserve">
+    <value>替换我的设置</value>
+  </data>
+  <data name="Onboarding_SetupWarning_ReplaceCancel" xml:space="preserve">
+    <value>保留我的设置</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Title" xml:space="preserve">
+    <value>正在本地设置</value>
+  </data>
+  <data name="Onboarding_LocalSetup_SubtitleIdle" xml:space="preserve">
+    <value>正在设置您的本地 OpenClaw 网关。</value>
+  </data>
+  <data name="Onboarding_LocalSetup_SubtitleSuccess" xml:space="preserve">
+    <value>本地网关已就绪。</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Retry" xml:space="preserve">
+    <value>重试</value>
+  </data>
+  <data name="Onboarding_LocalSetup_TerminalFailure" xml:space="preserve">
+    <value>设置未完成。</value>
+  </data>
+  <data name="Onboarding_LocalSetup_DiagnosticsHint" xml:space="preserve">
+    <value>诊断：aka.ms/wsllogs</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_Preflight" xml:space="preserve">
+    <value>正在检查系统</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_CreateInstance" xml:space="preserve">
+    <value>正在安装 Ubuntu</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_Configure" xml:space="preserve">
+    <value>正在配置实例</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_InstallCli" xml:space="preserve">
+    <value>正在安装 OpenClaw</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_PrepareConfig" xml:space="preserve">
+    <value>正在准备网关</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_StartGateway" xml:space="preserve">
+    <value>正在启动网关</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_MintToken" xml:space="preserve">
+    <value>正在生成设置代码</value>
   </data>
   <data name="AboutPage_TextBlock_10.Text" xml:space="preserve">
     <value>关于</value>

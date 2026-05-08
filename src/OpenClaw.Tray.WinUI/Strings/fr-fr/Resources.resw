@@ -416,6 +416,9 @@
   <data name="Menu_SetupGuide" xml:space="preserve">
     <value>Guide de configuration...</value>
   </data>
+  <data name="Menu_Reconfigure" xml:space="preserve">
+    <value>Reconfigurer…</value>
+  </data>
   <data name="Menu_SupportDebugHeader" xml:space="preserve">
     <value>🧰 Support et débogage</value>
   </data>
@@ -1152,9 +1155,6 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
   <data name="Onboarding_Ready_RemoteInfo" xml:space="preserve">
     <value>Assurez-vous que votre passerelle distante est en cours d'exécution et accessible.</value>
   </data>
-  <data name="Onboarding_Welcome_GetConnected" xml:space="preserve">
-    <value>Connectons-nous en quelques étapes.</value>
-  </data>
   <data name="Onboarding_Connection_SetupCode" xml:space="preserve">
     <value>Code de configuration</value>
   </data>
@@ -1406,6 +1406,72 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
   </data>
   <data name="Onboarding_Connection_LaterStatus" xml:space="preserve">
     <value>Vous pouvez configurer la passerelle plus tard dans les paramètres.</value>
+  </data>
+
+  <data name="Onboarding_SetupWarning_Title" xml:space="preserve">
+    <value>Configurer OpenClaw</value>
+  </data>
+  <data name="Onboarding_SetupWarning_Body" xml:space="preserve">
+    <value>OpenClaw permet aux agents d'exécuter des commandes, de lire et d'écrire des fichiers, et de capturer des captures d'écran sur ce PC. Ne le configurez que sur un ordinateur de confiance.
+
+⚠️ La configuration locale installe une petite instance WSL Linux dédiée à OpenClaw. Si vous préférez vous connecter à une passerelle existante ou distante, choisissez Configuration avancée.</value>
+  </data>
+  <data name="Onboarding_SetupWarning_SetupLocally" xml:space="preserve">
+    <value>Configurer localement</value>
+  </data>
+  <data name="Onboarding_SetupWarning_Advanced" xml:space="preserve">
+    <value>Configuration avancée</value>
+  </data>
+  <data name="Onboarding_SetupWarning_ReplaceHeading" xml:space="preserve">
+    <value>⚠️ Remplacer la configuration existante ?</value>
+  </data>
+  <data name="Onboarding_SetupWarning_ReplaceBody" xml:space="preserve">
+    <value>Continuer déconnectera de la passerelle actuelle et effacera tous les paramètres.</value>
+  </data>
+  <data name="Onboarding_SetupWarning_ReplaceConfirm" xml:space="preserve">
+    <value>Remplacer ma configuration</value>
+  </data>
+  <data name="Onboarding_SetupWarning_ReplaceCancel" xml:space="preserve">
+    <value>Conserver ma configuration</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Title" xml:space="preserve">
+    <value>Configuration locale en cours</value>
+  </data>
+  <data name="Onboarding_LocalSetup_SubtitleIdle" xml:space="preserve">
+    <value>Configuration de votre passerelle OpenClaw locale.</value>
+  </data>
+  <data name="Onboarding_LocalSetup_SubtitleSuccess" xml:space="preserve">
+    <value>La passerelle locale est prête.</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Retry" xml:space="preserve">
+    <value>Réessayer</value>
+  </data>
+  <data name="Onboarding_LocalSetup_TerminalFailure" xml:space="preserve">
+    <value>La configuration n'a pas abouti.</value>
+  </data>
+  <data name="Onboarding_LocalSetup_DiagnosticsHint" xml:space="preserve">
+    <value>Diagnostics : aka.ms/wsllogs</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_Preflight" xml:space="preserve">
+    <value>Vérification du système</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_CreateInstance" xml:space="preserve">
+    <value>Installation d'Ubuntu</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_Configure" xml:space="preserve">
+    <value>Configuration de l'instance</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_InstallCli" xml:space="preserve">
+    <value>Installation d'OpenClaw</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_PrepareConfig" xml:space="preserve">
+    <value>Préparation de la passerelle</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_StartGateway" xml:space="preserve">
+    <value>Démarrage de la passerelle</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_MintToken" xml:space="preserve">
+    <value>Génération du code de configuration</value>
   </data>
   <data name="AboutPage_TextBlock_10.Text" xml:space="preserve">
     <value>À propos</value>

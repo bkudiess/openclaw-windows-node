@@ -34,6 +34,10 @@ public class WindowsNodeClient : WebSocketClientBase
     // even after OnDisconnected clears _isPendingApproval.
     private volatile bool _pairingBlocked;
     private volatile bool _rateLimited;
+    // Bug 3: source-side idempotency for PairingStatusChanged. HandleHelloOk runs on every
+    // WS reconnect and re-fires PairingStatus.Paired even when nothing changed, causing a
+    // toast storm in the tray UI. Track the last emitted status and only fire on transitions.
+    private PairingStatus? _lastEmittedPairingStatus;
     private readonly string _gatewayToken;
     private readonly string? _bootstrapToken;
     
@@ -61,7 +65,7 @@ public class WindowsNodeClient : WebSocketClientBase
     public bool IsPendingApproval => _isPendingApproval;
     
     /// <summary>True if device is paired via a stored token or an explicit gateway approval event.</summary>
-    public bool IsPaired => _isPaired || !string.IsNullOrEmpty(_deviceIdentity.DeviceToken);
+    public bool IsPaired => _isPaired || !string.IsNullOrEmpty(_deviceIdentity.NodeDeviceToken);
     
     /// <summary>Device ID for display/approval (first 16 chars of full ID)</summary>
     public string ShortDeviceId => _deviceIdentity.DeviceId.Length > 16 
@@ -78,7 +82,7 @@ public class WindowsNodeClient : WebSocketClientBase
     protected override string ClientRole => "node";
     
     public WindowsNodeClient(string gatewayUrl, string token, string dataPath, IOpenClawLogger? logger = null, string? bootstrapToken = null)
-        : base(gatewayUrl, ResolveRequiredCredential(token, bootstrapToken, dataPath), logger)
+        : base(gatewayUrl, ResolveRequiredCredential(token, bootstrapToken, dataPath, logger), logger)
     {
         _gatewayToken = NormalizeOptionalCredential(token);
         _bootstrapToken = NormalizeOptionalCredential(bootstrapToken);
@@ -102,8 +106,14 @@ public class WindowsNodeClient : WebSocketClientBase
         return string.IsNullOrWhiteSpace(credential) ? string.Empty : credential;
     }
 
-    private static string ResolveRequiredCredential(string? token, string? bootstrapToken, string dataPath)
+    private static string ResolveRequiredCredential(string? token, string? bootstrapToken, string dataPath, IOpenClawLogger? logger)
     {
+        var storedNodeToken = TryLoadStoredNodeToken(dataPath, logger);
+        if (!string.IsNullOrEmpty(storedNodeToken))
+        {
+            return storedNodeToken;
+        }
+
         var gatewayToken = NormalizeOptionalCredential(token);
         if (!string.IsNullOrEmpty(gatewayToken))
         {
@@ -116,13 +126,26 @@ public class WindowsNodeClient : WebSocketClientBase
             return bootstrap;
         }
 
-        var storedDeviceToken = DeviceIdentity.TryReadStoredDeviceToken(dataPath);
-        if (!string.IsNullOrEmpty(storedDeviceToken))
-        {
-            return storedDeviceToken;
-        }
-
         throw new ArgumentException("Token or bootstrap token is required.", nameof(token));
+    }
+
+    public static bool HasStoredNodeDeviceToken(string dataPath, IOpenClawLogger? logger = null)
+    {
+        return !string.IsNullOrWhiteSpace(TryLoadStoredNodeToken(dataPath, logger));
+    }
+
+    private static string? TryLoadStoredNodeToken(string dataPath, IOpenClawLogger? logger)
+    {
+        try
+        {
+            var identity = new DeviceIdentity(dataPath, logger);
+            identity.Initialize();
+            return string.IsNullOrWhiteSpace(identity.NodeDeviceToken) ? null : identity.NodeDeviceToken;
+        }
+        catch
+        {
+            return null;
+        }
     }
     
     /// <summary>
@@ -190,7 +213,7 @@ public class WindowsNodeClient : WebSocketClientBase
         try
         {
             // Log raw messages at debug level (visible in dbgview, not in log file noise)
-            _logger.Debug($"[NODE RX] {json}");
+            _logger.Debug($"[NODE RX] {TokenSanitizer.Sanitize(json)}");
             
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
@@ -286,7 +309,7 @@ public class WindowsNodeClient : WebSocketClientBase
 
         _logger.Info($"[NODE] Pairing requested for this device via {eventType}");
         _logger.Info($"To approve, run: openclaw devices approve {_deviceIdentity.DeviceId}");
-        PairingStatusChanged?.Invoke(this, new PairingStatusEventArgs(
+        EmitPairingStatusOnTransition(new PairingStatusEventArgs(
             PairingStatus.Pending,
             _deviceIdentity.DeviceId,
             $"Run: openclaw devices approve {ShortDeviceId}..."));
@@ -318,7 +341,7 @@ public class WindowsNodeClient : WebSocketClientBase
             _pairingBlocked = false; // Allow reconnect after approval
             _pairingApprovedAwaitingReconnect = true;
 
-            PairingStatusChanged?.Invoke(this, new PairingStatusEventArgs(
+            EmitPairingStatusOnTransition(new PairingStatusEventArgs(
                 PairingStatus.Paired,
                 _deviceIdentity.DeviceId,
                 "Pairing approved; reconnecting to refresh node state."));
@@ -334,7 +357,7 @@ public class WindowsNodeClient : WebSocketClientBase
             _isPaired = false;
             _pairingApprovedAwaitingReconnect = false;
 
-            PairingStatusChanged?.Invoke(this, new PairingStatusEventArgs(
+            EmitPairingStatusOnTransition(new PairingStatusEventArgs(
                 PairingStatus.Rejected,
                 _deviceIdentity.DeviceId,
                 null));
@@ -505,7 +528,7 @@ public class WindowsNodeClient : WebSocketClientBase
     
     private async Task SendNodeConnectAsync(string? nonce, long ts)
     {
-        var isPaired = !string.IsNullOrEmpty(_deviceIdentity.DeviceToken);
+        var isPaired = !string.IsNullOrEmpty(_deviceIdentity.NodeDeviceToken);
         var usingBootstrap = !isPaired && !string.IsNullOrEmpty(_bootstrapToken);
 
         _logger.Info($"Connecting with Ed25519 device identity (paired: {isPaired}, bootstrap: {usingBootstrap})");
@@ -575,9 +598,9 @@ public class WindowsNodeClient : WebSocketClientBase
 
     private (Dictionary<string, string> Auth, string TokenForSignature) BuildConnectAuth()
     {
-        if (!string.IsNullOrEmpty(_deviceIdentity.DeviceToken))
+        if (!string.IsNullOrEmpty(_deviceIdentity.NodeDeviceToken))
         {
-            return (new Dictionary<string, string> { ["token"] = _deviceIdentity.DeviceToken }, _deviceIdentity.DeviceToken);
+            return (new Dictionary<string, string> { ["deviceToken"] = _deviceIdentity.NodeDeviceToken }, _deviceIdentity.NodeDeviceToken);
         }
 
         if (!string.IsNullOrEmpty(_bootstrapToken))
@@ -634,8 +657,8 @@ public class WindowsNodeClient : WebSocketClientBase
                     _isPaired = true;
                     _pairingApprovedAwaitingReconnect = false;
                     _logger.Info("Received device token - we are now paired!");
-                    _deviceIdentity.StoreDeviceToken(deviceToken);
-                    PairingStatusChanged?.Invoke(this, new PairingStatusEventArgs(
+                    _deviceIdentity.StoreDeviceTokenForRole("node", deviceToken, TryGetAuthScopes(authPayload));
+                    EmitPairingStatusOnTransition(new PairingStatusEventArgs(
                         PairingStatus.Paired,
                         _deviceIdentity.DeviceId,
                         wasWaiting ? "Pairing approved!" : null));
@@ -648,7 +671,7 @@ public class WindowsNodeClient : WebSocketClientBase
             // Skip this block if we already fired PairingStatusChanged above via gotNewToken.
             if (!gotNewToken)
             {
-                if (string.IsNullOrEmpty(_deviceIdentity.DeviceToken))
+                    if (string.IsNullOrEmpty(_deviceIdentity.NodeDeviceToken))
                 {
                     if (reconnectingAfterApproval)
                     {
@@ -664,7 +687,7 @@ public class WindowsNodeClient : WebSocketClientBase
                         _pairingBlocked = true;
                         _logger.Info("Not yet paired - check 'openclaw devices list' for pending approval");
                         _logger.Info($"To approve, run: openclaw devices approve {_deviceIdentity.DeviceId}");
-                        PairingStatusChanged?.Invoke(this, new PairingStatusEventArgs(
+                        EmitPairingStatusOnTransition(new PairingStatusEventArgs(
                             PairingStatus.Pending, 
                             _deviceIdentity.DeviceId,
                             $"Run: openclaw devices approve {ShortDeviceId}..."));
@@ -676,7 +699,7 @@ public class WindowsNodeClient : WebSocketClientBase
                     _isPaired = true;
                     _pairingApprovedAwaitingReconnect = false;
                     _logger.Info("Already paired with stored device token");
-                    PairingStatusChanged?.Invoke(this, new PairingStatusEventArgs(
+                    EmitPairingStatusOnTransition(new PairingStatusEventArgs(
                         PairingStatus.Paired, 
                         _deviceIdentity.DeviceId));
                 }
@@ -684,6 +707,22 @@ public class WindowsNodeClient : WebSocketClientBase
             
             RaiseStatusChanged(ConnectionStatus.Connected);
         }
+    }
+
+    /// <summary>
+    /// Bug 3: source-side suppression of duplicate PairingStatusChanged events from
+    /// HandleHelloOk on WS reconnects. Only fire when the status differs from the last
+    /// emitted status (or when nothing has been emitted yet).
+    /// </summary>
+    private void EmitPairingStatusOnTransition(PairingStatusEventArgs args)
+    {
+        if (_lastEmittedPairingStatus == args.Status)
+        {
+            _logger.Info($"[NODE] Suppressing duplicate pairing status event: {args.Status} for {args.DeviceId}");
+            return;
+        }
+        _lastEmittedPairingStatus = args.Status;
+        PairingStatusChanged?.Invoke(this, args);
     }
 
     private void HandleRequestError(JsonElement root)
@@ -733,7 +772,7 @@ public class WindowsNodeClient : WebSocketClientBase
                 : $"Run: openclaw devices approve {ShortDeviceId}...";
             _logger.Info($"[NODE] Pairing required for this device; reason={pairingReason ?? "unknown"}, requestId={pairingRequestId ?? "none"}");
             _logger.Info($"To approve, run: openclaw devices approve {_deviceIdentity.DeviceId}");
-            PairingStatusChanged?.Invoke(this, new PairingStatusEventArgs(
+            EmitPairingStatusOnTransition(new PairingStatusEventArgs(
                 PairingStatus.Pending,
                 _deviceIdentity.DeviceId,
                 detail));
@@ -747,12 +786,12 @@ public class WindowsNodeClient : WebSocketClientBase
             error.Contains("token mismatch", StringComparison.OrdinalIgnoreCase))
         {
             _rateLimited = true;
-            _logger.Warn($"[NODE] Terminal auth error; stopping reconnect. Error: {error}");
+            _logger.Warn($"[NODE] Terminal auth error; stopping reconnect. Error: {TokenSanitizer.Sanitize(error)}");
             RaiseStatusChanged(ConnectionStatus.Error);
             return;
         }
 
-        _logger.Error($"Node registration failed: {error} (code: {errorCode})");
+        _logger.Error($"Node registration failed: {TokenSanitizer.Sanitize(error)} (code: {errorCode})");
         RaiseStatusChanged(ConnectionStatus.Error);
     }
 
@@ -799,6 +838,27 @@ public class WindowsNodeClient : WebSocketClientBase
 
         value = prop.GetString();
         return !string.IsNullOrWhiteSpace(value);
+    }
+
+    private static string[]? TryGetAuthScopes(JsonElement authPayload)
+    {
+        if (!authPayload.TryGetProperty("scopes", out var scopes) || scopes.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var values = new List<string>();
+        foreach (var item in scopes.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String)
+            {
+                var value = item.GetString();
+                if (!string.IsNullOrWhiteSpace(value))
+                    values.Add(value);
+            }
+        }
+
+        return values.Count == 0 ? null : values.Distinct(StringComparer.Ordinal).ToArray();
     }
     
     private async Task HandleRequestAsync(JsonElement root)
@@ -951,16 +1011,8 @@ public class WindowsNodeClient : WebSocketClientBase
     }
     
     /// <summary>
-    /// Send a generic node-event to the gateway. Mirrors the Android
-    /// <c>GatewaySession.sendNodeEvent</c> wire shape: a JSON-RPC request with
-    /// method <c>node.event</c> and params <c>{ event, payloadJSON }</c>,
-    /// where <c>payloadJSON</c> is the inner payload as a *string*, not a
-    /// nested object. The gateway's node-event dispatcher
-    /// (<c>server-node-events.ts</c>) then re-parses it.
-    ///
-    /// Returns false when not connected so callers can surface a status to the
-    /// renderer (e.g. clear a button-loading spinner with an error). Throws on
-    /// argument problems but swallows transport-layer errors as false.
+    /// Sends a node.event request with JSON payload.
+    /// Returns false when not connected or when the transport send fails.
     /// </summary>
     public async Task<bool> SendNodeEventAsync(string eventName, System.Text.Json.Nodes.JsonObject payload)
     {
@@ -968,9 +1020,6 @@ public class WindowsNodeClient : WebSocketClientBase
         if (payload is null) throw new ArgumentNullException(nameof(payload));
         if (!_isConnected) return false;
 
-        // payloadJSON is a STRING containing JSON, matching the Android wire
-        // shape and the gateway's parser at server-node-events.ts:380 which
-        // does JSON.parse(evt.payloadJSON).
         var msg = new
         {
             type = "req",

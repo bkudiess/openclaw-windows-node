@@ -416,6 +416,9 @@
   <data name="Menu_SetupGuide" xml:space="preserve">
     <value>Setup Guide...</value>
   </data>
+  <data name="Menu_Reconfigure" xml:space="preserve">
+    <value>Reconfigure…</value>
+  </data>
   <data name="Menu_SupportDebugHeader" xml:space="preserve">
     <value>🧰 Support &amp; Debug</value>
   </data>
@@ -1083,30 +1086,6 @@ On your gateway host (Mac/Linux), run:
   <data name="Onboarding_Finish" xml:space="preserve">
     <value>Finish</value>
   </data>
-  <data name="Onboarding_Welcome_Title" xml:space="preserve">
-    <value>Welcome to OpenClaw</value>
-  </data>
-  <data name="Onboarding_Welcome_Subtitle" xml:space="preserve">
-    <value>Your AI assistant, right from the system tray</value>
-  </data>
-  <data name="Onboarding_Welcome_SecurityTitle" xml:space="preserve">
-    <value>Security Notice</value>
-  </data>
-  <data name="Onboarding_Welcome_SecurityBody" xml:space="preserve">
-    <value>OpenClaw runs an AI agent that can execute commands, read and write files, and interact with your system on your behalf.</value>
-  </data>
-  <data name="Onboarding_Welcome_TrustTitle" xml:space="preserve">
-    <value>Your agent can:</value>
-  </data>
-  <data name="Onboarding_Welcome_Trust_Commands" xml:space="preserve">
-    <value>Run commands on your computer</value>
-  </data>
-  <data name="Onboarding_Welcome_Trust_Files" xml:space="preserve">
-    <value>Read and write files</value>
-  </data>
-  <data name="Onboarding_Welcome_Trust_Screen" xml:space="preserve">
-    <value>Capture screenshots</value>
-  </data>
   <data name="Onboarding_Connection_Title" xml:space="preserve">
     <value>Choose your Gateway</value>
   </data>
@@ -1151,9 +1130,6 @@ On your gateway host (Mac/Linux), run:
   </data>
   <data name="Onboarding_Ready_RemoteInfo" xml:space="preserve">
     <value>Make sure your remote gateway is running and accessible.</value>
-  </data>
-  <data name="Onboarding_Welcome_GetConnected" xml:space="preserve">
-    <value>Let's get you connected in just a few steps.</value>
   </data>
   <data name="Onboarding_Connection_SetupCode" xml:space="preserve">
     <value>Setup Code</value>
@@ -1406,6 +1382,95 @@ On your gateway host (Mac/Linux), run:
   </data>
   <data name="Onboarding_Connection_LaterStatus" xml:space="preserve">
     <value>You can configure the gateway later in Settings.</value>
+  </data>
+  <data name="Onboarding_SetupWarning_Title" xml:space="preserve">
+    <value>Set up OpenClaw</value>
+  </data>
+  <data name="Onboarding_SetupWarning_Body" xml:space="preserve">
+    <value>OpenClaw lets agents run commands, read and write files, and capture screenshots on this PC. Only set it up on a computer you trust.
+
+⚠️ The local setup installs a small WSL Linux instance dedicated to OpenClaw. If you'd rather connect to an existing or remote gateway, choose Advanced setup.</value>
+  </data>
+  <data name="Onboarding_SetupWarning_SetupLocally" xml:space="preserve">
+    <value>Set up locally</value>
+  </data>
+  <data name="Onboarding_SetupWarning_Advanced" xml:space="preserve">
+    <value>Advanced setup</value>
+  </data>
+  <data name="Onboarding_SetupWarning_ReplaceHeading" xml:space="preserve">
+    <value>⚠️ Replace existing configuration?</value>
+  </data>
+  <data name="Onboarding_SetupWarning_ReplaceBody" xml:space="preserve">
+    <value>Moving forward will disconnect from the current gateway and lose all settings.</value>
+  </data>
+  <data name="Onboarding_SetupWarning_ReplaceConfirm" xml:space="preserve">
+    <value>Replace my setup</value>
+  </data>
+  <data name="Onboarding_SetupWarning_ReplaceCancel" xml:space="preserve">
+    <value>Keep my setup</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Title" xml:space="preserve">
+    <value>Setting up locally</value>
+  </data>
+  <data name="Onboarding_LocalSetup_SubtitleIdle" xml:space="preserve">
+    <value>Setting up your local OpenClaw gateway.</value>
+  </data>
+  <data name="Onboarding_LocalSetup_SubtitleSuccess" xml:space="preserve">
+    <value>Local gateway is ready.</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Retry" xml:space="preserve">
+    <value>Try again</value>
+  </data>
+  <data name="Onboarding_LocalSetup_TerminalFailure" xml:space="preserve">
+    <value>Setup did not complete.</value>
+  </data>
+  <data name="Onboarding_LocalSetup_DiagnosticsHint" xml:space="preserve">
+    <value>Diagnostics: aka.ms/wsllogs</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_Preflight" xml:space="preserve">
+    <value>Checking system</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_CreateInstance" xml:space="preserve">
+    <value>Installing Ubuntu</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_Configure" xml:space="preserve">
+    <value>Configuring instance</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_InstallCli" xml:space="preserve">
+    <value>Installing OpenClaw</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_PrepareConfig" xml:space="preserve">
+    <value>Preparing gateway</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_StartGateway" xml:space="preserve">
+    <value>Starting gateway</value>
+  </data>
+  <data name="Onboarding_LocalSetup_Phase_MintToken" xml:space="preserve">
+    <value>Generating setup code</value>
+  </data>
+  <data name="Onboarding_Welcome_Title" xml:space="preserve">
+    <value>Welcome to OpenClaw</value>
+  </data>
+  <data name="Onboarding_Welcome_Subtitle" xml:space="preserve">
+    <value>Your AI assistant, in the system tray</value>
+  </data>
+  <data name="Onboarding_Welcome_SecurityTitle" xml:space="preserve">
+    <value>Security notice</value>
+  </data>
+  <data name="Onboarding_Welcome_SecurityBody" xml:space="preserve">
+    <value>OpenClaw runs an AI agent that can execute commands, read and write files, and interact with your system on your behalf.</value>
+  </data>
+  <data name="Onboarding_Welcome_TrustTitle" xml:space="preserve">
+    <value>Your agent can:</value>
+  </data>
+  <data name="Onboarding_Welcome_Trust_Commands" xml:space="preserve">
+    <value>Run commands on your computer</value>
+  </data>
+  <data name="Onboarding_Welcome_Trust_Files" xml:space="preserve">
+    <value>Read and write files</value>
+  </data>
+  <data name="Onboarding_Welcome_Trust_Screen" xml:space="preserve">
+    <value>Capture screenshots</value>
   </data>
   <data name="AboutPage_TextBlock_10.Text" xml:space="preserve">
     <value>About</value>

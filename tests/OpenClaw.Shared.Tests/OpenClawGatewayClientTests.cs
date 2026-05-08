@@ -14,22 +14,19 @@ public class OpenClawGatewayClientTests
     {
         private readonly OpenClawGatewayClient _client;
 
-        public GatewayClientTestHelper(bool useBootstrapHandoffAuth = false)
+        public GatewayClientTestHelper(bool tokenIsBootstrapToken = false, bool bootstrapPairAsNode = false, string gatewayUrl = "ws://localhost:18789")
         {
             _client = new OpenClawGatewayClient(
-                "ws://localhost:18789",
+                gatewayUrl,
                 "test-token",
                 new TestLogger(),
-                useBootstrapHandoffAuth);
+                tokenIsBootstrapToken,
+                bootstrapPairAsNode);
         }
 
-        public GatewayClientTestHelper(IOpenClawLogger logger, bool useBootstrapHandoffAuth = false)
+        public GatewayClientTestHelper(IOpenClawLogger logger)
         {
-            _client = new OpenClawGatewayClient(
-                "ws://localhost:18789",
-                "test-token",
-                logger,
-                useBootstrapHandoffAuth);
+            _client = new OpenClawGatewayClient("ws://localhost:18789", "test-token", logger);
         }
 
         public string ClassifyNotification(string text)
@@ -74,6 +71,33 @@ public class OpenClawGatewayClientTests
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             method!.Invoke(_client, new object[] { requestId, completion });
             return completion.Task;
+        }
+
+        public Task<JsonElement> RegisterPendingWizardResponse(string requestId)
+        {
+            var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var field = typeof(OpenClawGatewayClient).GetField(
+                "_pendingWizardResponses",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var pending = (System.Collections.Concurrent.ConcurrentDictionary<string, TaskCompletionSource<JsonElement>>)field!.GetValue(_client)!;
+            pending[requestId] = completion;
+            return completion.Task;
+        }
+
+        public void ClearPendingRequests()
+        {
+            var method = typeof(OpenClawGatewayClient).GetMethod(
+                "ClearPendingRequests",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            method!.Invoke(_client, Array.Empty<object>());
+        }
+
+        public void OnDisconnected()
+        {
+            var method = typeof(OpenClawGatewayClient).GetMethod(
+                "OnDisconnected",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            method!.Invoke(_client, Array.Empty<object>());
         }
 
         public void ProcessRawMessage(string json)
@@ -259,10 +283,43 @@ public class OpenClawGatewayClientTests
 
         public string[] GetRequestedOperatorScopes()
         {
+            var role = GetConnectRole();
             var method = typeof(OpenClawGatewayClient).GetMethod(
-                "GetRequestedOperatorScopes",
+                "GetRequestedScopes",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            return (string[])method!.Invoke(_client, null)!;
+            return (string[])method!.Invoke(_client, new object[] { role })!;
+        }
+
+        public string GetConnectRole()
+        {
+            var method = typeof(OpenClawGatewayClient).GetMethod(
+                "GetConnectRole",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            return (string)method!.Invoke(_client, null)!;
+        }
+
+        public string? TryGetHandshakeDeviceToken(string payloadJson, string? preferredRole = null)
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            var method = typeof(OpenClawGatewayClient).GetMethod(
+                "TryGetHandshakeDeviceTokenCore",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static,
+                binder: null,
+                types: [typeof(JsonElement), typeof(string)],
+                modifiers: null);
+            return (string?)method!.Invoke(null, new object?[] { document.RootElement, preferredRole });
+        }
+
+        public string[]? TryGetHandshakeDeviceTokenScopes(string payloadJson, string? preferredRole = null)
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            var method = typeof(OpenClawGatewayClient).GetMethod(
+                "TryGetHandshakeDeviceTokenScopesCore",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static,
+                binder: null,
+                types: [typeof(JsonElement), typeof(string)],
+                modifiers: null);
+            return (string[]?)method!.Invoke(null, new object?[] { document.RootElement, preferredRole });
         }
 
         public Dictionary<string, string> BuildAuthPayload()
@@ -273,7 +330,7 @@ public class OpenClawGatewayClientTests
             return (Dictionary<string, string>)method!.Invoke(_client, null)!;
         }
 
-        public void SetDeviceTokenForTest(string? token)
+        public void SetDeviceTokenForTest(string? token, string[]? scopes = null)
         {
             var identityField = typeof(OpenClawGatewayClient).GetField(
                 "_deviceIdentity",
@@ -283,6 +340,10 @@ public class OpenClawGatewayClientTests
                 "_deviceToken",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
             tokenField!.SetValue(identity, token);
+            var scopesField = identity.GetType().GetField(
+                "_deviceTokenScopes",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            scopesField!.SetValue(identity, scopes);
             SetPrivateField("_connectAuthToken", token ?? "test-token");
         }
 
@@ -307,6 +368,8 @@ public class OpenClawGatewayClientTests
 
         public bool GetPairingRequiredFlag() =>
             GetPrivateField<bool>("_pairingRequiredAwaitingApproval");
+
+        public string? GetPairingRequiredRequestId() => _client.PairingRequiredRequestId;
 
         public string GetSignatureTokenMode()
         {
@@ -338,29 +401,9 @@ public class OpenClawGatewayClientTests
     }
 
     [Fact]
-    public void OperatorConnect_FreshDevice_DefaultPathKeepsLegacyAuthShape()
+    public void OperatorConnect_FreshDevice_RequestsBootstrapHandoffScopes()
     {
-        var helper = new GatewayClientTestHelper();
-        helper.SetDeviceTokenForTest(null);
-
-        var scopes = helper.GetRequestedOperatorScopes();
-        var auth = helper.BuildAuthPayload();
-
-        Assert.Equal(
-            ["operator.admin", "operator.read", "operator.write", "operator.approvals", "operator.pairing"],
-            scopes);
-        Assert.Contains("operator.admin", scopes);
-        Assert.Contains("operator.pairing", scopes);
-        Assert.DoesNotContain("operator.talk.secrets", scopes);
-        Assert.Equal("test-token", auth["token"]);
-        Assert.False(auth.ContainsKey("bootstrapToken"));
-        Assert.False(auth.ContainsKey("deviceToken"));
-    }
-
-    [Fact]
-    public void OperatorConnect_SetupCodeBootstrapPath_RequestsBootstrapHandoffScopes()
-    {
-        var helper = new GatewayClientTestHelper(useBootstrapHandoffAuth: true);
+        var helper = new GatewayClientTestHelper(tokenIsBootstrapToken: true);
         helper.SetDeviceTokenForTest(null);
 
         var scopes = helper.GetRequestedOperatorScopes();
@@ -372,28 +415,58 @@ public class OpenClawGatewayClientTests
         Assert.DoesNotContain("operator.admin", scopes);
         Assert.DoesNotContain("operator.pairing", scopes);
         Assert.Equal("test-token", auth["bootstrapToken"]);
+        Assert.False(auth.ContainsKey("token"));
         Assert.False(auth.ContainsKey("deviceToken"));
     }
 
     [Fact]
-    public void OperatorConnect_SetupCodeBootstrapPath_WithPairedDeviceUsesFullScopesAndDeviceToken()
+    public void OperatorConnect_FreshStandardLocalLoopbackDevice_RequestsFullOperatorScopes()
     {
-        var helper = new GatewayClientTestHelper(useBootstrapHandoffAuth: true);
-        helper.SetDeviceTokenForTest("paired-device-token");
+        var helper = new GatewayClientTestHelper(gatewayUrl: "ws://127.0.0.1:18789");
+        helper.SetDeviceTokenForTest(null);
 
         var scopes = helper.GetRequestedOperatorScopes();
         var auth = helper.BuildAuthPayload();
 
-        Assert.Equal(
-            ["operator.admin", "operator.read", "operator.write", "operator.approvals", "operator.pairing"],
-            scopes);
-        Assert.Equal("paired-device-token", auth["token"]);
-        Assert.Equal("paired-device-token", auth["deviceToken"]);
+        Assert.Contains("operator.admin", scopes);
+        Assert.Contains("operator.pairing", scopes);
+        Assert.Equal("test-token", auth["token"]);
+        Assert.False(auth.ContainsKey("bootstrapToken"));
+        Assert.False(auth.ContainsKey("deviceToken"));
+    }
+
+    [Fact]
+    public void Bug6_SharedSettingsToken_LocalLoopbackFreshOperator_RequestsAdminScopesAndTokenAuth()
+    {
+        var helper = new GatewayClientTestHelper(gatewayUrl: "ws://localhost:18789", tokenIsBootstrapToken: false);
+        helper.SetDeviceTokenForTest(null);
+
+        var scopes = helper.GetRequestedOperatorScopes();
+        var auth = helper.BuildAuthPayload();
+
+        Assert.Contains("operator.admin", scopes);
+        Assert.Contains("operator.pairing", scopes);
+        Assert.Equal("test-token", auth["token"]);
         Assert.False(auth.ContainsKey("bootstrapToken"));
     }
 
     [Fact]
-    public void OperatorConnect_PairedDevice_DefaultPathKeepsLegacyAuthShape()
+    public void OperatorConnect_FreshStandardRemoteDevice_RequestsBootstrapHandoffScopes()
+    {
+        var helper = new GatewayClientTestHelper(gatewayUrl: "ws://gateway.example.com:18789");
+        helper.SetDeviceTokenForTest(null);
+
+        var scopes = helper.GetRequestedOperatorScopes();
+
+        Assert.Equal(
+            ["operator.approvals", "operator.read", "operator.talk.secrets", "operator.write"],
+            scopes);
+        Assert.DoesNotContain("operator.admin", scopes);
+        Assert.DoesNotContain("operator.pairing", scopes);
+    }
+
+    [Fact]
+    public void OperatorConnect_PairedDevice_RequestsFullOperatorScopes()
     {
         var helper = new GatewayClientTestHelper();
         helper.SetDeviceTokenForTest("paired-device-token");
@@ -401,15 +474,73 @@ public class OpenClawGatewayClientTests
         var scopes = helper.GetRequestedOperatorScopes();
         var auth = helper.BuildAuthPayload();
 
-        Assert.Equal(
-            ["operator.admin", "operator.read", "operator.write", "operator.approvals", "operator.pairing"],
-            scopes);
         Assert.Contains("operator.admin", scopes);
         Assert.Contains("operator.pairing", scopes);
         Assert.DoesNotContain("operator.talk.secrets", scopes);
-        Assert.Equal("paired-device-token", auth["token"]);
-        Assert.False(auth.ContainsKey("deviceToken"));
+        Assert.Equal("paired-device-token", auth["deviceToken"]);
+        Assert.False(auth.ContainsKey("token"));
         Assert.False(auth.ContainsKey("bootstrapToken"));
+    }
+
+    [Fact]
+    public void OperatorConnect_PairedDeviceWithStoredScopes_RequestsStoredScopes()
+    {
+        var helper = new GatewayClientTestHelper();
+        helper.SetDeviceTokenForTest(
+            "paired-device-token",
+            ["operator.approvals", "operator.read", "operator.talk.secrets", "operator.write"]);
+
+        var scopes = helper.GetRequestedOperatorScopes();
+
+        Assert.Equal(
+            ["operator.approvals", "operator.read", "operator.talk.secrets", "operator.write"],
+            scopes);
+    }
+
+    [Fact]
+    public void BootstrapNodeHandoff_FreshDevice_RequestsNodeRoleWithoutScopes()
+    {
+        var helper = new GatewayClientTestHelper(tokenIsBootstrapToken: true, bootstrapPairAsNode: true);
+        helper.SetDeviceTokenForTest(null);
+
+        var auth = helper.BuildAuthPayload();
+
+        Assert.Equal("node", helper.GetConnectRole());
+        Assert.Empty(helper.GetRequestedOperatorScopes());
+        Assert.Equal("test-token", auth["bootstrapToken"]);
+        Assert.False(auth.ContainsKey("token"));
+        Assert.False(auth.ContainsKey("deviceToken"));
+    }
+
+    [Fact]
+    public void BootstrapNodeHandoff_PrefersOperatorTokenFromAdditionalDeviceTokens()
+    {
+        var helper = new GatewayClientTestHelper();
+
+        var payload =
+            """
+            {
+              "type": "hello-ok",
+              "auth": {
+                "deviceToken": "node-token",
+                "role": "node",
+                "scopes": [],
+                "deviceTokens": [
+                  {
+                    "deviceToken": "operator-token",
+                    "role": "operator",
+                    "scopes": ["operator.read"]
+                  }
+                ]
+              }
+            }
+            """;
+        var token = helper.TryGetHandshakeDeviceToken(payload, "operator");
+        var scopes = helper.TryGetHandshakeDeviceTokenScopes(payload, "operator");
+
+        Assert.Equal("operator-token", token);
+        Assert.NotNull(scopes);
+        Assert.Equal(["operator.read"], scopes!);
     }
 
     private class TestLogger : IOpenClawLogger
@@ -593,6 +724,31 @@ public class OpenClawGatewayClientTests
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () => await task);
         Assert.Contains("operator.write", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task PendingWizardResponse_ClearPendingRequests_FailsWithOperationCanceledException()
+    {
+        var helper = new GatewayClientTestHelper();
+        var task = helper.RegisterPendingWizardResponse("wizard-1");
+
+        helper.ClearPendingRequests();
+
+        var ex = await Assert.ThrowsAsync<OperationCanceledException>(async () => await task);
+        Assert.Contains("wizard response", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task PendingWizardNext_OnDisconnected_CompletesImmediatelyWithOperationCanceledException()
+    {
+        var helper = new GatewayClientTestHelper();
+        var task = helper.RegisterPendingWizardResponse("wizard-2");
+
+        helper.OnDisconnected();
+
+        var completed = await Task.WhenAny(task, Task.Delay(250));
+        Assert.Same(task, completed);
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await task);
     }
 
         [Fact]
@@ -1629,6 +1785,59 @@ public class OpenClawGatewayClientTests
         """);
 
         Assert.Contains(ConnectionStatus.Error, statusChanges);
+    }
+
+    [Fact]
+    public void HandleRequestError_PairingRequired_StructuredCodeWithoutTextMatch_SetsRequestId()
+    {
+        var helper = new GatewayClientTestHelper();
+        helper.TrackPendingRequest("req-pairing-structured", "connect");
+
+        helper.ProcessRawMessage("""
+        {
+            "type": "res",
+            "id": "req-pairing-structured",
+            "ok": false,
+            "error": {
+                "message": "approval is needed for this device",
+                "details": {
+                    "code": "PAIRING_REQUIRED",
+                    "requestId": "abc-123"
+                }
+            }
+        }
+        """);
+
+        Assert.True(helper.GetPairingRequiredFlag());
+        Assert.Equal("abc-123", helper.GetPairingRequiredRequestId());
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"code\":\"PAIRING_REQUIRED\"}")]
+    [InlineData("{\"code\":\"PAIRING_REQUIRED\",\"requestId\":\"\"}")]
+    [InlineData("{\"code\":\"PAIRING_REQUIRED\",\"requestId\":\"  \"}")]
+    [InlineData("{\"code\":\"PAIRING_REQUIRED\",\"requestId\":\"-bad\"}")]
+    [InlineData("{\"code\":\"PAIRING_REQUIRED\",\"requestId\":\"bad/id\"}")]
+    public void HandleRequestError_PairingRequired_MissingOrMalformedRequestId_FailsClosedWithNullRequestId(string detailsJson)
+    {
+        var helper = new GatewayClientTestHelper();
+        helper.TrackPendingRequest("req-pairing-malformed", "connect");
+
+        helper.ProcessRawMessage($$"""
+        {
+            "type": "res",
+            "id": "req-pairing-malformed",
+            "ok": false,
+            "error": {
+                "message": "pairing required for this device",
+                "details": {{detailsJson}}
+            }
+        }
+        """);
+
+        Assert.True(helper.GetPairingRequiredFlag());
+        Assert.Null(helper.GetPairingRequiredRequestId());
     }
 
     // --- HandleRequestError: device signature invalid ---

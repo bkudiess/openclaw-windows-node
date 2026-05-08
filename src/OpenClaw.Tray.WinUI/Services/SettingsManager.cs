@@ -15,16 +15,13 @@ public class SettingsManager
 {
     // OPENCLAW_TRAY_DATA_DIR overrides both this and App.DataPath so an isolated test
     // instance can run alongside the user's real tray without clobbering settings.
-    private static readonly string DefaultSettingsDirectory = GetDefaultSettingsDirectory();
-    private static readonly string DefaultSettingsFilePath = Path.Combine(DefaultSettingsDirectory, "settings.json");
-
     private readonly string _settingsDirectory;
     private readonly string _settingsFilePath;
     private const string ProtectedSecretPrefix = "dpapi:";
     private static readonly byte[] ProtectedSecretEntropy = Encoding.UTF8.GetBytes("OpenClawTray.Settings.v1");
 
-    public static string SettingsDirectoryPath => DefaultSettingsDirectory;
-    public static string SettingsPath => DefaultSettingsFilePath;
+    public static string SettingsDirectoryPath => GetDefaultSettingsDirectory();
+    public static string SettingsPath => Path.Combine(SettingsDirectoryPath, "settings.json");
 
     /// <summary>Raised after settings are persisted to disk.</summary>
     public event EventHandler? Saved;
@@ -42,8 +39,13 @@ public class SettingsManager
     public int SshTunnelLocalPort { get; set; } = 18789;
 
     // Startup
-    public bool AutoStart { get; set; } = false;
+    public bool AutoStart { get; set; } = true;
     public bool GlobalHotkeyEnabled { get; set; } = true;
+    /// <summary>
+    /// One-shot gate: set to true after the post-onboarding "first-run" bootstrap
+    /// kickoff message has been injected into the chat exactly once.
+    /// </summary>
+    public bool HasInjectedFirstRunBootstrap { get; set; } = false;
 
     // Notifications
     public bool ShowNotifications { get; set; } = true;
@@ -107,7 +109,7 @@ public class SettingsManager
     public string SkippedUpdateTag { get; set; } = "";
     public string? PreferredGatewayId { get; set; }
 
-    public SettingsManager() : this(DefaultSettingsDirectory)
+    public SettingsManager() : this(GetDefaultSettingsDirectory())
     {
     }
 
@@ -150,6 +152,7 @@ public class SettingsManager
                     SshTunnelLocalPort = loaded.SshTunnelLocalPort <= 0 ? SshTunnelLocalPort : loaded.SshTunnelLocalPort;
                     AutoStart = loaded.AutoStart;
                     GlobalHotkeyEnabled = loaded.GlobalHotkeyEnabled;
+                    HasInjectedFirstRunBootstrap = loaded.HasInjectedFirstRunBootstrap;
                     ShowNotifications = loaded.ShowNotifications;
                     NotificationSound = loaded.NotificationSound ?? NotificationSound;
                     NotifyHealth = loaded.NotifyHealth;
@@ -237,6 +240,7 @@ public class SettingsManager
                     SshTunnelLocalPort = SshTunnelLocalPort,
                     AutoStart = AutoStart,
                     GlobalHotkeyEnabled = GlobalHotkeyEnabled,
+                    HasInjectedFirstRunBootstrap = HasInjectedFirstRunBootstrap,
                     ShowNotifications = ShowNotifications,
                     NotificationSound = NotificationSound,
                     NotifyHealth = NotifyHealth,
