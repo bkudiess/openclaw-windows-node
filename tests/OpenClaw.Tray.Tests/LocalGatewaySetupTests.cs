@@ -673,11 +673,15 @@ public class LocalGatewaySetupTests
     }
 
     [Fact]
-    public async Task Engine_RunLocalOnly_PublishesInitializingState_BeforeAnyWslCall()
+    public async Task Engine_RunLocalOnly_FirstStateChangedShowsPreflightActive_BeforeAnyWslCall()
     {
-        // At least one StateChanged event must fire BEFORE the first wsl
-        // invocation, so the page never has a blank-bullet window during the
-        // observed ~60s cold-start hang of HasDistroAsync.
+        // The first StateChanged event must fire BEFORE the first wsl invocation
+        // AND must already report Phase=Preflight, Status=Running. If the engine
+        // published with Phase=NotStarted (or just a UserMessage subtitle change)
+        // the page would render no spinner — the user sees a blank window for
+        // the entire ~60s cold-start of HasDistroAsync. The page's stage map only
+        // marks a bullet active when state.Phase falls inside the stage's phase
+        // range, so this is the right contract.
         using var temp = new TempDirectory();
         var wsl = new CallSequenceRecordingFakeWsl();
         var provisioning = new FakeProvisioner();
@@ -697,16 +701,142 @@ public class LocalGatewaySetupTests
             gatewayServiceManager: new FakeGatewayServiceManager());
 
         int firstEventWslCommandCount = -1;
-        engine.StateChanged += _ =>
+        LocalGatewaySetupPhase firstEventPhase = LocalGatewaySetupPhase.NotStarted;
+        LocalGatewaySetupStatus firstEventStatus = LocalGatewaySetupStatus.Pending;
+        engine.StateChanged += s =>
         {
             if (firstEventWslCommandCount == -1)
+            {
                 firstEventWslCommandCount = wsl.Commands.Count;
+                firstEventPhase = s.Phase;
+                firstEventStatus = s.Status;
+            }
         };
 
         await engine.RunLocalOnlyAsync();
 
         Assert.True(firstEventWslCommandCount >= 0, "Expected at least one StateChanged event.");
         Assert.Equal(0, firstEventWslCommandCount); // First StateChanged must precede first wsl call.
+        Assert.Equal(LocalGatewaySetupPhase.Preflight, firstEventPhase);
+        Assert.Equal(LocalGatewaySetupStatus.Running, firstEventStatus);
+    }
+
+    [Fact]
+    public async Task Engine_RunLocalOnly_DoesNotAddDuplicatePreflightHistoryEntries()
+    {
+        // The pre-StartPhase(Preflight) call before HasDistroAsync used to
+        // produce a duplicate History entry (one from the engine's own
+        // pre-publish, one from RunPhaseAsync's StartPhase) for the same
+        // logical Preflight boundary. RunPhaseAsync now skips its
+        // StartPhase when the phase is already running for the same phase,
+        // so History should contain exactly one Preflight entry per run.
+        using var temp = new TempDirectory();
+        var wsl = new FakeWslCommandRunner();
+        var provisioning = new FakeProvisioner();
+        var engine = new LocalGatewaySetupEngine(
+            new LocalGatewaySetupOptions { InstanceInstallLocation = System.IO.Path.Combine(temp.Path, "OpenClawGateway") },
+            new LocalGatewaySetupStateStore(System.IO.Path.Combine(temp.Path, "setup-state.json")),
+            new LocalGatewayPreflightProbe(wsl, new FixedPortProbe(available: true)),
+            wsl,
+            new SuccessfulHealthProbe(),
+            provisioning,
+            provisioning,
+            provisioning,
+            wslInstanceInstaller: new WslStoreInstanceInstaller(wsl, createDirectory: _ => { }),
+            wslInstanceConfigurator: new FakeWslInstanceConfigurator(),
+            openClawLinuxInstaller: new FakeOpenClawLinuxInstaller(),
+            gatewayConfigurationPreparer: new FakeGatewayConfigurationPreparer(),
+            gatewayServiceManager: new FakeGatewayServiceManager());
+
+        var state = await engine.RunLocalOnlyAsync();
+
+        var preflightEntries = state.History.Count(h => h.Phase == LocalGatewaySetupPhase.Preflight);
+        Assert.Equal(1, preflightEntries);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // PhaseFailureHints — when a setup phase blocks, the Block message is
+    // augmented with phase-specific "things to try" guidance so the user
+    // doesn't have to guess (regression observed 2026-05-08 where a user
+    // enabled Hyper-V unnecessarily before realising a reboot was the fix).
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void PhaseFailureHints_CreateWslInstance_MentionsRestart()
+    {
+        var hint = PhaseFailureHints.HintFor(LocalGatewaySetupPhase.CreateWslInstance);
+        Assert.NotNull(hint);
+        Assert.Contains("restart", hint, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Virtual Machine Platform", hint);
+    }
+
+    [Fact]
+    public void PhaseFailureHints_ConfigureWslInstance_MentionsRestart()
+    {
+        var hint = PhaseFailureHints.HintFor(LocalGatewaySetupPhase.ConfigureWslInstance);
+        Assert.NotNull(hint);
+        Assert.Contains("restart", hint, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PhaseFailureHints_InstallOpenClawCli_MentionsInternet()
+    {
+        var hint = PhaseFailureHints.HintFor(LocalGatewaySetupPhase.InstallOpenClawCli);
+        Assert.NotNull(hint);
+        Assert.Contains("internet", hint, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PhaseFailureHints_StartGateway_MentionsWslShutdown()
+    {
+        var hint = PhaseFailureHints.HintFor(LocalGatewaySetupPhase.StartGateway);
+        Assert.NotNull(hint);
+        Assert.Contains("wsl --shutdown", hint, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(LocalGatewaySetupPhase.NotStarted)]
+    [InlineData(LocalGatewaySetupPhase.Preflight)]
+    [InlineData(LocalGatewaySetupPhase.EnsureWslEnabled)]
+    [InlineData(LocalGatewaySetupPhase.MintBootstrapToken)]
+    [InlineData(LocalGatewaySetupPhase.PairOperator)]
+    [InlineData(LocalGatewaySetupPhase.Complete)]
+    [InlineData(LocalGatewaySetupPhase.Failed)]
+    public void PhaseFailureHints_PhasesWithoutSpecificGuidance_ReturnsNull(LocalGatewaySetupPhase phase)
+    {
+        // Preflight has its own classifier (ClassifyWslStatusFailure) that
+        // already produces specific messages; we don't double-up on hints.
+        // Phases past PairOperator are loopback-internal and rarely user-fixable.
+        Assert.Null(PhaseFailureHints.HintFor(phase));
+    }
+
+    [Fact]
+    public void PhaseFailureHints_Augment_AppendsHintToBaseMessage()
+    {
+        var augmented = PhaseFailureHints.Augment(
+            LocalGatewaySetupPhase.CreateWslInstance,
+            "Failed to create the OpenClaw Gateway WSL instance.");
+
+        Assert.StartsWith("Failed to create the OpenClaw Gateway WSL instance.", augmented);
+        Assert.Contains("Things to try:", augmented);
+    }
+
+    [Fact]
+    public void PhaseFailureHints_Augment_LeavesBaseMessage_WhenNoHintApplies()
+    {
+        var augmented = PhaseFailureHints.Augment(
+            LocalGatewaySetupPhase.PairOperator,
+            "Some operator-pairing failure.");
+
+        Assert.Equal("Some operator-pairing failure.", augmented);
+    }
+
+    [Fact]
+    public void PhaseFailureHints_Augment_HandlesEmptyBaseMessage()
+    {
+        var augmented = PhaseFailureHints.Augment(LocalGatewaySetupPhase.CreateWslInstance, "");
+        Assert.Contains("Things to try:", augmented);
+        Assert.DoesNotContain("\n\nThings to try:", augmented); // No leading double newline.
     }
 
     [Fact]

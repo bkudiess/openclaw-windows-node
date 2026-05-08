@@ -1494,6 +1494,82 @@ public static class WslDistroKeepAlive
     }
 }
 
+/// <summary>
+/// Builds context-aware "things to try" hints for setup-phase failures.
+/// Without these hints, all post-Preflight phase failures collapse to a
+/// single generic message that doesn't tell the user what to try next.
+/// The most common cause for stages 2-3 (CreateWslInstance,
+/// ConfigureWslInstance) on a fresh install is a pending OS reboot after
+/// `wsl --install --no-distribution` — the relevant kernel/feature changes
+/// don't take effect until restart. Surfacing that hint up front saves the
+/// user from blind guessing (regression observed 2026-05-08 where a user
+/// enabled Hyper-V unnecessarily before realising a reboot was the fix).
+/// </summary>
+public static class PhaseFailureHints
+{
+    /// <summary>
+    /// Returns the augmented user-facing message for the given failed phase.
+    /// The base message (typically the upstream component's error) is
+    /// preserved verbatim and the hint is appended on its own line.
+    /// </summary>
+    public static string Augment(LocalGatewaySetupPhase phase, string baseMessage)
+    {
+        var hint = HintFor(phase);
+        if (string.IsNullOrEmpty(hint))
+            return baseMessage;
+
+        if (string.IsNullOrWhiteSpace(baseMessage))
+            return hint;
+
+        return baseMessage.TrimEnd() + Environment.NewLine + Environment.NewLine + hint;
+    }
+
+    /// <summary>
+    /// Phase-specific "things to try" hint, or null when no specific
+    /// guidance applies. Public for test coverage.
+    /// </summary>
+    public static string? HintFor(LocalGatewaySetupPhase phase) => phase switch
+    {
+        LocalGatewaySetupPhase.CreateWslInstance =>
+            "Things to try: " +
+            "(1) If you recently enabled WSL or Virtual Machine Platform, " +
+            "restart your PC and try again — the new feature isn't fully " +
+            "active until reboot. " +
+            "(2) Check that no other tool is creating a WSL distro at the same time. " +
+            "(3) See aka.ms/wsllogs for WSL-side diagnostics.",
+
+        LocalGatewaySetupPhase.ConfigureWslInstance =>
+            "Things to try: " +
+            "(1) If you just installed Ubuntu, restart your PC and try again — " +
+            "systemd inside WSL needs a reboot before user services work reliably. " +
+            "(2) See aka.ms/wsllogs for WSL-side diagnostics.",
+
+        LocalGatewaySetupPhase.InstallOpenClawCli =>
+            "Things to try: " +
+            "(1) Check that this PC has internet access; this step downloads " +
+            "OpenClaw from openclaw.ai/install-cli.sh. " +
+            "(2) If a corporate proxy is in the way, you may need to configure " +
+            "WSL's network. (3) Try again in a moment.",
+
+        LocalGatewaySetupPhase.PrepareGatewayConfig
+            or LocalGatewaySetupPhase.InstallGatewayService =>
+            "Things to try: " +
+            "(1) If you recently enabled WSL or restarted your PC, try again. " +
+            "(2) Run \"wsl --shutdown\" from an elevated PowerShell to reset " +
+            "WSL state, then click Try again.",
+
+        LocalGatewaySetupPhase.StartGateway
+            or LocalGatewaySetupPhase.WaitForGateway =>
+            "Things to try: " +
+            "(1) Run \"wsl --shutdown\" from an elevated PowerShell to reset " +
+            "WSL state, then click Try again. " +
+            "(2) Check that no other process is listening on the gateway port " +
+            "(default 18789).",
+
+        _ => null
+    };
+}
+
 public enum GatewayOperatorConnectionStatus
 {
     Connected,
@@ -2592,19 +2668,23 @@ public sealed class LocalGatewaySetupEngine
             state.UpdatedAtUtc = DateTimeOffset.UtcNow;
         }
 
-        // Publish an "Initializing setup…" event before any wsl invocation.
-        // HasDistroAsync below has been observed to take ~60s on cold start
-        // (descendant pipe-handle issue documented at WslExeCommandRunner.RunProcessAsync);
-        // without this initial publish the page would render blank pending
-        // bullets for the entire duration.
-        state.UserMessage ??= "Initializing setup…";
-        state.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        // Publish a StartPhase(Preflight) event before any wsl invocation so
+        // the page renders the first stage (“Checking system”) as active —
+        // not as a generic blank-bullet "Initializing…" subtitle. HasDistroAsync
+        // below has been observed to take ~60s on cold start (descendant
+        // pipe-handle issue documented at WslExeCommandRunner.RunProcessAsync);
+        // without this initial transition the page would render no spinner for
+        // the entire duration. We capture the loaded phase first so resume
+        // hints (IsCreateOrLater + AllowExistingDistro) still see prior
+        // progress for retries that hit CreateWslInstance or later.
+        var loadedPhaseForResumeHint = state.Phase;
+        state.StartPhase(LocalGatewaySetupPhase.Preflight, "Checking your PC");
         await SaveAndPublishAsync(state, cancellationToken);
 
         try
         {
             var distroExists = await HasDistroAsync(cancellationToken);
-            var resumingAfterInstanceStarted = IsCreateOrLater(state.Phase) && distroExists;
+            var resumingAfterInstanceStarted = IsCreateOrLater(loadedPhaseForResumeHint) && distroExists;
             var preflightOptions = _options with { AllowExistingDistro = _options.AllowExistingDistro || resumingAfterInstanceStarted };
 
             await RunPhaseAsync(state, LocalGatewaySetupPhase.Preflight, "Checking your PC", async () =>
@@ -2653,7 +2733,10 @@ public sealed class LocalGatewaySetupEngine
                     var detail = string.Join(Environment.NewLine, result.Warnings ?? Array.Empty<string>());
                     if (!string.IsNullOrWhiteSpace(detail))
                         _logger.Warn($"WSL instance install diagnostics: {SecretRedactor.Redact(detail)}");
-                    state.Block(result.ErrorCode ?? "wsl_instance_install_failed", result.ErrorMessage ?? "Failed to create the OpenClaw Gateway WSL instance.", retryable: true, detail: detail);
+                    var msg = PhaseFailureHints.Augment(
+                        LocalGatewaySetupPhase.CreateWslInstance,
+                        result.ErrorMessage ?? "Failed to create the OpenClaw Gateway WSL instance.");
+                    state.Block(result.ErrorCode ?? "wsl_instance_install_failed", msg, retryable: true, detail: detail);
                     return false;
                 }
 
@@ -2668,7 +2751,10 @@ public sealed class LocalGatewaySetupEngine
                 var result = await _wslInstanceConfigurator.ConfigureAsync(_options, cancellationToken);
                 if (!result.Success)
                 {
-                    state.Block(result.ErrorCode ?? "wsl_instance_config_failed", result.ErrorMessage ?? "Failed to configure the OpenClaw Gateway WSL instance.", retryable: true);
+                    var msg = PhaseFailureHints.Augment(
+                        LocalGatewaySetupPhase.ConfigureWslInstance,
+                        result.ErrorMessage ?? "Failed to configure the OpenClaw Gateway WSL instance.");
+                    state.Block(result.ErrorCode ?? "wsl_instance_config_failed", msg, retryable: true);
                     return false;
                 }
 
@@ -2685,7 +2771,10 @@ public sealed class LocalGatewaySetupEngine
                 {
                     if (!string.IsNullOrWhiteSpace(result.Detail))
                         _logger.Warn($"OpenClaw Linux installer diagnostics: {SecretRedactor.Redact(result.Detail)}");
-                    state.Block(result.ErrorCode ?? "openclaw_linux_install_failed", result.ErrorMessage ?? "The upstream OpenClaw Linux installer failed.", retryable: true, detail: result.Detail);
+                    var msg = PhaseFailureHints.Augment(
+                        LocalGatewaySetupPhase.InstallOpenClawCli,
+                        result.ErrorMessage ?? "The upstream OpenClaw Linux installer failed.");
+                    state.Block(result.ErrorCode ?? "openclaw_linux_install_failed", msg, retryable: true, detail: result.Detail);
                     return false;
                 }
 
@@ -2709,7 +2798,10 @@ public sealed class LocalGatewaySetupEngine
                 {
                     if (!string.IsNullOrWhiteSpace(result.Detail))
                         _logger.Warn($"Gateway configuration diagnostics: {SecretRedactor.Redact(result.Detail)}");
-                    state.Block(result.ErrorCode ?? "gateway_config_prepare_failed", result.ErrorMessage ?? "Failed to prepare OpenClaw Gateway configuration.", retryable: true, detail: result.Detail);
+                    var msg = PhaseFailureHints.Augment(
+                        LocalGatewaySetupPhase.PrepareGatewayConfig,
+                        result.ErrorMessage ?? "Failed to prepare OpenClaw Gateway configuration.");
+                    state.Block(result.ErrorCode ?? "gateway_config_prepare_failed", msg, retryable: true, detail: result.Detail);
                     return false;
                 }
 
@@ -2723,7 +2815,10 @@ public sealed class LocalGatewaySetupEngine
                 {
                     if (!string.IsNullOrWhiteSpace(result.Detail))
                         _logger.Warn($"Gateway service install diagnostics: {SecretRedactor.Redact(result.Detail)}");
-                    state.Block(result.ErrorCode ?? "gateway_service_install_failed", result.ErrorMessage ?? "Failed to install the OpenClaw Gateway service.", retryable: true, detail: result.Detail);
+                    var msg = PhaseFailureHints.Augment(
+                        LocalGatewaySetupPhase.InstallGatewayService,
+                        result.ErrorMessage ?? "Failed to install the OpenClaw Gateway service.");
+                    state.Block(result.ErrorCode ?? "gateway_service_install_failed", msg, retryable: true, detail: result.Detail);
                     return false;
                 }
 
@@ -2737,7 +2832,10 @@ public sealed class LocalGatewaySetupEngine
                 var result = await _endpointResolver.ResolveAsync(_options, state.GatewayUrl, _healthProbe, _wsl, cancellationToken);
                 if (!result.Success)
                 {
-                    state.Block("gateway_unhealthy", result.Error ?? WslLogsHelp("Gateway did not become healthy."), retryable: true);
+                    var msg = PhaseFailureHints.Augment(
+                        LocalGatewaySetupPhase.WaitForGateway,
+                        result.Error ?? WslLogsHelp("Gateway did not become healthy."));
+                    state.Block("gateway_unhealthy", msg, retryable: true);
                     return false;
                 }
 
@@ -2813,7 +2911,10 @@ public sealed class LocalGatewaySetupEngine
             {
                 if (!string.IsNullOrWhiteSpace(result.Detail))
                     _logger.Warn($"Gateway service start diagnostics: {SecretRedactor.Redact(result.Detail)}");
-                state.Block(result.ErrorCode ?? "gateway_service_start_failed", result.ErrorMessage ?? WslLogsHelp("Failed to start OpenClaw Gateway."), retryable: true, detail: result.Detail);
+                var msg = PhaseFailureHints.Augment(
+                    LocalGatewaySetupPhase.StartGateway,
+                    result.ErrorMessage ?? WslLogsHelp("Failed to start OpenClaw Gateway."));
+                state.Block(result.ErrorCode ?? "gateway_service_start_failed", msg, retryable: true, detail: result.Detail);
                 return false;
             }
 
@@ -2842,8 +2943,17 @@ public sealed class LocalGatewaySetupEngine
         if (state.Status is not LocalGatewaySetupStatus.Pending and not LocalGatewaySetupStatus.Running)
             return;
 
-        state.StartPhase(phase, message);
-        await SaveAndPublishAsync(state, cancellationToken);
+        // Skip the StartPhase + publish when the caller has already pre-started
+        // the same phase (e.g. RunLocalOnlyAsync transitions the state into
+        // Preflight before HasDistroAsync so the UI shows a spinner during
+        // that potentially-slow probe). Without this guard a duplicate
+        // History entry would be added for the same phase boundary.
+        if (state.Phase != phase || state.Status != LocalGatewaySetupStatus.Running)
+        {
+            state.StartPhase(phase, message);
+            await SaveAndPublishAsync(state, cancellationToken);
+        }
+
         bool completed;
         try
         {
