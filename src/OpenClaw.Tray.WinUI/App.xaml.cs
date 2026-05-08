@@ -371,6 +371,27 @@ public partial class App : Application
             useSshTunnel = _settings.UseSshTunnel
         });
 
+        // Re-arm the WSL distro keepalive on day-2 launches. WslDistroKeepAlive
+        // is otherwise only started during the wizard's StartGateway phase, so
+        // any tray restart after a successful local install would lose the
+        // keepalive child and let WSL idle the distro out — taking the gateway
+        // service with it (regression observed 2026-05-08). Calling
+        // EnsureStarted here is idempotent (existence check + lock) and a no-op
+        // for non-local installs because the policy gates on IsLocalOnly +
+        // matching gateway URL.
+        try
+        {
+            var setupState = await new LocalGatewaySetupStateStore().LoadAsync();
+            if (LocalGatewayKeepAlivePolicy.ShouldKeepAliveOnStartup(setupState, _settings.GetEffectiveGatewayUrl()))
+            {
+                WslDistroKeepAlive.EnsureStarted(setupState!.DistroName, new AppLogger());
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[startup] WSL keepalive re-arm skipped: {ex.Message}");
+        }
+
         // Register URI scheme on first run
         DeepLinkHandler.RegisterUriScheme();
 

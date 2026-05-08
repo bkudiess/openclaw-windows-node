@@ -81,6 +81,140 @@ public class LocalGatewaySetupTests
         Assert.True(config.AllowExistingDistro);
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // LocalGatewayKeepAlivePolicy — decides whether to re-arm the WSL
+    // distro keepalive on tray startup. The keepalive is otherwise only
+    // armed during the wizard's StartGateway phase, so any tray restart
+    // after a successful local install would lose the keepalive child and
+    // let WSL idle the distro out (regression observed 2026-05-08).
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void KeepAlivePolicy_ReturnsFalse_WhenStateIsNull()
+    {
+        // No setup-state.json on disk (fresh install, never ran the wizard).
+        Assert.False(LocalGatewayKeepAlivePolicy.ShouldKeepAliveOnStartup(null, "ws://localhost:18789"));
+    }
+
+    [Fact]
+    public void KeepAlivePolicy_ReturnsFalse_WhenStatusIsNotComplete()
+    {
+        // Wizard ran but didn't finish — gateway service is not actually up.
+        var state = new LocalGatewaySetupState
+        {
+            Status = LocalGatewaySetupStatus.FailedRetryable,
+            IsLocalOnly = true,
+            DistroName = "OpenClawGateway",
+            GatewayUrl = "ws://localhost:18789"
+        };
+        Assert.False(LocalGatewayKeepAlivePolicy.ShouldKeepAliveOnStartup(state, "ws://localhost:18789"));
+    }
+
+    [Fact]
+    public void KeepAlivePolicy_ReturnsFalse_WhenStatusIsRunning()
+    {
+        // Wizard mid-flight — engine is about to call EnsureStarted itself.
+        var state = new LocalGatewaySetupState
+        {
+            Status = LocalGatewaySetupStatus.Running,
+            IsLocalOnly = true,
+            DistroName = "OpenClawGateway",
+            GatewayUrl = "ws://localhost:18789"
+        };
+        Assert.False(LocalGatewayKeepAlivePolicy.ShouldKeepAliveOnStartup(state, "ws://localhost:18789"));
+    }
+
+    [Fact]
+    public void KeepAlivePolicy_ReturnsFalse_WhenIsLocalOnlyIsFalse()
+    {
+        // The setup completed in non-local-only mode (paired against an
+        // existing remote gateway). Nothing to keep alive locally.
+        var state = new LocalGatewaySetupState
+        {
+            Status = LocalGatewaySetupStatus.Complete,
+            IsLocalOnly = false,
+            DistroName = "OpenClawGateway",
+            GatewayUrl = "ws://localhost:18789"
+        };
+        Assert.False(LocalGatewayKeepAlivePolicy.ShouldKeepAliveOnStartup(state, "ws://localhost:18789"));
+    }
+
+    [Fact]
+    public void KeepAlivePolicy_ReturnsFalse_WhenDistroNameIsEmpty()
+    {
+        // Defensive guard — EnsureStarted itself ignores empty distro names but
+        // we don't even want to attempt the call.
+        var state = new LocalGatewaySetupState
+        {
+            Status = LocalGatewaySetupStatus.Complete,
+            IsLocalOnly = true,
+            DistroName = "",
+            GatewayUrl = "ws://localhost:18789"
+        };
+        Assert.False(LocalGatewayKeepAlivePolicy.ShouldKeepAliveOnStartup(state, "ws://localhost:18789"));
+    }
+
+    [Fact]
+    public void KeepAlivePolicy_ReturnsFalse_WhenEffectiveGatewayUrlDiffersFromState()
+    {
+        // User reconfigured the tray to point at a remote gateway after a prior
+        // local install. setup-state.json still reads Complete + IsLocalOnly,
+        // but settings now resolve to a different gateway. Don't keep an
+        // unused WSL distro spinning.
+        var state = new LocalGatewaySetupState
+        {
+            Status = LocalGatewaySetupStatus.Complete,
+            IsLocalOnly = true,
+            DistroName = "OpenClawGateway",
+            GatewayUrl = "ws://localhost:18789"
+        };
+        Assert.False(LocalGatewayKeepAlivePolicy.ShouldKeepAliveOnStartup(state, "wss://my-remote-gateway.example.com"));
+    }
+
+    [Fact]
+    public void KeepAlivePolicy_ReturnsFalse_WhenEffectiveGatewayUrlIsEmpty()
+    {
+        // Settings hasn't resolved to a URL yet (first-run state). We can't
+        // safely conclude the user is still on the local install.
+        var state = new LocalGatewaySetupState
+        {
+            Status = LocalGatewaySetupStatus.Complete,
+            IsLocalOnly = true,
+            DistroName = "OpenClawGateway",
+            GatewayUrl = "ws://localhost:18789"
+        };
+        Assert.False(LocalGatewayKeepAlivePolicy.ShouldKeepAliveOnStartup(state, ""));
+        Assert.False(LocalGatewayKeepAlivePolicy.ShouldKeepAliveOnStartup(state, null));
+    }
+
+    [Fact]
+    public void KeepAlivePolicy_ReturnsTrue_WhenStateCompleteAndUrlMatches()
+    {
+        var state = new LocalGatewaySetupState
+        {
+            Status = LocalGatewaySetupStatus.Complete,
+            IsLocalOnly = true,
+            DistroName = "OpenClawGateway",
+            GatewayUrl = "ws://localhost:18789"
+        };
+        Assert.True(LocalGatewayKeepAlivePolicy.ShouldKeepAliveOnStartup(state, "ws://localhost:18789"));
+    }
+
+    [Fact]
+    public void KeepAlivePolicy_UrlMatch_IsCaseInsensitive_AndIgnoresWhitespace()
+    {
+        // GetEffectiveGatewayUrl can apply minor normalization; we compare
+        // resilient to that without doing full URL parsing here.
+        var state = new LocalGatewaySetupState
+        {
+            Status = LocalGatewaySetupStatus.Complete,
+            IsLocalOnly = true,
+            DistroName = "OpenClawGateway",
+            GatewayUrl = "ws://localhost:18789"
+        };
+        Assert.True(LocalGatewayKeepAlivePolicy.ShouldKeepAliveOnStartup(state, "  WS://LOCALHOST:18789  "));
+    }
+
     [Fact]
     public async Task Preflight_BlocksExistingOpenClawDistro()
     {

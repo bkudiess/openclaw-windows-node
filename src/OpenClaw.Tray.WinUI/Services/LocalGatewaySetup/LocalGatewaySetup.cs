@@ -1436,6 +1436,52 @@ public static class WslDistroKeepAlive
     }
 }
 
+/// <summary>
+/// Decides whether <see cref="WslDistroKeepAlive"/> should be re-armed at tray
+/// startup. <see cref="WslDistroKeepAlive.EnsureStarted"/> is otherwise only
+/// called once during the wizard's <c>StartGateway</c> phase, so any tray
+/// restart after a successful local install loses the keepalive child and
+/// WSL idles the distro out — taking the gateway service with it
+/// (regression observed 2026-05-08).
+/// </summary>
+public static class LocalGatewayKeepAlivePolicy
+{
+    /// <summary>
+    /// Returns true when the persisted setup state shows a completed local-only
+    /// install AND the current effective gateway URL still matches the one the
+    /// wizard configured. The gateway-URL match guards against the case where
+    /// the user kept the state file but reconfigured the tray to point at a
+    /// remote gateway — we don't want to keep an unused WSL distro spinning
+    /// in that case.
+    /// </summary>
+    /// <param name="state">The persisted <see cref="LocalGatewaySetupState"/>,
+    /// or null if no setup-state.json exists.</param>
+    /// <param name="effectiveGatewayUrl">The current effective gateway URL
+    /// from settings (after SSH-tunnel resolution).</param>
+    public static bool ShouldKeepAliveOnStartup(
+        LocalGatewaySetupState? state,
+        string? effectiveGatewayUrl)
+    {
+        if (state is null)
+            return false;
+        if (state.Status != LocalGatewaySetupStatus.Complete)
+            return false;
+        if (!state.IsLocalOnly)
+            return false;
+        if (string.IsNullOrWhiteSpace(state.DistroName))
+            return false;
+        if (string.IsNullOrWhiteSpace(state.GatewayUrl))
+            return false;
+        if (string.IsNullOrWhiteSpace(effectiveGatewayUrl))
+            return false;
+
+        return string.Equals(
+            effectiveGatewayUrl.Trim(),
+            state.GatewayUrl.Trim(),
+            StringComparison.OrdinalIgnoreCase);
+    }
+}
+
 public enum GatewayOperatorConnectionStatus
 {
     Connected,
