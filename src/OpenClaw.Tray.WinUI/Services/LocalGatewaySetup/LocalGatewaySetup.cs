@@ -588,7 +588,16 @@ public sealed class LocalGatewayPreflightProbe : ILocalGatewayPreflightProbe
         var wslStatus = await _wsl.RunAsync(["--status"], cancellationToken);
         if (!wslStatus.Success)
         {
-            issues.Add(new LocalGatewaySetupIssue("wsl_unavailable", WslLogsHelp("WSL is not available or is blocked by policy."), LocalGatewaySetupSeverity.Blocking));
+            // Layered detection of common WSL failure modes. The English-text matching
+            // is brittle (Microsoft does change these strings between WSL versions);
+            // we always include redacted raw stdout/stderr in Detail so failures are
+            // diagnosable from the persisted state file even when the matcher misses.
+            var (code, message) = ClassifyWslStatusFailure(wslStatus);
+            issues.Add(new LocalGatewaySetupIssue(
+                code,
+                message,
+                LocalGatewaySetupSeverity.Blocking,
+                Detail: DiagnosticFormatter.Build("wsl_status", wslStatus)));
         }
         else
         {
@@ -643,6 +652,55 @@ public sealed class LocalGatewayPreflightProbe : ILocalGatewayPreflightProbe
     private static string WslLogsHelp(string message) => message + " If WSL diagnostics are needed, follow aka.ms/wsllogs.";
 
     private static string ShellQuote(string value) => "'" + value.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
+
+    /// <summary>
+    /// Classifies a non-zero <c>wsl --status</c> result into a specific failure code
+    /// and an actionable user message. The detection is layered:
+    /// <list type="number">
+    ///   <item>If the output mentions virtualization being disabled, emit
+    ///   <c>wsl_virtualization_disabled</c> (the canonical Microsoft remediation
+    ///   page is aka.ms/enablevirtualization, which covers BOTH the firmware
+    ///   virtualization toggle and the Virtual Machine Platform Windows feature).</item>
+    ///   <item>Else if the output explicitly calls out the Virtual Machine
+    ///   Platform component, emit <c>wsl_vm_platform_missing</c> with the exact
+    ///   command the user needs to run.</item>
+    ///   <item>Otherwise fall back to the generic <c>wsl_unavailable</c>.</item>
+    /// </list>
+    /// English-text matching is fragile (Microsoft has changed these strings
+    /// between WSL versions). Callers are responsible for attaching the redacted
+    /// raw output as <c>LocalGatewaySetupIssue.Detail</c> so support can still
+    /// classify failures we don't yet recognize. Future work: replace the
+    /// English-text matcher with structured detection (HRESULT / exit-code
+    /// mapping) once Microsoft exposes one.
+    /// </summary>
+    internal static (string Code, string Message) ClassifyWslStatusFailure(WslCommandResult wslStatus)
+    {
+        var combined = (wslStatus.StandardOutput ?? string.Empty) + "\n" + (wslStatus.StandardError ?? string.Empty);
+        if (combined.Contains("virtualization is not enabled", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("aka.ms/enablevirtualization", StringComparison.OrdinalIgnoreCase))
+        {
+            return (
+                "wsl_virtualization_disabled",
+                "WSL2 cannot start because virtualization is unavailable. " +
+                "Open an elevated PowerShell and run \"wsl --install --no-distribution\", " +
+                "then restart your PC. If virtualization is disabled in your firmware " +
+                "(BIOS/UEFI), enable it and reboot. " +
+                "For details: https://aka.ms/enablevirtualization");
+        }
+
+        if (combined.Contains("Virtual Machine Platform", StringComparison.OrdinalIgnoreCase))
+        {
+            return (
+                "wsl_vm_platform_missing",
+                "The \"Virtual Machine Platform\" Windows feature is not enabled. " +
+                "Open an elevated PowerShell and run \"wsl --install --no-distribution\", " +
+                "then restart your PC.");
+        }
+
+        return (
+            "wsl_unavailable",
+            WslLogsHelp("WSL is not available or is blocked by policy."));
+    }
 }
 
 public sealed record WslInstanceInstallResult(
@@ -2510,177 +2568,240 @@ public sealed class LocalGatewaySetupEngine
         var state = await _stateStore.LoadAsync(cancellationToken) ?? LocalGatewaySetupState.Create(_options);
         state.DistroName = _options.DistroName;
         state.GatewayUrl = LocalGatewayEndpointResolver.BuildLoopbackGatewayUrl(_options);
-        var distroExists = await HasDistroAsync(cancellationToken);
-        var resumingAfterInstanceStarted = IsCreateOrLater(state.Phase) && distroExists;
-        var preflightOptions = _options with { AllowExistingDistro = _options.AllowExistingDistro || resumingAfterInstanceStarted };
 
-        await RunPhaseAsync(state, LocalGatewaySetupPhase.Preflight, "Checking your PC", async () =>
+        // Reset terminal-but-recoverable statuses so a fresh wizard mount actually
+        // re-runs the phases instead of silently returning. Without this reset,
+        // every RunPhaseAsync below early-exits because of the
+        // `Status is not Pending and not Running` gate, and no StateChanged event
+        // fires — the page sits on empty pending bullets forever (regression
+        // observed 2026-05-08 with a stale FailedTerminal in setup-state.json).
+        // History and Phase are intentionally preserved so resume hints
+        // (IsCreateOrLater, AllowExistingDistro) keep working.
+        // Statuses NOT reset here: RequiresAdmin, RequiresRestart, Blocked,
+        // Complete — those have legitimate "needs user action / already done"
+        // semantics that a silent reset would mask.
+        if (state.Status is LocalGatewaySetupStatus.FailedTerminal
+                          or LocalGatewaySetupStatus.FailedRetryable
+                          or LocalGatewaySetupStatus.Cancelled)
         {
-            var result = await _preflight.RunAsync(preflightOptions, cancellationToken);
-            state.Issues = result.Issues.ToList();
-            if (!result.CanContinue)
-            {
-                state.Block("preflight_blocked", "This PC is not ready for local WSL gateway setup.");
-                return false;
-            }
+            _logger.Info($"[LocalGatewaySetup] Resetting stale persisted status {state.Status} → Pending for fresh wizard run.");
+            state.Status = LocalGatewaySetupStatus.Pending;
+            state.FailureCode = null;
+            state.UserMessage = null;
+            state.Issues = new List<LocalGatewaySetupIssue>();
+            state.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        }
 
-            if (result.RequiresRestart)
-            {
-                state.Status = LocalGatewaySetupStatus.RequiresRestart;
-                state.UserMessage = "Restart required before OpenClaw local gateway setup can continue.";
-                return false;
-            }
+        // Publish an "Initializing setup…" event before any wsl invocation.
+        // HasDistroAsync below has been observed to take ~60s on cold start
+        // (descendant pipe-handle issue documented at WslExeCommandRunner.RunProcessAsync);
+        // without this initial publish the page would render blank pending
+        // bullets for the entire duration.
+        state.UserMessage ??= "Initializing setup…";
+        state.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        await SaveAndPublishAsync(state, cancellationToken);
 
-            if (result.RequiresAdmin)
-            {
-                state.Status = LocalGatewaySetupStatus.RequiresAdmin;
-                state.UserMessage = "Administrator approval is required before setup can continue.";
-                return false;
-            }
-
-            return true;
-        }, cancellationToken);
-
-        await RunPhaseAsync(state, LocalGatewaySetupPhase.EnsureWslEnabled, "Checking WSL support", () => Task.FromResult(state.Status == LocalGatewaySetupStatus.Running), cancellationToken);
-
-        await RunPhaseAsync(state, LocalGatewaySetupPhase.CreateWslInstance, "Creating OpenClaw Gateway WSL instance", async () =>
+        try
         {
-            var installOptions = _options with { AllowExistingDistro = _options.AllowExistingDistro || resumingAfterInstanceStarted };
-            var result = await _wslInstanceInstaller.EnsureInstalledAsync(installOptions, cancellationToken);
-            if (!result.Success)
+            var distroExists = await HasDistroAsync(cancellationToken);
+            var resumingAfterInstanceStarted = IsCreateOrLater(state.Phase) && distroExists;
+            var preflightOptions = _options with { AllowExistingDistro = _options.AllowExistingDistro || resumingAfterInstanceStarted };
+
+            await RunPhaseAsync(state, LocalGatewaySetupPhase.Preflight, "Checking your PC", async () =>
             {
-                var detail = string.Join(Environment.NewLine, result.Warnings ?? Array.Empty<string>());
-                if (!string.IsNullOrWhiteSpace(detail))
-                    _logger.Warn($"WSL instance install diagnostics: {SecretRedactor.Redact(detail)}");
-                state.Block(result.ErrorCode ?? "wsl_instance_install_failed", result.ErrorMessage ?? "Failed to create the OpenClaw Gateway WSL instance.", retryable: true, detail: detail);
-                return false;
-            }
-
-            foreach (var warning in result.Warnings ?? Array.Empty<string>())
-                _logger.Warn($"WSL instance install warning: {SecretRedactor.Redact(warning)}");
-
-            return true;
-        }, cancellationToken);
-
-        await RunPhaseAsync(state, LocalGatewaySetupPhase.ConfigureWslInstance, "Configuring OpenClaw Gateway WSL instance", async () =>
-        {
-            var result = await _wslInstanceConfigurator.ConfigureAsync(_options, cancellationToken);
-            if (!result.Success)
-            {
-                state.Block(result.ErrorCode ?? "wsl_instance_config_failed", result.ErrorMessage ?? "Failed to configure the OpenClaw Gateway WSL instance.", retryable: true);
-                return false;
-            }
-
-            foreach (var warning in result.Warnings ?? Array.Empty<string>())
-                _logger.Warn($"WSL instance configuration warning: {SecretRedactor.Redact(warning)}");
-
-            return true;
-        }, cancellationToken);
-
-        await RunPhaseAsync(state, LocalGatewaySetupPhase.InstallOpenClawCli, "Installing OpenClaw inside WSL", async () =>
-        {
-            var result = await _openClawLinuxInstaller.InstallAsync(_options, cancellationToken);
-            if (!result.Success)
-            {
-                if (!string.IsNullOrWhiteSpace(result.Detail))
-                    _logger.Warn($"OpenClaw Linux installer diagnostics: {SecretRedactor.Redact(result.Detail)}");
-                state.Block(result.ErrorCode ?? "openclaw_linux_install_failed", result.ErrorMessage ?? "The upstream OpenClaw Linux installer failed.", retryable: true, detail: result.Detail);
-                return false;
-            }
-
-            return true;
-        }, cancellationToken);
-
-        await RunPhaseAsync(state, LocalGatewaySetupPhase.PrepareGatewayConfig, "Preparing OpenClaw Gateway configuration", async () =>
-        {
-            SharedGatewayProvisioningResult result;
-            if (_sharedGatewayTokenProvisioner is null)
-            {
-                var prepared = await _gatewayConfigurationPreparer.PrepareAsync(_options, string.Empty, cancellationToken);
-                result = new SharedGatewayProvisioningResult(prepared.Success, ErrorCode: prepared.ErrorCode, ErrorMessage: prepared.ErrorMessage, Detail: prepared.Detail);
-            }
-            else
-            {
-                result = await _sharedGatewayTokenProvisioner.ProvisionAsync(state, _options, cancellationToken);
-            }
-
-            if (!result.Success)
-            {
-                if (!string.IsNullOrWhiteSpace(result.Detail))
-                    _logger.Warn($"Gateway configuration diagnostics: {SecretRedactor.Redact(result.Detail)}");
-                state.Block(result.ErrorCode ?? "gateway_config_prepare_failed", result.ErrorMessage ?? "Failed to prepare OpenClaw Gateway configuration.", retryable: true, detail: result.Detail);
-                return false;
-            }
-
-            return true;
-        }, cancellationToken);
-
-        await RunPhaseAsync(state, LocalGatewaySetupPhase.InstallGatewayService, "Installing OpenClaw Gateway service", async () =>
-        {
-            var result = await _gatewayServiceManager.InstallAsync(_options, cancellationToken);
-            if (!result.Success)
-            {
-                if (!string.IsNullOrWhiteSpace(result.Detail))
-                    _logger.Warn($"Gateway service install diagnostics: {SecretRedactor.Redact(result.Detail)}");
-                state.Block(result.ErrorCode ?? "gateway_service_install_failed", result.ErrorMessage ?? "Failed to install the OpenClaw Gateway service.", retryable: true, detail: result.Detail);
-                return false;
-            }
-
-            return true;
-        }, cancellationToken);
-
-        await RunGatewayCliStartPhaseAsync(state, cancellationToken);
-
-        await RunPhaseAsync(state, LocalGatewaySetupPhase.WaitForGateway, "Waiting for OpenClaw Gateway", async () =>
-        {
-            var result = await _endpointResolver.ResolveAsync(_options, state.GatewayUrl, _healthProbe, _wsl, cancellationToken);
-            if (!result.Success)
-            {
-                state.Block("gateway_unhealthy", result.Error ?? WslLogsHelp("Gateway did not become healthy."), retryable: true);
-                return false;
-            }
-
-            state.GatewayUrl = result.GatewayUrl;
-            return true;
-        }, cancellationToken);
-
-        await RunProvisioningPhaseAsync(state, LocalGatewaySetupPhase.MintBootstrapToken, "Generating setup code", () => _bootstrapTokenProvisioner.MintAsync(state, cancellationToken), cancellationToken);
-        await RunProvisioningPhaseAsync(state, LocalGatewaySetupPhase.PairOperator, "Pairing tray operator", () => _operatorPairing.PairAsync(state, cancellationToken), cancellationToken);
-
-        if (_options.EnableWindowsTrayNodeByDefault)
-        {
-            await RunProvisioningPhaseAsync(state, LocalGatewaySetupPhase.CheckWindowsNodeReadiness, "Checking Windows node readiness", () => _windowsTrayNode.CheckReadinessAsync(state, cancellationToken), cancellationToken);
-            // Bug #2 (manual test 2026-05-05): bracket the Phase 14 node-role PairAsync
-            // exactly. The loopback gateway emits a transient PairingStatus.Pending event
-            // before our pending-approver auto-approves; App.OnPairingStatusChanged
-            // observes IsAutoPairingWindowsNode==true via this flag and suppresses the
-            // "copy pairing command" toast for that blip only. Scope is the await above
-            // the Pending event source (WindowsNodeClient → NodeService is synchronous on
-            // HandleRequestError), so try/finally around the await is race-safe.
-            await RunProvisioningPhaseAsync(state, LocalGatewaySetupPhase.PairWindowsTrayNode, "Pairing Windows tray node", async () =>
-            {
-                System.Threading.Interlocked.Exchange(ref _isAutoPairingWindowsNode, 1);
-                try
+                var result = await _preflight.RunAsync(preflightOptions, cancellationToken);
+                state.Issues = result.Issues.ToList();
+                if (!result.CanContinue)
                 {
-                    return await _windowsTrayNode.PairAsync(state, cancellationToken);
+                    // Propagate the most-specific blocking issue's message into
+                    // UserMessage so the page (which renders UserMessage, not
+                    // Issues) actually surfaces actionable text — e.g. the
+                    // wsl_virtualization_disabled link to aka.ms/enablevirtualization
+                    // — instead of the generic "This PC is not ready" string.
+                    var blockingIssue = result.Issues.FirstOrDefault(i => i.Severity == LocalGatewaySetupSeverity.Blocking);
+                    var blockMessage = blockingIssue?.Message ?? "This PC is not ready for local WSL gateway setup.";
+                    var blockCode = blockingIssue?.Code ?? "preflight_blocked";
+                    state.Block(blockCode, blockMessage, retryable: true, detail: blockingIssue?.Detail);
+                    return false;
                 }
-                finally
+
+                if (result.RequiresRestart)
                 {
-                    System.Threading.Interlocked.Exchange(ref _isAutoPairingWindowsNode, 0);
+                    state.Status = LocalGatewaySetupStatus.RequiresRestart;
+                    state.UserMessage = "Restart required before OpenClaw local gateway setup can continue.";
+                    return false;
                 }
+
+                if (result.RequiresAdmin)
+                {
+                    state.Status = LocalGatewaySetupStatus.RequiresAdmin;
+                    state.UserMessage = "Administrator approval is required before setup can continue.";
+                    return false;
+                }
+
+                return true;
             }, cancellationToken);
+
+            await RunPhaseAsync(state, LocalGatewaySetupPhase.EnsureWslEnabled, "Checking WSL support", () => Task.FromResult(state.Status == LocalGatewaySetupStatus.Running), cancellationToken);
+
+            await RunPhaseAsync(state, LocalGatewaySetupPhase.CreateWslInstance, "Creating OpenClaw Gateway WSL instance", async () =>
+            {
+                var installOptions = _options with { AllowExistingDistro = _options.AllowExistingDistro || resumingAfterInstanceStarted };
+                var result = await _wslInstanceInstaller.EnsureInstalledAsync(installOptions, cancellationToken);
+                if (!result.Success)
+                {
+                    var detail = string.Join(Environment.NewLine, result.Warnings ?? Array.Empty<string>());
+                    if (!string.IsNullOrWhiteSpace(detail))
+                        _logger.Warn($"WSL instance install diagnostics: {SecretRedactor.Redact(detail)}");
+                    state.Block(result.ErrorCode ?? "wsl_instance_install_failed", result.ErrorMessage ?? "Failed to create the OpenClaw Gateway WSL instance.", retryable: true, detail: detail);
+                    return false;
+                }
+
+                foreach (var warning in result.Warnings ?? Array.Empty<string>())
+                    _logger.Warn($"WSL instance install warning: {SecretRedactor.Redact(warning)}");
+
+                return true;
+            }, cancellationToken);
+
+            await RunPhaseAsync(state, LocalGatewaySetupPhase.ConfigureWslInstance, "Configuring OpenClaw Gateway WSL instance", async () =>
+            {
+                var result = await _wslInstanceConfigurator.ConfigureAsync(_options, cancellationToken);
+                if (!result.Success)
+                {
+                    state.Block(result.ErrorCode ?? "wsl_instance_config_failed", result.ErrorMessage ?? "Failed to configure the OpenClaw Gateway WSL instance.", retryable: true);
+                    return false;
+                }
+
+                foreach (var warning in result.Warnings ?? Array.Empty<string>())
+                    _logger.Warn($"WSL instance configuration warning: {SecretRedactor.Redact(warning)}");
+
+                return true;
+            }, cancellationToken);
+
+            await RunPhaseAsync(state, LocalGatewaySetupPhase.InstallOpenClawCli, "Installing OpenClaw inside WSL", async () =>
+            {
+                var result = await _openClawLinuxInstaller.InstallAsync(_options, cancellationToken);
+                if (!result.Success)
+                {
+                    if (!string.IsNullOrWhiteSpace(result.Detail))
+                        _logger.Warn($"OpenClaw Linux installer diagnostics: {SecretRedactor.Redact(result.Detail)}");
+                    state.Block(result.ErrorCode ?? "openclaw_linux_install_failed", result.ErrorMessage ?? "The upstream OpenClaw Linux installer failed.", retryable: true, detail: result.Detail);
+                    return false;
+                }
+
+                return true;
+            }, cancellationToken);
+
+            await RunPhaseAsync(state, LocalGatewaySetupPhase.PrepareGatewayConfig, "Preparing OpenClaw Gateway configuration", async () =>
+            {
+                SharedGatewayProvisioningResult result;
+                if (_sharedGatewayTokenProvisioner is null)
+                {
+                    var prepared = await _gatewayConfigurationPreparer.PrepareAsync(_options, string.Empty, cancellationToken);
+                    result = new SharedGatewayProvisioningResult(prepared.Success, ErrorCode: prepared.ErrorCode, ErrorMessage: prepared.ErrorMessage, Detail: prepared.Detail);
+                }
+                else
+                {
+                    result = await _sharedGatewayTokenProvisioner.ProvisionAsync(state, _options, cancellationToken);
+                }
+
+                if (!result.Success)
+                {
+                    if (!string.IsNullOrWhiteSpace(result.Detail))
+                        _logger.Warn($"Gateway configuration diagnostics: {SecretRedactor.Redact(result.Detail)}");
+                    state.Block(result.ErrorCode ?? "gateway_config_prepare_failed", result.ErrorMessage ?? "Failed to prepare OpenClaw Gateway configuration.", retryable: true, detail: result.Detail);
+                    return false;
+                }
+
+                return true;
+            }, cancellationToken);
+
+            await RunPhaseAsync(state, LocalGatewaySetupPhase.InstallGatewayService, "Installing OpenClaw Gateway service", async () =>
+            {
+                var result = await _gatewayServiceManager.InstallAsync(_options, cancellationToken);
+                if (!result.Success)
+                {
+                    if (!string.IsNullOrWhiteSpace(result.Detail))
+                        _logger.Warn($"Gateway service install diagnostics: {SecretRedactor.Redact(result.Detail)}");
+                    state.Block(result.ErrorCode ?? "gateway_service_install_failed", result.ErrorMessage ?? "Failed to install the OpenClaw Gateway service.", retryable: true, detail: result.Detail);
+                    return false;
+                }
+
+                return true;
+            }, cancellationToken);
+
+            await RunGatewayCliStartPhaseAsync(state, cancellationToken);
+
+            await RunPhaseAsync(state, LocalGatewaySetupPhase.WaitForGateway, "Waiting for OpenClaw Gateway", async () =>
+            {
+                var result = await _endpointResolver.ResolveAsync(_options, state.GatewayUrl, _healthProbe, _wsl, cancellationToken);
+                if (!result.Success)
+                {
+                    state.Block("gateway_unhealthy", result.Error ?? WslLogsHelp("Gateway did not become healthy."), retryable: true);
+                    return false;
+                }
+
+                state.GatewayUrl = result.GatewayUrl;
+                return true;
+            }, cancellationToken);
+
+            await RunProvisioningPhaseAsync(state, LocalGatewaySetupPhase.MintBootstrapToken, "Generating setup code", () => _bootstrapTokenProvisioner.MintAsync(state, cancellationToken), cancellationToken);
+            await RunProvisioningPhaseAsync(state, LocalGatewaySetupPhase.PairOperator, "Pairing tray operator", () => _operatorPairing.PairAsync(state, cancellationToken), cancellationToken);
+
+            if (_options.EnableWindowsTrayNodeByDefault)
+            {
+                await RunProvisioningPhaseAsync(state, LocalGatewaySetupPhase.CheckWindowsNodeReadiness, "Checking Windows node readiness", () => _windowsTrayNode.CheckReadinessAsync(state, cancellationToken), cancellationToken);
+                // Bug #2 (manual test 2026-05-05): bracket the Phase 14 node-role PairAsync
+                // exactly. The loopback gateway emits a transient PairingStatus.Pending event
+                // before our pending-approver auto-approves; App.OnPairingStatusChanged
+                // observes IsAutoPairingWindowsNode==true via this flag and suppresses the
+                // "copy pairing command" toast for that blip only. Scope is the await above
+                // the Pending event source (WindowsNodeClient → NodeService is synchronous on
+                // HandleRequestError), so try/finally around the await is race-safe.
+                await RunProvisioningPhaseAsync(state, LocalGatewaySetupPhase.PairWindowsTrayNode, "Pairing Windows tray node", async () =>
+                {
+                    System.Threading.Interlocked.Exchange(ref _isAutoPairingWindowsNode, 1);
+                    try
+                    {
+                        return await _windowsTrayNode.PairAsync(state, cancellationToken);
+                    }
+                    finally
+                    {
+                        System.Threading.Interlocked.Exchange(ref _isAutoPairingWindowsNode, 0);
+                    }
+                }, cancellationToken);
+            }
+
+            await RunPhaseAsync(state, LocalGatewaySetupPhase.VerifyEndToEnd, "Verifying local gateway", () => Task.FromResult(state.Status == LocalGatewaySetupStatus.Running), cancellationToken);
+
+            if (state.Status == LocalGatewaySetupStatus.Running)
+            {
+                state.IsLocalOnly = true;
+                state.CompletePhase(LocalGatewaySetupPhase.Complete, "Local OpenClaw gateway is ready.");
+                await SaveAndPublishAsync(state, cancellationToken);
+            }
+
+            return state;
         }
-
-        await RunPhaseAsync(state, LocalGatewaySetupPhase.VerifyEndToEnd, "Verifying local gateway", () => Task.FromResult(state.Status == LocalGatewaySetupStatus.Running), cancellationToken);
-
-        if (state.Status == LocalGatewaySetupStatus.Running)
+        finally
         {
-            state.IsLocalOnly = true;
-            state.CompletePhase(LocalGatewaySetupPhase.Complete, "Local OpenClaw gateway is ready.");
-            await SaveAndPublishAsync(state, cancellationToken);
+            // Defense-in-depth: ensure at least one StateChanged event fires
+            // even if a non-RunPhaseAsync await above throws or the outer
+            // cancellation token is cancelled mid-flight. RunPhaseAsync
+            // already publishes on its own exception path, but the inter-phase
+            // code (e.g. HasDistroAsync, IsCreateOrLater computation) is not
+            // guarded — this finally closes that gap. We pass CancellationToken.None
+            // because the caller's token may already be cancelled and we still
+            // want to persist the terminal state for the next wizard mount.
+            try
+            {
+                await SaveAndPublishAsync(state, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"[LocalGatewaySetup] Final state publish failed: {ex.Message}");
+            }
         }
-
-        return state;
     }
 
     private async Task RunGatewayCliStartPhaseAsync(LocalGatewaySetupState state, CancellationToken cancellationToken)

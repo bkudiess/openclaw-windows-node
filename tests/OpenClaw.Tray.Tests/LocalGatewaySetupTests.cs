@@ -464,9 +464,404 @@ public class LocalGatewaySetupTests
 
         var state = await engine.RunLocalOnlyAsync();
 
-        Assert.Equal(LocalGatewaySetupStatus.FailedTerminal, state.Status);
-        Assert.Equal("preflight_blocked", state.FailureCode);
+        // Preflight emits a single Blocking issue (distro_exists, since AllowExistingDistro
+        // defaults to false). Engine now propagates that issue's code/message into
+        // state.FailureCode/UserMessage instead of the generic "preflight_blocked"/
+        // "This PC is not ready" pair, so retry surfaces actionable text. Block is
+        // marked retryable so the page renders a Try Again button — preflight failures
+        // are inherently fixable (free up the port, remove the existing distro, etc.)
+        // rather than terminal.
+        Assert.Equal(LocalGatewaySetupStatus.FailedRetryable, state.Status);
+        Assert.Equal("distro_exists", state.FailureCode);
+        Assert.Contains("OpenClawGateway", state.UserMessage);
         Assert.DoesNotContain(wsl.Commands, command => command.Count > 0 && command[0] == "--install");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Setup-engine progress-visibility tests:
+    //   - Stale Failed*/Cancelled state is reset on fresh RunLocalOnlyAsync,
+    //     so a prior failure never silently no-ops the next attempt.
+    //   - At least one StateChanged event fires before any wsl invocation,
+    //     and at least one fires before the method returns on every code path.
+    //   - Preflight blocks propagate the most-specific issue's message into
+    //     state.UserMessage so the page surfaces actionable text.
+    //   - wsl --status failure is classified into specific issue codes
+    //     (wsl_virtualization_disabled, wsl_vm_platform_missing, fallback
+    //     wsl_unavailable) with redacted raw output preserved in Detail.
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Engine_RunLocalOnly_ResetsStaleFailedTerminal_AndProgressesPastPreflight()
+    {
+        using var temp = new TempDirectory();
+        var statePath = System.IO.Path.Combine(temp.Path, "setup-state.json");
+        // Pre-seed a Failed-state file as if a prior run had been blocked by preflight.
+        // Without the reset, every RunPhaseAsync below early-exits silently and the page
+        // sits on empty pending bullets forever.
+        var stateStore = new LocalGatewaySetupStateStore(statePath);
+        await stateStore.SaveAsync(new LocalGatewaySetupState
+        {
+            Phase = LocalGatewaySetupPhase.Failed,
+            Status = LocalGatewaySetupStatus.FailedTerminal,
+            FailureCode = "preflight_blocked",
+            UserMessage = "This PC is not ready for local WSL gateway setup.",
+            Issues = new()
+            {
+                new LocalGatewaySetupIssue("wsl_unavailable", "WSL is not available or is blocked by policy.", LocalGatewaySetupSeverity.Blocking)
+            }
+        });
+
+        // Fresh-everything wsl/installer/etc. so this run's preflight passes and phases run.
+        var wsl = new FakeWslCommandRunner();
+        var provisioning = new FakeProvisioner();
+        var engine = new LocalGatewaySetupEngine(
+            new LocalGatewaySetupOptions { InstanceInstallLocation = System.IO.Path.Combine(temp.Path, "OpenClawGateway") },
+            stateStore,
+            new LocalGatewayPreflightProbe(wsl, new FixedPortProbe(available: true)),
+            wsl,
+            new SuccessfulHealthProbe(),
+            provisioning,
+            provisioning,
+            provisioning,
+            wslInstanceInstaller: new WslStoreInstanceInstaller(wsl, createDirectory: _ => { }),
+            wslInstanceConfigurator: new FakeWslInstanceConfigurator(),
+            openClawLinuxInstaller: new FakeOpenClawLinuxInstaller(),
+            gatewayConfigurationPreparer: new FakeGatewayConfigurationPreparer(),
+            gatewayServiceManager: new FakeGatewayServiceManager());
+
+        var state = await engine.RunLocalOnlyAsync();
+
+        // Ran to completion — proves the stale FailedTerminal didn't silently kill the run.
+        Assert.Equal(LocalGatewaySetupStatus.Complete, state.Status);
+        Assert.Null(state.FailureCode);
+        // Stale Issues from the prior run must be cleared so they don't leak into the new run's diagnostic surface.
+        Assert.DoesNotContain(state.Issues, i => i.Code == "wsl_unavailable");
+        // Phases beyond Preflight actually executed.
+        Assert.Contains(state.History, h => h.Phase == LocalGatewaySetupPhase.CreateWslInstance);
+    }
+
+    [Fact]
+    public async Task Engine_RunLocalOnly_ResetsStaleFailedRetryable()
+    {
+        using var temp = new TempDirectory();
+        var statePath = System.IO.Path.Combine(temp.Path, "setup-state.json");
+        var stateStore = new LocalGatewaySetupStateStore(statePath);
+        await stateStore.SaveAsync(new LocalGatewaySetupState
+        {
+            Phase = LocalGatewaySetupPhase.Failed,
+            Status = LocalGatewaySetupStatus.FailedRetryable,
+            FailureCode = "wsl_instance_install_failed"
+        });
+
+        var wsl = new FakeWslCommandRunner();
+        var provisioning = new FakeProvisioner();
+        var engine = new LocalGatewaySetupEngine(
+            new LocalGatewaySetupOptions { InstanceInstallLocation = System.IO.Path.Combine(temp.Path, "OpenClawGateway") },
+            stateStore,
+            new LocalGatewayPreflightProbe(wsl, new FixedPortProbe(available: true)),
+            wsl,
+            new SuccessfulHealthProbe(),
+            provisioning,
+            provisioning,
+            provisioning,
+            wslInstanceInstaller: new WslStoreInstanceInstaller(wsl, createDirectory: _ => { }),
+            wslInstanceConfigurator: new FakeWslInstanceConfigurator(),
+            openClawLinuxInstaller: new FakeOpenClawLinuxInstaller(),
+            gatewayConfigurationPreparer: new FakeGatewayConfigurationPreparer(),
+            gatewayServiceManager: new FakeGatewayServiceManager());
+
+        var state = await engine.RunLocalOnlyAsync();
+
+        Assert.Equal(LocalGatewaySetupStatus.Complete, state.Status);
+        Assert.Null(state.FailureCode);
+    }
+
+    [Fact]
+    public async Task Engine_RunLocalOnly_ResetsStaleCancelled()
+    {
+        using var temp = new TempDirectory();
+        var statePath = System.IO.Path.Combine(temp.Path, "setup-state.json");
+        var stateStore = new LocalGatewaySetupStateStore(statePath);
+        await stateStore.SaveAsync(new LocalGatewaySetupState
+        {
+            Phase = LocalGatewaySetupPhase.Cancelled,
+            Status = LocalGatewaySetupStatus.Cancelled
+        });
+
+        var wsl = new FakeWslCommandRunner();
+        var provisioning = new FakeProvisioner();
+        var engine = new LocalGatewaySetupEngine(
+            new LocalGatewaySetupOptions { InstanceInstallLocation = System.IO.Path.Combine(temp.Path, "OpenClawGateway") },
+            stateStore,
+            new LocalGatewayPreflightProbe(wsl, new FixedPortProbe(available: true)),
+            wsl,
+            new SuccessfulHealthProbe(),
+            provisioning,
+            provisioning,
+            provisioning,
+            wslInstanceInstaller: new WslStoreInstanceInstaller(wsl, createDirectory: _ => { }),
+            wslInstanceConfigurator: new FakeWslInstanceConfigurator(),
+            openClawLinuxInstaller: new FakeOpenClawLinuxInstaller(),
+            gatewayConfigurationPreparer: new FakeGatewayConfigurationPreparer(),
+            gatewayServiceManager: new FakeGatewayServiceManager());
+
+        var state = await engine.RunLocalOnlyAsync();
+
+        Assert.Equal(LocalGatewaySetupStatus.Complete, state.Status);
+    }
+
+    [Fact]
+    public async Task Engine_RunLocalOnly_AlwaysPublishesAtLeastOneStateChange_OnSuccessPath()
+    {
+        // Every code path through RunLocalOnlyAsync must publish at least one
+        // StateChanged event before returning. Without this, the page sits on
+        // its initial empty render forever, regardless of what the engine does.
+        using var temp = new TempDirectory();
+        var wsl = new FakeWslCommandRunner();
+        var provisioning = new FakeProvisioner();
+        var engine = new LocalGatewaySetupEngine(
+            new LocalGatewaySetupOptions { InstanceInstallLocation = System.IO.Path.Combine(temp.Path, "OpenClawGateway") },
+            new LocalGatewaySetupStateStore(System.IO.Path.Combine(temp.Path, "setup-state.json")),
+            new LocalGatewayPreflightProbe(wsl, new FixedPortProbe(available: true)),
+            wsl,
+            new SuccessfulHealthProbe(),
+            provisioning,
+            provisioning,
+            provisioning,
+            wslInstanceInstaller: new WslStoreInstanceInstaller(wsl, createDirectory: _ => { }),
+            wslInstanceConfigurator: new FakeWslInstanceConfigurator(),
+            openClawLinuxInstaller: new FakeOpenClawLinuxInstaller(),
+            gatewayConfigurationPreparer: new FakeGatewayConfigurationPreparer(),
+            gatewayServiceManager: new FakeGatewayServiceManager());
+
+        int events = 0;
+        engine.StateChanged += _ => events++;
+
+        await engine.RunLocalOnlyAsync();
+
+        Assert.True(events >= 1, $"Expected ≥1 StateChanged event; got {events}.");
+    }
+
+    [Fact]
+    public async Task Engine_RunLocalOnly_AlwaysPublishesAtLeastOneStateChange_OnPreflightBlockedPath()
+    {
+        // Same publish invariant along the preflight-blocked path, where a stale
+        // FailedTerminal in the state store would otherwise make every phase
+        // early-exit silently and zero events fire.
+        using var temp = new TempDirectory();
+        var statePath = System.IO.Path.Combine(temp.Path, "setup-state.json");
+        var stateStore = new LocalGatewaySetupStateStore(statePath);
+        // Fresh state with a wsl runner that fails preflight (port unavailable + distro exists).
+        var wsl = new FakeWslCommandRunner { Distros = [new WslDistroInfo("OpenClawGateway", "Stopped", 2)] };
+        var provisioning = new FakeProvisioner();
+        var engine = new LocalGatewaySetupEngine(
+            new LocalGatewaySetupOptions(),
+            stateStore,
+            new LocalGatewayPreflightProbe(wsl, new FixedPortProbe(available: true)),
+            wsl,
+            new SuccessfulHealthProbe(),
+            provisioning,
+            provisioning,
+            provisioning);
+
+        int events = 0;
+        engine.StateChanged += _ => events++;
+
+        await engine.RunLocalOnlyAsync();
+
+        Assert.True(events >= 1, $"Expected ≥1 StateChanged event on preflight-block path; got {events}.");
+    }
+
+    [Fact]
+    public async Task Engine_RunLocalOnly_PublishesInitializingState_BeforeAnyWslCall()
+    {
+        // At least one StateChanged event must fire BEFORE the first wsl
+        // invocation, so the page never has a blank-bullet window during the
+        // observed ~60s cold-start hang of HasDistroAsync.
+        using var temp = new TempDirectory();
+        var wsl = new CallSequenceRecordingFakeWsl();
+        var provisioning = new FakeProvisioner();
+        var engine = new LocalGatewaySetupEngine(
+            new LocalGatewaySetupOptions { InstanceInstallLocation = System.IO.Path.Combine(temp.Path, "OpenClawGateway") },
+            new LocalGatewaySetupStateStore(System.IO.Path.Combine(temp.Path, "setup-state.json")),
+            new LocalGatewayPreflightProbe(wsl, new FixedPortProbe(available: true)),
+            wsl,
+            new SuccessfulHealthProbe(),
+            provisioning,
+            provisioning,
+            provisioning,
+            wslInstanceInstaller: new WslStoreInstanceInstaller(wsl, createDirectory: _ => { }),
+            wslInstanceConfigurator: new FakeWslInstanceConfigurator(),
+            openClawLinuxInstaller: new FakeOpenClawLinuxInstaller(),
+            gatewayConfigurationPreparer: new FakeGatewayConfigurationPreparer(),
+            gatewayServiceManager: new FakeGatewayServiceManager());
+
+        int firstEventWslCommandCount = -1;
+        engine.StateChanged += _ =>
+        {
+            if (firstEventWslCommandCount == -1)
+                firstEventWslCommandCount = wsl.Commands.Count;
+        };
+
+        await engine.RunLocalOnlyAsync();
+
+        Assert.True(firstEventWslCommandCount >= 0, "Expected at least one StateChanged event.");
+        Assert.Equal(0, firstEventWslCommandCount); // First StateChanged must precede first wsl call.
+    }
+
+    [Fact]
+    public async Task Engine_PreflightBlocked_PropagatesSpecificIssueIntoUserMessage()
+    {
+        // When preflight blocks, state.UserMessage must come from the most-specific
+        // blocking issue's message — not the generic "This PC is not ready" string.
+        // The page renders UserMessage; without this propagation the actionable
+        // error text is buried in state.Issues which the page never displays.
+        using var temp = new TempDirectory();
+        var wsl = new FakeWslCommandRunner
+        {
+            WslStatusExitCode = 1,
+            WslStatusOutput = "WSL2 is unable to start since virtualization is not enabled on this machine.\nFor information please visit https://aka.ms/enablevirtualization\n"
+        };
+        var provisioning = new FakeProvisioner();
+        var engine = new LocalGatewaySetupEngine(
+            new LocalGatewaySetupOptions(),
+            new LocalGatewaySetupStateStore(System.IO.Path.Combine(temp.Path, "setup-state.json")),
+            new LocalGatewayPreflightProbe(wsl, new FixedPortProbe(available: true)),
+            wsl,
+            new SuccessfulHealthProbe(),
+            provisioning,
+            provisioning,
+            provisioning);
+
+        var state = await engine.RunLocalOnlyAsync();
+
+        Assert.Equal(LocalGatewaySetupStatus.FailedRetryable, state.Status);
+        Assert.Equal("wsl_virtualization_disabled", state.FailureCode);
+        Assert.NotNull(state.UserMessage);
+        Assert.Contains("aka.ms/enablevirtualization", state.UserMessage);
+        // Detail with redacted raw wsl --status output should be carried through too.
+        var blockingIssue = state.Issues.First(i => i.Code == "wsl_virtualization_disabled");
+        Assert.NotNull(blockingIssue.Detail);
+        Assert.Contains("wsl_status_exit_code=1", blockingIssue.Detail);
+    }
+
+    [Fact]
+    public async Task Preflight_VirtualizationDisabled_EmitsSpecificIssueWithEnableVirtLink()
+    {
+        // Known WSL failure modes get specific issue codes.
+        // Virtualization-disabled is the highest-priority detection because the
+        // remediation page (aka.ms/enablevirtualization) covers BOTH the firmware
+        // virtualization toggle AND the Virtual Machine Platform feature.
+        var wsl = new FakeWslCommandRunner
+        {
+            WslStatusExitCode = -1,
+            WslStatusOutput = "WSL2 is unable to start since virtualization is not enabled on this machine.\nPlease ensure the \"Virtual Machine Platform\" optional component is enabled and virtualization is turned on in your computer's firmware settings.\nFor information please visit https://aka.ms/enablevirtualization\n"
+        };
+        var probe = new LocalGatewayPreflightProbe(wsl, new FixedPortProbe(available: true));
+
+        var result = await probe.RunAsync(new LocalGatewaySetupOptions());
+
+        Assert.False(result.CanContinue);
+        var virt = result.Issues.Single(i => i.Code == "wsl_virtualization_disabled");
+        Assert.Equal(LocalGatewaySetupSeverity.Blocking, virt.Severity);
+        Assert.Contains("aka.ms/enablevirtualization", virt.Message);
+        Assert.Contains("wsl --install --no-distribution", virt.Message);
+    }
+
+    [Fact]
+    public async Task Preflight_VmPlatformMissing_EmitsSpecificIssueWithInstallCommand()
+    {
+        // Output mentions VM Platform but NOT the virtualization phrase (e.g. on a
+        // machine where firmware virt is fine but the Windows feature was uninstalled).
+        var wsl = new FakeWslCommandRunner
+        {
+            WslStatusExitCode = -1,
+            WslStatusOutput = "Please enable the \"Virtual Machine Platform\" optional component to use WSL.\n"
+        };
+        var probe = new LocalGatewayPreflightProbe(wsl, new FixedPortProbe(available: true));
+
+        var result = await probe.RunAsync(new LocalGatewaySetupOptions());
+
+        Assert.False(result.CanContinue);
+        var vmp = result.Issues.Single(i => i.Code == "wsl_vm_platform_missing");
+        Assert.Equal(LocalGatewaySetupSeverity.Blocking, vmp.Severity);
+        Assert.Contains("Virtual Machine Platform", vmp.Message);
+        Assert.Contains("wsl --install --no-distribution", vmp.Message);
+        // No spurious aka.ms/enablevirtualization (that's the virt-disabled path).
+        Assert.DoesNotContain("aka.ms/enablevirtualization", vmp.Message);
+    }
+
+    [Fact]
+    public async Task Preflight_GenericFailure_StillFallsBackToWslUnavailable()
+    {
+        // Defense-in-depth: an unexpected wsl --status output (Microsoft has
+        // changed these strings between WSL versions) must still produce a known
+        // issue code rather than crashing or silently succeeding.
+        var wsl = new FakeWslCommandRunner
+        {
+            WslStatusExitCode = 1,
+            WslStatusOutput = "Some entirely new error string we have never seen before."
+        };
+        var probe = new LocalGatewayPreflightProbe(wsl, new FixedPortProbe(available: true));
+
+        var result = await probe.RunAsync(new LocalGatewaySetupOptions());
+
+        Assert.False(result.CanContinue);
+        var fallback = result.Issues.Single(i => i.Code == "wsl_unavailable");
+        Assert.Equal(LocalGatewaySetupSeverity.Blocking, fallback.Severity);
+        Assert.NotNull(fallback.Detail);
+        Assert.Contains("Some entirely new error", fallback.Detail);
+    }
+
+    [Fact]
+    public async Task Preflight_AllWslStatusFailureIssues_IncludeRawWslOutputInDetail()
+    {
+        // Every issue triggered by wsl --status failure includes the redacted raw
+        // output in Detail, so support / debug-bundle have the diagnostic context
+        // even when we can't classify the failure.
+        var cases = new[]
+        {
+            ("WSL2 is unable to start since virtualization is not enabled.", "wsl_virtualization_disabled"),
+            ("Please enable the \"Virtual Machine Platform\" optional component.", "wsl_vm_platform_missing"),
+            ("New unrecognized failure mode.", "wsl_unavailable")
+        };
+
+        foreach (var (output, expectedCode) in cases)
+        {
+            var wsl = new FakeWslCommandRunner { WslStatusExitCode = 1, WslStatusOutput = output };
+            var probe = new LocalGatewayPreflightProbe(wsl, new FixedPortProbe(available: true));
+
+            var result = await probe.RunAsync(new LocalGatewaySetupOptions());
+
+            var issue = result.Issues.Single(i => i.Code == expectedCode);
+            Assert.NotNull(issue.Detail);
+            Assert.Contains(output.Substring(0, Math.Min(20, output.Length)), issue.Detail);
+            Assert.Contains("wsl_status_exit_code=1", issue.Detail);
+        }
+    }
+
+    /// <summary>
+    /// Subclass of <see cref="FakeWslCommandRunner"/> that's identical in behaviour
+    /// — included only to make the
+    /// <see cref="Engine_RunLocalOnly_PublishesInitializingState_BeforeAnyWslCall"/>
+    /// test self-documenting (the Commands list is what we observe; the type name
+    /// signals intent).
+    /// </summary>
+    private sealed class CallSequenceRecordingFakeWsl : IWslCommandRunner
+    {
+        private readonly FakeWslCommandRunner _inner = new();
+        public List<IReadOnlyList<string>> Commands => _inner.Commands;
+
+        public Task<WslCommandResult> RunAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken = default, IReadOnlyDictionary<string, string>? environment = null)
+            => _inner.RunAsync(arguments, cancellationToken, environment);
+        public Task<IReadOnlyList<WslDistroInfo>> ListDistrosAsync(CancellationToken cancellationToken = default)
+            => _inner.ListDistrosAsync(cancellationToken);
+        public Task<WslCommandResult> TerminateDistroAsync(string name, CancellationToken cancellationToken = default)
+            => _inner.TerminateDistroAsync(name, cancellationToken);
+        public Task<WslCommandResult> UnregisterDistroAsync(string name, CancellationToken cancellationToken = default)
+            => _inner.UnregisterDistroAsync(name, cancellationToken);
+        public Task<WslCommandResult> RunInDistroAsync(string name, IReadOnlyList<string> command, CancellationToken cancellationToken = default, IReadOnlyDictionary<string, string>? environment = null)
+            => _inner.RunInDistroAsync(name, command, cancellationToken, environment);
     }
 
     [Fact]
