@@ -349,16 +349,21 @@ public sealed class LocalSetupProgressPage : Component<OnboardingState>
             .VAlign(VerticalAlignment.Center)
             .Grid(row: 0, column: 1);
 
-        // Always assign Foreground so a stage that previously rendered Failed
+        // Always reset Foreground so a stage that previously rendered Failed
         // (red) reverts to the default theme brush once a retry succeeds.
         // The FunctionalUI reconciler reuses TextBlock instances across
         // re-renders, so a conditional set leaves stale red on stages that
-        // are now green-checkmarked (regression observed 2026-05-08 on a
-        // FailedRetryable → Complete retry).
+        // are now green-checkmarked (regression observed 2026-05-08).
+        // Use ClearValue rather than setting Foreground = null — null leaves
+        // the property unset to the type default (black), which is invisible
+        // in dark mode. ClearValue restores the inherited theme brush.
         labelBlock = labelBlock.Set(t =>
-            t.Foreground = stageState == LocalSetupProgressStageMap.StageState.Failed
-                ? new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.IndianRed)
-                : null!);
+        {
+            if (stageState == LocalSetupProgressStageMap.StageState.Failed)
+                t.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.IndianRed);
+            else
+                t.ClearValue(Microsoft.UI.Xaml.Controls.TextBlock.ForegroundProperty);
+        });
 
         return Grid(
             columns: ["Auto", "1*", "Auto"],
