@@ -216,8 +216,8 @@ public class CanvasCapability : NodeCapabilityBase
         }
         catch (Exception ex)
         {
-            Logger.Error($"canvas.navigate handler failed: {ex.Message}", ex);
-            return Error($"Navigate failed: {ex.Message}");
+            Logger.Error("canvas.navigate handler failed", ex);
+            return Error("Navigate failed");
         }
     }
     
@@ -244,9 +244,9 @@ public class CanvasCapability : NodeCapabilityBase
             var result = await evalHandler(script);
             return Success(new { result });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return Error($"Eval failed: {ex.Message}");
+            return Error("Eval failed");
         }
     }
     
@@ -275,9 +275,9 @@ public class CanvasCapability : NodeCapabilityBase
             
             return Success(new { format, base64 });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return Error($"Snapshot failed: {ex.Message}");
+            return Error("Snapshot failed");
         }
     }
     
@@ -367,7 +367,7 @@ public class CanvasCapability : NodeCapabilityBase
         }
         catch (Exception ex)
         {
-            throw new InvalidOperationException($"Invalid jsonlPath: {ex.Message}", ex);
+            throw new InvalidOperationException("Invalid jsonlPath", ex);
         }
 
         if (!IsPathWithinRoot(fullPath, tempRoot))
@@ -495,9 +495,9 @@ public class CanvasCapability : NodeCapabilityBase
             using var doc = System.Text.Json.JsonDocument.Parse(json);
             return Success(System.Text.Json.JsonSerializer.Deserialize<object>(doc.RootElement.GetRawText()));
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return Error($"CANVAS_DUMP_FAILED: {ex.Message}");
+            return Error("CANVAS_DUMP_FAILED");
         }
     }
 
@@ -521,9 +521,9 @@ public class CanvasCapability : NodeCapabilityBase
             using var doc = System.Text.Json.JsonDocument.Parse(json);
             return Success(System.Text.Json.JsonSerializer.Deserialize<object>(doc.RootElement.GetRawText()));
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return Error($"CANVAS_CAPS_FAILED: {ex.Message}");
+            return Error("CANVAS_CAPS_FAILED");
         }
     }
 }
