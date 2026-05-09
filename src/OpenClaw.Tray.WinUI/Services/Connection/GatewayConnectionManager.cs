@@ -196,10 +196,53 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         await ConnectAsync(gatewayId);
     }
 
-    public Task<SetupCodeResult> ApplySetupCodeAsync(string setupCode)
+    public async Task<SetupCodeResult> ApplySetupCodeAsync(string setupCode)
     {
-        // Stub — implemented in Step 3.1
-        return Task.FromResult(new SetupCodeResult(SetupCodeOutcome.InvalidCode, "Not yet implemented"));
+        ThrowIfDisposed();
+
+        // 1. Decode setup code
+        var decoded = OpenClawTray.Onboarding.Services.SetupCodeDecoder.Decode(setupCode);
+        if (!decoded.Success || string.IsNullOrWhiteSpace(decoded.Url))
+            return new SetupCodeResult(SetupCodeOutcome.InvalidCode, decoded.Error ?? "Could not decode setup code");
+
+        var gatewayUrl = GatewayUrlHelper.NormalizeForWebSocket(decoded.Url);
+
+        // 2. Validate URL
+        if (!GatewayUrlHelper.IsValidGatewayUrl(gatewayUrl))
+            return new SetupCodeResult(SetupCodeOutcome.InvalidUrl, "Invalid gateway URL");
+
+        // 3. Disconnect current gateway if any
+        await DisconnectAsync();
+
+        // 4. Create or update gateway record
+        var existing = _registry.FindByUrl(gatewayUrl);
+        var recordId = existing?.Id ?? Guid.NewGuid().ToString();
+
+        // Determine if the token is a bootstrap token (heuristic: setup codes typically provide bootstrap)
+        var isBootstrap = !string.IsNullOrWhiteSpace(decoded.Token) &&
+                          string.IsNullOrWhiteSpace(existing?.SharedGatewayToken);
+
+        var record = (existing ?? new GatewayRecord { Id = recordId }) with
+        {
+            Url = gatewayUrl,
+            SharedGatewayToken = isBootstrap ? existing?.SharedGatewayToken : decoded.Token,
+            BootstrapToken = isBootstrap ? decoded.Token : existing?.BootstrapToken,
+        };
+        _registry.AddOrUpdate(record);
+        _registry.SetActive(recordId);
+        _registry.Save();
+
+        // Ensure identity directory
+        var identityDir = _registry.GetIdentityDirectory(recordId);
+        if (!Directory.Exists(identityDir))
+            Directory.CreateDirectory(identityDir);
+
+        _diagnostics.Record("setup", $"Setup code applied for {GatewayUrlHelper.SanitizeForDisplay(gatewayUrl)}");
+
+        // 5. Connect to new gateway
+        await ConnectAsync(recordId);
+
+        return new SetupCodeResult(SetupCodeOutcome.Success, GatewayUrl: gatewayUrl);
     }
 
     // ─── Event Handlers ───
