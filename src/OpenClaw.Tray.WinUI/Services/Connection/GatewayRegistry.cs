@@ -156,6 +156,73 @@ public sealed class GatewayRegistry
             string.Equals(r.Url, url, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Migrate credentials from legacy SettingsManager fields to GatewayRecord.
+    /// Idempotent: skips if a record for the same URL already exists.
+    /// Identity file is COPIED (not moved) for rollback safety.
+    /// </summary>
+    public bool MigrateFromSettings(
+        string? gatewayUrl,
+        string? token,
+        string? bootstrapToken,
+        bool useSshTunnel,
+        string? sshUser,
+        string? sshHost,
+        int sshRemotePort,
+        int sshLocalPort,
+        string settingsDir,
+        IOpenClawLogger? logger = null)
+    {
+        if (string.IsNullOrWhiteSpace(gatewayUrl))
+            return false;
+
+        // Idempotent: don't duplicate if already migrated
+        if (FindByUrl(gatewayUrl) != null)
+        {
+            logger?.Info($"[Registry] Migration skipped — record already exists for {gatewayUrl}");
+            return false;
+        }
+
+        var id = Guid.NewGuid().ToString();
+        var record = new GatewayRecord
+        {
+            Id = id,
+            Url = gatewayUrl,
+            SharedGatewayToken = string.IsNullOrWhiteSpace(bootstrapToken) ? token : null,
+            BootstrapToken = !string.IsNullOrWhiteSpace(bootstrapToken) ? bootstrapToken : null,
+            SshTunnel = useSshTunnel
+                ? new SshTunnelConfig(sshUser ?? "", sshHost ?? "", sshRemotePort, sshLocalPort)
+                : null
+        };
+
+        AddOrUpdate(record);
+        SetActive(id);
+
+        // Copy identity file to per-gateway directory (rollback safe — original stays)
+        var legacyIdentity = Path.Combine(settingsDir, "device-key-ed25519.json");
+        var newIdentityDir = GetIdentityDirectory(id);
+        if (File.Exists(legacyIdentity))
+        {
+            try
+            {
+                if (!Directory.Exists(newIdentityDir))
+                    Directory.CreateDirectory(newIdentityDir);
+                var dest = Path.Combine(newIdentityDir, "device-key-ed25519.json");
+                if (!File.Exists(dest))
+                    File.Copy(legacyIdentity, dest, overwrite: false);
+                logger?.Info($"[Registry] Identity file copied to {newIdentityDir}");
+            }
+            catch (Exception ex)
+            {
+                logger?.Warn($"[Registry] Failed to copy identity file: {ex.Message}");
+            }
+        }
+
+        Save();
+        logger?.Info($"[Registry] Migrated gateway {gatewayUrl} → record {id}");
+        return true;
+    }
+
     private sealed class RegistryData
     {
         public List<GatewayRecord>? Gateways { get; set; }

@@ -9,7 +9,9 @@ namespace OpenClaw.Shared;
 public class SettingsData
 {
     public string? GatewayUrl { get; set; }
+    /// <summary>Legacy: migrated to GatewayRecord.SharedGatewayToken. Kept for migration and backward compat.</summary>
     public string? Token { get; set; }
+    /// <summary>Legacy: migrated to GatewayRecord.BootstrapToken. Kept for migration and backward compat.</summary>
     public string? BootstrapToken { get; set; }
     public bool UseSshTunnel { get; set; } = false;
     public string? SshTunnelUser { get; set; }
