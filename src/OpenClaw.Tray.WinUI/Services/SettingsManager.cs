@@ -112,6 +112,14 @@ public class SettingsManager
     public string SkippedUpdateTag { get; set; } = "";
     public string? PreferredGatewayId { get; set; }
 
+    // ── MXC sandbox (Slice 1) ──────────────────────────────────────────
+    /// <summary>Master switch for system.run containment. When true (default), system.run runs sandboxed and is denied if MXC is unavailable. When false, system.run runs on host like before.</summary>
+    public bool SystemRunSandboxEnabled { get; set; } = true;
+    /// <summary>When sandboxed, allow system.run commands to reach the public internet. Default false.</summary>
+    public bool SystemRunAllowOutbound { get; set; } = false;
+    /// <summary>When sandboxed, allow system.run commands to reach the local network. Default false.</summary>
+    public bool SystemRunAllowLocalNetwork { get; set; } = false;
+
     public SettingsManager() : this(GetDefaultSettingsDirectory())
     {
     }
@@ -211,6 +219,11 @@ public class SettingsManager
                     PreferStructuredCategories = loaded.PreferStructuredCategories;
                     if (loaded.UserRules != null)
                         UserRules = loaded.UserRules;
+
+                    // MXC sandbox settings (Slice 1)
+                    SystemRunSandboxEnabled = loaded.SystemRunSandboxEnabled;
+                    SystemRunAllowOutbound = loaded.SystemRunAllowOutbound;
+                    SystemRunAllowLocalNetwork = loaded.SystemRunAllowLocalNetwork;
                 }
             }
         }
@@ -302,7 +315,11 @@ public class SettingsManager
         PreferredGatewayId = string.IsNullOrWhiteSpace(PreferredGatewayId) ? null : PreferredGatewayId,
         NotifyChatResponses = NotifyChatResponses,
         PreferStructuredCategories = PreferStructuredCategories,
-        UserRules = UserRules
+        UserRules = UserRules,
+        // MXC sandbox settings (Slice 1)
+        SystemRunSandboxEnabled = SystemRunSandboxEnabled,
+        SystemRunAllowOutbound = SystemRunAllowOutbound,
+        SystemRunAllowLocalNetwork = SystemRunAllowLocalNetwork
     };
 
     public void Save()

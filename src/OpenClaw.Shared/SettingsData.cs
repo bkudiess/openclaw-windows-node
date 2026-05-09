@@ -88,6 +88,28 @@ public class SettingsData
     public bool PreferStructuredCategories { get; set; } = true;
     public List<UserNotificationRule>? UserRules { get; set; }
 
+    // ── MXC sandbox (Slice 1) ──────────────────────────────────────────
+    /// <summary>
+    /// Master switch for system.run containment. When <c>true</c> (default),
+    /// system.run runs inside an MXC AppContainer; if MXC is unavailable on
+    /// this host the invocation is denied — there is no host fallback. When
+    /// <c>false</c>, system.run runs on the host as it did before MXC support
+    /// was added.
+    /// </summary>
+    public bool SystemRunSandboxEnabled { get; set; } = true;
+
+    /// <summary>
+    /// When sandboxed, allow system.run commands to reach the public internet.
+    /// Default false — most shell commands are local-only.
+    /// </summary>
+    public bool SystemRunAllowOutbound { get; set; } = false;
+
+    /// <summary>
+    /// When sandboxed, allow system.run commands to reach the local network
+    /// (RFC1918 addresses, link-local). Default false.
+    /// </summary>
+    public bool SystemRunAllowLocalNetwork { get; set; } = false;
+
     // ── (Voice / STT settings consolidated into the block above.) ──
 
     private static readonly JsonSerializerOptions s_options = new()

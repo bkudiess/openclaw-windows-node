@@ -8,6 +8,7 @@ using Microsoft.UI.Dispatching;
 using OpenClaw.Shared;
 using OpenClaw.Shared.Capabilities;
 using OpenClaw.Shared.Mcp;
+using OpenClaw.Shared.Mxc;
 using OpenClawTray.A2UI.Actions;
 using OpenClawTray.A2UI.Rendering;
 using OpenClawTray.Helpers;
@@ -279,7 +280,7 @@ public sealed class NodeService : IDisposable
         // System capability (notifications + command execution)
         _systemCapability = new SystemCapability(_logger);
         _systemCapability.NotifyRequested += OnSystemNotify;
-        _systemCapability.SetCommandRunner(new LocalCommandRunner(_logger));
+        _systemCapability.SetCommandRunner(BuildSystemRunRunner());
         _systemCapability.SetApprovalPolicy(new ExecApprovalPolicy(_dataPath, _logger));
         _systemCapability.SetPromptHandler(new ExecApprovalPromptService(_dispatcherQueue, _rootProvider, _logger));
         Register(_systemCapability);
@@ -392,6 +393,74 @@ public sealed class NodeService : IDisposable
         _capabilities.Add(capability);
         _nodeClient?.RegisterCapability(capability);
     }
+
+    /// <summary>
+    /// Build the <see cref="ICommandRunner"/> for system.run. Picks
+    /// <see cref="MxcCommandRunner"/> wrapping a one-shot AppContainer when MXC is
+    /// available; falls back to <see cref="LocalCommandRunner"/> with an explanatory
+    /// log when it isn't. The choice respects <see cref="SettingsData.SystemRunSandboxMode"/>:
+    /// Required (default) fail-closes; BestEffort uses a host fallback inside MxcCommandRunner;
+    /// Off bypasses MXC entirely.
+    /// </summary>
+    private ICommandRunner BuildSystemRunRunner()
+    {
+        var availability = _mxcAvailability ??= MxcAvailability.Probe(_logger);
+        var hostRunner = new LocalCommandRunner(_logger);
+
+        // No MXC backend → host-only path. The MxcCommandRunner adapter still routes
+        // through this when SandboxMode == Off, but if MXC isn't even installed there's
+        // nothing to gain from going through the adapter.
+        if (!availability.HasAnyBackend)
+        {
+            _logger.Info(
+                $"[mxc] system.run runner = LocalCommandRunner (MXC unavailable: " +
+                $"{string.Join("; ", availability.UnsupportedReasons)})");
+            return hostRunner;
+        }
+
+        var executor = new OneShotAppContainerExecutor(
+            availability,
+            availability.RunCommandScriptPath!,
+            _logger);
+
+        var settingsDirectory = SettingsManager.SettingsDirectoryPath;
+        var mxcRunner = new MxcCommandRunner(
+            executor,
+            hostRunner,
+            () => SnapshotSettings(),
+            () => settingsDirectory,
+            _logger);
+
+        _logger.Info(
+            $"[mxc] system.run runner = MxcCommandRunner " +
+            $"(executor={executor.Name}, sandboxEnabled={(_settings?.SystemRunSandboxEnabled ?? true)})");
+        return mxcRunner;
+    }
+
+    /// <summary>
+    /// Snapshot the live <see cref="SettingsManager"/> into the wire-shaped
+    /// <see cref="SettingsData"/> that MxcCommandRunner / MxcPolicyBuilder consume.
+    /// Defensive default keeps sandbox enabled if _settings is null.
+    /// </summary>
+    private SettingsData SnapshotSettings()
+    {
+        if (_settings is null)
+            return new SettingsData
+            {
+                SystemRunSandboxEnabled = true,
+                SystemRunAllowOutbound = false,
+                SystemRunAllowLocalNetwork = false,
+            };
+
+        return new SettingsData
+        {
+            SystemRunSandboxEnabled = _settings.SystemRunSandboxEnabled,
+            SystemRunAllowOutbound = _settings.SystemRunAllowOutbound,
+            SystemRunAllowLocalNetwork = _settings.SystemRunAllowLocalNetwork,
+        };
+    }
+
+    private MxcAvailability? _mxcAvailability;
 
     private void StartMcpServer()
     {
