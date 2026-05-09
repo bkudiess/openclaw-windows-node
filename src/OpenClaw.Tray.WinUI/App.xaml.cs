@@ -1815,38 +1815,6 @@ public partial class App : Application
         });
     }
 
-    private void UnsubscribeGatewayEvents()
-    {
-        if (_gatewayClient != null)
-        {
-            _gatewayClient.StatusChanged -= OnConnectionStatusChanged;
-            _gatewayClient.AuthenticationFailed -= OnAuthenticationFailed;
-            _gatewayClient.ActivityChanged -= OnActivityChanged;
-            _gatewayClient.NotificationReceived -= OnNotificationReceived;
-            _gatewayClient.ChannelHealthUpdated -= OnChannelHealthUpdated;
-            _gatewayClient.SessionsUpdated -= OnSessionsUpdated;
-            _gatewayClient.UsageUpdated -= OnUsageUpdated;
-            _gatewayClient.UsageStatusUpdated -= OnUsageStatusUpdated;
-            _gatewayClient.UsageCostUpdated -= OnUsageCostUpdated;
-            _gatewayClient.NodesUpdated -= OnNodesUpdated;
-            _gatewayClient.SessionPreviewUpdated -= OnSessionPreviewUpdated;
-            _gatewayClient.SessionCommandCompleted -= OnSessionCommandCompleted;
-            _gatewayClient.GatewaySelfUpdated -= OnGatewaySelfUpdated;
-            _gatewayClient.CronListUpdated -= OnCronListUpdated;
-            _gatewayClient.CronStatusUpdated -= OnCronStatusUpdated;
-            _gatewayClient.ConfigUpdated -= OnConfigUpdated;
-            _gatewayClient.ConfigSchemaUpdated -= OnConfigSchemaUpdated;
-            _gatewayClient.SkillsStatusUpdated -= OnSkillsStatusUpdated;
-            _gatewayClient.AgentEventReceived -= OnAgentEventReceived;
-            _gatewayClient.NodePairListUpdated -= OnNodePairListUpdated;
-            _gatewayClient.DevicePairListUpdated -= OnDevicePairListUpdated;
-            _gatewayClient.ModelsListUpdated -= OnModelsListUpdated;
-            _gatewayClient.PresenceUpdated -= OnPresenceUpdated;
-            _gatewayClient.AgentsListUpdated -= OnAgentsListUpdated;
-            _gatewayClient.AgentFilesListUpdated -= OnAgentFilesListUpdated;
-            _gatewayClient.AgentFileContentUpdated -= OnAgentFileContentUpdated;
-        }
-    }
     
     private void InitializeNodeService()
     {
@@ -3216,9 +3184,7 @@ public partial class App : Application
                 remotePort = _settings.SshTunnelRemotePort
             });
 
-            UnsubscribeGatewayEvents();
-            _gatewayClient?.Dispose();
-            _gatewayClient = null;
+            _ = _connectionManager?.DisconnectAsync();
             _lastGatewaySelf = null;
 
             var oldNodeService = _nodeService;
@@ -3725,9 +3691,7 @@ public partial class App : Application
             }
 
             // Otherwise reinitialize with saved settings
-            UnsubscribeGatewayEvents();
-            _gatewayClient?.Dispose();
-            _gatewayClient = null;
+            _ = _connectionManager?.DisconnectAsync();
             var oldNodeService = _nodeService;
             _nodeService = null;
             try { oldNodeService?.Dispose(); } catch (Exception ex) { Logger.Warn($"Node dispose error: {ex.Message}"); }
@@ -4519,8 +4483,7 @@ public partial class App : Application
         // Dispose runtime services
         SafeShutdownStep("gateway client", () =>
         {
-            UnsubscribeGatewayEvents();
-            _gatewayClient?.Dispose();
+            _connectionManager?.Dispose();
             _gatewayClient = null;
         });
 
