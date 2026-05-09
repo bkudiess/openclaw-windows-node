@@ -66,62 +66,6 @@
                 </StackPanel>
             </Border>
 
-            <!-- ═══ Section 2: Gateway Discovery ═══ -->
-            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="16">
-                <StackPanel Spacing="12">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock x:Uid="ConnectionPage_TextBlock_76" Grid.Column="0" Text="📡 Available Gateways"
-                                   Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center"/>
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                            <ProgressRing x:Name="ScanProgressRing" IsActive="False" Width="16" Height="16"
-                                          VerticalAlignment="Center" Visibility="Collapsed"/>
-                            <Button x:Name="ScanButton" Click="OnScanForGateways" VerticalAlignment="Center">
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <FontIcon Glyph="&#xE11A;" FontSize="14"/>
-                                    <TextBlock x:Uid="ConnectionPage_TextBlock_84" Text="Scan"/>
-                                </StackPanel>
-                            </Button>
-                        </StackPanel>
-                    </Grid>
-                    <StackPanel x:Name="GatewayListPanel" Spacing="4" Visibility="Collapsed"/>
-                    <!-- Inline token prompt (shown when connecting to a gateway that needs auth) -->
-                    <Border x:Name="TokenPromptPanel" Visibility="Collapsed"
-                            Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
-                            CornerRadius="6" Padding="12" Margin="0,4,0,0">
-                        <StackPanel Spacing="8">
-                            <TextBlock x:Uid="TokenPromptText" x:Name="TokenPromptText" Text="This gateway requires a token to connect."
-                                       Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"/>
-                            <Grid ColumnSpacing="8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBox x:Uid="TokenPromptBox" x:Name="TokenPromptBox" Grid.Column="0"
-                                             PlaceholderText="Gateway token" Header="Token"/>
-                                <Button x:Uid="ConnectionPage_Button_105" Grid.Column="1" Content="Cancel"
-                                        VerticalAlignment="Bottom" Click="OnCancelTokenPrompt"/>
-                                <Button x:Uid="TokenPromptConnectBtn" x:Name="TokenPromptConnectBtn" Grid.Column="2" Content="Connect"
-                                        Style="{ThemeResource AccentButtonStyle}"
-                                        VerticalAlignment="Bottom" Click="OnConnectWithToken"/>
-                            </Grid>
-                            <TextBlock x:Uid="ConnectionPage_TextBlock_111" Text="Run 'openclaw qr' on the gateway host for a setup code, or find the token in the gateway's config."
-                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                       FontSize="11" TextWrapping="Wrap"/>
-                        </StackPanel>
-                    </Border>
-                    <TextBlock x:Uid="GatewayEmptyText" x:Name="GatewayEmptyText" Text="No gateways found. Click Scan to search."
-                               Style="{StaticResource CaptionTextBlockStyle}"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                </StackPanel>
-            </Border>
 
             <!-- ═══ Section 3: Setup Code ═══ -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"

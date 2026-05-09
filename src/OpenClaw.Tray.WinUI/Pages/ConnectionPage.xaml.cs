@@ -17,20 +17,11 @@ public sealed partial class ConnectionPage : Page
     private HubWindow? _hub;
     private IGatewayConnectionManager? _connectionManager;
     private GatewayRegistry? _gatewayRegistry;
-    private GatewayDiscoveryService? _discoveryService;
-    private List<DiscoveredGateway> _discoveredGateways = new();
     private int _connectionAttempts;
-    private string? _pendingGatewayUrl; // URL waiting for token input
-    private string? _pendingGatewayId;
 
     public ConnectionPage()
     {
         InitializeComponent();
-        Unloaded += (_, _) =>
-        {
-            _discoveryService?.Dispose();
-            _discoveryService = null;
-        };
     }
 
     public void Initialize(HubWindow hub)
@@ -59,13 +50,6 @@ public sealed partial class ConnectionPage : Page
         UpdateDeviceIdentity();
         LoadConnectionLog();
         LoadRecentGateways();
-
-        // Auto-scan for gateways when disconnected or when no URL configured
-        if (hub.CurrentStatus != ConnectionStatus.Connected ||
-            string.IsNullOrWhiteSpace(settings.GatewayUrl))
-        {
-            _ = AutoScanAsync();
-        }
     }
 
     private void OnManagerStateChanged(object? sender, GatewayConnectionSnapshot snapshot)
@@ -84,31 +68,6 @@ public sealed partial class ConnectionPage : Page
             UpdateStatus(status);
             LoadRecentGateways();
         });
-    }
-
-    private async System.Threading.Tasks.Task AutoScanAsync()
-    {
-        try
-        {
-            _discoveryService?.Dispose();
-            _discoveryService = new GatewayDiscoveryService();
-            ScanProgressRing.IsActive = true;
-            ScanProgressRing.Visibility = Visibility.Visible;
-            GatewayEmptyText.Text = "Scanning for gateways…";
-
-            await _discoveryService.StartDiscoveryAsync();
-            _discoveredGateways = _discoveryService.Gateways.ToList();
-            PopulateGatewayList();
-        }
-        catch
-        {
-            // Silently fail on auto-scan — user can manually scan
-        }
-        finally
-        {
-            ScanProgressRing.IsActive = false;
-            ScanProgressRing.Visibility = Visibility.Collapsed;
-        }
     }
 
     public void UpdateStatus(ConnectionStatus status)
@@ -356,185 +315,6 @@ public sealed partial class ConnectionPage : Page
 
         settings.Save();
         _hub?.RaiseSettingsSaved();
-    }
-
-    private async void OnScanForGateways(object sender, RoutedEventArgs e)
-    {
-        ScanButton.IsEnabled = false;
-        ScanProgressRing.IsActive = true;
-        ScanProgressRing.Visibility = Visibility.Visible;
-        GatewayEmptyText.Visibility = Visibility.Collapsed;
-
-        try
-        {
-            _discoveryService?.Dispose();
-            _discoveryService = new GatewayDiscoveryService();
-            await _discoveryService.StartDiscoveryAsync();
-            _discoveredGateways = _discoveryService.Gateways.ToList();
-            PopulateGatewayList();
-        }
-        catch (Exception ex)
-        {
-            GatewayEmptyText.Text = $"Discovery failed: {ex.Message}";
-            GatewayEmptyText.Visibility = Visibility.Visible;
-        }
-        finally
-        {
-            ScanButton.IsEnabled = true;
-            ScanProgressRing.IsActive = false;
-            ScanProgressRing.Visibility = Visibility.Collapsed;
-        }
-    }
-
-    private void PopulateGatewayList()
-    {
-        var currentUrl = _hub?.Settings?.GetEffectiveGatewayUrl();
-        // Build display list: discovered gateways + synthesized current gateway if not found
-        var displayList = new List<DiscoveredGateway>(_discoveredGateways);
-
-        // Compare by host:port to avoid ws:// vs http:// mismatches
-        string? currentHostPort = null;
-        Uri? currentUri = null;
-        if (!string.IsNullOrEmpty(currentUrl) && Uri.TryCreate(currentUrl, UriKind.Absolute, out var parsedUri))
-        {
-            currentUri = parsedUri;
-            currentHostPort = $"{parsedUri.Host}:{parsedUri.Port}";
-        }
-
-        if (_hub?.CurrentStatus == ConnectionStatus.Connected &&
-            currentHostPort != null &&
-            !displayList.Any(g => $"{g.Host}:{g.Port}".Equals(currentHostPort, StringComparison.OrdinalIgnoreCase)))
-        {
-            displayList.Insert(0, new DiscoveredGateway
-            {
-                Id = $"current-{currentHostPort}",
-                DisplayName = _hub.LastGatewaySelf?.ServerVersion != null
-                    ? $"Current Gateway (v{_hub.LastGatewaySelf.ServerVersion})"
-                    : "Current Gateway",
-                Host = currentUri!.Host,
-                Port = currentUri!.Port,
-                TlsEnabled = currentUri!.Scheme is "wss" or "https"
-            });
-        }
-
-        if (displayList.Count > 0)
-        {
-            GatewayListPanel.Children.Clear();
-            foreach (var gw in displayList)
-            {
-                var row = new Grid { Padding = new Thickness(4, 8, 4, 8), ColumnSpacing = 8 };
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-                var info = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-                var nameTb = new TextBlock
-                {
-                    Text = gw.DisplayName,
-                    Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"]
-                };
-                var addrTb = new TextBlock
-                {
-                    Text = $"{gw.Host}:{gw.Port}",
-                    Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
-                    Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
-                };
-                info.Children.Add(nameTb);
-                info.Children.Add(addrTb);
-                Grid.SetColumn(info, 0);
-                row.Children.Add(info);
-
-                if (gw.TlsEnabled)
-                {
-                    var tls = new TextBlock { Text = "🔒", VerticalAlignment = VerticalAlignment.Center };
-                    Grid.SetColumn(tls, 1);
-                    row.Children.Add(tls);
-                }
-
-                // Match current gateway by host:port
-                var gwHostPort = $"{gw.Host}:{gw.Port}";
-                var isCurrentGw = currentHostPort != null &&
-                    gwHostPort.Equals(currentHostPort, StringComparison.OrdinalIgnoreCase);
-                var connectBtn = new Button
-                {
-                    Content = isCurrentGw ? "✓" : "→",
-                    VerticalAlignment = VerticalAlignment.Center,
-                    IsEnabled = !isCurrentGw,
-                    Tag = gw.Id
-                };
-                connectBtn.Click += OnConnectToGateway;
-                Grid.SetColumn(connectBtn, 2);
-                row.Children.Add(connectBtn);
-
-                GatewayListPanel.Children.Add(row);
-            }
-            GatewayListPanel.Visibility = Visibility.Visible;
-            GatewayEmptyText.Visibility = Visibility.Collapsed;
-        }
-        else
-        {
-            GatewayListPanel.Visibility = Visibility.Collapsed;
-            GatewayEmptyText.Text = "No gateways found. Click Scan to search.";
-            GatewayEmptyText.Visibility = Visibility.Visible;
-        }
-    }
-
-    private void OnConnectToGateway(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button btn || btn.Tag is not string gatewayId) return;
-        var gw = _discoveredGateways.FirstOrDefault(g => g.Id == gatewayId);
-        if (gw == null || _hub?.Settings == null) return;
-
-        // When switching to a different gateway, always prompt for token
-        // (different gateways may have different tokens)
-        var currentUrl = _hub.Settings.GetEffectiveGatewayUrl() ?? "";
-        var isSameGateway = !string.IsNullOrEmpty(currentUrl) &&
-            Uri.TryCreate(currentUrl, UriKind.Absolute, out var curUri) &&
-            $"{curUri.Host}:{curUri.Port}".Equals($"{gw.Host}:{gw.Port}", StringComparison.OrdinalIgnoreCase);
-
-        if (isSameGateway)
-            return; // already connected to this one
-
-        _pendingGatewayUrl = gw.ConnectionUrl;
-        _pendingGatewayId = gw.Id;
-        TokenPromptText.Text = $"Connect to gateway at {gw.Host}:{gw.Port}";
-        TokenPromptBox.Text = _hub.Settings.Token ?? "";
-        TokenPromptPanel.Visibility = Visibility.Visible;
-        TokenPromptBox.Focus(Microsoft.UI.Xaml.FocusState.Programmatic);
-    }
-
-    private void OnConnectWithToken(object sender, RoutedEventArgs e)
-    {
-        var token = TokenPromptBox.Text?.Trim();
-        if (string.IsNullOrEmpty(token) || _hub?.Settings == null || string.IsNullOrEmpty(_pendingGatewayUrl))
-            return;
-
-        _hub.Settings.GatewayUrl = _pendingGatewayUrl;
-        _hub.Settings.Token = token;
-        if (!string.IsNullOrEmpty(_pendingGatewayId))
-            _hub.Settings.PreferredGatewayId = _pendingGatewayId;
-        _hub.Settings.Save();
-        _hub?.RaiseSettingsSaved();
-
-        // Clear auth error from previous attempt
-        if (_hub != null) _hub.LastAuthError = null;
-        AuthErrorBar.IsOpen = false;
-
-        GatewayUrlTextBox.Text = _pendingGatewayUrl;
-        TokenTextBox.Text = token;
-        TokenPromptPanel.Visibility = Visibility.Collapsed;
-        _pendingGatewayUrl = null;
-        _pendingGatewayId = null;
-
-        // Refresh discovery list to show ✓ on newly connected gateway
-        PopulateGatewayList();
-    }
-
-    private void OnCancelTokenPrompt(object sender, RoutedEventArgs e)
-    {
-        TokenPromptPanel.Visibility = Visibility.Collapsed;
-        _pendingGatewayUrl = null;
-        _pendingGatewayId = null;
     }
 
     private async void OnApplySetupCode(object sender, RoutedEventArgs e)
