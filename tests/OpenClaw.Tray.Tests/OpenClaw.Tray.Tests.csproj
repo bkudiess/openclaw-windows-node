@@ -54,6 +54,11 @@
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\GatewayRecord.cs" Link="Services\Connection\GatewayRecord.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\ICredentialResolver.cs" Link="Services\Connection\ICredentialResolver.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\CredentialResolver.cs" Link="Services\Connection\CredentialResolver.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\ConnectionStateMachine.cs" Link="Services\Connection\ConnectionStateMachine.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\GatewayConnectionSnapshot.cs" Link="Services\Connection\GatewayConnectionSnapshot.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\ConnectionTrigger.cs" Link="Services\Connection\ConnectionTrigger.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\OverallConnectionState.cs" Link="Services\Connection\OverallConnectionState.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\RoleConnectionState.cs" Link="Services\Connection\RoleConnectionState.cs" />
   </ItemGroup>
 
 </Project>
