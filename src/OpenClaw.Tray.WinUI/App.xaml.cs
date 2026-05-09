@@ -153,6 +153,7 @@ public partial class App : Application
     private TrayMenuWindow? _trayMenuWindow;
     private QuickSendDialog? _quickSendDialog;
     private ChatWindow? _chatWindow;
+    private ConnectionStatusWindow? _connectionStatusWindow;
     private string? _authFailureMessage;
 
     // Bug 3: per-device idempotency for "Node paired" toast. WindowsNodeClient.HandleHelloOk
@@ -678,6 +679,7 @@ public partial class App : Application
             case "logfolder": OpenLogFolder(); break;
             case "configfolder": OpenConfigFolder(); break;
             case "diagnosticsfolder": OpenDiagnosticsFolder(); break;
+            case "connectionstatus": ShowConnectionStatusWindow(); break;
             case "supportcontext": CopySupportContext(); break;
             case "debugbundle": CopyDebugBundle(); break;
             case "browsersetup": CopyBrowserSetupGuidance(); break;
@@ -2889,6 +2891,7 @@ public partial class App : Application
             _hubWindow.CheckForUpdatesAction = () => _ = CheckForUpdatesUserInitiatedAsync();
             _hubWindow.QuickSendAction = () => ShowQuickSend();
             _hubWindow.OpenSetupAction = () => _ = ShowOnboardingAsync();
+            _hubWindow.OpenConnectionStatusAction = ShowConnectionStatusWindow;
             _hubWindow.ConnectAction = () =>
             {
                 InitializeGatewayClient();
@@ -3163,6 +3166,20 @@ public partial class App : Application
     private void ShowStatusDetail()
     {
         ShowHub("general");
+    }
+
+    private void ShowConnectionStatusWindow()
+    {
+        if (_connectionStatusWindow != null && !_connectionStatusWindow.IsClosed)
+        {
+            _connectionStatusWindow.Activate();
+            return;
+        }
+        _connectionStatusWindow = new ConnectionStatusWindow(
+            _connectionManager!.Diagnostics,
+            _gatewayRegistry,
+            _connectionManager);
+        _connectionStatusWindow.Activate();
     }
 
     private void RestartSshTunnel()
@@ -4305,6 +4322,7 @@ public partial class App : Application
             OpenLogFolder = OpenLogFolder,
             OpenConfigFolder = OpenConfigFolder,
             OpenDiagnosticsFolder = OpenDiagnosticsFolder,
+            OpenConnectionStatus = ShowConnectionStatusWindow,
             CopySupportContext = CopySupportContext,
             CopyDebugBundle = CopyDebugBundle,
             CopyBrowserSetupGuidance = CopyBrowserSetupGuidance,

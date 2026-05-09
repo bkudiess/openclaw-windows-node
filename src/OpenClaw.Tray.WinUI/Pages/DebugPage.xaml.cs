@@ -170,6 +170,11 @@ public sealed partial class DebugPage : Page
         catch { }
     }
 
+    private void OnOpenConnectionStatus(object sender, RoutedEventArgs e)
+    {
+        _hub?.OpenConnectionStatusAction?.Invoke();
+    }
+
     private void OnCopySupportContext(object sender, RoutedEventArgs e)
     {
         var lines = new[]
