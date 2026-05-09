@@ -74,6 +74,30 @@
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="6" Padding="10">
                 <TextBlock x:Name="CredentialsText" FontFamily="Consolas" FontSize="10.5" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
             </Border>
+
+            <!-- Setup Code -->
+            <TextBlock Text="SETUP CODE" FontWeight="Bold" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,8,0,4" CharacterSpacing="100"/>
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Paste a setup code to connect end-to-end." FontSize="10.5"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    <TextBox x:Name="SetupCodeBox" PlaceholderText="Paste setup code…" FontSize="11"
+                             TextChanged="OnSetupCodeChanged"/>
+                    <TextBlock x:Name="SetupCodePreview" FontFamily="Consolas" FontSize="10"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="SetupCodeResult" Grid.Column="0" FontSize="10.5"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"/>
+                        <Button Grid.Column="1" x:Name="ConnectButton" Content="Connect" Click="OnConnect" Padding="8,3" FontSize="11"/>
+                        <Button Grid.Column="2" x:Name="DisconnectBtn" Content="Disconnect" Click="OnDisconnectClick" Padding="8,3" FontSize="11"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
         </StackPanel>
         </ScrollViewer>
 

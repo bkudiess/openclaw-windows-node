@@ -440,6 +440,12 @@ public partial class App : Application
             InitializeNodeService();
         }
 
+        // Show diagnostics window when not connected (no gateway configured)
+        if (string.IsNullOrWhiteSpace(_settings.GetEffectiveGatewayUrl()))
+        {
+            ShowConnectionStatusWindow();
+        }
+
         // Pre-warm chat window (WebView2 init takes 1-3s, do it now so left-click is instant)
         if (_settings != null &&
             TryResolveChatCredentials(out var prewarmUrl, out var prewarmToken, out _))

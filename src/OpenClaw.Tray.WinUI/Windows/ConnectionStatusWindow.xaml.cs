@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
 using OpenClaw.Shared;
+using OpenClawTray.Onboarding.Services;
 using OpenClawTray.Services.Connection;
 using System;
 using System.IO;
@@ -244,6 +245,63 @@ public sealed partial class ConnectionStatusWindow : WindowEx
         sb.Append(snapshot?.OverallState.ToString() ?? "unknown");
 
         CredentialsText.Text = sb.ToString();
+    }
+
+    // ── Setup Code & Connect/Disconnect ──
+
+    private void OnSetupCodeChanged(object sender, Microsoft.UI.Xaml.Controls.TextChangedEventArgs e)
+    {
+        var code = SetupCodeBox.Text?.Trim();
+        if (string.IsNullOrEmpty(code) || code.Length < 10)
+        {
+            SetupCodePreview.Text = "";
+            return;
+        }
+
+        var decoded = SetupCodeDecoder.Decode(code);
+        if (decoded.Success)
+            SetupCodePreview.Text = $"→ {decoded.Url ?? "?"}\n  token: {decoded.Token?[..Math.Min(8, decoded.Token?.Length ?? 0)]}…";
+        else
+            SetupCodePreview.Text = $"✗ {decoded.Error}";
+    }
+
+    private async void OnConnect(object sender, RoutedEventArgs e)
+    {
+        if (_manager == null) return;
+
+        var code = SetupCodeBox.Text?.Trim();
+        if (!string.IsNullOrEmpty(code))
+        {
+            ConnectButton.IsEnabled = false;
+            SetupCodeResult.Text = "Applying…";
+            try
+            {
+                var result = await _manager.ApplySetupCodeAsync(code);
+                SetupCodeResult.Text = result.Outcome switch
+                {
+                    SetupCodeOutcome.Success => $"✓ Connected to {GatewayUrlHelper.SanitizeForDisplay(result.GatewayUrl ?? "")}",
+                    _ => $"✗ {result.ErrorMessage ?? result.Outcome.ToString()}"
+                };
+            }
+            finally
+            {
+                ConnectButton.IsEnabled = true;
+            }
+        }
+        else
+        {
+            // Reconnect to active gateway
+            SetupCodeResult.Text = "Reconnecting…";
+            await _manager.ReconnectAsync();
+            SetupCodeResult.Text = "";
+        }
+    }
+
+    private async void OnDisconnectClick(object sender, RoutedEventArgs e)
+    {
+        if (_manager == null) return;
+        await _manager.DisconnectAsync();
+        SetupCodeResult.Text = "Disconnected";
     }
 
     // ── Timeline with colors ──
