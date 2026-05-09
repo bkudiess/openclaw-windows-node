@@ -24,6 +24,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
 
     public event EventHandler<GatewayConnectionSnapshot>? StateChanged;
     public event EventHandler<ConnectionDiagnosticEvent>? DiagnosticEvent;
+    public event EventHandler<OperatorClientChangedEventArgs>? OperatorClientChanged;
 
     public GatewayConnectionManager(
         ICredentialResolver credentialResolver,
@@ -115,6 +116,11 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             // Create client via factory
             var lifecycle = _clientFactory.Create(record.Url, credential, identityPath, _logger);
             _activeLifecycle = lifecycle;
+            OperatorClientChanged?.Invoke(this, new OperatorClientChangedEventArgs
+            {
+                OldClient = null,
+                NewClient = lifecycle.DataClient
+            });
 
             // Subscribe to client events with generation guard
             lifecycle.StatusChanged += (s, status) =>
@@ -300,7 +306,15 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
     {
         var old = _activeLifecycle;
         _activeLifecycle = null;
-        old?.Dispose();
+        if (old != null)
+        {
+            OperatorClientChanged?.Invoke(this, new OperatorClientChangedEventArgs
+            {
+                OldClient = old.DataClient,
+                NewClient = null
+            });
+            old.Dispose();
+        }
     }
 
     private void ThrowIfDisposed()

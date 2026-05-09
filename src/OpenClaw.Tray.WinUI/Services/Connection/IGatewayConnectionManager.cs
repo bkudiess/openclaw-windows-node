@@ -14,6 +14,7 @@ public interface IGatewayConnectionManager : IDisposable
     // ─── Events ───
     event EventHandler<GatewayConnectionSnapshot> StateChanged;
     event EventHandler<ConnectionDiagnosticEvent> DiagnosticEvent;
+    event EventHandler<OperatorClientChangedEventArgs> OperatorClientChanged;
 
     // ─── Lifecycle ───
     Task ConnectAsync(string? gatewayId = null);

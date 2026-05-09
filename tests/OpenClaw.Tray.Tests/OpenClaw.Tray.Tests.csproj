@@ -69,6 +69,7 @@
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\ConnectionErrorCategory.cs" Link="Services\Connection\ConnectionErrorCategory.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\RetryPolicy.cs" Link="Services\Connection\RetryPolicy.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\SetupCodeResult.cs" Link="Services\Connection\SetupCodeResult.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\OperatorClientChangedEventArgs.cs" Link="Services\Connection\OperatorClientChangedEventArgs.cs" />
   </ItemGroup>
 
 </Project>
