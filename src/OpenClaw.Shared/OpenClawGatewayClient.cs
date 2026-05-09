@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 
 namespace OpenClaw.Shared;
 
-public class OpenClawGatewayClient : WebSocketClientBase
+public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
 {
     private const string OperatorClientId = "cli";
     private const string OperatorClientDisplayName = "OpenClaw Windows Tray";
