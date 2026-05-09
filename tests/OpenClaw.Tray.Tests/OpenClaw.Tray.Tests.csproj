@@ -60,6 +60,8 @@
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\OverallConnectionState.cs" Link="Services\Connection\OverallConnectionState.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\RoleConnectionState.cs" Link="Services\Connection\RoleConnectionState.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\GatewayRegistry.cs" Link="Services\Connection\GatewayRegistry.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\ConnectionDiagnostics.cs" Link="Services\Connection\ConnectionDiagnostics.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\ConnectionDiagnosticEvent.cs" Link="Services\Connection\ConnectionDiagnosticEvent.cs" />
   </ItemGroup>
 
 </Project>
