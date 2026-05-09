@@ -62,6 +62,13 @@
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\GatewayRegistry.cs" Link="Services\Connection\GatewayRegistry.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\ConnectionDiagnostics.cs" Link="Services\Connection\ConnectionDiagnostics.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\ConnectionDiagnosticEvent.cs" Link="Services\Connection\ConnectionDiagnosticEvent.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\IGatewayConnectionManager.cs" Link="Services\Connection\IGatewayConnectionManager.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\GatewayConnectionManager.cs" Link="Services\Connection\GatewayConnectionManager.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\IGatewayClientFactory.cs" Link="Services\Connection\IGatewayClientFactory.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\GatewayClientFactory.cs" Link="Services\Connection\GatewayClientFactory.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\ConnectionErrorCategory.cs" Link="Services\Connection\ConnectionErrorCategory.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\RetryPolicy.cs" Link="Services\Connection\RetryPolicy.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\SetupCodeResult.cs" Link="Services\Connection\SetupCodeResult.cs" />
   </ItemGroup>
 
 </Project>
