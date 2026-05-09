@@ -22,10 +22,11 @@
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="16">
                 <StackPanel Spacing="8">
-                    <!-- Row 1: Status + Reconnect -->
+                    <!-- Row 1: Status + Buttons -->
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
@@ -34,7 +35,9 @@
                                        Style="{StaticResource SubtitleTextBlockStyle}"/>
                         </StackPanel>
                         <Button x:Uid="ReconnectButton" x:Name="ReconnectButton" Grid.Column="1" Content="Reconnect"
-                                VerticalAlignment="Center" Click="OnReconnect" IsEnabled="False"/>
+                                VerticalAlignment="Center" Click="OnReconnect" IsEnabled="False" Margin="0,0,8,0"/>
+                        <Button x:Name="DisconnectButton" Grid.Column="2" Content="Disconnect"
+                                VerticalAlignment="Center" Click="OnDisconnect" Visibility="Collapsed"/>
                     </Grid>
                     <!-- Row 2: Gateway details -->
                     <TextBlock x:Name="GatewayDetailText"
@@ -55,11 +58,11 @@
                                    Style="{StaticResource CaptionTextBlockStyle}"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                     </StackPanel>
-                    <!-- Row 5: Connect/Disconnect toggle -->
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                        <ToggleSwitch x:Uid="ConnectToggle" x:Name="ConnectToggle" Header="Connection"
-                                      Toggled="OnConnectToggled"/>
-                    </StackPanel>
+                    <!-- Row 5: Connection attempts (shown when connecting) -->
+                    <TextBlock x:Name="ConnectionAttemptsText"
+                               Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Visibility="Collapsed"/>
                 </StackPanel>
             </Border>
 
@@ -135,19 +138,42 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <TextBox x:Uid="SetupCodeTextBox" x:Name="SetupCodeTextBox" Grid.Column="0"
-                                 PlaceholderText="Paste setup code here…"/>
+                                 PlaceholderText="Paste setup code here…" TextChanged="OnSetupCodeTextChanged"/>
                         <Button x:Uid="ApplySetupCodeButton" x:Name="ApplySetupCodeButton" Grid.Column="1" Content="Apply"
                                 Style="{ThemeResource AccentButtonStyle}"
                                 Click="OnApplySetupCode" VerticalAlignment="Bottom"/>
                     </Grid>
+                    <!-- Decoded preview (shown after pasting) -->
+                    <StackPanel x:Name="SetupCodePreviewPanel" Spacing="4" Visibility="Collapsed">
+                        <TextBlock x:Name="SetupCodePreviewUrl"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        <TextBlock x:Name="SetupCodePreviewToken"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    </StackPanel>
                     <TextBlock x:Name="SetupCodeResultText"
                                Style="{StaticResource CaptionTextBlockStyle}"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                 </StackPanel>
             </Border>
 
+            <!-- ═══ Section 3.5: Recent Gateways ═══ -->
+            <Border x:Name="RecentGatewaysCard" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16"
+                    Visibility="Collapsed">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="📡 Recent Gateways" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                    <TextBlock Text="Switch between previously paired gateways."
+                               Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    <StackPanel x:Name="RecentGatewayListPanel" Spacing="6"/>
+                </StackPanel>
+            </Border>
+
             <!-- ═══ Section 4: Advanced Connection Settings ═══ -->
-            <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsExpanded="True">
+            <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsExpanded="False">
                 <Expander.Header>
                     <TextBlock x:Uid="ConnectionPage_TextBlock_152" Text="Advanced Connection Settings" Style="{StaticResource BodyStrongTextBlockStyle}"/>
                 </Expander.Header>

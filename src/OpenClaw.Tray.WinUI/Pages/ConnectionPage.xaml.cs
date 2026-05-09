@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using OpenClaw.Shared;
 using OpenClawTray.Onboarding.Services;
 using OpenClawTray.Services;
+using OpenClawTray.Services.Connection;
 using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
@@ -14,9 +15,11 @@ namespace OpenClawTray.Pages;
 public sealed partial class ConnectionPage : Page
 {
     private HubWindow? _hub;
+    private IGatewayConnectionManager? _connectionManager;
+    private GatewayRegistry? _gatewayRegistry;
     private GatewayDiscoveryService? _discoveryService;
     private List<DiscoveredGateway> _discoveredGateways = new();
-    private bool _suppressToggle;
+    private int _connectionAttempts;
     private string? _pendingGatewayUrl; // URL waiting for token input
     private string? _pendingGatewayId;
 
@@ -33,8 +36,14 @@ public sealed partial class ConnectionPage : Page
     public void Initialize(HubWindow hub)
     {
         _hub = hub;
+        _connectionManager = hub.ConnectionManager;
+        _gatewayRegistry = hub.GatewayRegistry;
         var settings = hub.Settings;
         if (settings == null) return;
+
+        // Subscribe to live state changes from the connection manager
+        if (_connectionManager != null)
+            _connectionManager.StateChanged += OnManagerStateChanged;
 
         // Populate manual connection fields
         GatewayUrlTextBox.Text = settings.GatewayUrl ?? "";
@@ -46,15 +55,10 @@ public sealed partial class ConnectionPage : Page
         SshRemotePortBox.Text = settings.SshTunnelRemotePort.ToString();
         SshLocalPortBox.Text = settings.SshTunnelLocalPort.ToString();
 
-        // Set connect toggle without triggering event
-        _suppressToggle = true;
-        ConnectToggle.IsOn = hub.CurrentStatus == ConnectionStatus.Connected ||
-                             hub.CurrentStatus == ConnectionStatus.Connecting;
-        _suppressToggle = false;
-
         UpdateStatus(hub.CurrentStatus);
         UpdateDeviceIdentity();
         LoadConnectionLog();
+        LoadRecentGateways();
 
         // Auto-scan for gateways when disconnected or when no URL configured
         if (hub.CurrentStatus != ConnectionStatus.Connected ||
@@ -62,6 +66,24 @@ public sealed partial class ConnectionPage : Page
         {
             _ = AutoScanAsync();
         }
+    }
+
+    private void OnManagerStateChanged(object? sender, GatewayConnectionSnapshot snapshot)
+    {
+        DispatcherQueue?.TryEnqueue(() =>
+        {
+            var status = snapshot.OverallState switch
+            {
+                OverallConnectionState.Connected or OverallConnectionState.Ready or OverallConnectionState.Degraded
+                    => ConnectionStatus.Connected,
+                OverallConnectionState.Connecting => ConnectionStatus.Connecting,
+                OverallConnectionState.PairingRequired => ConnectionStatus.Connecting,
+                OverallConnectionState.Error => ConnectionStatus.Error,
+                _ => ConnectionStatus.Disconnected
+            };
+            UpdateStatus(status);
+            LoadRecentGateways();
+        });
     }
 
     private async System.Threading.Tasks.Task AutoScanAsync()
@@ -102,15 +124,22 @@ public sealed partial class ConnectionPage : Page
         StatusDot.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
         StatusText.Text = text;
 
-        // Reconnect button enabled when connected or error
-        ReconnectButton.IsEnabled = status == ConnectionStatus.Connected ||
-                                    status == ConnectionStatus.Error;
+        var isConnected = status == ConnectionStatus.Connected;
+        ReconnectButton.IsEnabled = status != ConnectionStatus.Connecting;
+        ReconnectButton.Visibility = isConnected ? Visibility.Collapsed : Visibility.Visible;
+        DisconnectButton.Visibility = isConnected ? Visibility.Visible : Visibility.Collapsed;
 
-        // Update connect toggle without firing event
-        _suppressToggle = true;
-        ConnectToggle.IsOn = status == ConnectionStatus.Connected ||
-                             status == ConnectionStatus.Connecting;
-        _suppressToggle = false;
+        if (status == ConnectionStatus.Connecting)
+        {
+            _connectionAttempts++;
+            ConnectionAttemptsText.Text = $"Connection attempt {_connectionAttempts}…";
+            ConnectionAttemptsText.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            if (isConnected) _connectionAttempts = 0;
+            ConnectionAttemptsText.Visibility = Visibility.Collapsed;
+        }
 
         // Gateway details
         var self = _hub?.LastGatewaySelf;
@@ -270,18 +299,14 @@ public sealed partial class ConnectionPage : Page
 
     // ─── Event Handlers ───
 
-    private void OnConnectToggled(object sender, RoutedEventArgs e)
+    private void OnDisconnect(object sender, RoutedEventArgs e)
     {
-        if (_suppressToggle || _hub == null) return;
-
-        if (ConnectToggle.IsOn)
-            _hub.ConnectAction?.Invoke();
-        else
-            _hub.DisconnectAction?.Invoke();
+        _hub?.DisconnectAction?.Invoke();
     }
 
     private void OnReconnect(object sender, RoutedEventArgs e)
     {
+        _connectionAttempts = 0;
         _hub?.ReconnectAction?.Invoke();
     }
 
@@ -512,7 +537,7 @@ public sealed partial class ConnectionPage : Page
         _pendingGatewayId = null;
     }
 
-    private void OnApplySetupCode(object sender, RoutedEventArgs e)
+    private async void OnApplySetupCode(object sender, RoutedEventArgs e)
     {
         var code = SetupCodeTextBox.Text?.Trim();
         if (string.IsNullOrEmpty(code))
@@ -521,31 +546,180 @@ public sealed partial class ConnectionPage : Page
             return;
         }
 
-        var result = SetupCodeDecoder.Decode(code);
-        if (!result.Success)
+        if (_connectionManager != null)
         {
-            SetupCodeResultText.Text = $"✗ {result.Error}";
+            // Use the unified manager path
+            ApplySetupCodeButton.IsEnabled = false;
+            SetupCodeResultText.Text = "Applying…";
+            try
+            {
+                var result = await _connectionManager.ApplySetupCodeAsync(code);
+                SetupCodeResultText.Text = result.Outcome switch
+                {
+                    SetupCodeOutcome.Success => $"✓ Applied — gateway: {SanitizeUrl(result.GatewayUrl ?? "")}",
+                    SetupCodeOutcome.InvalidCode => $"✗ {result.ErrorMessage ?? "Invalid setup code"}",
+                    SetupCodeOutcome.InvalidUrl => $"✗ {result.ErrorMessage ?? "Invalid URL"}",
+                    SetupCodeOutcome.ConnectionFailed => $"✗ {result.ErrorMessage ?? "Connection failed"}",
+                    _ => $"✗ {result.ErrorMessage ?? "Unknown error"}"
+                };
+                if (result.Outcome == SetupCodeOutcome.Success && result.GatewayUrl != null)
+                    GatewayUrlTextBox.Text = result.GatewayUrl;
+            }
+            finally
+            {
+                ApplySetupCodeButton.IsEnabled = true;
+            }
+        }
+        else
+        {
+            // Fallback: decode and apply via settings
+            var decoded = SetupCodeDecoder.Decode(code);
+            if (!decoded.Success)
+            {
+                SetupCodeResultText.Text = $"✗ {decoded.Error}";
+                return;
+            }
+
+            var settings = _hub?.Settings;
+            if (settings == null) return;
+
+            if (!string.IsNullOrEmpty(decoded.Url))
+                settings.GatewayUrl = decoded.Url;
+            if (!string.IsNullOrEmpty(decoded.Token))
+                settings.BootstrapToken = decoded.Token;
+
+            settings.Save();
+            SetupCodeResultText.Text = $"✓ Applied — gateway: {SanitizeUrl(decoded.Url ?? settings.GatewayUrl ?? "")}";
+            GatewayUrlTextBox.Text = settings.GatewayUrl ?? "";
+            _hub?.RaiseSettingsSaved();
+        }
+    }
+
+    private void OnSetupCodeTextChanged(object sender, TextChangedEventArgs e)
+    {
+        var code = SetupCodeTextBox.Text?.Trim();
+        if (string.IsNullOrEmpty(code) || code.Length < 10)
+        {
+            SetupCodePreviewPanel.Visibility = Visibility.Collapsed;
+            SetupCodeResultText.Text = "";
             return;
         }
 
-        var settings = _hub?.Settings;
-        if (settings == null) return;
-
-        if (!string.IsNullOrEmpty(result.Url))
-            settings.GatewayUrl = result.Url;
-        if (!string.IsNullOrEmpty(result.Token))
+        var decoded = SetupCodeDecoder.Decode(code);
+        if (decoded.Success)
         {
-            // Bootstrap token goes to BootstrapToken only — it's single-use for pairing.
-            // Don't save it as Settings.Token, which would cause reconnect storms on restart.
-            settings.BootstrapToken = result.Token;
+            SetupCodePreviewUrl.Text = $"Gateway: {decoded.Url ?? "(not specified)"}";
+            SetupCodePreviewToken.Text = $"Token: {decoded.Token?[..Math.Min(8, decoded.Token?.Length ?? 0)]}…";
+            SetupCodePreviewPanel.Visibility = Visibility.Visible;
+            SetupCodeResultText.Text = "";
+        }
+        else
+        {
+            SetupCodePreviewPanel.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void LoadRecentGateways()
+    {
+        RecentGatewayListPanel.Children.Clear();
+        if (_gatewayRegistry == null)
+        {
+            RecentGatewaysCard.Visibility = Visibility.Collapsed;
+            return;
         }
 
-        settings.Save();
+        var gateways = _gatewayRegistry.GetAll();
+        if (gateways.Count == 0)
+        {
+            RecentGatewaysCard.Visibility = Visibility.Collapsed;
+            return;
+        }
 
-        SetupCodeResultText.Text = $"✓ Applied — gateway: {SanitizeUrl(result.Url ?? settings.GatewayUrl ?? "")}";
-        GatewayUrlTextBox.Text = settings.GatewayUrl ?? "";
+        RecentGatewaysCard.Visibility = Visibility.Visible;
+        var active = _gatewayRegistry.GetActive();
 
-        _hub?.RaiseSettingsSaved();
+        foreach (var gw in gateways)
+        {
+            var isActive = gw.Id == active?.Id;
+            var row = new Grid { ColumnSpacing = 8, Padding = new Thickness(0, 2, 0, 2) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+
+            var indicator = new TextBlock
+            {
+                Text = isActive ? "✓" : "",
+                VerticalAlignment = VerticalAlignment.Center,
+                Width = 16,
+                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            };
+            Grid.SetColumn(indicator, 0);
+            row.Children.Add(indicator);
+
+            var infoPanel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            infoPanel.Children.Add(new TextBlock
+            {
+                Text = GatewayUrlHelper.SanitizeForDisplay(gw.Url),
+                Style = (Style)Application.Current.Resources["BodyTextBlockStyle"],
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+            var statusParts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(gw.SharedGatewayToken)) statusParts.Add("shared");
+            if (!string.IsNullOrWhiteSpace(gw.BootstrapToken)) statusParts.Add("bootstrap");
+            if (gw.SshTunnel != null) statusParts.Add("SSH");
+            var suffix = statusParts.Count > 0 ? $"  ({string.Join(", ", statusParts)})" : "";
+            infoPanel.Children.Add(new TextBlock
+            {
+                Text = $"{gw.Id[..Math.Min(8, gw.Id.Length)]}…{suffix}",
+                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+                Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+            });
+            Grid.SetColumn(infoPanel, 1);
+            row.Children.Add(infoPanel);
+
+            var connectBtn = new Button
+            {
+                Content = isActive ? "Active" : "Connect",
+                IsEnabled = !isActive,
+                VerticalAlignment = VerticalAlignment.Center,
+                Tag = gw.Id,
+            };
+            connectBtn.Click += OnConnectRecentGateway;
+            Grid.SetColumn(connectBtn, 2);
+            row.Children.Add(connectBtn);
+
+            var removeBtn = new Button
+            {
+                Content = "✕",
+                VerticalAlignment = VerticalAlignment.Center,
+                Tag = gw.Id,
+                Padding = new Thickness(6, 4, 6, 4),
+            };
+            removeBtn.Click += OnRemoveRecentGateway;
+            Grid.SetColumn(removeBtn, 3);
+            row.Children.Add(removeBtn);
+
+            RecentGatewayListPanel.Children.Add(row);
+        }
+    }
+
+    private void OnConnectRecentGateway(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || btn.Tag is not string gwId) return;
+        if (_gatewayRegistry == null || _connectionManager == null) return;
+
+        _gatewayRegistry.SetActive(gwId);
+        _ = _connectionManager.SwitchGatewayAsync(gwId);
+        LoadRecentGateways();
+    }
+
+    private void OnRemoveRecentGateway(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || btn.Tag is not string gwId) return;
+        _gatewayRegistry?.Remove(gwId);
+        _gatewayRegistry?.Save();
+        LoadRecentGateways();
     }
 
     private void OnCopyDeviceId(object sender, RoutedEventArgs e)

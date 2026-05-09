@@ -2892,6 +2892,8 @@ public partial class App : Application
             _hubWindow.QuickSendAction = () => ShowQuickSend();
             _hubWindow.OpenSetupAction = () => _ = ShowOnboardingAsync();
             _hubWindow.OpenConnectionStatusAction = ShowConnectionStatusWindow;
+            _hubWindow.ConnectionManager = _connectionManager;
+            _hubWindow.GatewayRegistry = _gatewayRegistry;
             _hubWindow.ConnectAction = () =>
             {
                 InitializeGatewayClient();

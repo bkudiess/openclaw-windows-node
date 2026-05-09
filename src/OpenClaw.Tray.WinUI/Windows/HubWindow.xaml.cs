@@ -47,6 +47,8 @@ public sealed partial class HubWindow : WindowEx
     public Action? ReconnectAction { get; set; }
     public Action? OpenSetupAction { get; set; }
     public Action? OpenConnectionStatusAction { get; set; }
+    public OpenClawTray.Services.Connection.IGatewayConnectionManager? ConnectionManager { get; set; }
+    public OpenClawTray.Services.Connection.GatewayRegistry? GatewayRegistry { get; set; }
 
     // Node service state (set by App.xaml.cs in ShowHub)
     public bool NodeIsConnected { get; set; }
