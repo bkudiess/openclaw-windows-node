@@ -184,6 +184,11 @@ public class OpenClawGatewayClient : WebSocketClientBase
     public event EventHandler<JsonElement>? AgentFilesListUpdated;
     public event EventHandler<JsonElement>? AgentFileContentUpdated;
 
+    /// <summary>Raised when a device token is received from the gateway during hello-ok handshake.</summary>
+    public event EventHandler<DeviceTokenReceivedEventArgs>? DeviceTokenReceived;
+    /// <summary>Raised when the hello-ok handshake completes successfully.</summary>
+    public event EventHandler? HandshakeSucceeded;
+
     public string? OperatorDeviceId => _operatorDeviceId;
     public IReadOnlyList<string> GrantedOperatorScopes => _grantedOperatorScopes;
     public bool IsConnectedToGateway => IsConnected;
@@ -1009,6 +1014,7 @@ public class OpenClawGatewayClient : WebSocketClientBase
                     var nodeDeviceTokenScopes = TryGetHandshakeDeviceTokenScopesCore(payload, "node", allowDirectDeviceTokenFallback: true);
                     _deviceIdentity.StoreDeviceTokenForRole("node", nodeDeviceToken, nodeDeviceTokenScopes);
                     _logger.Info("Node device token stored for Windows tray node reconnect");
+                    DeviceTokenReceived?.Invoke(this, new DeviceTokenReceivedEventArgs(nodeDeviceToken, nodeDeviceTokenScopes, "node"));
                 }
             }
 
@@ -1023,9 +1029,11 @@ public class OpenClawGatewayClient : WebSocketClientBase
                 _deviceIdentity.StoreDeviceTokenWithScopes(newDeviceToken, deviceTokenScopes);
                 _connectAuthToken = newDeviceToken;
                 _logger.Info("Operator device token stored for reconnect");
+                DeviceTokenReceived?.Invoke(this, new DeviceTokenReceivedEventArgs(newDeviceToken, deviceTokenScopes, "operator"));
             }
 
             _logger.Info("Handshake complete (hello-ok)");
+            HandshakeSucceeded?.Invoke(this, EventArgs.Empty);
             if (!string.IsNullOrWhiteSpace(_operatorDeviceId))
             {
                 _logger.Info($"Operator device ID: {_operatorDeviceId}");

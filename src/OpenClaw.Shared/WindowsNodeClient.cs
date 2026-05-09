@@ -55,6 +55,10 @@ public class WindowsNodeClient : WebSocketClientBase
     public event EventHandler<PairingStatusEventArgs>? PairingStatusChanged;
     public event EventHandler<JsonElement>? HealthReceived;
     public event EventHandler<GatewaySelfInfo>? GatewaySelfUpdated;
+    /// <summary>Raised when a device token is received from the gateway during hello-ok handshake.</summary>
+    public event EventHandler<DeviceTokenReceivedEventArgs>? DeviceTokenReceived;
+    /// <summary>Raised when the hello-ok handshake completes successfully.</summary>
+    public event EventHandler? HandshakeSucceeded;
     
     public new bool IsConnected => _isConnected;
     public string? NodeId => _nodeId;
@@ -658,6 +662,7 @@ public class WindowsNodeClient : WebSocketClientBase
                     _pairingApprovedAwaitingReconnect = false;
                     _logger.Info("Received device token - we are now paired!");
                     _deviceIdentity.StoreDeviceTokenForRole("node", deviceToken, TryGetAuthScopes(authPayload));
+                    DeviceTokenReceived?.Invoke(this, new DeviceTokenReceivedEventArgs(deviceToken, TryGetAuthScopes(authPayload), "node"));
                     EmitPairingStatusOnTransition(new PairingStatusEventArgs(
                         PairingStatus.Paired,
                         _deviceIdentity.DeviceId,
@@ -706,6 +711,7 @@ public class WindowsNodeClient : WebSocketClientBase
             }
             
             RaiseStatusChanged(ConnectionStatus.Connected);
+            HandshakeSucceeded?.Invoke(this, EventArgs.Empty);
         }
     }
 
