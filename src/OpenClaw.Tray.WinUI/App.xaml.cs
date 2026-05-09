@@ -9,6 +9,7 @@ using OpenClawTray.Helpers;
 using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using OpenClawTray.Onboarding;
+using OpenClawTray.Services.Connection;
 using OpenClawTray.Services.LocalGatewaySetup;
 using System;
 using System.Collections.Frozen;
@@ -38,6 +39,8 @@ public partial class App : Application
 
     private TrayIcon? _trayIcon;
     private OpenClawGatewayClient? _gatewayClient;
+    private GatewayConnectionManager? _connectionManager;
+    private GatewayRegistry? _gatewayRegistry;
     /// <summary>
     /// Cached reference to the most recently constructed local-setup engine. Used by
     /// <see cref="OnPairingStatusChanged"/> to suppress the "copy pairing command" toast
@@ -417,6 +420,16 @@ public partial class App : Application
         {
             Logger.Error($"Onboarding failed during launch (tray remains available): {ex}");
         }
+
+        // Initialize connection manager (north star architecture)
+        _gatewayRegistry = new GatewayRegistry(SettingsManager.SettingsDirectoryPath);
+        _gatewayRegistry.Load();
+        var credentialResolver = new CredentialResolver(DeviceIdentityFileReader.Instance);
+        var clientFactory = new GatewayClientFactory();
+        _connectionManager = new GatewayConnectionManager(
+            credentialResolver, clientFactory, _gatewayRegistry, new AppLogger());
+        _connectionManager.OperatorClientChanged += OnOperatorClientChanged;
+        _connectionManager.StateChanged += OnManagerStateChanged;
 
         // Initialize connections — always create operator client for UI data,
         // additionally create node service for gateway node mode or local MCP.
@@ -1016,9 +1029,7 @@ public partial class App : Application
             }
             else
             {
-                UnsubscribeGatewayEvents();
-                _gatewayClient?.Dispose();
-                _gatewayClient = null;
+                _ = _connectionManager?.DisconnectAsync();
                 var oldNode = _nodeService;
                 _nodeService = null;
                 try { oldNode?.Dispose(); } catch { }
@@ -1636,10 +1647,9 @@ public partial class App : Application
 
     private void InitializeGatewayClient(bool useBootstrapHandoffAuth = false)
     {
-        if (_settings == null) return;
+        if (_settings == null || _connectionManager == null || _gatewayRegistry == null) return;
         if (!EnsureSshTunnelConfigured()) return;
 
-        // Guard against empty gateway URL (e.g., fresh install before onboarding)
         var gatewayUrl = _settings.GetEffectiveGatewayUrl();
         if (string.IsNullOrWhiteSpace(gatewayUrl))
         {
@@ -1647,69 +1657,162 @@ public partial class App : Application
             return;
         }
 
-        // Bug #4 (Wizard hung at "Authenticating"): broaden credential resolution
-        // beyond settings.Token so a paired operator whose only credential is
-        // BootstrapToken or a stored DeviceIdentity DeviceToken still gets a
-        // client. Mirrors the prototype's resolver shape (openclaw-windows-node
-        // App.xaml.cs:1244-1298). Logic lives in GatewayCredentialResolver so
-        // Tray tests can cover all branches without booting WinUI.
-        var identityPath = Path.Combine(SettingsManager.SettingsDirectoryPath, "device-key-ed25519.json");
-        var credential = OpenClawTray.Services.GatewayCredentialResolver.Resolve(
-            _settings.Token,
-            _settings.BootstrapToken,
-            identityPath,
-            msg => Logger.Warn(msg));
-        if (credential == null)
+        // Bridge: create/update a GatewayRecord from current settings
+        // (Step 2.4 will add a proper migration, making this bridge unnecessary)
+        var existing = _gatewayRegistry.FindByUrl(gatewayUrl);
+        var recordId = existing?.Id ?? Guid.NewGuid().ToString();
+        var record = new GatewayRecord
         {
-            Logger.Info("Gateway token not configured — skipping operator client initialization");
-            return;
+            Id = recordId,
+            Url = gatewayUrl,
+            SharedGatewayToken = _settings.Token,
+            BootstrapToken = _settings.BootstrapToken,
+            FriendlyName = existing?.FriendlyName,
+            IsLocal = existing?.IsLocal ?? false,
+            SshTunnel = _settings.UseSshTunnel
+                ? new SshTunnelConfig(
+                    _settings.SshTunnelUser ?? "",
+                    _settings.SshTunnelHost ?? "",
+                    _settings.SshTunnelRemotePort,
+                    _settings.SshTunnelLocalPort)
+                : null,
+        };
+        _gatewayRegistry.AddOrUpdate(record);
+        _gatewayRegistry.SetActive(recordId);
+
+        // Ensure identity directory exists for credential resolution
+        var identityDir = _gatewayRegistry.GetIdentityDirectory(recordId);
+        if (!Directory.Exists(identityDir))
+            Directory.CreateDirectory(identityDir);
+
+        // Copy identity file from legacy location if needed
+        var legacyIdentityPath = Path.Combine(SettingsManager.SettingsDirectoryPath, "device-key-ed25519.json");
+        var newIdentityPath = Path.Combine(identityDir, "device-key-ed25519.json");
+        if (File.Exists(legacyIdentityPath) && !File.Exists(newIdentityPath))
+        {
+            try { File.Copy(legacyIdentityPath, newIdentityPath, overwrite: false); }
+            catch (Exception ex) { Logger.Warn($"Failed to copy identity file: {ex.Message}"); }
         }
 
-        // Caller's useBootstrapHandoffAuth hint is preserved as an OR so existing
-        // call sites that put a bootstrap value into settings.Token + pass true
-        // continue to send auth.bootstrapToken (OpenClawGatewayClient.cs:556-565).
-        var tokenIsBootstrapToken = credential.IsBootstrapToken || useBootstrapHandoffAuth;
-        Logger.Info($"Gateway credential resolved from {credential.Source} (bootstrap={tokenIsBootstrapToken})");
+        // Delegate to connection manager — it creates the client, fires OperatorClientChanged,
+        // and our handler re-wires the 27 event subscriptions
+        _ = _connectionManager.ConnectAsync(recordId);
+    }
 
-        // Unsubscribe from old client if exists
-        UnsubscribeGatewayEvents();
-        _gatewayClient?.Dispose();
+    /// <summary>
+    /// Handles the connection manager's OperatorClientChanged event.
+    /// Re-wires all 27 data event handlers from the old client to the new one.
+    /// Updates the _gatewayClient field so existing code still works.
+    /// </summary>
+    private void OnOperatorClientChanged(object? sender, OperatorClientChangedEventArgs e)
+    {
+        // Unsubscribe from old client
+        if (e.OldClient is { } old)
+        {
+            old.StatusChanged -= OnConnectionStatusChanged;
+            old.AuthenticationFailed -= OnAuthenticationFailed;
+            old.ActivityChanged -= OnActivityChanged;
+            old.NotificationReceived -= OnNotificationReceived;
+            old.ChannelHealthUpdated -= OnChannelHealthUpdated;
+            old.SessionsUpdated -= OnSessionsUpdated;
+            old.UsageUpdated -= OnUsageUpdated;
+            old.UsageStatusUpdated -= OnUsageStatusUpdated;
+            old.UsageCostUpdated -= OnUsageCostUpdated;
+            old.NodesUpdated -= OnNodesUpdated;
+            old.SessionPreviewUpdated -= OnSessionPreviewUpdated;
+            old.SessionCommandCompleted -= OnSessionCommandCompleted;
+            old.GatewaySelfUpdated -= OnGatewaySelfUpdated;
+            old.CronListUpdated -= OnCronListUpdated;
+            old.CronStatusUpdated -= OnCronStatusUpdated;
+            old.ConfigUpdated -= OnConfigUpdated;
+            old.ConfigSchemaUpdated -= OnConfigSchemaUpdated;
+            old.SkillsStatusUpdated -= OnSkillsStatusUpdated;
+            old.AgentEventReceived -= OnAgentEventReceived;
+            old.NodePairListUpdated -= OnNodePairListUpdated;
+            old.DevicePairListUpdated -= OnDevicePairListUpdated;
+            old.ModelsListUpdated -= OnModelsListUpdated;
+            old.PresenceUpdated -= OnPresenceUpdated;
+            old.AgentsListUpdated -= OnAgentsListUpdated;
+            old.AgentFilesListUpdated -= OnAgentFilesListUpdated;
+            old.AgentFileContentUpdated -= OnAgentFileContentUpdated;
+        }
+
+        // Update the _gatewayClient field for backward compat
+        _gatewayClient = e.NewClient;
+
+        // Subscribe to new client
+        if (e.NewClient is { } client)
+        {
+            client.SetUserRules(_settings?.UserRules?.Count > 0 ? _settings.UserRules : null);
+            client.SetPreferStructuredCategories(_settings?.PreferStructuredCategories ?? true);
+            client.StatusChanged += OnConnectionStatusChanged;
+            client.AuthenticationFailed += OnAuthenticationFailed;
+            client.ActivityChanged += OnActivityChanged;
+            client.NotificationReceived += OnNotificationReceived;
+            client.ChannelHealthUpdated += OnChannelHealthUpdated;
+            client.SessionsUpdated += OnSessionsUpdated;
+            client.UsageUpdated += OnUsageUpdated;
+            client.UsageStatusUpdated += OnUsageStatusUpdated;
+            client.UsageCostUpdated += OnUsageCostUpdated;
+            client.NodesUpdated += OnNodesUpdated;
+            client.SessionPreviewUpdated += OnSessionPreviewUpdated;
+            client.SessionCommandCompleted += OnSessionCommandCompleted;
+            client.GatewaySelfUpdated += OnGatewaySelfUpdated;
+            client.CronListUpdated += OnCronListUpdated;
+            client.CronStatusUpdated += OnCronStatusUpdated;
+            client.ConfigUpdated += OnConfigUpdated;
+            client.ConfigSchemaUpdated += OnConfigSchemaUpdated;
+            client.SkillsStatusUpdated += OnSkillsStatusUpdated;
+            client.AgentEventReceived += OnAgentEventReceived;
+            client.NodePairListUpdated += OnNodePairListUpdated;
+            client.DevicePairListUpdated += OnDevicePairListUpdated;
+            client.ModelsListUpdated += OnModelsListUpdated;
+            client.PresenceUpdated += OnPresenceUpdated;
+            client.AgentsListUpdated += OnAgentsListUpdated;
+            client.AgentFilesListUpdated += OnAgentFilesListUpdated;
+            client.AgentFileContentUpdated += OnAgentFileContentUpdated;
+        }
+
         _lastGatewaySelf = null;
 
-        _gatewayClient = new OpenClawGatewayClient(
-            gatewayUrl,
-            credential.Token,
-            new AppLogger(),
-            tokenIsBootstrapToken);
-        _gatewayClient.SetUserRules(_settings.UserRules.Count > 0 ? _settings.UserRules : null);
-        _gatewayClient.SetPreferStructuredCategories(_settings.PreferStructuredCategories);
-        _gatewayClient.StatusChanged += OnConnectionStatusChanged;
-        _gatewayClient.AuthenticationFailed += OnAuthenticationFailed;
-        _gatewayClient.ActivityChanged += OnActivityChanged;
-        _gatewayClient.NotificationReceived += OnNotificationReceived;
-        _gatewayClient.ChannelHealthUpdated += OnChannelHealthUpdated;
-        _gatewayClient.SessionsUpdated += OnSessionsUpdated;
-        _gatewayClient.UsageUpdated += OnUsageUpdated;
-        _gatewayClient.UsageStatusUpdated += OnUsageStatusUpdated;
-        _gatewayClient.UsageCostUpdated += OnUsageCostUpdated;
-        _gatewayClient.NodesUpdated += OnNodesUpdated;
-        _gatewayClient.SessionPreviewUpdated += OnSessionPreviewUpdated;
-        _gatewayClient.SessionCommandCompleted += OnSessionCommandCompleted;
-        _gatewayClient.GatewaySelfUpdated += OnGatewaySelfUpdated;
-        _gatewayClient.CronListUpdated += OnCronListUpdated;
-        _gatewayClient.CronStatusUpdated += OnCronStatusUpdated;
-        _gatewayClient.ConfigUpdated += OnConfigUpdated;
-        _gatewayClient.ConfigSchemaUpdated += OnConfigSchemaUpdated;
-        _gatewayClient.SkillsStatusUpdated += OnSkillsStatusUpdated;
-        _gatewayClient.AgentEventReceived += OnAgentEventReceived;
-        _gatewayClient.NodePairListUpdated += OnNodePairListUpdated;
-        _gatewayClient.DevicePairListUpdated += OnDevicePairListUpdated;
-        _gatewayClient.ModelsListUpdated += OnModelsListUpdated;
-        _gatewayClient.PresenceUpdated += OnPresenceUpdated;
-        _gatewayClient.AgentsListUpdated += OnAgentsListUpdated;
-        _gatewayClient.AgentFilesListUpdated += OnAgentFilesListUpdated;
-        _gatewayClient.AgentFileContentUpdated += OnAgentFileContentUpdated;
-        _ = _gatewayClient.ConnectAsync();
+        // Update UI references
+        _dispatcherQueue?.TryEnqueue(() =>
+        {
+            if (_hubWindow != null && !_hubWindow.IsClosed)
+            {
+                _hubWindow.GatewayClient = _gatewayClient;
+                _hubWindow.CurrentStatus = _currentStatus;
+            }
+        });
+    }
+
+    /// <summary>
+    /// Handles the connection manager's StateChanged event.
+    /// Maps the snapshot to the existing tray icon / UI status system.
+    /// </summary>
+    private void OnManagerStateChanged(object? sender, GatewayConnectionSnapshot snap)
+    {
+        // Map OverallConnectionState to the existing ConnectionStatus enum
+        // for backward compat with tray icon and hub window
+        var mapped = snap.OverallState switch
+        {
+            OverallConnectionState.Idle => ConnectionStatus.Disconnected,
+            OverallConnectionState.Connecting => ConnectionStatus.Connecting,
+            OverallConnectionState.Connected => ConnectionStatus.Connected,
+            OverallConnectionState.Ready => ConnectionStatus.Connected,
+            OverallConnectionState.Degraded => ConnectionStatus.Connected,
+            OverallConnectionState.PairingRequired => ConnectionStatus.Connecting,
+            OverallConnectionState.Error => ConnectionStatus.Error,
+            OverallConnectionState.Disconnecting => ConnectionStatus.Disconnected,
+            _ => ConnectionStatus.Disconnected
+        };
+
+        _currentStatus = mapped;
+        _dispatcherQueue?.TryEnqueue(() =>
+        {
+            _hubWindow?.UpdateStatus(mapped);
+            UpdateTrayIcon();
+        });
     }
 
     private void UnsubscribeGatewayEvents()
@@ -2825,9 +2928,7 @@ public partial class App : Application
             };
             _hubWindow.DisconnectAction = () =>
             {
-                UnsubscribeGatewayEvents();
-                _gatewayClient?.Dispose();
-                _gatewayClient = null;
+                _ = _connectionManager?.DisconnectAsync();
                 var oldNode = _nodeService;
                 _nodeService = null;
                 try { oldNode?.Dispose(); } catch { }
@@ -2935,11 +3036,8 @@ public partial class App : Application
 
     private void OnSettingsSaved(object? sender, EventArgs e)
     {
-        // Reconnect with new settings — mirror the startup if/else pattern
-        // to avoid dual connections that cause gateway conflicts.
-        UnsubscribeGatewayEvents();
-        _gatewayClient?.Dispose();
-        _gatewayClient = null;
+        // Reconnect with new settings — tear down via manager, then reconnect
+        _ = _connectionManager?.DisconnectAsync();
         _lastGatewaySelf = null;
         var oldNodeService = _nodeService;
         _nodeService = null;
@@ -3005,9 +3103,7 @@ public partial class App : Application
     /// </summary>
     private void ReconnectGateway()
     {
-        UnsubscribeGatewayEvents();
-        _gatewayClient?.Dispose();
-        _gatewayClient = null;
+        _ = _connectionManager?.DisconnectAsync();
         _lastGatewaySelf = null;
         var oldNodeService = _nodeService;
         _nodeService = null;
