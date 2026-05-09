@@ -51,6 +51,9 @@
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Onboarding\Services\WizardStepSelection.cs" Link="Imported\WizardStepSelection.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Onboarding\Services\WizardFlowController.cs" Link="Imported\WizardFlowController.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Dialogs\QuickSendCoordinator.cs" Link="Imported\QuickSendCoordinator.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\GatewayRecord.cs" Link="Services\Connection\GatewayRecord.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\ICredentialResolver.cs" Link="Services\Connection\ICredentialResolver.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\CredentialResolver.cs" Link="Services\Connection\CredentialResolver.cs" />
   </ItemGroup>
 
 </Project>
