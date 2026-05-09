@@ -193,8 +193,8 @@ internal sealed class ConnectionStateMachine
             case ConnectionTrigger.WebSocketDisconnected:
                 if (_operatorState == RoleConnectionState.PairingRequired)
                 {
-                    _operatorState = RoleConnectionState.Error;
-                    _operatorError = detail ?? "Disconnected during pairing";
+                    // Gateway closes WebSocket after PAIRING_REQUIRED — stay in PairingRequired
+                    // (don't transition to Error; user needs to approve then reconnect)
                 }
                 else
                 {

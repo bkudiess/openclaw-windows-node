@@ -87,7 +87,9 @@ public sealed partial class ConnectionStatusWindow : WindowEx
     {
         _dispatcherQueue.TryEnqueue(() =>
         {
-            PrependTimelineRich(evt);
+            AppendTimelineRich(evt);
+            // Auto-scroll to bottom
+            TimelineScroll.ChangeView(null, TimelineScroll.ScrollableHeight, null);
             if (evt.Category is "state" or "error" or "credential")
                 RefreshAll();
         });
@@ -333,6 +335,28 @@ public sealed partial class ConnectionStatusWindow : WindowEx
             Foreground = DimTextBrush
         });
 
+        // Direction arrow based on category/content
+        var direction = evt.Category switch
+        {
+            "handshake" when evt.Message.Contains("Sending") => "→ GW",
+            "handshake" when evt.Message.Contains("Received") || evt.Message.Contains("hello-ok") => "← GW",
+            "handshake" when evt.Message.Contains("Raw error") => "← GW",
+            "handshake" when evt.Message.Contains("Connect error") => "← GW",
+            "warning" when evt.Message.Contains("Connect error") || evt.Message.Contains("Gateway") => "← GW",
+            "warning" when evt.Message.Contains("authentication failed") => "← GW",
+            "error" when evt.Message.Contains("Authentication") || evt.Message.Contains("signature") => "← GW",
+            "websocket" when evt.Message.Contains("connecting") => "→ GW",
+            "websocket" when evt.Message.Contains("connected") => "← GW",
+            "websocket" when evt.Message.Contains("disconnected") || evt.Message.Contains("error") => "← GW",
+            "setup" => "    ",
+            _ => "    "
+        };
+        para.Inlines.Add(new Run
+        {
+            Text = direction + " ",
+            Foreground = DimTextBrush
+        });
+
         // Category tag
         para.Inlines.Add(new Run
         {
@@ -343,8 +367,11 @@ public sealed partial class ConnectionStatusWindow : WindowEx
         // Message (color-coded by category)
         var brush = evt.Category switch
         {
-            "error" => ErrorTextBrush,
+            "error" or "warning" => ErrorTextBrush,
             "credential" => AuthTextBrush,
+            "handshake" when evt.Message.Contains("hello-ok") => OkTextBrush,
+            "handshake" when evt.Message.Contains("error", StringComparison.OrdinalIgnoreCase) => ErrorTextBrush,
+            "handshake" => AuthTextBrush,
             "state" when evt.Message.Contains("Connected") || evt.Message.Contains("Ready")
                 || evt.Message.Contains("hello-ok") => OkTextBrush,
             "state" when evt.Message.Contains("Error") => ErrorTextBrush,

@@ -119,8 +119,8 @@
             </Grid>
             <ScrollViewer Grid.Row="1" x:Name="TimelineScroll"
                           Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="6" Padding="10"
-                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
-                <RichTextBlock x:Name="TimelineRichText" FontFamily="Consolas" FontSize="11" IsTextSelectionEnabled="True" TextWrapping="NoWrap"/>
+                          VerticalScrollBarVisibility="Auto">
+                <RichTextBlock x:Name="TimelineRichText" FontFamily="Consolas" FontSize="11" IsTextSelectionEnabled="True" TextWrapping="Wrap"/>
             </ScrollViewer>
         </Grid>
     </Grid>

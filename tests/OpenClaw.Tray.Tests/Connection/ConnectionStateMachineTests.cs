@@ -101,12 +101,12 @@ public class ConnectionStateMachineTests
     }
 
     [Fact]
-    public void PairingRequired_WebSocketDisconnected_TransitionsToError()
+    public void PairingRequired_WebSocketDisconnected_StaysInPairingRequired()
     {
         _sm.TryTransition(ConnectionTrigger.ConnectRequested);
         _sm.TryTransition(ConnectionTrigger.PairingPending);
         Assert.True(_sm.TryTransition(ConnectionTrigger.WebSocketDisconnected));
-        Assert.Equal(OverallConnectionState.Error, _sm.Current.OverallState);
+        Assert.Equal(OverallConnectionState.PairingRequired, _sm.Current.OverallState);
     }
 
     // ─── Operator: Error states ───

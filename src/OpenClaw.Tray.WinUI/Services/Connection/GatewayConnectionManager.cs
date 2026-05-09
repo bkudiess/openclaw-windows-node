@@ -21,6 +21,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
     private CancellationTokenSource? _operationCts;
     private IGatewayClientLifecycle? _activeLifecycle;
     private bool _disposed;
+    private bool _gatewayNeedsV2Signature; // remembered across reconnects
 
     public event EventHandler<GatewayConnectionSnapshot>? StateChanged;
     public event EventHandler<ConnectionDiagnosticEvent>? DiagnosticEvent;
@@ -87,9 +88,30 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 GatewayName = record.FriendlyName
             };
 
-            // Resolve credentials
-            var identityPath = _registry.GetIdentityDirectory(record.Id);
-            var credential = _credentialResolver.ResolveOperator(record, identityPath);
+            // Resolve credentials — use the root identity path since OpenClawGatewayClient
+            // always creates/reads DeviceIdentity from %APPDATA%/OpenClawTray (the root),
+            // not the per-gateway directory. Also ensure the per-gateway directory has a
+            // copy of the root identity for the credentials display and future migration.
+            var rootIdentityDir = Path.Combine(
+                Environment.GetEnvironmentVariable("OPENCLAW_TRAY_APPDATA_DIR")
+                    ?? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "OpenClawTray");
+            var perGatewayIdentityDir = _registry.GetIdentityDirectory(record.Id);
+
+            // Ensure per-gateway directory exists
+            if (!Directory.Exists(perGatewayIdentityDir))
+                Directory.CreateDirectory(perGatewayIdentityDir);
+
+            // Sync: copy root identity → per-gateway (so credentials display and resolver work)
+            var rootIdentityFile = Path.Combine(rootIdentityDir, "device-key-ed25519.json");
+            var perGwIdentityFile = Path.Combine(perGatewayIdentityDir, "device-key-ed25519.json");
+            if (File.Exists(rootIdentityFile))
+            {
+                try { File.Copy(rootIdentityFile, perGwIdentityFile, overwrite: true); }
+                catch (Exception ex) { _logger.Warn($"[ConnMgr] Identity sync failed: {ex.Message}"); }
+            }
+
+            var credential = _credentialResolver.ResolveOperator(record, perGatewayIdentityDir);
             _diagnostics.RecordCredentialResolution(credential);
 
             if (credential == null)
@@ -113,8 +135,10 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             _diagnostics.RecordStateChange(prevState, _stateMachine.Current.OverallState);
             EmitStateChanged(prevState);
 
-            // Create client via factory
-            var lifecycle = _clientFactory.Create(record.Url, credential, identityPath, _logger);
+            // Create client via factory — use a diagnostic-tee logger so client handshake
+            // logs appear in the Connection Status window timeline
+            var diagLogger = new DiagnosticTeeLogger(_logger, _diagnostics);
+            var lifecycle = _clientFactory.Create(record.Url, credential, perGatewayIdentityDir, diagLogger);
             _activeLifecycle = lifecycle;
             OperatorClientChanged?.Invoke(this, new OperatorClientChangedEventArgs
             {
@@ -143,6 +167,19 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 if (Interlocked.Read(ref _generation) != gen) return;
                 HandleDeviceTokenReceived(e);
             };
+            lifecycle.DataClient.PairingRequired += (s, requestId) =>
+            {
+                if (Interlocked.Read(ref _generation) != gen) return;
+                _ = HandlePairingRequiredAsync(requestId, gen);
+            };
+            lifecycle.DataClient.V2SignatureFallback += (s, _) =>
+            {
+                _gatewayNeedsV2Signature = true;
+            };
+
+            // If we already know this gateway needs v2, tell the client upfront
+            if (_gatewayNeedsV2Signature)
+                lifecycle.DataClient.UseV2Signature = true;
 
             // Connect (fire and forget — the event handlers will drive state transitions)
             var ct = _operationCts!.Token;
@@ -192,6 +229,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
     public async Task SwitchGatewayAsync(string gatewayId)
     {
         await DisconnectAsync();
+        _gatewayNeedsV2Signature = false; // new gateway might support v3
         _registry.SetActive(gatewayId);
         await ConnectAsync(gatewayId);
     }
@@ -214,19 +252,23 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         // 3. Disconnect current gateway if any
         await DisconnectAsync();
 
+        // New gateway URL → reset v2 signature flag (new gateway might support v3)
+        var isNewGateway = _registry.FindByUrl(gatewayUrl) == null;
+        if (isNewGateway)
+            _gatewayNeedsV2Signature = false;
+
         // 4. Create or update gateway record
         var existing = _registry.FindByUrl(gatewayUrl);
         var recordId = existing?.Id ?? Guid.NewGuid().ToString();
 
-        // Determine if the token is a bootstrap token (heuristic: setup codes typically provide bootstrap)
-        var isBootstrap = !string.IsNullOrWhiteSpace(decoded.Token) &&
-                          string.IsNullOrWhiteSpace(existing?.SharedGatewayToken);
-
+        // Setup codes from `openclaw qr` always provide bootstrap tokens.
+        // Store as BootstrapToken so the credential resolver passes IsBootstrapToken=true,
+        // causing the client to send auth.bootstrapToken (not auth.token).
         var record = (existing ?? new GatewayRecord { Id = recordId }) with
         {
             Url = gatewayUrl,
-            SharedGatewayToken = isBootstrap ? existing?.SharedGatewayToken : decoded.Token,
-            BootstrapToken = isBootstrap ? decoded.Token : existing?.BootstrapToken,
+            SharedGatewayToken = existing?.SharedGatewayToken, // preserve existing shared token if any
+            BootstrapToken = decoded.Token ?? existing?.BootstrapToken,
         };
         _registry.AddOrUpdate(record);
         _registry.SetActive(recordId);
@@ -236,6 +278,15 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         var identityDir = _registry.GetIdentityDirectory(recordId);
         if (!Directory.Exists(identityDir))
             Directory.CreateDirectory(identityDir);
+
+        // Clear stored device tokens so we start fresh with the bootstrap token.
+        // The keypair (device ID) stays — only the tokens are wiped.
+        var rootIdentityDir = Path.Combine(
+            Environment.GetEnvironmentVariable("OPENCLAW_TRAY_APPDATA_DIR")
+                ?? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "OpenClawTray");
+        ClearStoredDeviceTokens(rootIdentityDir);
+        ClearStoredDeviceTokens(identityDir);
 
         _diagnostics.Record("setup", $"Setup code applied for {GatewayUrlHelper.SanitizeForDisplay(gatewayUrl)}");
 
@@ -334,7 +385,62 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             $"Scopes={string.Join(",", e.Scopes ?? [])}");
     }
 
+    private async Task HandlePairingRequiredAsync(string? requestId, long gen)
+    {
+        await _transitionSemaphore.WaitAsync();
+        try
+        {
+            if (Interlocked.Read(ref _generation) != gen) return;
+
+            var prev = _stateMachine.Current.OverallState;
+            _diagnostics.Record("pairing", $"Pairing required — waiting for approval (requestId={requestId})");
+            _stateMachine.TryTransition(ConnectionTrigger.PairingPending);
+            _diagnostics.RecordStateChange(prev, _stateMachine.Current.OverallState);
+            EmitStateChanged(prev);
+        }
+        finally
+        {
+            _transitionSemaphore.Release();
+        }
+    }
+
     // ─── Helpers ───
+
+    /// <summary>
+    /// Clear stored device tokens from an identity file, keeping the keypair intact.
+    /// </summary>
+    private void ClearStoredDeviceTokens(string identityDir)
+    {
+        var keyPath = Path.Combine(identityDir, "device-key-ed25519.json");
+        if (!File.Exists(keyPath)) return;
+        try
+        {
+            var json = File.ReadAllText(keyPath);
+            var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            // Rebuild without token fields
+            using var ms = new MemoryStream();
+            using var writer = new System.Text.Json.Utf8JsonWriter(ms, new System.Text.Json.JsonWriterOptions { Indented = true });
+            writer.WriteStartObject();
+            foreach (var prop in root.EnumerateObject())
+            {
+                // Skip token fields — keep everything else (keys, deviceId, algorithm, etc.)
+                if (prop.Name is "DeviceToken" or "DeviceTokenScopes" or "NodeDeviceToken" or "NodeDeviceTokenScopes")
+                    continue;
+                prop.WriteTo(writer);
+            }
+            writer.WriteEndObject();
+            writer.Flush();
+
+            File.WriteAllBytes(keyPath, ms.ToArray());
+            _logger.Info($"[ConnMgr] Cleared stored device tokens from {identityDir}");
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"[ConnMgr] Failed to clear device tokens: {ex.Message}");
+        }
+    }
 
     private void EmitStateChanged(OverallConnectionState previousOverall)
     {
@@ -374,5 +480,56 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         _operationCts?.Cancel();
         _operationCts?.Dispose();
         _transitionSemaphore.Dispose();
+    }
+}
+
+/// <summary>
+/// Logger that tees messages to both the underlying logger and the diagnostics ring buffer.
+/// Client handshake logs tagged with [HANDSHAKE] appear in the Connection Status timeline.
+/// </summary>
+internal sealed class DiagnosticTeeLogger : IOpenClawLogger
+{
+    private readonly IOpenClawLogger _inner;
+    private readonly ConnectionDiagnostics _diagnostics;
+
+    public DiagnosticTeeLogger(IOpenClawLogger inner, ConnectionDiagnostics diagnostics)
+    {
+        _inner = inner;
+        _diagnostics = diagnostics;
+    }
+
+    public void Info(string message)
+    {
+        _inner.Info(message);
+        // Forward handshake-related and connection-relevant messages to timeline
+        if (message.Contains("[HANDSHAKE]") || message.Contains("challenge") ||
+            message.Contains("hello-ok") || message.Contains("Handshake") ||
+            message.Contains("  role=") || message.Contains("  scopes=") ||
+            message.Contains("  deviceId=") || message.Contains("  nonce=") ||
+            message.Contains("  signedAt=") || message.Contains("  sigToken") ||
+            message.Contains("  signature ") || message.Contains("  isBootstrap") ||
+            message.Contains("signed:") || message.Contains("auth:") ||
+            message.Contains("gateway connected") || message.Contains("gateway reconnecting") ||
+            message.Contains("[NODE]"))
+        {
+            // Strip redundant [HANDSHAKE] prefix since the category tag already shows "handshake"
+            var clean = message.Replace("[HANDSHAKE] ", "");
+            _diagnostics.Record("handshake", clean);
+        }
+    }
+
+    public void Debug(string message) => _inner.Debug(message);
+
+    public void Warn(string message)
+    {
+        _inner.Warn(message);
+        var clean = message.Replace("[HANDSHAKE] ", "").Replace("[NODE] ", "");
+        _diagnostics.Record("warning", clean);
+    }
+
+    public void Error(string message, Exception? ex = null)
+    {
+        _inner.Error(message, ex);
+        _diagnostics.Record("error", message);
     }
 }

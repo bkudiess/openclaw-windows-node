@@ -440,11 +440,8 @@ public partial class App : Application
             InitializeNodeService();
         }
 
-        // Show diagnostics window when not connected (no gateway configured)
-        if (string.IsNullOrWhiteSpace(_settings.GetEffectiveGatewayUrl()))
-        {
-            ShowConnectionStatusWindow();
-        }
+        // Always show diagnostics window on startup for connection debugging
+        ShowConnectionStatusWindow();
 
         // Pre-warm chat window (WebView2 init takes 1-3s, do it now so left-click is instant)
         if (_settings != null &&
@@ -1659,37 +1656,76 @@ public partial class App : Application
         if (!EnsureSshTunnelConfigured()) return;
 
         var gatewayUrl = _settings.GetEffectiveGatewayUrl();
+
+        // Check registry first — it's the source of truth after initial setup
+        var activeRecord = _gatewayRegistry.GetActive();
+        if (activeRecord != null)
+        {
+            // Registry has an active gateway — connect directly, skip settings bridge
+            var idDir = _gatewayRegistry.GetIdentityDirectory(activeRecord.Id);
+            if (!Directory.Exists(idDir))
+                Directory.CreateDirectory(idDir);
+            var rootId = Path.Combine(SettingsManager.SettingsDirectoryPath, "device-key-ed25519.json");
+            var gwId = Path.Combine(idDir, "device-key-ed25519.json");
+            if (File.Exists(rootId))
+            {
+                try { File.Copy(rootId, gwId, overwrite: true); } catch { }
+            }
+            _ = _connectionManager.ConnectAsync(activeRecord.Id);
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(gatewayUrl))
         {
             Logger.Info("Gateway URL not configured — skipping client initialization");
             return;
         }
 
-        // Bridge: create/update a GatewayRecord from current settings
-        // (Step 2.4 will add a proper migration, making this bridge unnecessary)
+        // Bridge: create/update a GatewayRecord from current settings.
+        // If a record already exists in the registry for this URL (e.g. from ApplySetupCodeAsync),
+        // preserve its token classification — don't overwrite bootstrap with shared.
         var existing = _gatewayRegistry.FindByUrl(gatewayUrl);
-        var recordId = existing?.Id ?? Guid.NewGuid().ToString();
-        var record = new GatewayRecord
+        if (existing != null)
         {
-            Id = recordId,
-            Url = gatewayUrl,
-            SharedGatewayToken = _settings.Token,
-            BootstrapToken = _settings.BootstrapToken,
-            FriendlyName = existing?.FriendlyName,
-            IsLocal = existing?.IsLocal ?? false,
-            SshTunnel = _settings.UseSshTunnel
-                ? new SshTunnelConfig(
-                    _settings.SshTunnelUser ?? "",
-                    _settings.SshTunnelHost ?? "",
-                    _settings.SshTunnelRemotePort,
-                    _settings.SshTunnelLocalPort)
-                : null,
-        };
-        _gatewayRegistry.AddOrUpdate(record);
-        _gatewayRegistry.SetActive(recordId);
+            // Record already exists — just ensure it's active and connect
+            _gatewayRegistry.SetActive(existing.Id);
+        }
+        else
+        {
+            // No record yet — create one from settings (first launch / legacy migration).
+            // Only migrate if there's a non-bootstrap credential (shared token or device token).
+            // Stale bootstrap tokens from settings are one-time-use and already expired.
+            var hasSharedToken = !string.IsNullOrWhiteSpace(_settings.Token);
+            var hasStoredDeviceToken = DeviceIdentity.HasStoredDeviceToken(
+                Path.Combine(SettingsManager.SettingsDirectoryPath));
+            if (!hasSharedToken && !hasStoredDeviceToken)
+            {
+                Logger.Info("No reusable credential in settings — skipping startup connect (use Setup Code)");
+                return;
+            }
+
+            var recordId = Guid.NewGuid().ToString();
+            var record = new GatewayRecord
+            {
+                Id = recordId,
+                Url = gatewayUrl,
+                SharedGatewayToken = _settings.Token,
+                SshTunnel = _settings.UseSshTunnel
+                    ? new SshTunnelConfig(
+                        _settings.SshTunnelUser ?? "",
+                        _settings.SshTunnelHost ?? "",
+                        _settings.SshTunnelRemotePort,
+                        _settings.SshTunnelLocalPort)
+                    : null,
+            };
+            _gatewayRegistry.AddOrUpdate(record);
+            _gatewayRegistry.SetActive(recordId);
+        }
+
+        var migratedRecord = _gatewayRegistry.GetActive()!;
 
         // Ensure identity directory exists for credential resolution
-        var identityDir = _gatewayRegistry.GetIdentityDirectory(recordId);
+        var identityDir = _gatewayRegistry.GetIdentityDirectory(migratedRecord.Id);
         if (!Directory.Exists(identityDir))
             Directory.CreateDirectory(identityDir);
 
@@ -1704,7 +1740,7 @@ public partial class App : Application
 
         // Delegate to connection manager — it creates the client, fires OperatorClientChanged,
         // and our handler re-wires the 27 event subscriptions
-        _ = _connectionManager.ConnectAsync(recordId);
+        _ = _connectionManager.ConnectAsync(migratedRecord.Id);
     }
 
     /// <summary>

@@ -34,6 +34,7 @@ public class WindowsNodeClient : WebSocketClientBase
     // even after OnDisconnected clears _isPendingApproval.
     private volatile bool _pairingBlocked;
     private volatile bool _rateLimited;
+    private bool _useV2Signature; // true after v3 signature rejected by gateway
     // Bug 3: source-side idempotency for PairingStatusChanged. HandleHelloOk runs on every
     // WS reconnect and re-fires PairingStatus.Paired even when nothing changed, causing a
     // toast storm in the tray UI. Track the last emitted status and only fire on transitions.
@@ -552,10 +553,14 @@ public class WindowsNodeClient : WebSocketClientBase
         {
             try
             {
-                signature = _deviceIdentity.SignConnectPayloadV3(
-                    nonce, signedAt, ClientId, "node", "node",
-                    Array.Empty<string>(), tokenForSignature,
-                    "windows", "desktop");
+                signature = _useV2Signature
+                    ? _deviceIdentity.SignConnectPayloadV2(
+                        nonce, signedAt, ClientId, "node", "node",
+                        Array.Empty<string>(), tokenForSignature)
+                    : _deviceIdentity.SignConnectPayloadV3(
+                        nonce, signedAt, ClientId, "node", "node",
+                        Array.Empty<string>(), tokenForSignature,
+                        "windows", "desktop");
             }
             catch (Exception ex)
             {
@@ -798,6 +803,17 @@ public class WindowsNodeClient : WebSocketClientBase
             _logger.Warn($"[NODE] Terminal auth error; stopping reconnect. Error: {TokenSanitizer.Sanitize(error)}");
             RaiseStatusChanged(ConnectionStatus.Error);
             return;
+        }
+
+        // v3 signature rejected — fall back to v2 for this session
+        if (error.Contains("device signature invalid", StringComparison.OrdinalIgnoreCase) ||
+            errorCode == "DEVICE_AUTH_SIGNATURE_INVALID")
+        {
+            if (!_useV2Signature)
+            {
+                _useV2Signature = true;
+                _logger.Warn("[NODE] v3 signature rejected, will use v2 on reconnect");
+            }
         }
 
         _logger.Error($"Node registration failed: {TokenSanitizer.Sanitize(error)} (code: {errorCode})");

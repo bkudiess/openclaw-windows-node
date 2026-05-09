@@ -23,10 +23,6 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
     private static readonly string[] s_operatorScopes =
     [
         "operator.admin",
-        "operator.read",
-        "operator.write",
-        "operator.approvals",
-        "operator.pairing"
     ];
     private static readonly string[] s_operatorBootstrapScopes =
     [
@@ -52,6 +48,10 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
     private string? _operatorDeviceId;
     private string[] _grantedOperatorScopes = Array.Empty<string>();
     private string _connectAuthToken;
+    private bool _useV2Signature; // true after v3 signature rejected by gateway
+
+    /// <summary>Set to true to skip v3 and use v2 signatures directly (for gateways that don't support v3).</summary>
+    public bool UseV2Signature { get => _useV2Signature; set => _useV2Signature = value; }
     private long? _challengeTimestampMs;
     private string? _currentChallengeNonce;
     private bool _usageStatusUnsupported;
@@ -179,6 +179,10 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
     public event EventHandler<DeviceTokenReceivedEventArgs>? DeviceTokenReceived;
     /// <summary>Raised when the hello-ok handshake completes successfully.</summary>
     public event EventHandler? HandshakeSucceeded;
+    /// <summary>Raised when the gateway requires pairing approval for this device.</summary>
+    public event EventHandler<string?>? PairingRequired;
+    /// <summary>Raised when v3 signature was rejected and client fell back to v2.</summary>
+    public event EventHandler? V2SignatureFallback;
 
     public string? OperatorDeviceId => _operatorDeviceId;
     public IReadOnlyList<string> GrantedOperatorScopes => _grantedOperatorScopes;
@@ -616,19 +620,38 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
         var signedAt = _challengeTimestampMs ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var connectNonce = nonce ?? string.Empty;
         var signatureToken = GetSignatureToken();
+        var authPayload = BuildAuthPayload();
 
-        // Always use v3 signature — matches reference client behavior.
-        // Gateway tries v3 first; if rejected, it's a real error (wrong key/token).
-        var signature = _deviceIdentity.SignConnectPayloadV3(
-                connectNonce,
-                signedAt,
-                OperatorClientId,
-                OperatorClientMode,
-                role,
-                requestedScopes,
-                signatureToken,
-                OperatorPlatform,
-                OperatorDeviceFamily);
+        // Log complete handshake details for diagnostics
+        _logger.Info($"[HANDSHAKE] → Sending connect:");
+        _logger.Info($"  role={role}, clientId={OperatorClientId}, mode={OperatorClientMode}");
+        _logger.Info($"  scopes=[{string.Join(", ", requestedScopes)}]");
+        _logger.Info($"  isBootstrap={_tokenIsBootstrapToken}, hasDeviceToken={!string.IsNullOrEmpty(_deviceIdentity.DeviceToken)}");
+        _logger.Info($"  deviceId={_deviceIdentity.DeviceId[..Math.Min(16, _deviceIdentity.DeviceId.Length)]}...");
+        _logger.Info($"  nonce={(!string.IsNullOrEmpty(connectNonce) ? connectNonce[..Math.Min(12, connectNonce.Length)] + "..." : "(empty)")}");
+        _logger.Info($"  signedAt={signedAt}");
+        _logger.Info($"  sigToken(len)={signatureToken.Length}, preview={signatureToken[..Math.Min(8, signatureToken.Length)]}...");
+        _logger.Info($"  signature format={(_useV2Signature ? "v2" : "v3")}, platform={OperatorPlatform}, family={OperatorDeviceFamily}");
+
+        var signedPayload = _useV2Signature
+            ? _deviceIdentity.BuildConnectPayloadV2(connectNonce, signedAt, OperatorClientId, OperatorClientMode, role, requestedScopes, signatureToken)
+            : _deviceIdentity.BuildConnectPayloadV3(connectNonce, signedAt, OperatorClientId, OperatorClientMode, role, requestedScopes, signatureToken, OperatorPlatform, OperatorDeviceFamily);
+        _logger.Info($"[HANDSHAKE] signed: {signedPayload}");
+
+        // Also log what auth field we're sending
+        var authObj = BuildAuthPayload();
+        var authJson = JsonSerializer.Serialize(authObj);
+        _logger.Info($"[HANDSHAKE] auth: {authJson}");
+
+        // Try v3 first (matches reference client). Fall back to v2 if gateway rejects v3.
+        var signature = _useV2Signature
+            ? _deviceIdentity.SignConnectPayloadV2(
+                connectNonce, signedAt, OperatorClientId, OperatorClientMode,
+                role, requestedScopes, signatureToken)
+            : _deviceIdentity.SignConnectPayloadV3(
+                connectNonce, signedAt, OperatorClientId, OperatorClientMode,
+                role, requestedScopes, signatureToken,
+                OperatorPlatform, OperatorDeviceFamily);
 
         // Use "cli" client ID for native apps - no browser security checks
         var msg = new
@@ -980,6 +1003,7 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
         // Handle handshake acknowledgement payload.
         if (payload.TryGetProperty("type", out var t) && t.GetString() == "hello-ok")
         {
+            _logger.Info($"[HANDSHAKE] Received hello-ok!");
             _pairingRequiredAwaitingApproval = false;
             _pairingRequiredRequestId = null;
             _authFailed = false;
@@ -987,6 +1011,7 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
             _operatorDeviceId = TryGetHandshakeDeviceId(payload);
             _grantedOperatorScopes = TryGetHandshakeScopes(payload);
             _mainSessionKey = TryGetHandshakeMainSessionKey(payload) ?? "main";
+            _logger.Info($"[HANDSHAKE] deviceId={_operatorDeviceId}, scopes=[{string.Join(", ", _grantedOperatorScopes)}], mainSession={_mainSessionKey}");
             PublishGatewaySelf(GatewaySelfInfo.FromHelloOk(payload));
             if (_bootstrapPairAsNode)
             {
@@ -1168,13 +1193,34 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
             return;
         }
 
+        if (method == "connect")
+        {
+            var detailCode = TryGetErrorDetailCode(root);
+            _logger.Warn($"[HANDSHAKE] Connect error from gateway: message=\"{message}\", detailCode={detailCode ?? "none"}");
+            // Log raw JSON for debugging (truncated)
+            var rawJson = root.ToString() ?? "";
+            if (rawJson.Length > 500) rawJson = rawJson[..500] + "...";
+            _logger.Info($"[HANDSHAKE] Raw error response: {rawJson}");
+        }
+
         if (method == "connect" &&
             (message.Contains("device signature invalid", StringComparison.OrdinalIgnoreCase) ||
              TryGetErrorDetailCode(root) == "DEVICE_AUTH_SIGNATURE_INVALID"))
         {
-            _logger.Warn("Gateway rejected device signature — wrong key or token");
+            if (!_useV2Signature)
+            {
+                // v3 rejected — set flag so next connect uses v2.
+                // Don't retry on this socket — gateway closes it after rejection.
+                // The auto-reconnect will use v2 on the fresh connection.
+                _useV2Signature = true;
+                _logger.Warn($"[HANDSHAKE] v3 signature rejected, will use v2 on reconnect");
+                V2SignatureFallback?.Invoke(this, EventArgs.Empty);
+                return;
+            }
+            // v2 also rejected — real auth error
+            _logger.Warn($"[HANDSHAKE] v2 signature also rejected — wrong key or token. Raw: {message}");
             _authFailed = true;
-            RaiseAuthenticationFailed("device signature rejected — check device identity and credentials");
+            RaiseAuthenticationFailed($"device signature rejected — {message}");
             RaiseStatusChanged(ConnectionStatus.Error);
             return;
         }
@@ -1185,13 +1231,14 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
         {
             _pairingRequiredAwaitingApproval = true;
             _pairingRequiredRequestId = pairingDetails.RequestId;
-            _logger.Warn("Pairing approval required for this device; auto-reconnect paused until manual reconnect or app restart");
-            RaiseStatusChanged(ConnectionStatus.Error);
+            _logger.Warn($"[HANDSHAKE] Pairing required (requestId={pairingDetails.RequestId}). Waiting for approval.");
+            PairingRequired?.Invoke(this, pairingDetails.RequestId);
             return;
         }
 
         // Permanent auth failures — stop retrying and notify the app
-        if (method == "connect" && IsTerminalAuthError(message))
+        var detailCode2 = TryGetErrorDetailCode(root);
+        if (method == "connect" && (IsTerminalAuthError(message) || IsTerminalAuthDetailCode(detailCode2)))
         {
             _authFailed = true;
             RaiseAuthenticationFailed(message);
@@ -1385,8 +1432,14 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
     {
         return errorMessage.Contains("token mismatch", StringComparison.OrdinalIgnoreCase) ||
                errorMessage.Contains("origin not allowed", StringComparison.OrdinalIgnoreCase) ||
-               errorMessage.Contains("too many failed", StringComparison.OrdinalIgnoreCase);
+               errorMessage.Contains("too many failed", StringComparison.OrdinalIgnoreCase) ||
+               errorMessage.Contains("bootstrap token invalid", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool IsTerminalAuthDetailCode(string? code) => code is
+        "AUTH_TOKEN_MISMATCH" or "AUTH_BOOTSTRAP_TOKEN_INVALID" or
+        "AUTH_DEVICE_TOKEN_MISMATCH" or "AUTH_RATE_LIMITED" or
+        "AUTH_TOKEN_NOT_CONFIGURED";
 
     private static bool IsMissingScopeError(string errorMessage, string scope)
     {
@@ -1726,8 +1779,20 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
         _challengeTimestampMs = ts;
         _currentChallengeNonce = nonce;
         
-        _logger.Info($"Received challenge, nonce: {nonce}");
-        _ = SendConnectMessageAsync(nonce);
+        _logger.Info($"[HANDSHAKE] Received connect.challenge: nonce={nonce}, ts={ts}");
+        _ = SendConnectSafeAsync(nonce);
+    }
+
+    private async Task SendConnectSafeAsync(string? nonce)
+    {
+        try
+        {
+            await SendConnectMessageAsync(nonce);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"[HANDSHAKE] FATAL: SendConnectMessageAsync threw: {ex}");
+        }
     }
 
     private void HandleAgentEvent(JsonElement root)
