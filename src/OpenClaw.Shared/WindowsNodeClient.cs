@@ -552,7 +552,10 @@ public class WindowsNodeClient : WebSocketClientBase
         {
             try
             {
-                signature = _deviceIdentity.SignPayload(nonce, signedAt, ClientId, tokenForSignature);
+                signature = _deviceIdentity.SignConnectPayloadV3(
+                    nonce, signedAt, ClientId, "node", "node",
+                    Array.Empty<string>(), tokenForSignature,
+                    "windows", "desktop");
             }
             catch (Exception ex)
             {

@@ -1843,12 +1843,12 @@ public class OpenClawGatewayClientTests
     // --- HandleRequestError: device signature invalid ---
 
     [Fact]
-    public void HandleRequestError_DeviceSignatureInvalid_CyclesSignatureMode()
+    public void HandleRequestError_DeviceSignatureInvalid_SetsAuthFailedImmediately()
     {
         var helper = new GatewayClientTestHelper();
-        // Starting mode is V3AuthToken; first rejection should move it to V3EmptyToken
-        Assert.Equal("V3AuthToken", helper.GetSignatureTokenMode());
+        var authEvents = helper.CaptureAuthenticationFailedEvents();
 
+        // With cascade removed, first rejection should immediately fail
         helper.TrackPendingRequest("req-sig-1", "connect");
         helper.ProcessRawMessage("""
         {
@@ -1859,7 +1859,8 @@ public class OpenClawGatewayClientTests
         }
         """);
 
-        Assert.Equal("V3EmptyToken", helper.GetSignatureTokenMode());
+        Assert.True(helper.GetAuthFailedFlag());
+        Assert.Single(authEvents);
     }
 
     [Fact]
@@ -2097,25 +2098,22 @@ public class OpenClawGatewayClientTests
     }
 
     [Fact]
-    public void HandleRequestError_AllDeviceSignatureModesExhausted_SetsAuthFailed()
+    public void HandleRequestError_DeviceSignatureRejected_SetsAuthFailed()
     {
         var logger = new TestLogger();
         var helper = new GatewayClientTestHelper(logger);
         var authEvents = helper.CaptureAuthenticationFailedEvents();
 
-        // Cycle through all 4 signature modes by sending 4 successive rejections
-        for (int i = 1; i <= 4; i++)
+        // With cascade removed, first signature rejection is a real error
+        helper.TrackPendingRequest("req-sig-fail", "connect");
+        helper.ProcessRawMessage("""
         {
-            helper.TrackPendingRequest($"req-sig-exhaust-{i}", "connect");
-            helper.ProcessRawMessage($$"""
-            {
-                "type": "res",
-                "id": "req-sig-exhaust-{{i}}",
-                "ok": false,
-                "error": "device signature invalid"
-            }
-            """);
+            "type": "res",
+            "id": "req-sig-fail",
+            "ok": false,
+            "error": "device signature invalid"
         }
+        """);
 
         Assert.True(helper.GetAuthFailedFlag());
         Assert.Single(authEvents);

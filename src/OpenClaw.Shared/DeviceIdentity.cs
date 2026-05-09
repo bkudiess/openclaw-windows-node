@@ -178,10 +178,9 @@ public class DeviceIdentity
     }
     
     /// <summary>
-    /// Sign a payload for device authentication
-    /// Payload format: v2|{deviceId}|{client.id}|{client.mode}|{role}|{scopes}|{signedAtMs}|{token}|{nonce}
-    /// IMPORTANT: {token} is the auth.token from the connect request, NOT the device token!
+    /// Sign a payload for device authentication.
     /// </summary>
+    [Obsolete("Use SignConnectPayloadV3 instead. This method hardcodes v2 format with node-specific values.")]
     public string SignPayload(string nonce, long signedAtMs, string clientId, string authToken)
     {
         if (_privateKey == null || _deviceId == null)
@@ -311,10 +310,9 @@ public class DeviceIdentity
     }
     
     /// <summary>
-    /// Build the payload string (for debugging)
-    /// Format: v2|{deviceId}|{clientId}|{clientMode}|{role}||{signedAtMs}|{token}|{nonce}
-    /// IMPORTANT: {token} is the auth.token from connect request!
+    /// Build the legacy v2 payload string for node connections.
     /// </summary>
+    [Obsolete("Use BuildConnectPayloadV3 instead. This method hardcodes v2 format with node-specific values.")]
     public string BuildDebugPayload(string nonce, long signedAtMs, string clientId, string authToken)
     {
         if (_deviceId == null)

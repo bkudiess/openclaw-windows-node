@@ -4,6 +4,8 @@ using System.Text;
 using Xunit;
 using OpenClaw.Shared;
 
+#pragma warning disable CS0618 // Obsolete - testing legacy methods
+
 namespace OpenClaw.Shared.Tests;
 
 /// <summary>

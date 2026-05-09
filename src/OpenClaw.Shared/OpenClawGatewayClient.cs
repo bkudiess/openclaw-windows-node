@@ -36,14 +36,6 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
         "operator.write"
     ];
 
-    private enum SignatureTokenMode
-    {
-        V3AuthToken,
-        V3EmptyToken,
-        V2AuthToken,
-        V2EmptyToken
-    }
-
     // Tracked state
     private readonly Dictionary<string, SessionInfo> _sessions = new();
     private GatewayUsageInfo? _usage;
@@ -60,7 +52,6 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
     private string? _operatorDeviceId;
     private string[] _grantedOperatorScopes = Array.Empty<string>();
     private string _connectAuthToken;
-    private SignatureTokenMode _signatureTokenMode = SignatureTokenMode.V3AuthToken;
     private long? _challengeTimestampMs;
     private string? _currentChallengeNonce;
     private bool _usageStatusUnsupported;
@@ -624,20 +615,11 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
 
         var signedAt = _challengeTimestampMs ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var connectNonce = nonce ?? string.Empty;
-        var signatureToken = _signatureTokenMode is SignatureTokenMode.V3EmptyToken or SignatureTokenMode.V2EmptyToken
-            ? string.Empty
-            : GetSignatureToken();
+        var signatureToken = GetSignatureToken();
 
-        var signature = _signatureTokenMode is SignatureTokenMode.V2AuthToken or SignatureTokenMode.V2EmptyToken
-            ? _deviceIdentity.SignConnectPayloadV2(
-                connectNonce,
-                signedAt,
-                OperatorClientId,
-                OperatorClientMode,
-                role,
-                requestedScopes,
-                signatureToken)
-            : _deviceIdentity.SignConnectPayloadV3(
+        // Always use v3 signature — matches reference client behavior.
+        // Gateway tries v3 first; if rejected, it's a real error (wrong key/token).
+        var signature = _deviceIdentity.SignConnectPayloadV3(
                 connectNonce,
                 signedAt,
                 OperatorClientId,
@@ -1187,27 +1169,12 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
         }
 
         if (method == "connect" &&
-            message.Contains("device signature invalid", StringComparison.OrdinalIgnoreCase))
+            (message.Contains("device signature invalid", StringComparison.OrdinalIgnoreCase) ||
+             TryGetErrorDetailCode(root) == "DEVICE_AUTH_SIGNATURE_INVALID"))
         {
-            var previousMode = _signatureTokenMode;
-            _signatureTokenMode = _signatureTokenMode switch
-            {
-                SignatureTokenMode.V3AuthToken => SignatureTokenMode.V3EmptyToken,
-                SignatureTokenMode.V3EmptyToken => SignatureTokenMode.V2AuthToken,
-                SignatureTokenMode.V2AuthToken => SignatureTokenMode.V2EmptyToken,
-                _ => SignatureTokenMode.V2EmptyToken
-            };
-
-            if (_signatureTokenMode != previousMode)
-            {
-                _logger.Warn($"Gateway rejected device signature with mode {previousMode}; retrying with mode {_signatureTokenMode}");
-                _ = SendConnectMessageAsync(_currentChallengeNonce);
-                return;
-            }
-
-            _logger.Warn("Gateway rejected device signature in all supported payload modes");
+            _logger.Warn("Gateway rejected device signature — wrong key or token");
             _authFailed = true;
-            RaiseAuthenticationFailed("device signature rejected in all modes — the gateway may require a different auth protocol version");
+            RaiseAuthenticationFailed("device signature rejected — check device identity and credentials");
             RaiseStatusChanged(ConnectionStatus.Error);
             return;
         }
@@ -1348,6 +1315,22 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
         if (error.ValueKind != JsonValueKind.Object) return null;
         if (error.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String)
             return message.GetString();
+        return null;
+    }
+
+    /// <summary>
+    /// Extract the structured error detail code from the gateway error response.
+    /// Checks error.details.code and error.data.details.code.
+    /// </summary>
+    private static string? TryGetErrorDetailCode(JsonElement root)
+    {
+        if (!root.TryGetProperty("error", out var error) || error.ValueKind != JsonValueKind.Object)
+            return null;
+        if (TryGetPairingDetailsElement(error, out var details) &&
+            details.ValueKind == JsonValueKind.Object &&
+            details.TryGetProperty("code", out var code) &&
+            code.ValueKind == JsonValueKind.String)
+            return code.GetString();
         return null;
     }
 
