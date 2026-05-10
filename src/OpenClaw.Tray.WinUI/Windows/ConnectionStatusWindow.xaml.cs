@@ -327,6 +327,11 @@ public sealed partial class ConnectionStatusWindow : WindowEx
         SetupCodeResult.Text = "Disconnected";
     }
 
+    private void OnDiagSshToggled(object sender, RoutedEventArgs e)
+    {
+        DiagSshDetailsPanel.Visibility = DiagSshToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     private async void OnDirectConnect(object sender, RoutedEventArgs e)
     {
         if (_manager == null || _registry == null) return;
@@ -341,12 +346,26 @@ public sealed partial class ConnectionStatusWindow : WindowEx
 
         url = GatewayUrlHelper.NormalizeForWebSocket(url);
 
-        DirectConnectResult.Text = "Connecting…";
+        // Parse SSH config
+        var useSsh = DiagSshToggle.IsOn;
+        SshTunnelConfig? sshConfig = null;
+        if (useSsh)
+        {
+            var sshUser = DiagSshUserBox.Text.Trim();
+            var sshHost = DiagSshHostBox.Text.Trim();
+            int.TryParse(DiagSshRemotePortBox.Text, out var remotePort);
+            int.TryParse(DiagSshLocalPortBox.Text, out var localPort);
+            if (remotePort <= 0) remotePort = 18789;
+            if (localPort <= 0) localPort = 18790;
+            sshConfig = new SshTunnelConfig(sshUser, sshHost, remotePort, localPort);
+        }
+
+        DirectConnectResult.Text = useSsh ? "Starting SSH tunnel…" : "Connecting…";
         try
         {
             await _manager.DisconnectAsync();
 
-            // Create/update gateway record with shared token
+            // Create/update gateway record with shared token + SSH config
             var existing = _registry.FindByUrl(url);
             var recordId = existing?.Id ?? Guid.NewGuid().ToString();
             var record = new GatewayRecord
@@ -354,14 +373,14 @@ public sealed partial class ConnectionStatusWindow : WindowEx
                 Id = recordId,
                 Url = url,
                 SharedGatewayToken = string.IsNullOrWhiteSpace(token) ? null : token,
-                BootstrapToken = null, // clear any stale bootstrap
+                BootstrapToken = null,
+                SshTunnel = sshConfig,
             };
             _registry.AddOrUpdate(record);
             _registry.SetActive(recordId);
             _registry.Save();
 
             // Clear stored device tokens so the shared token is used
-            // (device tokens from previous bootstrap pairing have limited scopes)
             var identityDir = _registry.GetIdentityDirectory(recordId);
             var keyPath = Path.Combine(identityDir, "device-key-ed25519.json");
             if (File.Exists(keyPath))
@@ -383,6 +402,22 @@ public sealed partial class ConnectionStatusWindow : WindowEx
                     File.WriteAllBytes(keyPath, ms.ToArray());
                 }
                 catch { }
+            }
+
+            // Start SSH tunnel and save settings
+            if (useSsh && sshConfig != null)
+            {
+                var app = (App)Microsoft.UI.Xaml.Application.Current;
+                var settings = app.Settings;
+                settings.GatewayUrl = url;
+                settings.UseSshTunnel = true;
+                settings.SshTunnelUser = sshConfig.User;
+                settings.SshTunnelHost = sshConfig.Host;
+                settings.SshTunnelRemotePort = sshConfig.RemotePort;
+                settings.SshTunnelLocalPort = sshConfig.LocalPort;
+                settings.Save();
+                app.EnsureSshTunnelStarted();
+                DirectConnectResult.Text = "Connecting…";
             }
 
             await _manager.ConnectAsync(recordId);

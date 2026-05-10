@@ -121,6 +121,28 @@
                         <Button Grid.Column="1" Content="Connect" Click="OnDirectConnect" Padding="8,3" FontSize="11"
                                 Style="{ThemeResource AccentButtonStyle}"/>
                     </Grid>
+
+                    <!-- SSH Tunnel -->
+                    <ToggleSwitch x:Name="DiagSshToggle" Header="SSH Tunnel" FontSize="11" Margin="0,4,0,0"
+                                  Toggled="OnDiagSshToggled"/>
+                    <StackPanel x:Name="DiagSshDetailsPanel" Spacing="4" Visibility="Collapsed">
+                        <Grid ColumnSpacing="6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="DiagSshUserBox" Grid.Column="0" Header="SSH User" PlaceholderText="user" FontSize="11"/>
+                            <TextBox x:Name="DiagSshHostBox" Grid.Column="1" Header="SSH Host" PlaceholderText="192.168.x.x" FontSize="11"/>
+                        </Grid>
+                        <Grid ColumnSpacing="6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="DiagSshRemotePortBox" Grid.Column="0" Header="Remote Port" PlaceholderText="18789" Text="18789" FontSize="11"/>
+                            <TextBox x:Name="DiagSshLocalPortBox" Grid.Column="1" Header="Local Port" PlaceholderText="18790" Text="18790" FontSize="11"/>
+                        </Grid>
+                    </StackPanel>
                 </StackPanel>
             </Border>
         </StackPanel>

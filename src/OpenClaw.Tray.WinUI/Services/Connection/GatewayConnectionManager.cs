@@ -139,9 +139,13 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             EmitStateChanged(prevState);
 
             // Create client via factory — use a diagnostic-tee logger so client handshake
-            // logs appear in the Connection Status window timeline
+            // logs appear in the Connection Status window timeline.
+            // When SSH tunnel is configured, connect to the local tunnel URL instead.
+            var connectUrl = record.SshTunnel != null
+                ? $"ws://localhost:{record.SshTunnel.LocalPort}"
+                : record.Url;
             var diagLogger = new DiagnosticTeeLogger(_logger, _diagnostics);
-            var lifecycle = _clientFactory.Create(record.Url, credential, perGatewayIdentityDir, diagLogger);
+            var lifecycle = _clientFactory.Create(connectUrl, credential, perGatewayIdentityDir, diagLogger);
             _activeLifecycle = lifecycle;
             OperatorClientChanged?.Invoke(this, new OperatorClientChangedEventArgs
             {
@@ -467,12 +471,16 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         // Mark node as enabled in the state machine so UI reflects node state
         _stateMachine.SetNodeEnabled(true);
 
-        _diagnostics.Record("node", $"Starting node connection to {record.Url}",
+        var nodeConnectUrl = record.SshTunnel != null
+            ? $"ws://localhost:{record.SshTunnel.LocalPort}"
+            : record.Url;
+
+        _diagnostics.Record("node", $"Starting node connection to {nodeConnectUrl}",
             $"Credential source: {nodeCredential.Source}");
 
         try
         {
-            await _nodeConnector.ConnectAsync(record.Url, nodeCredential, _activeIdentityPath,
+            await _nodeConnector.ConnectAsync(nodeConnectUrl, nodeCredential, _activeIdentityPath,
                 useV2Signature: _gatewayNeedsV2Signature);
         }
         catch (Exception ex)
