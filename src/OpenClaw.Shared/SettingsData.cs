@@ -9,8 +9,6 @@ namespace OpenClaw.Shared;
 public class SettingsData
 {
     public string? GatewayUrl { get; set; }
-    public string? Token { get; set; }
-    public string? BootstrapToken { get; set; }
     public bool UseSshTunnel { get; set; } = false;
     public string? SshTunnelUser { get; set; }
     public string? SshTunnelHost { get; set; }

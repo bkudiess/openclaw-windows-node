@@ -503,33 +503,16 @@ public class LocalGatewaySetupTests
     }
 
     [Fact]
-    public void CreateLocalOnly_ThrowsInvalidOperation_WhenTokenExistsAndNotConfirmed()
+    public void CreateLocalOnly_Succeeds_WhenExistingConfigAndConfirmed()
     {
         using var temp = new TempDirectory();
-        var settings = new OpenClawTray.Services.SettingsManager(temp.Path) { Token = "existing-token" };
+        var settings = new OpenClawTray.Services.SettingsManager(temp.Path) { GatewayUrl = "ws://remote:9000" };
 
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            LocalGatewaySetupEngineFactory.CreateLocalOnly(
-                settings,
-                identityDataPath: temp.Path,
-                replaceExistingConfigurationConfirmed: false));
+        var engine = LocalGatewaySetupEngineFactory.CreateLocalOnly(
+            settings,
+            replaceExistingConfigurationConfirmed: true);
 
-        Assert.Contains("existing_config_replacement_not_confirmed", ex.Message);
-    }
-
-    [Fact]
-    public void CreateLocalOnly_ThrowsInvalidOperation_WhenBootstrapTokenExistsAndNotConfirmed()
-    {
-        using var temp = new TempDirectory();
-        var settings = new OpenClawTray.Services.SettingsManager(temp.Path) { BootstrapToken = "bootstrap-abc" };
-
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            LocalGatewaySetupEngineFactory.CreateLocalOnly(
-                settings,
-                identityDataPath: temp.Path,
-                replaceExistingConfigurationConfirmed: false));
-
-        Assert.Contains("existing_config_replacement_not_confirmed", ex.Message);
+        Assert.NotNull(engine);
     }
 
     [Fact]
@@ -599,19 +582,6 @@ public class LocalGatewaySetupTests
                 replaceExistingConfigurationConfirmed: false));
 
         Assert.Contains("existing_config_replacement_not_confirmed", ex.Message);
-    }
-
-    [Fact]
-    public void CreateLocalOnly_Succeeds_WhenTokenExistsAndConfirmed()
-    {
-        using var temp = new TempDirectory();
-        var settings = new OpenClawTray.Services.SettingsManager(temp.Path) { Token = "existing-token" };
-
-        var engine = LocalGatewaySetupEngineFactory.CreateLocalOnly(
-            settings,
-            replaceExistingConfigurationConfirmed: true);
-
-        Assert.NotNull(engine);
     }
 
     internal sealed class FakeWslCommandRunner : IWslCommandRunner

@@ -276,6 +276,7 @@ public class DeepLinkActions
     public Action? OpenLogFolder { get; set; }
     public Action? OpenConfigFolder { get; set; }
     public Action? OpenDiagnosticsFolder { get; set; }
+    public Action? OpenConnectionStatus { get; set; }
     public Action? CopySupportContext { get; set; }
     public Action? CopyDebugBundle { get; set; }
     public Action? CopyBrowserSetupGuidance { get; set; }

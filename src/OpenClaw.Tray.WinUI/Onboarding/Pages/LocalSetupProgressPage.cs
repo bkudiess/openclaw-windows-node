@@ -164,7 +164,11 @@ public sealed class LocalSetupProgressPage : Component<OnboardingState>
                         {
                             var appForSeed = (App)Application.Current;
                             if (appForSeed.GatewayClient == null || !appForSeed.GatewayClient.IsConnectedToGateway)
-                                appForSeed.ReinitializeGatewayClient();
+                            {
+                                // Use connection manager to reconnect (registry has credentials from WSL setup)
+                                if (appForSeed.ConnectionManager != null)
+                                    _ = appForSeed.ConnectionManager.ReconnectAsync();
+                            }
                             advanceRef.GatewayClient = appForSeed.GatewayClient;
                         }
                         catch (Exception ex)

@@ -30,6 +30,7 @@
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\ActivityStreamService.cs" Link="Services\ActivityStreamService.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\NodeInvokeActivityFormatter.cs" Link="Services\NodeInvokeActivityFormatter.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\NodeCapabilityGating.cs" Link="Services\NodeCapabilityGating.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Helpers\TrayTooltipFormatter.cs" Link="Helpers\TrayTooltipFormatter.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\TextToSpeech\ElevenLabsTextToSpeechClient.cs" Link="Services\TextToSpeech\ElevenLabsTextToSpeechClient.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\GatewayDiscoveryService.cs" Link="Services\GatewayDiscoveryService.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\A2UI\Actions\AgentMessageFormatter.cs" Link="A2UI\Actions\AgentMessageFormatter.cs" />
@@ -51,6 +52,31 @@
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Onboarding\Services\WizardStepSelection.cs" Link="Imported\WizardStepSelection.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Onboarding\Services\WizardFlowController.cs" Link="Imported\WizardFlowController.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Dialogs\QuickSendCoordinator.cs" Link="Imported\QuickSendCoordinator.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\GatewayRecord.cs" Link="Services\Connection\GatewayRecord.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\ICredentialResolver.cs" Link="Services\Connection\ICredentialResolver.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\CredentialResolver.cs" Link="Services\Connection\CredentialResolver.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\InteractiveGatewayCredentialResolver.cs" Link="Services\Connection\InteractiveGatewayCredentialResolver.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\ConnectionStateMachine.cs" Link="Services\Connection\ConnectionStateMachine.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\GatewayConnectionSnapshot.cs" Link="Services\Connection\GatewayConnectionSnapshot.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\ConnectionTrigger.cs" Link="Services\Connection\ConnectionTrigger.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\OverallConnectionState.cs" Link="Services\Connection\OverallConnectionState.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\RoleConnectionState.cs" Link="Services\Connection\RoleConnectionState.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\GatewayRegistry.cs" Link="Services\Connection\GatewayRegistry.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\ConnectionDiagnostics.cs" Link="Services\Connection\ConnectionDiagnostics.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\ConnectionDiagnosticEvent.cs" Link="Services\Connection\ConnectionDiagnosticEvent.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\IGatewayConnectionManager.cs" Link="Services\Connection\IGatewayConnectionManager.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\GatewayConnectionManager.cs" Link="Services\Connection\GatewayConnectionManager.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\IGatewayClientFactory.cs" Link="Services\Connection\IGatewayClientFactory.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\GatewayClientFactory.cs" Link="Services\Connection\GatewayClientFactory.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\ConnectionErrorCategory.cs" Link="Services\Connection\ConnectionErrorCategory.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\RetryPolicy.cs" Link="Services\Connection\RetryPolicy.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\SetupCodeResult.cs" Link="Services\Connection\SetupCodeResult.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\OperatorClientChangedEventArgs.cs" Link="Services\Connection\OperatorClientChangedEventArgs.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\SettingsChangeImpact.cs" Link="Services\Connection\SettingsChangeImpact.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\INodeConnector.cs" Link="Services\Connection\INodeConnector.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\NodeConnector.cs" Link="Services\Connection\NodeConnector.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\NodeConnectionMode.cs" Link="Services\Connection\NodeConnectionMode.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\ISshTunnelManager.cs" Link="Services\Connection\ISshTunnelManager.cs" />
   </ItemGroup>
 
 </Project>

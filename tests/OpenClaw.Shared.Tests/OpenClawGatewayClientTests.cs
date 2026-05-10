@@ -14,6 +14,8 @@ public class OpenClawGatewayClientTests
     {
         private readonly OpenClawGatewayClient _client;
 
+        public OpenClawGatewayClient Client => _client;
+
         public GatewayClientTestHelper(bool tokenIsBootstrapToken = false, bool bootstrapPairAsNode = false, string gatewayUrl = "ws://localhost:18789")
         {
             _client = new OpenClawGatewayClient(
@@ -429,7 +431,6 @@ public class OpenClawGatewayClientTests
         var auth = helper.BuildAuthPayload();
 
         Assert.Contains("operator.admin", scopes);
-        Assert.Contains("operator.pairing", scopes);
         Assert.Equal("test-token", auth["token"]);
         Assert.False(auth.ContainsKey("bootstrapToken"));
         Assert.False(auth.ContainsKey("deviceToken"));
@@ -445,24 +446,19 @@ public class OpenClawGatewayClientTests
         var auth = helper.BuildAuthPayload();
 
         Assert.Contains("operator.admin", scopes);
-        Assert.Contains("operator.pairing", scopes);
         Assert.Equal("test-token", auth["token"]);
         Assert.False(auth.ContainsKey("bootstrapToken"));
     }
 
     [Fact]
-    public void OperatorConnect_FreshStandardRemoteDevice_RequestsBootstrapHandoffScopes()
+    public void OperatorConnect_FreshStandardRemoteDevice_RequestsAdminScopes()
     {
         var helper = new GatewayClientTestHelper(gatewayUrl: "ws://gateway.example.com:18789");
         helper.SetDeviceTokenForTest(null);
 
         var scopes = helper.GetRequestedOperatorScopes();
 
-        Assert.Equal(
-            ["operator.approvals", "operator.read", "operator.talk.secrets", "operator.write"],
-            scopes);
-        Assert.DoesNotContain("operator.admin", scopes);
-        Assert.DoesNotContain("operator.pairing", scopes);
+        Assert.Contains("operator.admin", scopes);
     }
 
     [Fact]
@@ -475,8 +471,6 @@ public class OpenClawGatewayClientTests
         var auth = helper.BuildAuthPayload();
 
         Assert.Contains("operator.admin", scopes);
-        Assert.Contains("operator.pairing", scopes);
-        Assert.DoesNotContain("operator.talk.secrets", scopes);
         Assert.Equal("paired-device-token", auth["deviceToken"]);
         Assert.False(auth.ContainsKey("token"));
         Assert.False(auth.ContainsKey("bootstrapToken"));
@@ -1765,15 +1759,16 @@ public class OpenClawGatewayClientTests
         }
         """);
 
-        Assert.Contains(logger.Logs, l => l.Contains("auto-reconnect paused", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(logger.Logs, l => l.Contains("Pairing required", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
-    public void HandleRequestError_PairingRequired_RaisesErrorStatus()
+    public void HandleRequestError_PairingRequired_FiresPairingEvent()
     {
         var helper = new GatewayClientTestHelper();
         helper.TrackPendingRequest("req-pairing-3", "connect");
-        var statusChanges = helper.CaptureStatusChanges();
+        var pairingFired = false;
+        helper.Client.PairingRequired += (_, _) => pairingFired = true;
 
         helper.ProcessRawMessage("""
         {
@@ -1784,7 +1779,7 @@ public class OpenClawGatewayClientTests
         }
         """);
 
-        Assert.Contains(ConnectionStatus.Error, statusChanges);
+        Assert.True(pairingFired);
     }
 
     [Fact]
@@ -1843,12 +1838,12 @@ public class OpenClawGatewayClientTests
     // --- HandleRequestError: device signature invalid ---
 
     [Fact]
-    public void HandleRequestError_DeviceSignatureInvalid_CyclesSignatureMode()
+    public void HandleRequestError_DeviceSignatureInvalid_FirstRejectionFallsBackToV2()
     {
         var helper = new GatewayClientTestHelper();
-        // Starting mode is V3AuthToken; first rejection should move it to V3EmptyToken
-        Assert.Equal("V3AuthToken", helper.GetSignatureTokenMode());
+        var authEvents = helper.CaptureAuthenticationFailedEvents();
 
+        // First rejection triggers v2 fallback, not auth failure
         helper.TrackPendingRequest("req-sig-1", "connect");
         helper.ProcessRawMessage("""
         {
@@ -1859,7 +1854,8 @@ public class OpenClawGatewayClientTests
         }
         """);
 
-        Assert.Equal("V3EmptyToken", helper.GetSignatureTokenMode());
+        Assert.False(helper.GetAuthFailedFlag());
+        Assert.Empty(authEvents);
     }
 
     [Fact]
@@ -2097,25 +2093,36 @@ public class OpenClawGatewayClientTests
     }
 
     [Fact]
-    public void HandleRequestError_AllDeviceSignatureModesExhausted_SetsAuthFailed()
+    public void HandleRequestError_DeviceSignatureRejected_SetsAuthFailed()
     {
         var logger = new TestLogger();
         var helper = new GatewayClientTestHelper(logger);
         var authEvents = helper.CaptureAuthenticationFailedEvents();
 
-        // Cycle through all 4 signature modes by sending 4 successive rejections
-        for (int i = 1; i <= 4; i++)
+        // First rejection triggers v2 fallback (not auth failure)
+        helper.TrackPendingRequest("req-sig-v3", "connect");
+        helper.ProcessRawMessage("""
         {
-            helper.TrackPendingRequest($"req-sig-exhaust-{i}", "connect");
-            helper.ProcessRawMessage($$"""
-            {
-                "type": "res",
-                "id": "req-sig-exhaust-{{i}}",
-                "ok": false,
-                "error": "device signature invalid"
-            }
-            """);
+            "type": "res",
+            "id": "req-sig-v3",
+            "ok": false,
+            "error": "device signature invalid"
         }
+        """);
+
+        Assert.False(helper.GetAuthFailedFlag());
+        Assert.Empty(authEvents);
+
+        // Second rejection (v2 also rejected) is a real auth error
+        helper.TrackPendingRequest("req-sig-v2", "connect");
+        helper.ProcessRawMessage("""
+        {
+            "type": "res",
+            "id": "req-sig-v2",
+            "ok": false,
+            "error": "device signature invalid"
+        }
+        """);
 
         Assert.True(helper.GetAuthFailedFlag());
         Assert.Single(authEvents);

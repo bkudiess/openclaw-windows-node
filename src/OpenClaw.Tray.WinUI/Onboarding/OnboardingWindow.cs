@@ -316,11 +316,9 @@ public sealed class OnboardingWindow : WindowEx
             Logger.Info("[OnboardingChat] Initializing WebView2 chat overlay");
 
             var gatewayUrl = _state.Settings.GetEffectiveGatewayUrl();
-            // Use settings token for chat URL — this is the gateway shared secret
-            // that the chat web UI's JavaScript uses for WebSocket authentication.
-            // NOTE: Do NOT use the client's connect auth token here. After device pairing,
-            // that becomes the Ed25519 device token, which the HTTP chat JS doesn't understand.
-            var token = _state.Settings.Token;
+            // Get token from GatewayRegistry — the source of truth for credentials.
+            var app0 = (App)Microsoft.UI.Xaml.Application.Current;
+            var token = app0.Registry?.GetActive()?.SharedGatewayToken ?? "";
 
             // Pre-flight: verify gateway is reachable before loading chat
             var app = (App)Microsoft.UI.Xaml.Application.Current;

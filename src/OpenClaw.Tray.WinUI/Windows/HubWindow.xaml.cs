@@ -33,7 +33,7 @@ public sealed partial class HubWindow : WindowEx
             }
         }
     }
-    public OpenClawGatewayClient? GatewayClient { get; set; }
+    public IOperatorGatewayClient? GatewayClient { get; set; }
     public ConnectionStatus CurrentStatus { get; set; }
     private string _currentAgentId = "main";
     public string CurrentAgentId => _currentAgentId;
@@ -46,6 +46,9 @@ public sealed partial class HubWindow : WindowEx
     public Action? DisconnectAction { get; set; }
     public Action? ReconnectAction { get; set; }
     public Action? OpenSetupAction { get; set; }
+    public Action? OpenConnectionStatusAction { get; set; }
+    public OpenClawTray.Services.Connection.IGatewayConnectionManager? ConnectionManager { get; set; }
+    public OpenClawTray.Services.Connection.GatewayRegistry? GatewayRegistry { get; set; }
 
     // Node service state (set by App.xaml.cs in ShowHub)
     public bool NodeIsConnected { get; set; }
@@ -502,6 +505,7 @@ public sealed partial class HubWindow : WindowEx
             {
                 if (IsClosed) return;
                 if (ContentFrame?.Content is NodesPage np) np.UpdateDevicePairingRequests(data);
+                if (ContentFrame?.Content is ConnectionPage cp) cp.UpdateDevicePairingRequests(data);
             });
         }
         catch { }
@@ -582,7 +586,10 @@ public sealed partial class HubWindow : WindowEx
                 sessions.Initialize(this);
                 if (LastModelsList != null) sessions.UpdateModelsList(LastModelsList);
                 break;
-            case ConnectionPage connection: connection.Initialize(this); break;
+            case ConnectionPage connection:
+                connection.Initialize(this);
+                if (LastDevicePairList != null) connection.UpdateDevicePairingRequests(LastDevicePairList);
+                break;
             case ChannelsPage channels: channels.Initialize(this); break;
             case UsagePage usage: usage.Initialize(this); break;
             case NodesPage nodes:

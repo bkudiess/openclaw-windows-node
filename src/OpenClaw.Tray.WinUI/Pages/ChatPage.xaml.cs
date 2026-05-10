@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.Web.WebView2.Core;
 using OpenClaw.Shared;
 using OpenClawTray.Services;
+using OpenClawTray.Services.Connection;
 using OpenClawTray.Windows;
 using System;
 using System.Diagnostics;
@@ -49,13 +50,29 @@ public sealed partial class ChatPage : Page
     {
         try
         {
-            var gatewayUrl = settings.GetEffectiveGatewayUrl();
-            if (string.IsNullOrEmpty(gatewayUrl))
+            if (!InteractiveGatewayCredentialResolver.TryResolve(
+                settings,
+                _hub?.GatewayRegistry,
+                SettingsManager.SettingsDirectoryPath,
+                DeviceIdentityFileReader.Instance,
+                out var credential) ||
+                credential == null)
             {
+                PlaceholderPanel.Visibility = Visibility.Collapsed;
+                ErrorPanel.Visibility = Visibility.Visible;
+                ErrorText.Text = "Open Connection settings to finish pairing with a gateway.";
                 return;
             }
 
-            if (!TryBuildChatUrl(gatewayUrl, settings.Token, out var chatUrl, out var errorMessage))
+            if (credential.IsBootstrapToken)
+            {
+                PlaceholderPanel.Visibility = Visibility.Collapsed;
+                ErrorPanel.Visibility = Visibility.Visible;
+                ErrorText.Text = "Gateway pairing is not complete. Open Connection settings to finish pairing.";
+                return;
+            }
+
+            if (!TryBuildChatUrl(credential.GatewayUrl, credential.Token, out var chatUrl, out var errorMessage))
             {
                 PlaceholderPanel.Visibility = Visibility.Collapsed;
                 ErrorPanel.Visibility = Visibility.Visible;
@@ -107,7 +124,7 @@ public sealed partial class ChatPage : Page
                 {
                     WebView.Visibility = Visibility.Collapsed;
                     ErrorPanel.Visibility = Visibility.Visible;
-                    ErrorText.Text = $"Cannot connect to gateway at {gatewayUrl}\n\nMake sure the gateway is running.";
+                    ErrorText.Text = $"Cannot connect to gateway at {credential.GatewayUrl}\n\nMake sure the gateway is running.";
                 }
             };
             WebView.CoreWebView2.NavigationCompleted += _navCompletedHandler;

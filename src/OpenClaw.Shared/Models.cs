@@ -27,12 +27,14 @@ public class PairingStatusEventArgs : EventArgs
     public PairingStatus Status { get; }
     public string DeviceId { get; }
     public string? Message { get; }
+    public string? RequestId { get; }
     
-    public PairingStatusEventArgs(PairingStatus status, string deviceId, string? message = null)
+    public PairingStatusEventArgs(PairingStatus status, string deviceId, string? message = null, string? requestId = null)
     {
         Status = status;
         DeviceId = deviceId;
         Message = message;
+        RequestId = requestId;
     }
 }
 

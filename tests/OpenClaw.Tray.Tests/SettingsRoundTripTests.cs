@@ -12,9 +12,7 @@ public class SettingsRoundTripTests
         var original = new SettingsData
         {
             GatewayUrl = "ws://localhost:18789",
-            Token = "secret-token",
-            BootstrapToken = "bootstrap-token",
-            UseSshTunnel = true,
+            UseSshTunnel= true,
             SshTunnelUser = "user1",
             SshTunnelHost = "remote-host",
             SshTunnelRemotePort = 18789,
@@ -68,8 +66,6 @@ public class SettingsRoundTripTests
 
         Assert.NotNull(restored);
         Assert.Equal(original.GatewayUrl, restored.GatewayUrl);
-        Assert.Equal(original.Token, restored.Token);
-        Assert.Equal(original.BootstrapToken, restored.BootstrapToken);
         Assert.Equal(original.UseSshTunnel, restored.UseSshTunnel);
         Assert.Equal(original.SshTunnelUser, restored.SshTunnelUser);
         Assert.Equal(original.SshTunnelHost, restored.SshTunnelHost);
@@ -141,8 +137,6 @@ public class SettingsRoundTripTests
 
         Assert.NotNull(settings);
         Assert.Null(settings.GatewayUrl);
-        Assert.Null(settings.Token);
-        Assert.Null(settings.BootstrapToken);
         Assert.False(settings.UseSshTunnel);
         Assert.Null(settings.SshTunnelUser);
         Assert.Null(settings.SshTunnelHost);
@@ -223,8 +217,6 @@ public class SettingsRoundTripTests
 
         Assert.NotNull(settings);
         Assert.Equal("ws://localhost:18789", settings.GatewayUrl);
-        Assert.Equal("abc", settings.Token);
-        Assert.Null(settings.BootstrapToken);
         Assert.False(settings.UseSshTunnel);
         Assert.Null(settings.SshTunnelUser);
         Assert.Null(settings.SshTunnelHost);
