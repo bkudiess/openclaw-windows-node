@@ -48,7 +48,7 @@ public sealed class SettingsManagerIsolationTests
             Environment.SetEnvironmentVariable("OPENCLAW_TRAY_DATA_DIR", previousOverride);
             if (Directory.Exists(isolatedDirectory))
             {
-                Directory.Delete(isolatedDirectory, recursive: true);
+                try { Directory.Delete(isolatedDirectory, recursive: true); } catch { /* best effort */ }
             }
         }
     }
@@ -93,7 +93,7 @@ public sealed class SettingsManagerIsolationTests
             Environment.SetEnvironmentVariable("OPENCLAW_TRAY_DATA_DIR", previousOverride);
             if (Directory.Exists(isolatedDirectory))
             {
-                Directory.Delete(isolatedDirectory, recursive: true);
+                try { Directory.Delete(isolatedDirectory, recursive: true); } catch { /* best effort */ }
             }
         }
     }

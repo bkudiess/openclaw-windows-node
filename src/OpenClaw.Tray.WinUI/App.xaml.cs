@@ -1721,6 +1721,9 @@ public partial class App : Application
 
         if (string.IsNullOrWhiteSpace(gatewayUrl))
         {
+            if (TryStartLocalMcpOnlyNode())
+                return;
+
             Logger.Info("Gateway URL not configured — skipping client initialization");
             return;
         }
@@ -1740,6 +1743,9 @@ public partial class App : Application
                 Path.Combine(SettingsManager.SettingsDirectoryPath));
             if (!hasStoredDeviceToken)
             {
+                if (TryStartLocalMcpOnlyNode())
+                    return;
+
                 Logger.Info("No stored device token — skipping startup connect (use Setup Code)");
                 return;
             }
@@ -1813,6 +1819,33 @@ public partial class App : Application
         if (migrated)
         {
             Logger.Info("[GatewayRegistry] Migrated legacy gateway settings into registry");
+        }
+    }
+
+    private bool TryStartLocalMcpOnlyNode()
+    {
+        if (_settings == null || !_settings.EnableMcpServer || _settings.EnableNodeMode)
+        {
+            return false;
+        }
+
+        var nodeService = EnsureNodeServiceForLocalGatewaySetup(_settings);
+        if (nodeService == null)
+        {
+            Logger.Warn("MCP-only mode requested but node service could not be initialized");
+            return false;
+        }
+
+        try
+        {
+            nodeService.StartLocalOnlyAsync().GetAwaiter().GetResult();
+            Logger.Info("Started MCP-only node service without gateway connection");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"Failed to start MCP-only node service: {ex}");
+            return false;
         }
     }
 
