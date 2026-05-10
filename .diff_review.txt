@@ -1,0 +1,2138 @@
+diff --git a/src/OpenClaw.Shared/IOperatorGatewayClient.cs b/src/OpenClaw.Shared/IOperatorGatewayClient.cs
+index 43a10f2..d5e2047 100644
+--- a/src/OpenClaw.Shared/IOperatorGatewayClient.cs
++++ b/src/OpenClaw.Shared/IOperatorGatewayClient.cs
+@@ -5,7 +5,7 @@ namespace OpenClaw.Shared;
+ /// <summary>
+ /// Read-only facade for the operator gateway client.
+ /// Exposes data events and request methods needed by UI consumers
+-/// without exposing connection lifecycle methods.
++/// without exposing connection lifecycle methods (connect/disconnect/dispose).
+ /// </summary>
+ public interface IOperatorGatewayClient
+ {
+@@ -45,4 +45,46 @@ public interface IOperatorGatewayClient
+     event EventHandler<string>? AuthenticationFailed;
+     event EventHandler<DeviceTokenReceivedEventArgs>? DeviceTokenReceived;
+     event EventHandler? HandshakeSucceeded;
++
++    // ─── Configuration ───
++    void SetUserRules(IReadOnlyList<UserNotificationRule>? rules);
++    void SetPreferStructuredCategories(bool value);
++
++    // ─── Request Methods ───
++    Task SendChatMessageAsync(string message, string? sessionKey = null);
++    Task CheckHealthAsync();
++    Task RequestSessionsAsync(string? agentId = null);
++    Task RequestUsageAsync();
++    Task RequestNodesAsync();
++    Task RequestUsageStatusAsync();
++    Task RequestUsageCostAsync(int days = 30);
++    Task RequestSessionPreviewAsync(string[] keys, int limit = 12, int maxChars = 240);
++    Task<bool> PatchSessionAsync(string key, string? thinkingLevel = null, string? verboseLevel = null);
++    Task<bool> ResetSessionAsync(string key);
++    Task<bool> DeleteSessionAsync(string key, bool deleteTranscript = true);
++    Task<bool> CompactSessionAsync(string key, int maxLines = 400);
++    Task RequestCronListAsync();
++    Task RequestCronStatusAsync();
++    Task<bool> RunCronJobAsync(string jobId, bool force = true);
++    Task<bool> RemoveCronJobAsync(string jobId);
++    Task RequestSkillsStatusAsync(string? agentId = null);
++    Task<bool> InstallSkillAsync(string skillId);
++    Task<bool> UpdateSkillAsync(string skillId);
++    Task RequestConfigAsync();
++    Task RequestConfigSchemaAsync();
++    Task<bool> SetConfigAsync(string path, object value);
++    Task<bool> PatchConfigAsync(JsonElement fullConfig, string? baseHash);
++    Task RequestAgentsListAsync();
++    Task RequestAgentFilesListAsync(string agentId = "main");
++    Task RequestAgentFileGetAsync(string agentId, string name);
++    Task RequestModelsListAsync();
++    Task RequestNodePairListAsync();
++    Task<bool> NodePairApproveAsync(string requestId);
++    Task<bool> NodePairRejectAsync(string requestId);
++    Task RequestDevicePairListAsync();
++    Task<bool> DevicePairApproveAsync(string requestId);
++    Task<bool> DevicePairRejectAsync(string requestId);
++    Task<bool> StartChannelAsync(string channelName);
++    Task<bool> StopChannelAsync(string channelName);
++    Task<JsonElement> SendWizardRequestAsync(string method, object? parameters = null, int timeoutMs = 30000);
+ }
+diff --git a/src/OpenClaw.Tray.WinUI/App.xaml.cs b/src/OpenClaw.Tray.WinUI/App.xaml.cs
+index 1509952..07bb104 100644
+--- a/src/OpenClaw.Tray.WinUI/App.xaml.cs
++++ b/src/OpenClaw.Tray.WinUI/App.xaml.cs
+@@ -38,7 +38,6 @@ public partial class App : Application
+     };
+ 
+     private TrayIcon? _trayIcon;
+-    private OpenClawGatewayClient? _gatewayClient;
+     private GatewayConnectionManager? _connectionManager;
+     private GatewayRegistry? _gatewayRegistry;
+     /// <summary>
+@@ -48,9 +47,14 @@ public partial class App : Application
+     /// setup has run in this app lifetime.
+     /// </summary>
+     private LocalGatewaySetupEngine? _localSetupEngine;
++    /// <summary>
++    /// When true, the connection manager suppresses node auto-connect after operator handshake.
++    /// Set during the WSL local-setup flow so the engine controls node pairing in its own phase.
++    /// </summary>
++    private volatile bool _suppressNodeDuringSetup;
+ 
+     /// <summary>The persistent gateway client. Used by the onboarding wizard for RPC calls.</summary>
+-    public OpenClawGatewayClient? GatewayClient => _gatewayClient;
++    public IOperatorGatewayClient? GatewayClient => _connectionManager?.OperatorClient;
+     public GatewayRegistry? Registry => _gatewayRegistry;
+     public GatewayConnectionManager? ConnectionManager => _connectionManager;
+     internal SettingsManager Settings => _settings ?? throw new InvalidOperationException("Settings are not initialized.");
+@@ -72,12 +76,34 @@ public partial class App : Application
+     {
+         var settings = _settings ?? new SettingsManager();
+         var nodeService = EnsureNodeServiceForLocalGatewaySetup(settings);
++        // Suppress node auto-connect in the connection manager during setup.
++        // The engine controls node pairing in its own phase (PairWindowsTrayNode).
++        _suppressNodeDuringSetup = true;
++        // Use the connection manager's operator connector so all handshake/pairing
++        // events appear in the diagnostics window and reuse the manager's v2/v3
++        // signature fallback, credential resolution, and device token persistence.
++        IGatewayOperatorConnector? operatorConnector = null;
++        if (_connectionManager != null && _gatewayRegistry != null)
++        {
++            operatorConnector = new ConnectionManagerOperatorConnector(
++                _connectionManager, _gatewayRegistry, new AppLogger());
++        }
+         var engine = LocalGatewaySetupEngineFactory.CreateLocalOnly(
+             settings,
+             new AppLogger(),
+             nodeService,
+             replaceExistingConfigurationConfirmed: replaceExistingConfigurationConfirmed,
+-            gatewayRegistry: _gatewayRegistry);
++            gatewayRegistry: _gatewayRegistry,
++            operatorConnectorOverride: operatorConnector);
++        // Clear suppress flag when engine completes so normal node connections resume.
++        engine.StateChanged += (st) =>
++        {
++            if (st.Status is LocalGatewaySetupStatus.Complete or LocalGatewaySetupStatus.FailedTerminal
++                or LocalGatewaySetupStatus.FailedRetryable or LocalGatewaySetupStatus.Cancelled)
++            {
++                _suppressNodeDuringSetup = false;
++            }
++        };
+         // Bug #2: cache so OnPairingStatusChanged can read engine.IsAutoPairingWindowsNode
+         // and suppress the "copy pairing command" toast during the Phase 14 blip.
+         _localSetupEngine = engine;
+@@ -93,12 +119,6 @@ public partial class App : Application
+             ? WinRT.Interop.WindowNative.GetWindowHandle(_onboardingWindow)
+             : IntPtr.Zero;
+ 
+-    /// <summary>
+-    /// Reinitializes the gateway client with current settings.
+-    /// Called by the onboarding wizard after saving URL + Token.
+-    /// </summary>
+-    public void ReinitializeGatewayClient(bool useBootstrapHandoffAuth = false) =>
+-        InitializeGatewayClient(useBootstrapHandoffAuth);
+     private SettingsManager? _settings;
+     private SettingsData? _previousSettingsSnapshot;
+     private SshTunnelService? _sshTunnelService;
+@@ -108,6 +128,11 @@ public partial class App : Application
+     private CancellationTokenSource? _deepLinkCts;
+     private bool _isExiting;
+     
++    /// <summary>
++    /// Cached connection status — sole writer is OnManagerStateChanged.
++    /// Reads are safe from any thread; derives from the connection manager's state machine.
++    /// SSH tunnel errors in EnsureSshTunnelConfigured also write this temporarily (Phase 3 moves tunnel to manager).
++    /// </summary>
+     private ConnectionStatus _currentStatus = ConnectionStatus.Disconnected;
+     private AgentActivity? _currentActivity;
+     private ChannelHealth[] _lastChannels = Array.Empty<ChannelHealth>();
+@@ -435,12 +460,17 @@ public partial class App : Application
+         var appLogger = new AppLogger();
+         var diagnostics = new ConnectionDiagnostics();
+         var nodeConnector = new NodeConnector(appLogger, diagnostics);
++        // Wrap the SSH tunnel service so the connection manager can start/stop the tunnel
++        var tunnelManager = _sshTunnelService != null
++            ? new SshTunnelManager(_sshTunnelService, appLogger)
++            : null;
+         _connectionManager = new GatewayConnectionManager(
+             credentialResolver, clientFactory, _gatewayRegistry, appLogger,
+             identityStore: new DeviceIdentityFileStore(appLogger),
+             nodeConnector: nodeConnector,
+             isNodeEnabled: ShouldInitializeNodeService,
+-            diagnostics: diagnostics);
++            diagnostics: diagnostics,
++            tunnelManager: tunnelManager);
+         _connectionManager.OperatorClientChanged += OnOperatorClientChanged;
+         _connectionManager.StateChanged += OnManagerStateChanged;
+ 
+@@ -595,9 +625,10 @@ public partial class App : Application
+             // Wire transcription to gateway chat when connected
+             _voiceOverlayWindow.TextSubmitted += text =>
+             {
+-                if (_gatewayClient != null && _currentStatus == ConnectionStatus.Connected)
++                var client = _connectionManager?.OperatorClient;
++                if (client != null && _currentStatus == ConnectionStatus.Connected)
+                 {
+-                    _ = _gatewayClient.SendChatMessageAsync(text);
++                    _ = client.SendChatMessageAsync(text);
+                 }
+             };
+             // Wire Settings button → open the Hub on the Voice & Audio page.
+@@ -663,7 +694,7 @@ public partial class App : Application
+         switch (action)
+         {
+             case "status": ShowStatusDetail(); break;
+-            case "reconnect": ReconnectGateway(); break;
++            case "reconnect": _ = _connectionManager?.ReconnectAsync(); break;
+             case "dashboard": OpenDashboard(); break;
+             case "canvas": _nodeService?.ShowCanvasWindow(); break;
+             case "openchat": ShowChatWindow(); break;
+@@ -789,7 +820,8 @@ public partial class App : Application
+ 
+     private async Task ExecuteSessionActionAsync(string action, string sessionKey, string? value = null)
+     {
+-        if (_gatewayClient == null || string.IsNullOrWhiteSpace(sessionKey)) return;
++        var client = _connectionManager?.OperatorClient;
++        if (client == null || string.IsNullOrWhiteSpace(sessionKey)) return;
+ 
+         try
+         {
+@@ -823,11 +855,11 @@ public partial class App : Application
+ 
+             var sent = action switch
+             {
+-                "reset" => await _gatewayClient.ResetSessionAsync(sessionKey),
+-                "compact" => await _gatewayClient.CompactSessionAsync(sessionKey, 400),
+-                "delete" => await _gatewayClient.DeleteSessionAsync(sessionKey, deleteTranscript: true),
+-                "thinking" => await _gatewayClient.PatchSessionAsync(sessionKey, thinkingLevel: value),
+-                "verbose" => await _gatewayClient.PatchSessionAsync(sessionKey, verboseLevel: value),
++                "reset" => await client.ResetSessionAsync(sessionKey),
++                "compact" => await client.CompactSessionAsync(sessionKey, 400),
++                "delete" => await client.DeleteSessionAsync(sessionKey, deleteTranscript: true),
++                "thinking" => await client.PatchSessionAsync(sessionKey, thinkingLevel: value),
++                "verbose" => await client.PatchSessionAsync(sessionKey, verboseLevel: value),
+                 _ => false
+             };
+ 
+@@ -841,7 +873,7 @@ public partial class App : Application
+ 
+             if (action is "thinking" or "verbose")
+             {
+-                _ = _gatewayClient.RequestSessionsAsync();
++                _ = client.RequestSessionsAsync();
+             }
+         }
+         catch (Exception ex)
+@@ -1042,14 +1074,14 @@ public partial class App : Application
+             else
+             {
+                 _ = _connectionManager?.DisconnectAsync();
+-                _currentStatus = ConnectionStatus.Disconnected;
++                // Status is updated by OnManagerStateChanged when disconnect completes.
+                 _lastSessions = Array.Empty<SessionInfo>();
+                 _lastNodePairList = null;
+                 _lastDevicePairList = null;
+                 _lastModelsList = null;
+                 _agentEventsCache.Clear();
+                 UpdateTrayIcon();
+-                _hubWindow?.UpdateStatus(_currentStatus);
++                _hubWindow?.UpdateStatus(ConnectionStatus.Disconnected);
+             }
+             // Dismiss menu after toggle — header will rebuild with correct state on next open
+             _trayMenuWindow?.HideCascade();
+@@ -1176,7 +1208,7 @@ public partial class App : Application
+                             btn.Click += (s, ev) =>
+                             {
+                                 var on = ((ToggleButton)s!).IsChecked == true;
+-                                capRef.Set(on); _settings.Save(); ReconnectNodeServiceOnly();
++                                capRef.Set(on); _settings.Save(); _ = _connectionManager?.ReconnectAsync();
+                             };
+                             Grid.SetRow(btn, i / columns);
+                             Grid.SetColumn(btn, i % columns);
+@@ -1657,7 +1689,7 @@ public partial class App : Application
+     private void InitializeGatewayClient(bool useBootstrapHandoffAuth = false)
+     {
+         if (_settings == null || _connectionManager == null || _gatewayRegistry == null) return;
+-        if (!EnsureSshTunnelConfigured()) return;
++        // SSH tunnel lifecycle is now handled by the connection manager.
+ 
+         var gatewayUrl = _settings.GetEffectiveGatewayUrl();
+ 
+@@ -1736,7 +1768,6 @@ public partial class App : Application
+     /// <summary>
+     /// Handles the connection manager's OperatorClientChanged event.
+     /// Re-wires all 27 data event handlers from the old client to the new one.
+-    /// Updates the _gatewayClient field so existing code still works.
+     /// </summary>
+     private void OnOperatorClientChanged(object? sender, OperatorClientChangedEventArgs e)
+     {
+@@ -1771,9 +1802,6 @@ public partial class App : Application
+             old.AgentFileContentUpdated -= OnAgentFileContentUpdated;
+         }
+ 
+-        // Update the _gatewayClient field for backward compat
+-        _gatewayClient = e.NewClient;
+-
+         // Subscribe to new client
+         if (e.NewClient is { } client)
+         {
+@@ -1814,7 +1842,7 @@ public partial class App : Application
+         {
+             if (_hubWindow != null && !_hubWindow.IsClosed)
+             {
+-                _hubWindow.GatewayClient = _gatewayClient;
++                _hubWindow.GatewayClient = _connectionManager?.OperatorClient;
+                 _hubWindow.CurrentStatus = _currentStatus;
+             }
+         });
+@@ -1849,70 +1877,6 @@ public partial class App : Application
+         });
+     }
+ 
+-    
+-    private void InitializeNodeService()
+-    {
+-        if (_settings == null) return;
+-        if (_dispatcherQueue == null) return;
+-
+-        var enableNode = _settings.EnableNodeMode;
+-        var enableMcp = _settings.EnableMcpServer;
+-        if (!enableNode && !enableMcp) return;
+-
+-        // Gateway connection requires auth (operator token, bootstrap token, or stored device token); MCP doesn't.
+-        var canRunGateway = StartupSetupState.CanStartNodeGateway(_settings, IdentityDataPath);
+-
+-        if (enableNode && !canRunGateway && !enableMcp)
+-        {
+-            Logger.Warn("Node mode enabled but no token or bootstrap token configured — skipping node service. Run Setup Guide to configure.");
+-            return;
+-        }
+-
+-        // Surface gateway-disabled fallback so the user isn't surprised when
+-        // they enabled both but only MCP comes up.
+-        if (enableNode && !canRunGateway && enableMcp)
+-        {
+-            Logger.Warn("Node mode enabled but gateway auth is missing — running MCP-only.");
+-        }
+-
+-        try
+-        {
+-            _nodeService = new NodeService(
+-                new AppLogger(),
+-                _dispatcherQueue,
+-                DataPath,
+-                () => _keepAliveWindow?.Content as FrameworkElement,
+-                _settings,
+-                enableMcpServer: enableMcp,
+-                identityDataPath: IdentityDataPath);
+-            _nodeService.StatusChanged += OnNodeStatusChanged;
+-            _nodeService.NotificationRequested += OnNodeNotificationRequested;
+-            _nodeService.PairingStatusChanged += OnPairingStatusChanged;
+-            _nodeService.ChannelHealthUpdated += OnChannelHealthUpdated;
+-            _nodeService.InvokeCompleted += OnNodeInvokeCompleted;
+-            _nodeService.GatewaySelfUpdated += OnGatewaySelfUpdated;
+-            _nodeService.RecordingStateChanged += OnRecordingStateChanged;
+-
+-            if (canRunGateway)
+-            {
+-                Logger.Info($"Initializing Windows Node service (gateway{(enableMcp ? " + MCP" : "")})...");
+-                _ = _nodeService.ConnectAsync(_settings.GetEffectiveGatewayUrl(), "", null);
+-            }
+-            else
+-            {
+-                Logger.Info("Initializing Windows Node service (MCP-only, no gateway)...");
+-                _ = _nodeService.StartLocalOnlyAsync();
+-            }
+-
+-            // Wire handlers after connect (RegisterCapabilities runs synchronously within Connect/StartLocal)
+-            WireAppCapabilityHandlers();
+-        }
+-        catch (Exception ex)
+-        {
+-            Logger.Error($"Failed to initialize node service: {ex}");
+-        }
+-    }
+-
+     private NodeService? EnsureNodeServiceForLocalGatewaySetup(SettingsManager settings)
+     {
+         if (_nodeService != null)
+@@ -2089,6 +2053,7 @@ public partial class App : Application
+ 
+     private bool ShouldInitializeNodeService()
+     {
++        if (_suppressNodeDuringSetup) return false;
+         return _settings?.EnableNodeMode == true || _settings?.EnableMcpServer == true;
+     }
+ 
+@@ -2100,8 +2065,8 @@ public partial class App : Application
+         // In node-only mode, surface node connection in main status indicator
+         if (_settings?.EnableNodeMode == true)
+         {
+-            _currentStatus = status;
+-            _hubWindow?.UpdateStatus(_currentStatus);
++            // Status field is maintained by OnManagerStateChanged — no write needed here.
++            _hubWindow?.UpdateStatus(status);
+             UpdateTrayIcon();
+             _dispatcherQueue?.TryEnqueue(UpdateStatusDetailWindow);
+         }
+@@ -2311,13 +2276,13 @@ public partial class App : Application
+ 
+     private void OnConnectionStatusChanged(object? sender, ConnectionStatus status)
+     {
+-        _currentStatus = status;
++        // Status field is maintained by OnManagerStateChanged — no write needed here.
+         DiagnosticsJsonlService.Write("connection.status", new
+         {
+             status = status.ToString(),
+             nodeMode = _settings?.EnableNodeMode == true
+         });
+-        _hubWindow?.UpdateStatus(_currentStatus);
++        _hubWindow?.UpdateStatus(status);
+         if (status == ConnectionStatus.Connected)
+         {
+             _authFailureMessage = null;
+@@ -2453,13 +2418,13 @@ public partial class App : Application
+                 _sessionPreviews.Remove(key);
+         }
+ 
+-        if (_gatewayClient != null &&
++        if (_connectionManager?.OperatorClient != null &&
+             sessions.Length > 0 &&
+             DateTime.UtcNow - _lastPreviewRequestUtc > TimeSpan.FromSeconds(5))
+         {
+             _lastPreviewRequestUtc = DateTime.UtcNow;
+             var keys = sessions.Take(5).Select(s => s.Key).ToArray();
+-            _ = _gatewayClient.RequestSessionPreviewAsync(keys, limit: 3, maxChars: 140);
++            _ = _connectionManager.OperatorClient.RequestSessionPreviewAsync(keys, limit: 3, maxChars: 140);
+         }
+     }
+ 
+@@ -2596,7 +2561,7 @@ public partial class App : Application
+ 
+         if (result.Ok)
+         {
+-            _ = _gatewayClient?.RequestSessionsAsync();
++            _ = _connectionManager?.OperatorClient?.RequestSessionsAsync();
+         }
+     }
+ 
+@@ -2791,7 +2756,8 @@ public partial class App : Application
+     /// <summary>User-initiated health check (from UI button). No background timers.</summary>
+     private async Task RunHealthCheckAsync(bool userInitiated = false)
+     {
+-        if (_gatewayClient == null)
++        var client = _connectionManager?.OperatorClient;
++        if (client == null)
+         {
+             if (_settings?.EnableNodeMode == true && _nodeService?.IsConnected == true)
+             {
+@@ -2818,7 +2784,7 @@ public partial class App : Application
+         try
+         {
+             _lastCheckTime = DateTime.Now;
+-            await _gatewayClient.CheckHealthAsync();
++            await client.CheckHealthAsync();
+             if (userInitiated)
+             {
+                 ShowToast(new ToastContentBuilder()
+@@ -2917,7 +2883,7 @@ public partial class App : Application
+         {
+             _hubWindow = new HubWindow();
+             _hubWindow.Settings = _settings;
+-            _hubWindow.GatewayClient = _gatewayClient;
++            _hubWindow.GatewayClient = _connectionManager?.OperatorClient;
+             _hubWindow.CurrentStatus = _currentStatus;
+             _hubWindow.OpenDashboardAction = OpenDashboard;
+             _hubWindow.CheckForUpdatesAction = () => _ = CheckForUpdatesUserInitiatedAsync();
+@@ -2933,13 +2899,13 @@ public partial class App : Application
+             _hubWindow.DisconnectAction = () =>
+             {
+                 _ = _connectionManager?.DisconnectAsync();
+-                _currentStatus = ConnectionStatus.Disconnected;
++                // Status is updated by OnManagerStateChanged when disconnect completes.
+                 UpdateTrayIcon();
+-                _hubWindow?.UpdateStatus(_currentStatus);
++                _hubWindow?.UpdateStatus(ConnectionStatus.Disconnected);
+             };
+             _hubWindow.ReconnectAction = () =>
+             {
+-                ReconnectGateway();
++                _ = _connectionManager?.ReconnectAsync();
+             };
+             _hubWindow.ClearAppAgentEventsCache = () => _agentEventsCache.Clear();
+             if (_nodeService != null)
+@@ -2966,7 +2932,7 @@ public partial class App : Application
+         }
+         // Always update live state
+         _hubWindow.Settings = _settings;
+-        _hubWindow.GatewayClient = _gatewayClient;
++        _hubWindow.GatewayClient = _connectionManager?.OperatorClient;
+         _hubWindow.CurrentStatus = _currentStatus;
+         _hubWindow.VoiceServiceInstance = _nodeService?.VoiceService ?? _standaloneVoiceService;
+         if (_nodeService != null)
+@@ -3052,8 +3018,8 @@ public partial class App : Application
+                 {
+                     _sshTunnelService?.Stop();
+                 }
+-                _currentStatus = ConnectionStatus.Disconnected;
+-                _hubWindow?.UpdateStatus(_currentStatus);
++                // Status is updated by OnManagerStateChanged when reconnect starts.
++                _hubWindow?.UpdateStatus(ConnectionStatus.Disconnected);
+                 UpdateTrayIcon();
+ 
+                 // Reset chat window — it has a stale URL/token
+@@ -3067,11 +3033,11 @@ public partial class App : Application
+                 break;
+ 
+             case SettingsChangeImpact.NodeReconnectRequired:
+-                ReconnectNodeServiceOnly();
++                _ = _connectionManager?.ReconnectAsync();
+                 break;
+ 
+             case SettingsChangeImpact.CapabilityReload:
+-                ReconnectNodeServiceOnly();
++                _ = _connectionManager?.ReconnectAsync();
+                 break;
+ 
+             case SettingsChangeImpact.UiOnly:
+@@ -3099,37 +3065,11 @@ public partial class App : Application
+         if (_hubWindow != null && !_hubWindow.IsClosed)
+         {
+             _hubWindow.Settings = _settings;
+-            _hubWindow.GatewayClient = _gatewayClient;
++            _hubWindow.GatewayClient = _connectionManager?.OperatorClient;
+             _hubWindow.CurrentStatus = _currentStatus;
+         }
+     }
+ 
+-    /// <summary>
+-    /// Lightweight reconnect: tears down and rebuilds gateway + node connections
+-    /// without destroying the chat window or re-registering hotkeys/autostart.
+-    /// Use for "Reconnect" actions where only the connection needs recycling.
+-    /// </summary>
+-    private void ReconnectGateway()
+-    {
+-        _ = _connectionManager?.ReconnectAsync();
+-
+-        if (_hubWindow != null && !_hubWindow.IsClosed)
+-        {
+-            _hubWindow.Settings = _settings;
+-            _hubWindow.GatewayClient = _gatewayClient;
+-            _hubWindow.CurrentStatus = _currentStatus;
+-        }
+-    }
+-
+-    /// <summary>
+-    /// Reconnects only the node service (preserves gateway client + chat window).
+-    /// Use for capability toggle changes that don't require a full reconnect.
+-    /// </summary>
+-    private void ReconnectNodeServiceOnly()
+-    {
+-        _ = _connectionManager?.ReconnectAsync();
+-    }
+-
+     private void ShowWebChat()
+     {
+         ShowHub("chat");
+@@ -3137,7 +3077,7 @@ public partial class App : Application
+ 
+     private void ShowQuickSend(string? prefillMessage = null)
+     {
+-        if (_gatewayClient == null)
++        if (_connectionManager?.OperatorClient == null)
+         {
+             Logger.Warn("QuickSend blocked: gateway client not initialized");
+             return;
+@@ -3164,9 +3104,9 @@ public partial class App : Application
+             }
+ 
+             Logger.Info("Showing QuickSend dialog");
+-            // Bug #3: pass a Func that resolves the live _gatewayClient on
++            // Bug #3: pass a Func that resolves the live OperatorClient on
+             // every Send so post-pair / restart / reinit swaps are observed.
+-            var dialog = new QuickSendDialog(() => _gatewayClient, prefillMessage);
++            var dialog = new QuickSendDialog(() => _connectionManager?.OperatorClient as OpenClawGatewayClient, prefillMessage);
+             dialog.Closed += (s, e) =>
+             {
+                 if (ReferenceEquals(_quickSendDialog, dialog))
+@@ -3222,7 +3162,7 @@ public partial class App : Application
+             });
+ 
+             _sshTunnelService?.Stop();
+-            _currentStatus = ConnectionStatus.Disconnected;
++            // Status is updated by OnManagerStateChanged when reconnect completes.
+             UpdateTrayIcon();
+ 
+             if (!EnsureSshTunnelConfigured())
+@@ -3254,11 +3194,12 @@ public partial class App : Application
+     private async Task RefreshCommandCenterAsync()
+     {
+         await RunHealthCheckAsync(userInitiated: true);
+-        if (_gatewayClient != null)
++        var client = _connectionManager?.OperatorClient;
++        if (client != null)
+         {
+-            await _gatewayClient.RequestSessionsAsync();
+-            await _gatewayClient.RequestUsageAsync();
+-            await _gatewayClient.RequestNodesAsync();
++            await client.RequestSessionsAsync();
++            await client.RequestUsageAsync();
++            await client.RequestNodesAsync();
+         }
+         UpdateStatusDetailWindow();
+     }
+@@ -3349,7 +3290,7 @@ public partial class App : Application
+             });
+         }
+ 
+-        if (_lastChannels.Length == 0 && _currentStatus == ConnectionStatus.Connected && _gatewayClient != null)
++        if (_lastChannels.Length == 0 && _currentStatus == ConnectionStatus.Connected && _connectionManager?.OperatorClient != null)
+         {
+             warnings.Add(new GatewayDiagnosticWarning
+             {
+@@ -3380,7 +3321,7 @@ public partial class App : Application
+             });
+         }
+ 
+-        if (_currentStatus == ConnectionStatus.Connected && nodes.Count == 0 && _gatewayClient != null)
++        if (_currentStatus == ConnectionStatus.Connected && nodes.Count == 0 && _connectionManager?.OperatorClient != null)
+         {
+             warnings.Add(new GatewayDiagnosticWarning
+             {
+@@ -3706,7 +3647,7 @@ public partial class App : Application
+             _onboardingWindow = null;
+ 
+             // If the persistent client was already initialized during onboarding, keep it
+-            if (_gatewayClient?.IsConnectedToGateway == true)
++            if (_connectionManager?.OperatorClient is OpenClawGatewayClient { IsConnectedToGateway: true })
+             {
+                 Logger.Info("Gateway client already connected from onboarding — keeping");
+                 return;
+@@ -3719,7 +3660,7 @@ public partial class App : Application
+             if (_hubWindow != null && !_hubWindow.IsClosed)
+             {
+                 _hubWindow.Settings = _settings;
+-                _hubWindow.GatewayClient = _gatewayClient;
++                _hubWindow.GatewayClient = _connectionManager?.OperatorClient;
+                 _hubWindow.CurrentStatus = _currentStatus;
+             }
+         };
+@@ -3875,7 +3816,8 @@ public partial class App : Application
+ 
+     private async void ToggleChannel(string channelName)
+     {
+-        if (_gatewayClient == null) return;
++        var client = _connectionManager?.OperatorClient;
++        if (client == null) return;
+ 
+         var channel = _lastChannels.FirstOrDefault(c => c.Name == channelName);
+         if (channel == null) return;
+@@ -3885,12 +3827,12 @@ public partial class App : Application
+             var isRunning = ChannelHealth.IsHealthyStatus(channel.Status);
+             if (isRunning)
+             {
+-                await _gatewayClient.StopChannelAsync(channelName);
++                await client.StopChannelAsync(channelName);
+                 AddRecentActivity($"Stopped channel: {channelName}", category: "channel", dashboardPath: "settings");
+             }
+             else
+             {
+-                await _gatewayClient.StartChannelAsync(channelName);
++                await client.StartChannelAsync(channelName);
+                 AddRecentActivity($"Started channel: {channelName}", category: "channel", dashboardPath: "settings");
+             }
+              
+@@ -4339,9 +4281,10 @@ public partial class App : Application
+             StopVoice = () => _ = StopVoiceAsync(),
+             SendMessage = async (msg) =>
+             {
+-                if (_gatewayClient != null)
++                var client = _connectionManager?.OperatorClient;
++                if (client != null)
+                 {
+-                    await _gatewayClient.SendChatMessageAsync(msg);
++                    await client.SendChatMessageAsync(msg);
+                 }
+             }
+         });
+@@ -4496,7 +4439,6 @@ public partial class App : Application
+         SafeShutdownStep("gateway client", () =>
+         {
+             _connectionManager?.Dispose();
+-            _gatewayClient = null;
+         });
+ 
+         SafeShutdownStep("node service", () =>
+diff --git a/src/OpenClaw.Tray.WinUI/Onboarding/Services/OnboardingState.cs b/src/OpenClaw.Tray.WinUI/Onboarding/Services/OnboardingState.cs
+index cc23b5d..b73c725 100644
+--- a/src/OpenClaw.Tray.WinUI/Onboarding/Services/OnboardingState.cs
++++ b/src/OpenClaw.Tray.WinUI/Onboarding/Services/OnboardingState.cs
+@@ -95,7 +95,7 @@ public sealed class OnboardingState : IDisposable
+     /// Available for the Wizard page to make RPC calls (wizard.start/wizard.next).
+     /// Null until connection is successfully tested.
+     /// </summary>
+-    public OpenClawGatewayClient? GatewayClient { get; set; }
++    public IOperatorGatewayClient? GatewayClient { get; set; }
+ 
+     // ── Wizard session state (persisted across page navigations) ──
+ 
+diff --git a/src/OpenClaw.Tray.WinUI/Pages/ConnectionPage.xaml b/src/OpenClaw.Tray.WinUI/Pages/ConnectionPage.xaml
+index 711a8af..5ae4c19 100644
+--- a/src/OpenClaw.Tray.WinUI/Pages/ConnectionPage.xaml
++++ b/src/OpenClaw.Tray.WinUI/Pages/ConnectionPage.xaml
+@@ -28,6 +28,7 @@
+                             <ColumnDefinition Width="*"/>
+                             <ColumnDefinition Width="Auto"/>
+                             <ColumnDefinition Width="Auto"/>
++                            <ColumnDefinition Width="Auto"/>
+                         </Grid.ColumnDefinitions>
+                         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                             <Ellipse x:Name="StatusDot" Width="12" Height="12" VerticalAlignment="Center" Fill="Gray"/>
+@@ -38,6 +39,11 @@
+                                 VerticalAlignment="Center" Click="OnReconnect" IsEnabled="False" Margin="0,0,8,0"/>
+                         <Button x:Name="DisconnectButton" Grid.Column="2" Content="Disconnect"
+                                 VerticalAlignment="Center" Click="OnDisconnect" Visibility="Collapsed"/>
++                        <Button x:Name="DiagnosticsButton" Grid.Column="3" Content="🔍"
++                                ToolTipService.ToolTip="Open Connection Diagnostics"
++                                VerticalAlignment="Center" Click="OnOpenDiagnostics"
++                                Padding="8,4" Margin="4,0,0,0" FontSize="14"
++                                Background="Transparent"/>
+                     </Grid>
+                     <!-- Row 2: Gateway details -->
+                     <TextBlock x:Name="GatewayDetailText"
+@@ -127,6 +133,20 @@
+                 </StackPanel>
+             </Border>
+ 
++            <!-- ═══ Section 1.5: Pending Device Pairing ═══ -->
++            <Border x:Name="DevicePairingCard" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
++                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
++                    BorderThickness="1" CornerRadius="8" Padding="16"
++                    Visibility="Collapsed">
++                <StackPanel Spacing="8">
++                    <TextBlock Text="📋 Pending Device Pairing" Style="{StaticResource BodyStrongTextBlockStyle}"/>
++                    <TextBlock Text="Devices waiting for approval to connect to this gateway."
++                               Style="{StaticResource CaptionTextBlockStyle}"
++                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
++                    <StackPanel x:Name="DevicePairingListPanel" Spacing="6"/>
++                </StackPanel>
++            </Border>
++
+ 
+             <!-- ═══ Section 3: Setup Code ═══ -->
+             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+diff --git a/src/OpenClaw.Tray.WinUI/Pages/ConnectionPage.xaml.cs b/src/OpenClaw.Tray.WinUI/Pages/ConnectionPage.xaml.cs
+index 8dae01a..092e7c4 100644
+--- a/src/OpenClaw.Tray.WinUI/Pages/ConnectionPage.xaml.cs
++++ b/src/OpenClaw.Tray.WinUI/Pages/ConnectionPage.xaml.cs
+@@ -255,6 +255,128 @@ public sealed partial class ConnectionPage : Page
+         _ = _connectionManager?.ReconnectAsync();
+     }
+ 
++    private void OnOpenDiagnostics(object sender, RoutedEventArgs e)
++    {
++        _hub?.OpenConnectionStatusAction?.Invoke();
++    }
++
++    /// <summary>
++    /// Called by HubWindow when device pairing list updates arrive.
++    /// Renders pending pairing request cards with scope-gated Approve/Reject buttons.
++    /// </summary>
++    public void UpdateDevicePairingRequests(DevicePairingListInfo data)
++    {
++        DevicePairingListPanel.Children.Clear();
++        if (data.Pending.Count == 0)
++        {
++            DevicePairingCard.Visibility = Visibility.Collapsed;
++            return;
++        }
++        DevicePairingCard.Visibility = Visibility.Visible;
++
++        // Check if operator has scope to approve/reject
++        var scopes = _hub?.GatewayClient?.GrantedOperatorScopes ?? (IReadOnlyList<string>)Array.Empty<string>();
++        var canPair = scopes.Any(s =>
++            s.Equals("operator.admin", StringComparison.OrdinalIgnoreCase) ||
++            s.Equals("operator.pairing", StringComparison.OrdinalIgnoreCase));
++
++        foreach (var req in data.Pending)
++        {
++            var card = new Border
++            {
++                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardBackgroundFillColorSecondaryBrush"],
++                CornerRadius = new CornerRadius(8),
++                Padding = new Thickness(16),
++            };
++
++            var grid = new Grid();
++            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
++            if (canPair)
++                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
++
++            var info = new StackPanel { Spacing = 4 };
++            info.Children.Add(new TextBlock
++            {
++                Text = req.DisplayName ?? req.DeviceId,
++                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
++            });
++            var detail = $"{req.Platform ?? "unknown"}";
++            if (!string.IsNullOrEmpty(req.Role)) detail += $" · {req.Role}";
++            info.Children.Add(new TextBlock
++            {
++                Text = detail,
++                Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
++                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"]
++            });
++            if (req.Scopes is { Length: > 0 })
++            {
++                info.Children.Add(new TextBlock
++                {
++                    Text = $"Scopes: {string.Join(", ", req.Scopes)}",
++                    Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
++                    Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"]
++                });
++            }
++            Grid.SetColumn(info, 0);
++            grid.Children.Add(info);
++
++            if (canPair)
++            {
++                var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
++                var approveBtn = new Button { Content = "Approve", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
++                var rejectBtn = new Button { Content = "Reject" };
++                var capturedId = req.RequestId;
++
++                approveBtn.Click += async (s, ev) =>
++                {
++                    approveBtn.IsEnabled = false;
++                    rejectBtn.IsEnabled = false;
++                    try
++                    {
++                        var client = _hub?.GatewayClient;
++                        if (client != null)
++                        {
++                            await client.DevicePairApproveAsync(capturedId);
++                            await client.RequestDevicePairListAsync();
++                        }
++                    }
++                    catch
++                    {
++                        approveBtn.IsEnabled = true;
++                        rejectBtn.IsEnabled = true;
++                    }
++                };
++                rejectBtn.Click += async (s, ev) =>
++                {
++                    approveBtn.IsEnabled = false;
++                    rejectBtn.IsEnabled = false;
++                    try
++                    {
++                        var client = _hub?.GatewayClient;
++                        if (client != null)
++                        {
++                            await client.DevicePairRejectAsync(capturedId);
++                            await client.RequestDevicePairListAsync();
++                        }
++                    }
++                    catch
++                    {
++                        approveBtn.IsEnabled = true;
++                        rejectBtn.IsEnabled = true;
++                    }
++                };
++
++                buttons.Children.Add(approveBtn);
++                buttons.Children.Add(rejectBtn);
++                Grid.SetColumn(buttons, 1);
++                grid.Children.Add(buttons);
++            }
++
++            card.Child = grid;
++            DevicePairingListPanel.Children.Add(card);
++        }
++    }
++
+     private static string GetAuthErrorGuidance(string error)
+     {
+         if (error.Contains("token", StringComparison.OrdinalIgnoreCase))
+diff --git a/src/OpenClaw.Tray.WinUI/Services/Connection/ConnectionStateMachine.cs b/src/OpenClaw.Tray.WinUI/Services/Connection/ConnectionStateMachine.cs
+index 63006b2..81ad0b6 100644
+--- a/src/OpenClaw.Tray.WinUI/Services/Connection/ConnectionStateMachine.cs
++++ b/src/OpenClaw.Tray.WinUI/Services/Connection/ConnectionStateMachine.cs
+@@ -46,10 +46,10 @@ internal sealed class ConnectionStateMachine
+                 _operatorState == RoleConnectionState.Connecting,
+ 
+             ConnectionTrigger.WebSocketConnected =>
+-                _operatorState == RoleConnectionState.Connecting,
++                _operatorState is RoleConnectionState.Connecting or RoleConnectionState.Error,
+ 
+             ConnectionTrigger.HandshakeSucceeded =>
+-                _operatorState == RoleConnectionState.Connecting,
++                _operatorState is RoleConnectionState.Connecting or RoleConnectionState.Error,
+ 
+             ConnectionTrigger.PairingPending =>
+                 _operatorState is RoleConnectionState.Connecting or RoleConnectionState.Connected or RoleConnectionState.Error,
+diff --git a/src/OpenClaw.Tray.WinUI/Services/Connection/GatewayConnectionManager.cs b/src/OpenClaw.Tray.WinUI/Services/Connection/GatewayConnectionManager.cs
+index b09a1c0..ca3ed4a 100644
+--- a/src/OpenClaw.Tray.WinUI/Services/Connection/GatewayConnectionManager.cs
++++ b/src/OpenClaw.Tray.WinUI/Services/Connection/GatewayConnectionManager.cs
+@@ -17,6 +17,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
+     private readonly IOpenClawLogger _logger;
+     private readonly IDeviceIdentityStore? _identityStore;
+     private readonly INodeConnector? _nodeConnector;
++    private readonly ISshTunnelManager? _tunnelManager;
+     private readonly Func<bool>? _isNodeEnabled;
+     private readonly SemaphoreSlim _transitionSemaphore = new(1, 1);
+ 
+@@ -42,7 +43,8 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
+         IDeviceIdentityStore? identityStore = null,
+         INodeConnector? nodeConnector = null,
+         Func<bool>? isNodeEnabled = null,
+-        ConnectionDiagnostics? diagnostics = null)
++        ConnectionDiagnostics? diagnostics = null,
++        ISshTunnelManager? tunnelManager = null)
+     {
+         _credentialResolver = credentialResolver ?? throw new ArgumentNullException(nameof(credentialResolver));
+         _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
+@@ -50,6 +52,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
+         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+         _identityStore = identityStore;
+         _nodeConnector = nodeConnector;
++        _tunnelManager = tunnelManager;
+         _isNodeEnabled = isNodeEnabled;
+         _diagnostics = diagnostics ?? new ConnectionDiagnostics(clock: clock);
+         _diagnostics.EventRecorded += (_, e) => DiagnosticEvent?.Invoke(this, e);
+@@ -65,7 +68,9 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
+ 
+     public GatewayConnectionSnapshot CurrentSnapshot => _stateMachine.Current;
+     public string? ActiveGatewayUrl => _stateMachine.Current.GatewayUrl;
+-    public OpenClawGatewayClient? OperatorClient => _activeLifecycle?.DataClient;
++    public IOperatorGatewayClient? OperatorClient => _activeLifecycle?.DataClient;
++    /// <summary>Internal access to the concrete client for auto-approve and other manager-internal operations.</summary>
++    internal OpenClawGatewayClient? ConcreteOperatorClient => _activeLifecycle?.DataClient;
+     public ConnectionDiagnostics Diagnostics => _diagnostics;
+ 
+     // ─── Lifecycle ───
+@@ -140,10 +145,41 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
+ 
+             // Create client via factory — use a diagnostic-tee logger so client handshake
+             // logs appear in the Connection Status window timeline.
+-            // When SSH tunnel is configured, connect to the local tunnel URL instead.
+-            var connectUrl = record.SshTunnel != null
+-                ? $"ws://localhost:{record.SshTunnel.LocalPort}"
+-                : record.Url;
++            // When SSH tunnel is configured, start the tunnel and connect to the local URL.
++            var connectUrl = record.Url;
++            if (record.SshTunnel != null && _tunnelManager != null)
++            {
++                var tunnel = record.SshTunnel;
++                if (string.IsNullOrWhiteSpace(tunnel.User) || string.IsNullOrWhiteSpace(tunnel.Host) ||
++                    tunnel.RemotePort is < 1 or > 65535 || tunnel.LocalPort is < 1 or > 65535)
++                {
++                    _logger.Warn("[ConnMgr] SSH tunnel config is incomplete");
++                    _diagnostics.Record("tunnel", "SSH tunnel config is incomplete");
++                    var p = _stateMachine.Current.OverallState;
++                    _stateMachine.TryTransition(ConnectionTrigger.AuthenticationFailed, "SSH tunnel config is incomplete");
++                    EmitStateChanged(p);
++                    return;
++                }
++                try
++                {
++                    connectUrl = await _tunnelManager.StartAsync(tunnel, _operationCts!.Token);
++                    _diagnostics.Record("tunnel", $"SSH tunnel started → {connectUrl}");
++                }
++                catch (Exception ex)
++                {
++                    _logger.Error($"[ConnMgr] SSH tunnel start failed: {ex.Message}");
++                    _diagnostics.Record("tunnel", "SSH tunnel start failed", ex.Message);
++                    var p = _stateMachine.Current.OverallState;
++                    _stateMachine.TryTransition(ConnectionTrigger.WebSocketError, $"SSH tunnel failed: {ex.Message}");
++                    EmitStateChanged(p);
++                    return;
++                }
++            }
++            else if (record.SshTunnel != null)
++            {
++                // Tunnel config present but no tunnel manager — use local URL directly
++                connectUrl = $"ws://localhost:{record.SshTunnel.LocalPort}";
++            }
+             var diagLogger = new DiagnosticTeeLogger(_logger, _diagnostics);
+             var lifecycle = _clientFactory.Create(connectUrl, credential, perGatewayIdentityDir, diagLogger);
+             _activeLifecycle = lifecycle;
+@@ -217,6 +253,12 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
+         {
+             var prev = _stateMachine.Current.OverallState;
+             DisposeActiveClient();
++            // Stop SSH tunnel when disconnecting
++            if (_tunnelManager?.IsActive == true)
++            {
++                try { await _tunnelManager.StopAsync(); }
++                catch (Exception ex) { _logger.Warn($"[ConnMgr] Tunnel stop error: {ex.Message}"); }
++            }
+             _stateMachine.TryTransition(ConnectionTrigger.DisconnectRequested);
+             _diagnostics.RecordStateChange(prev, _stateMachine.Current.OverallState);
+             EmitStateChanged(prev);
+@@ -437,6 +479,8 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
+             var prev = _stateMachine.Current.OverallState;
+             _diagnostics.Record("pairing", $"Pairing required — waiting for approval (requestId={requestId})");
+             _stateMachine.TryTransition(ConnectionTrigger.PairingPending);
++            // Store requestId in snapshot so setup flows can use it for explicit approval
++            _stateMachine.Current = _stateMachine.Current with { OperatorPairingRequestId = requestId };
+             _diagnostics.RecordStateChange(prev, _stateMachine.Current.OverallState);
+             EmitStateChanged(prev);
+         }
+diff --git a/src/OpenClaw.Tray.WinUI/Services/Connection/GatewayConnectionSnapshot.cs b/src/OpenClaw.Tray.WinUI/Services/Connection/GatewayConnectionSnapshot.cs
+index 1d01cf4..2b953f7 100644
+--- a/src/OpenClaw.Tray.WinUI/Services/Connection/GatewayConnectionSnapshot.cs
++++ b/src/OpenClaw.Tray.WinUI/Services/Connection/GatewayConnectionSnapshot.cs
+@@ -14,6 +14,11 @@ public sealed record GatewayConnectionSnapshot
+     public string? OperatorError { get; init; }
+     public bool OperatorPairingRequired { get; init; }
+     public string? OperatorDeviceId { get; init; }
++    /// <summary>
++    /// The requestId returned by the gateway when operator pairing is required.
++    /// Used by setup flows to approve the specific pairing request via CLI.
++    /// </summary>
++    public string? OperatorPairingRequestId { get; init; }
+ 
+     // ─── Node ───
+     public RoleConnectionState NodeState { get; init; }
+diff --git a/src/OpenClaw.Tray.WinUI/Services/Connection/IGatewayConnectionManager.cs b/src/OpenClaw.Tray.WinUI/Services/Connection/IGatewayConnectionManager.cs
+index 87b3c4e..9250967 100644
+--- a/src/OpenClaw.Tray.WinUI/Services/Connection/IGatewayConnectionManager.cs
++++ b/src/OpenClaw.Tray.WinUI/Services/Connection/IGatewayConnectionManager.cs
+@@ -1,3 +1,5 @@
++using OpenClaw.Shared;
++
+ namespace OpenClawTray.Services.Connection;
+ 
+ /// <summary>
+@@ -29,7 +31,7 @@ public interface IGatewayConnectionManager : IDisposable
+     /// <summary>
+     /// The active operator client for data requests. Null when disconnected.
+     /// </summary>
+-    OpenClaw.Shared.OpenClawGatewayClient? OperatorClient { get; }
++    IOperatorGatewayClient? OperatorClient { get; }
+ 
+     // ─── Diagnostics ───
+     ConnectionDiagnostics Diagnostics { get; }
+diff --git a/src/OpenClaw.Tray.WinUI/Services/Connection/ISshTunnelManager.cs b/src/OpenClaw.Tray.WinUI/Services/Connection/ISshTunnelManager.cs
+index b8c2fdc..3f0939d 100644
+--- a/src/OpenClaw.Tray.WinUI/Services/Connection/ISshTunnelManager.cs
++++ b/src/OpenClaw.Tray.WinUI/Services/Connection/ISshTunnelManager.cs
+@@ -1,5 +1,3 @@
+-using OpenClaw.Shared;
+-
+ namespace OpenClawTray.Services.Connection;
+ 
+ /// <summary>
+@@ -13,41 +11,3 @@ public interface ISshTunnelManager : IDisposable
+     Task StopAsync();
+     string? LocalTunnelUrl { get; }
+ }
+-
+-/// <summary>
+-/// Implementation wrapping the existing SshTunnelService.
+-/// </summary>
+-public sealed class SshTunnelManager : ISshTunnelManager
+-{
+-    private readonly OpenClawTray.Services.SshTunnelService _service;
+-    private readonly IOpenClawLogger _logger;
+-
+-    public SshTunnelManager(OpenClawTray.Services.SshTunnelService service, IOpenClawLogger logger)
+-    {
+-        _service = service;
+-        _logger = logger;
+-    }
+-
+-    public bool IsActive => _service.IsRunning;
+-    public string? LocalTunnelUrl => IsActive ? $"ws://localhost:{_service.CurrentLocalPort}" : null;
+-
+-    public Task<string> StartAsync(SshTunnelConfig config, CancellationToken ct)
+-    {
+-        _logger.Info($"[SshTunnelMgr] Starting tunnel {config.User}@{config.Host}:{config.RemotePort} → localhost:{config.LocalPort}");
+-        _service.EnsureStarted(config.User, config.Host, config.RemotePort, config.LocalPort);
+-        var localUrl = $"ws://localhost:{config.LocalPort}";
+-        _logger.Info($"[SshTunnelMgr] Tunnel started, local URL: {localUrl}");
+-        return Task.FromResult(localUrl);
+-    }
+-
+-    public Task StopAsync()
+-    {
+-        _service.Stop();
+-        return Task.CompletedTask;
+-    }
+-
+-    public void Dispose()
+-    {
+-        // SshTunnelService lifecycle is managed by App — don't dispose here
+-    }
+-}
+diff --git a/src/OpenClaw.Tray.WinUI/Services/ConnectionManagerOperatorConnector.cs b/src/OpenClaw.Tray.WinUI/Services/ConnectionManagerOperatorConnector.cs
+new file mode 100644
+index 0000000..4fb5881
+--- /dev/null
++++ b/src/OpenClaw.Tray.WinUI/Services/ConnectionManagerOperatorConnector.cs
+@@ -0,0 +1,179 @@
++using OpenClaw.Shared;
++using OpenClawTray.Services.Connection;
++using OpenClawTray.Services.LocalGatewaySetup;
++
++namespace OpenClawTray.Services;
++
++/// <summary>
++/// Implements <see cref="IGatewayOperatorConnector"/> by delegating to the
++/// app's <see cref="GatewayConnectionManager"/>. All connection events flow
++/// through the manager's diagnostics pipeline, giving full visibility in the
++/// Connection Status window during the WSL local-setup flow.
++/// </summary>
++public sealed class ConnectionManagerOperatorConnector : IGatewayOperatorConnector
++{
++    private readonly GatewayConnectionManager _manager;
++    private readonly GatewayRegistry _registry;
++    private readonly IOpenClawLogger _logger;
++    private readonly TimeSpan _timeout;
++
++    public ConnectionManagerOperatorConnector(
++        GatewayConnectionManager manager,
++        GatewayRegistry registry,
++        IOpenClawLogger logger,
++        TimeSpan? timeout = null)
++    {
++        _manager = manager;
++        _registry = registry;
++        _logger = logger;
++        _timeout = timeout ?? TimeSpan.FromSeconds(35);
++    }
++
++    public async Task<GatewayOperatorConnectionResult> ConnectAsync(
++        string gatewayUrl, string token, bool tokenIsBootstrapToken = false,
++        CancellationToken cancellationToken = default)
++    {
++        // Ensure registry has a record for this gateway with the provided credential
++        var normalized = GatewayUrlHelper.NormalizeForWebSocket(gatewayUrl);
++        var existing = _registry.FindByUrl(normalized);
++        var recordId = existing?.Id ?? Guid.NewGuid().ToString();
++        var record = (existing ?? new GatewayRecord { Id = recordId }) with
++        {
++            Url = normalized,
++            BootstrapToken = tokenIsBootstrapToken ? token : existing?.BootstrapToken,
++            SharedGatewayToken = !tokenIsBootstrapToken ? token : existing?.SharedGatewayToken,
++            IsLocal = true,
++        };
++        _registry.AddOrUpdate(record);
++        _registry.SetActive(recordId);
++        _registry.Save();
++
++        // Ensure identity directory exists for credential resolution
++        var identityDir = _registry.GetIdentityDirectory(recordId);
++        if (!Directory.Exists(identityDir))
++            Directory.CreateDirectory(identityDir);
++
++        _logger.Info($"[SetupConnector] Connecting via manager to {GatewayUrlHelper.SanitizeForDisplay(normalized)}");
++
++        // Wait for state transition via a TaskCompletionSource
++        var tcs = new TaskCompletionSource<GatewayOperatorConnectionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
++
++        void OnStateChanged(object? sender, GatewayConnectionSnapshot snap)
++        {
++            switch (snap.OperatorState)
++            {
++                case RoleConnectionState.Connected:
++                    tcs.TrySetResult(new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.Connected));
++                    break;
++                case RoleConnectionState.PairingRequired:
++                    tcs.TrySetResult(new GatewayOperatorConnectionResult(
++                        GatewayOperatorConnectionStatus.PairingRequired,
++                        "Gateway requires pairing approval.",
++                        snap.OperatorPairingRequestId));
++                    break;
++                case RoleConnectionState.PairingRejected:
++                    tcs.TrySetResult(new GatewayOperatorConnectionResult(
++                        GatewayOperatorConnectionStatus.AuthFailed,
++                        "Pairing was rejected."));
++                    break;
++                case RoleConnectionState.Error:
++                    var error = snap.OperatorError ?? "Connection error";
++                    var status = error.Contains("auth", StringComparison.OrdinalIgnoreCase)
++                        || error.Contains("token", StringComparison.OrdinalIgnoreCase)
++                        || error.Contains("signature", StringComparison.OrdinalIgnoreCase)
++                        ? GatewayOperatorConnectionStatus.AuthFailed
++                        : GatewayOperatorConnectionStatus.Failed;
++                    tcs.TrySetResult(new GatewayOperatorConnectionResult(status, error));
++                    break;
++            }
++        }
++
++        _manager.StateChanged += OnStateChanged;
++        try
++        {
++            // If already connected or in a non-idle state, disconnect first
++            var current = _manager.CurrentSnapshot.OperatorState;
++            if (current is not RoleConnectionState.Idle)
++                await _manager.DisconnectAsync();
++
++            await _manager.ConnectAsync(recordId);
++
++            // Check if already in the target state (fast path for cached state)
++            var snap = _manager.CurrentSnapshot;
++            if (snap.OperatorState == RoleConnectionState.Connected)
++                return new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.Connected);
++            if (snap.OperatorState == RoleConnectionState.PairingRequired)
++                return new GatewayOperatorConnectionResult(
++                    GatewayOperatorConnectionStatus.PairingRequired,
++                    "Gateway requires pairing approval.",
++                    snap.OperatorPairingRequestId);
++
++            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
++            cts.CancelAfter(_timeout);
++
++            try
++            {
++                return await tcs.Task.WaitAsync(cts.Token);
++            }
++            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
++            {
++                return new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.Timeout, "Timed out waiting for operator handshake.");
++            }
++        }
++        finally
++        {
++            _manager.StateChanged -= OnStateChanged;
++        }
++    }
++
++    public async Task<GatewayOperatorConnectionResult> ConnectWithStoredDeviceTokenAsync(
++        string gatewayUrl, CancellationToken cancellationToken = default)
++    {
++        _logger.Info("[SetupConnector] Reconnecting with stored device token via manager");
++
++        // Reconnect — the credential resolver will pick up the stored device token
++        var tcs = new TaskCompletionSource<GatewayOperatorConnectionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
++
++        void OnStateChanged(object? sender, GatewayConnectionSnapshot snap)
++        {
++            if (snap.OperatorState == RoleConnectionState.Connected)
++                tcs.TrySetResult(new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.Connected));
++            else if (snap.OperatorState == RoleConnectionState.PairingRequired)
++                tcs.TrySetResult(new GatewayOperatorConnectionResult(
++                    GatewayOperatorConnectionStatus.PairingRequired,
++                    "Pairing required after reconnect.",
++                    snap.OperatorPairingRequestId));
++            else if (snap.OperatorState == RoleConnectionState.Error)
++                tcs.TrySetResult(new GatewayOperatorConnectionResult(
++                    GatewayOperatorConnectionStatus.AuthFailed,
++                    snap.OperatorError ?? "Reconnect failed."));
++        }
++
++        _manager.StateChanged += OnStateChanged;
++        try
++        {
++            await _manager.ReconnectAsync();
++
++            // Fast path check
++            var snap = _manager.CurrentSnapshot;
++            if (snap.OperatorState == RoleConnectionState.Connected)
++                return new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.Connected);
++
++            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
++            cts.CancelAfter(_timeout);
++
++            try
++            {
++                return await tcs.Task.WaitAsync(cts.Token);
++            }
++            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
++            {
++                return new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.Timeout, "Timed out waiting for operator reconnect.");
++            }
++        }
++        finally
++        {
++            _manager.StateChanged -= OnStateChanged;
++        }
++    }
++}
+diff --git a/src/OpenClaw.Tray.WinUI/Services/LocalGatewaySetup/LocalGatewaySetup.cs b/src/OpenClaw.Tray.WinUI/Services/LocalGatewaySetup/LocalGatewaySetup.cs
+index a3e477f..877975d 100644
+--- a/src/OpenClaw.Tray.WinUI/Services/LocalGatewaySetup/LocalGatewaySetup.cs
++++ b/src/OpenClaw.Tray.WinUI/Services/LocalGatewaySetup/LocalGatewaySetup.cs
+@@ -2941,7 +2941,8 @@ public static class LocalGatewaySetupEngineFactory
+         bool replaceExistingConfigurationConfirmed = false,
+         string? identityDataPath = null,
+         string? setupStatePath = null,
+-        OpenClawTray.Services.Connection.GatewayRegistry? gatewayRegistry = null)
++        OpenClawTray.Services.Connection.GatewayRegistry? gatewayRegistry = null,
++        IGatewayOperatorConnector? operatorConnectorOverride = null)
+     {
+         // Defense-in-depth fail-closed: refuse to construct the engine if any of the
+         // 6 sync existing-config predicates fire and the caller has not passed explicit
+@@ -2975,7 +2976,7 @@ public static class LocalGatewaySetupEngineFactory
+             GatewayUrl = settings.GetEffectiveGatewayUrl(),
+             DistroName = ResolveDistroName(runtime, distroName),
+             InstanceInstallLocation = string.IsNullOrWhiteSpace(instanceInstallLocation) ? runtime.InstanceInstallLocation : instanceInstallLocation,
+-            AllowExistingDistro = allowExistingDistro || runtime.AllowExistingDistro,
++            AllowExistingDistro = allowExistingDistro || runtime.AllowExistingDistro || replaceExistingConfigurationConfirmed,
+ #if OPENCLAW_TRAY_TESTS
+             EnableWindowsTrayNodeByDefault = settings.EnableNodeMode
+ #else
+@@ -2983,9 +2984,22 @@ public static class LocalGatewaySetupEngineFactory
+ #endif
+         };
+ 
++        // When replacing existing configuration, clear persisted setup state
++        // so the engine starts from scratch instead of replaying a completed run.
++        var resolvedStatePath = setupStatePath ?? Path.Combine(
++            Environment.GetEnvironmentVariable("OPENCLAW_TRAY_LOCALAPPDATA_DIR")
++                ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
++            "OpenClawTray",
++            "setup-state.json");
++        if (replaceExistingConfigurationConfirmed && File.Exists(resolvedStatePath))
++        {
++            try { File.Delete(resolvedStatePath); }
++            catch { /* best-effort — engine will overwrite on first save */ }
++        }
++
+         var wsl = new WslExeCommandRunner(logger, TimeSpan.FromMinutes(30));
+         var settingsAdapter = new SettingsManagerLocalGatewaySetupSettings(settings, gatewayRegistry);
+-        var operatorConnector = new OpenClawGatewayOperatorConnector(logger);
++        var operatorConnector = operatorConnectorOverride ?? (IGatewayOperatorConnector)new OpenClawGatewayOperatorConnector(logger);
+         var bootstrapTokenProvider = new WslGatewayCliBootstrapTokenProvider(wsl, options.OpenClawInstallPrefix + "/bin/openclaw");
+         var sharedGatewayTokenProvider = new WslGatewayCliSharedGatewayTokenProvider(wsl);
+         var gatewayConfigurationPreparer = new OpenClawCliGatewayConfigurationPreparer(wsl);
+diff --git a/src/OpenClaw.Tray.WinUI/Services/SshTunnelManager.cs b/src/OpenClaw.Tray.WinUI/Services/SshTunnelManager.cs
+new file mode 100644
+index 0000000..08b1024
+--- /dev/null
++++ b/src/OpenClaw.Tray.WinUI/Services/SshTunnelManager.cs
+@@ -0,0 +1,45 @@
++using OpenClaw.Shared;
++using OpenClawTray.Services.Connection;
++
++namespace OpenClawTray.Services;
++
++/// <summary>
++/// Implementation of <see cref="ISshTunnelManager"/> wrapping the existing
++/// <see cref="SshTunnelService"/>. Lives outside the Connection directory
++/// because it depends on the WinUI-specific SshTunnelService.
++/// </summary>
++public sealed class SshTunnelManager : ISshTunnelManager
++{
++    private readonly SshTunnelService _service;
++    private readonly IOpenClawLogger _logger;
++
++    public SshTunnelManager(SshTunnelService service, IOpenClawLogger logger)
++    {
++        _service = service;
++        _logger = logger;
++    }
++
++    public bool IsActive => _service.IsRunning;
++    public string? LocalTunnelUrl => IsActive ? $"ws://localhost:{_service.CurrentLocalPort}" : null;
++
++    public Task<string> StartAsync(SshTunnelConfig config, CancellationToken ct)
++    {
++        _logger.Info($"[SshTunnelMgr] Starting tunnel {config.User}@{config.Host}:{config.RemotePort} → localhost:{config.LocalPort}");
++        _service.EnsureStarted(config.User, config.Host, config.RemotePort, config.LocalPort);
++        var localUrl = $"ws://localhost:{config.LocalPort}";
++        _logger.Info($"[SshTunnelMgr] Tunnel started, local URL: {localUrl}");
++        return Task.FromResult(localUrl);
++    }
++
++    public Task StopAsync()
++    {
++        _service.Stop();
++        return Task.CompletedTask;
++    }
++
++    public void Dispose()
++    {
++        // SshTunnelService process lifecycle is managed by App — don't dispose here.
++        // The connection manager calls StopAsync when needed.
++    }
++}
+diff --git a/src/OpenClaw.Tray.WinUI/Windows/HubWindow.xaml.cs b/src/OpenClaw.Tray.WinUI/Windows/HubWindow.xaml.cs
+index 512f5e0..fb4f637 100644
+--- a/src/OpenClaw.Tray.WinUI/Windows/HubWindow.xaml.cs
++++ b/src/OpenClaw.Tray.WinUI/Windows/HubWindow.xaml.cs
+@@ -33,7 +33,7 @@ public sealed partial class HubWindow : WindowEx
+             }
+         }
+     }
+-    public OpenClawGatewayClient? GatewayClient { get; set; }
++    public IOperatorGatewayClient? GatewayClient { get; set; }
+     public ConnectionStatus CurrentStatus { get; set; }
+     private string _currentAgentId = "main";
+     public string CurrentAgentId => _currentAgentId;
+@@ -505,6 +505,7 @@ public sealed partial class HubWindow : WindowEx
+             {
+                 if (IsClosed) return;
+                 if (ContentFrame?.Content is NodesPage np) np.UpdateDevicePairingRequests(data);
++                if (ContentFrame?.Content is ConnectionPage cp) cp.UpdateDevicePairingRequests(data);
+             });
+         }
+         catch { }
+@@ -585,7 +586,10 @@ public sealed partial class HubWindow : WindowEx
+                 sessions.Initialize(this);
+                 if (LastModelsList != null) sessions.UpdateModelsList(LastModelsList);
+                 break;
+-            case ConnectionPage connection: connection.Initialize(this); break;
++            case ConnectionPage connection:
++                connection.Initialize(this);
++                if (LastDevicePairList != null) connection.UpdateDevicePairingRequests(LastDevicePairList);
++                break;
+             case ChannelsPage channels: channels.Initialize(this); break;
+             case UsagePage usage: usage.Initialize(this); break;
+             case NodesPage nodes:
+diff --git a/tests/OpenClaw.Tray.Tests/Connection/NodeConnectorTests.cs b/tests/OpenClaw.Tray.Tests/Connection/NodeConnectorTests.cs
+new file mode 100644
+index 0000000..6fc2749
+--- /dev/null
++++ b/tests/OpenClaw.Tray.Tests/Connection/NodeConnectorTests.cs
+@@ -0,0 +1,81 @@
++using OpenClaw.Shared;
++using OpenClawTray.Services.Connection;
++
++namespace OpenClawTray.Tests.Connection;
++
++public class NodeConnectorTests
++{
++    private class StubLogger : IOpenClawLogger
++    {
++        public void Info(string message) { }
++        public void Debug(string message) { }
++        public void Warn(string message) { }
++        public void Error(string message, Exception? ex = null) { }
++    }
++
++    [Fact]
++    public void InitialState_IsConnected_IsFalse()
++    {
++        using var connector = new NodeConnector(new StubLogger());
++        Assert.False(connector.IsConnected);
++    }
++
++    [Fact]
++    public void InitialState_PairingStatus_IsUnknown()
++    {
++        using var connector = new NodeConnector(new StubLogger());
++        Assert.Equal(PairingStatus.Unknown, connector.PairingStatus);
++    }
++
++    [Fact]
++    public void InitialState_Mode_IsDisabled()
++    {
++        using var connector = new NodeConnector(new StubLogger());
++        Assert.Equal(NodeConnectionMode.Disabled, connector.Mode);
++    }
++
++    [Fact]
++    public void InitialState_Client_IsNull()
++    {
++        using var connector = new NodeConnector(new StubLogger());
++        Assert.Null(connector.Client);
++    }
++
++    [Fact]
++    public void InitialState_NodeDeviceId_IsNull()
++    {
++        using var connector = new NodeConnector(new StubLogger());
++        Assert.Null(connector.NodeDeviceId);
++    }
++
++    [Fact]
++    public async Task ConnectAsync_AfterDispose_IsNoOp()
++    {
++        var connector = new NodeConnector(new StubLogger());
++        connector.Dispose();
++
++        // Should return without error; disposed connector skips connection.
++        await connector.ConnectAsync("wss://example.com", new GatewayCredential("tok", false, "test"), "id-path");
++
++        Assert.False(connector.IsConnected);
++        Assert.Null(connector.Client);
++    }
++
++    [Fact]
++    public async Task DisconnectAsync_WhenNotConnected_CompletesWithoutError()
++    {
++        using var connector = new NodeConnector(new StubLogger());
++        await connector.DisconnectAsync();
++
++        Assert.False(connector.IsConnected);
++        Assert.Equal(NodeConnectionMode.Disabled, connector.Mode);
++    }
++
++    [Fact]
++    public void Dispose_IsIdempotent()
++    {
++        var connector = new NodeConnector(new StubLogger());
++        connector.Dispose();
++        connector.Dispose(); // second call should not throw
++    }
++}
+diff --git a/tests/OpenClaw.Tray.Tests/Connection/PairingFlowTests.cs b/tests/OpenClaw.Tray.Tests/Connection/PairingFlowTests.cs
+new file mode 100644
+index 0000000..475b56c
+--- /dev/null
++++ b/tests/OpenClaw.Tray.Tests/Connection/PairingFlowTests.cs
+@@ -0,0 +1,287 @@
++using OpenClaw.Shared;
++using OpenClawTray.Services.Connection;
++
++namespace OpenClaw.Tray.Tests.Connection;
++
++/// <summary>
++/// Tests the pairing flow through GatewayConnectionManager — specifically
++/// node pairing state transitions driven by INodeConnector events.
++/// Uses a ScriptedNodeConnector to fire PairingStatusChanged / StatusChanged
++/// and verifies the manager's state machine and snapshot update correctly.
++/// </summary>
++public class PairingFlowTests : IDisposable
++{
++    private readonly string _tempDir;
++    private readonly GatewayRegistry _registry;
++    private readonly MockCredentialResolver _resolver;
++    private readonly MockClientFactory _factory;
++    private readonly ScriptedNodeConnector _nodeConnector;
++
++    public PairingFlowTests()
++    {
++        _tempDir = Path.Combine(Path.GetTempPath(), "openclaw-pairing-test-" + Guid.NewGuid().ToString("N")[..8]);
++        Directory.CreateDirectory(_tempDir);
++        _registry = new GatewayRegistry(_tempDir);
++        _resolver = new MockCredentialResolver();
++        _factory = new MockClientFactory();
++        _nodeConnector = new ScriptedNodeConnector();
++    }
++
++    public void Dispose()
++    {
++        _nodeConnector.Dispose();
++        try { Directory.Delete(_tempDir, true); } catch { }
++    }
++
++    // ─── Tests ───
++
++    [Fact]
++    public async Task NodePairingPending_UpdatesSnapshotState()
++    {
++        using var manager = CreateConnectedManager();
++
++        // Node: Idle → Connecting
++        await FireAndWait(manager, () =>
++            _nodeConnector.FireStatusChanged(ConnectionStatus.Connecting));
++
++        // Node: Connecting → PairingRequired
++        var snapshot = await FireAndWait(manager, () =>
++            _nodeConnector.FirePairingStatusChanged(PairingStatus.Pending));
++
++        Assert.Equal(RoleConnectionState.PairingRequired, snapshot.NodeState);
++        Assert.Equal(PairingStatus.Pending, snapshot.NodePairingStatus);
++    }
++
++    [Fact]
++    public async Task NodePairingApproved_TransitionsToConnected()
++    {
++        using var manager = CreateConnectedManager();
++
++        // Node: Idle → Connecting → PairingRequired
++        await FireAndWait(manager, () =>
++            _nodeConnector.FireStatusChanged(ConnectionStatus.Connecting));
++        await FireAndWait(manager, () =>
++            _nodeConnector.FirePairingStatusChanged(PairingStatus.Pending));
++
++        // PairingRequired → Connected (via NodePaired trigger)
++        var snapshot = await FireAndWait(manager, () =>
++            _nodeConnector.FirePairingStatusChanged(PairingStatus.Paired));
++
++        Assert.Equal(RoleConnectionState.Connected, snapshot.NodeState);
++        Assert.Equal(PairingStatus.Paired, snapshot.NodePairingStatus);
++    }
++
++    [Fact]
++    public async Task NodePairingRejected_TransitionsToRejectedState()
++    {
++        using var manager = CreateConnectedManager();
++
++        // Node: Idle → Connecting → PairingRequired
++        await FireAndWait(manager, () =>
++            _nodeConnector.FireStatusChanged(ConnectionStatus.Connecting));
++        await FireAndWait(manager, () =>
++            _nodeConnector.FirePairingStatusChanged(PairingStatus.Pending));
++
++        // PairingRequired → PairingRejected
++        var snapshot = await FireAndWait(manager, () =>
++            _nodeConnector.FirePairingStatusChanged(PairingStatus.Rejected));
++
++        Assert.Equal(RoleConnectionState.PairingRejected, snapshot.NodeState);
++        Assert.Equal(PairingStatus.Rejected, snapshot.NodePairingStatus);
++    }
++
++    [Fact]
++    public async Task NodeConnected_UpdatesSnapshot()
++    {
++        using var manager = CreateConnectedManager();
++
++        // Node: Idle → Connecting → Connected
++        await FireAndWait(manager, () =>
++            _nodeConnector.FireStatusChanged(ConnectionStatus.Connecting));
++
++        var snapshot = await FireAndWait(manager, () =>
++            _nodeConnector.FireStatusChanged(ConnectionStatus.Connected));
++
++        Assert.Equal(RoleConnectionState.Connected, snapshot.NodeState);
++    }
++
++    [Fact]
++    public async Task StateChanged_FiresOnNodePairingEvents()
++    {
++        using var manager = CreateConnectedManager();
++
++        // Get node into Connecting first
++        await FireAndWait(manager, () =>
++            _nodeConnector.FireStatusChanged(ConnectionStatus.Connecting));
++
++        // Collect all subsequent StateChanged snapshots
++        var snapshots = new List<GatewayConnectionSnapshot>();
++        manager.StateChanged += (_, s) => snapshots.Add(s);
++
++        var snapshot = await FireAndWait(manager, () =>
++            _nodeConnector.FirePairingStatusChanged(PairingStatus.Pending));
++
++        Assert.NotEmpty(snapshots);
++        Assert.Contains(snapshots, s => s.NodePairingStatus == PairingStatus.Pending);
++    }
++
++    [Fact]
++    public async Task NodeDeviceId_ReflectedInSnapshot()
++    {
++        using var manager = CreateConnectedManager();
++        _nodeConnector.NodeDeviceId = "my-node-device-42";
++
++        await FireAndWait(manager, () =>
++            _nodeConnector.FireStatusChanged(ConnectionStatus.Connecting));
++
++        var snapshot = await FireAndWait(manager, () =>
++            _nodeConnector.FireStatusChanged(ConnectionStatus.Connected));
++
++        Assert.Equal("my-node-device-42", snapshot.NodeDeviceId);
++    }
++
++    [Fact]
++    public async Task NodePairingRejected_FromConnecting_TransitionsCorrectly()
++    {
++        using var manager = CreateConnectedManager();
++
++        // Node: Idle → Connecting
++        await FireAndWait(manager, () =>
++            _nodeConnector.FireStatusChanged(ConnectionStatus.Connecting));
++
++        // Connecting → PairingRejected (valid per state machine: Connecting or PairingRequired)
++        var snapshot = await FireAndWait(manager, () =>
++            _nodeConnector.FirePairingStatusChanged(PairingStatus.Rejected));
++
++        Assert.Equal(RoleConnectionState.PairingRejected, snapshot.NodeState);
++        Assert.Equal(PairingStatus.Rejected, snapshot.NodePairingStatus);
++    }
++
++    // ─── Helpers ───
++
++    private GatewayConnectionManager CreateConnectedManager(string gatewayId = "gw1", string url = "wss://test")
++    {
++        _registry.AddOrUpdate(new GatewayRecord { Id = gatewayId, Url = url });
++        _registry.SetActive(gatewayId);
++        Directory.CreateDirectory(_registry.GetIdentityDirectory(gatewayId));
++
++        _resolver.OperatorCredential = new GatewayCredential("op-tok", false, "test");
++        _resolver.NodeCredential = new GatewayCredential("node-tok", false, "test");
++
++        var manager = new GatewayConnectionManager(
++            _resolver, _factory, _registry, NullLogger.Instance,
++            nodeConnector: _nodeConnector,
++            isNodeEnabled: () => true);
++
++        // Kick the operator into Connecting state so the lifecycle is created
++        manager.ConnectAsync(gatewayId).GetAwaiter().GetResult();
++
++        return manager;
++    }
++
++    /// <summary>
++    /// Subscribe to StateChanged, execute <paramref name="action"/> (which fires
++    /// an event on the scripted connector), then wait for the resulting snapshot.
++    /// </summary>
++    private static async Task<GatewayConnectionSnapshot> FireAndWait(
++        GatewayConnectionManager manager, Action action, int timeoutMs = 5000)
++    {
++        var tcs = new TaskCompletionSource<GatewayConnectionSnapshot>();
++
++        void Handler(object? _, GatewayConnectionSnapshot s)
++        {
++            manager.StateChanged -= Handler;
++            tcs.TrySetResult(s);
++        }
++        manager.StateChanged += Handler;
++
++        action();
++
++        return await tcs.Task.WaitAsync(TimeSpan.FromMilliseconds(timeoutMs));
++    }
++
++    // ─── Fakes / Mocks ───
++
++    private sealed class MockCredentialResolver : ICredentialResolver
++    {
++        public GatewayCredential? OperatorCredential { get; set; }
++        public GatewayCredential? NodeCredential { get; set; }
++
++        public GatewayCredential? ResolveOperator(GatewayRecord record, string identityPath) => OperatorCredential;
++        public GatewayCredential? ResolveNode(GatewayRecord record, string identityPath) => NodeCredential;
++    }
++
++    private sealed class MockClientFactory : IGatewayClientFactory
++    {
++        public IGatewayClientLifecycle Create(string gatewayUrl, GatewayCredential credential,
++            string identityPath, IOpenClawLogger logger)
++        {
++            return new MockLifecycle(gatewayUrl);
++        }
++    }
++
++    private sealed class MockLifecycle : IGatewayClientLifecycle
++    {
++        private readonly MockGatewayClient _client;
++
++        public MockLifecycle(string url)
++        {
++            _client = new MockGatewayClient(url);
++        }
++
++        public OpenClawGatewayClient DataClient => _client;
++
++#pragma warning disable CS0067 // Events required by interface but not fired in tests
++        public event EventHandler<ConnectionStatus>? StatusChanged;
++        public event EventHandler<string>? AuthenticationFailed;
++#pragma warning restore CS0067
++
++        public Task ConnectAsync(CancellationToken ct) => Task.CompletedTask;
++        public void Dispose() { }
++    }
++
++    private sealed class MockGatewayClient : OpenClawGatewayClient
++    {
++        public MockGatewayClient(string url)
++            : base(url, "mock-token", NullLogger.Instance) { }
++    }
++
++    private sealed class ScriptedNodeConnector : INodeConnector
++    {
++        public bool IsConnected { get; private set; }
++        public PairingStatus PairingStatus { get; set; } = PairingStatus.Unknown;
++        public string? NodeDeviceId { get; set; }
++        public NodeConnectionMode Mode { get; set; } = NodeConnectionMode.Disabled;
++
++        public event EventHandler<ConnectionStatus>? StatusChanged;
++        public event EventHandler<PairingStatusEventArgs>? PairingStatusChanged;
++
++        public Task ConnectAsync(string gatewayUrl, GatewayCredential credential,
++            string identityPath, bool useV2Signature = false)
++        {
++            Mode = NodeConnectionMode.Gateway;
++            return Task.CompletedTask;
++        }
++
++        public Task DisconnectAsync()
++        {
++            Mode = NodeConnectionMode.Disabled;
++            return Task.CompletedTask;
++        }
++
++        public void FireStatusChanged(ConnectionStatus status)
++        {
++            IsConnected = status == ConnectionStatus.Connected;
++            StatusChanged?.Invoke(this, status);
++        }
++
++        public void FirePairingStatusChanged(PairingStatus status, string? requestId = null)
++        {
++            PairingStatus = status;
++            PairingStatusChanged?.Invoke(this, new PairingStatusEventArgs(
++                status, NodeDeviceId ?? "test-node", requestId: requestId));
++        }
++
++        public void Dispose() { }
++    }
++}
+diff --git a/tests/OpenClaw.Tray.Tests/Connection/RetryPolicyTests.cs b/tests/OpenClaw.Tray.Tests/Connection/RetryPolicyTests.cs
+new file mode 100644
+index 0000000..1a93fe6
+--- /dev/null
++++ b/tests/OpenClaw.Tray.Tests/Connection/RetryPolicyTests.cs
+@@ -0,0 +1,101 @@
++using OpenClawTray.Services.Connection;
++
++namespace OpenClaw.Tray.Tests.Connection;
++
++public class RetryPolicyTests
++{
++    // ─── ShouldRetry: non-retryable categories ───
++
++    [Theory]
++    [InlineData(ConnectionErrorCategory.AuthFailure)]
++    [InlineData(ConnectionErrorCategory.PairingPending)]
++    [InlineData(ConnectionErrorCategory.PairingRejected)]
++    [InlineData(ConnectionErrorCategory.ProtocolMismatch)]
++    [InlineData(ConnectionErrorCategory.Cancelled)]
++    [InlineData(ConnectionErrorCategory.Disposed)]
++    public void ShouldRetry_NonRetryableCategory_ReturnsFalse(ConnectionErrorCategory category)
++    {
++        Assert.False(RetryPolicy.ShouldRetry(category));
++    }
++
++    // ─── ShouldRetry: retryable categories ───
++
++    [Theory]
++    [InlineData(ConnectionErrorCategory.RateLimited)]
++    [InlineData(ConnectionErrorCategory.NetworkUnreachable)]
++    [InlineData(ConnectionErrorCategory.ServerClose)]
++    [InlineData(ConnectionErrorCategory.MalformedMessage)]
++    [InlineData(ConnectionErrorCategory.InternalError)]
++    [InlineData(ConnectionErrorCategory.SshTunnelFailure)]
++    public void ShouldRetry_RetryableCategory_ReturnsTrue(ConnectionErrorCategory category)
++    {
++        Assert.True(RetryPolicy.ShouldRetry(category));
++    }
++
++    // ─── GetBackoffMs: standard backoff ───
++
++    [Theory]
++    [InlineData(0, 1000)]
++    [InlineData(1, 2000)]
++    [InlineData(2, 4000)]
++    [InlineData(3, 8000)]
++    [InlineData(4, 15000)]
++    [InlineData(5, 30000)]
++    [InlineData(6, 60000)]
++    public void GetBackoffMs_StandardBackoff_ReturnsExpectedValue(int attempt, int expectedMs)
++    {
++        Assert.Equal(expectedMs, RetryPolicy.GetBackoffMs(ConnectionErrorCategory.NetworkUnreachable, attempt));
++    }
++
++    // ─── GetBackoffMs: rate-limited backoff ───
++
++    [Theory]
++    [InlineData(0, 30000)]
++    [InlineData(1, 60000)]
++    [InlineData(2, 120000)]
++    [InlineData(3, 300000)]
++    public void GetBackoffMs_RateLimited_ReturnsExpectedValue(int attempt, int expectedMs)
++    {
++        Assert.Equal(expectedMs, RetryPolicy.GetBackoffMs(ConnectionErrorCategory.RateLimited, attempt));
++    }
++
++    // ─── GetBackoffMs: server-close backoff ───
++
++    [Theory]
++    [InlineData(0, 1000)]
++    [InlineData(1, 2000)]
++    [InlineData(2, 4000)]
++    public void GetBackoffMs_ServerClose_ReturnsExpectedValue(int attempt, int expectedMs)
++    {
++        Assert.Equal(expectedMs, RetryPolicy.GetBackoffMs(ConnectionErrorCategory.ServerClose, attempt));
++    }
++
++    // ─── GetBackoffMs: clamps to max when attempt exceeds array length ───
++
++    [Theory]
++    [InlineData(ConnectionErrorCategory.NetworkUnreachable, 7, 60000)]
++    [InlineData(ConnectionErrorCategory.NetworkUnreachable, 100, 60000)]
++    [InlineData(ConnectionErrorCategory.RateLimited, 4, 300000)]
++    [InlineData(ConnectionErrorCategory.RateLimited, 50, 300000)]
++    [InlineData(ConnectionErrorCategory.ServerClose, 3, 4000)]
++    [InlineData(ConnectionErrorCategory.ServerClose, 20, 4000)]
++    public void GetBackoffMs_AttemptExceedsArrayLength_ClampsToMax(
++        ConnectionErrorCategory category, int attempt, int expectedMs)
++    {
++        Assert.Equal(expectedMs, RetryPolicy.GetBackoffMs(category, attempt));
++    }
++
++    // ─── GetBackoffMs: unmapped categories use standard backoff ───
++
++    [Theory]
++    [InlineData(ConnectionErrorCategory.MalformedMessage)]
++    [InlineData(ConnectionErrorCategory.InternalError)]
++    [InlineData(ConnectionErrorCategory.SshTunnelFailure)]
++    public void GetBackoffMs_UnmappedCategory_UsesStandardBackoff(ConnectionErrorCategory category)
++    {
++        for (var i = 0; i < RetryPolicy.StandardBackoffMs.Length; i++)
++        {
++            Assert.Equal(RetryPolicy.StandardBackoffMs[i], RetryPolicy.GetBackoffMs(category, i));
++        }
++    }
++}
+diff --git a/tests/OpenClaw.Tray.Tests/Connection/StaleEventGuardTests.cs b/tests/OpenClaw.Tray.Tests/Connection/StaleEventGuardTests.cs
+new file mode 100644
+index 0000000..b2687ab
+--- /dev/null
++++ b/tests/OpenClaw.Tray.Tests/Connection/StaleEventGuardTests.cs
+@@ -0,0 +1,245 @@
++using OpenClaw.Shared;
++using OpenClawTray.Services.Connection;
++
++namespace OpenClawTray.Tests.Connection;
++
++/// <summary>
++/// Tests the generation-based stale event guard in GatewayConnectionManager.
++/// Each ConnectAsync increments _generation; event handlers captured with an
++/// older generation value are silently discarded, preventing stale connections
++/// from corrupting state.
++/// </summary>
++public class StaleEventGuardTests : IDisposable
++{
++    private readonly string _tempDir;
++    private readonly GatewayRegistry _registry;
++    private readonly MockCredentialResolver _resolver;
++    private readonly TrackingClientFactory _factory;
++    private readonly GatewayConnectionManager _manager;
++
++    public StaleEventGuardTests()
++    {
++        _tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
++        Directory.CreateDirectory(_tempDir);
++        _registry = new GatewayRegistry(_tempDir);
++        _resolver = new MockCredentialResolver();
++        _factory = new TrackingClientFactory();
++        _manager = new GatewayConnectionManager(
++            _resolver, _factory, _registry, NullLogger.Instance);
++    }
++
++    public void Dispose()
++    {
++        _manager.Dispose();
++        try { Directory.Delete(_tempDir, true); } catch { }
++    }
++
++    // ─── Tests ───
++
++    [Fact]
++    public async Task ConnectAsync_IncrementsGeneration_OldLifecycleDisposed()
++    {
++        SetupGateway("gw1", "ws://test");
++        _resolver.OperatorCredential = new GatewayCredential("tok", false, "test");
++
++        await _manager.ConnectAsync("gw1");
++        var first = _factory.CreatedClients[^1];
++        Assert.False(first.IsDisposed);
++
++        // Disconnect to return to Idle, then connect again
++        await _manager.DisconnectAsync();
++        await _manager.ConnectAsync("gw1");
++        var second = _factory.CreatedClients[^1];
++
++        Assert.True(first.IsDisposed, "First lifecycle should be disposed after disconnect");
++        Assert.False(second.IsDisposed);
++        Assert.Equal(2, _factory.CreatedClients.Count);
++        Assert.Equal(OverallConnectionState.Connecting, _manager.CurrentSnapshot.OverallState);
++    }
++
++    [Fact]
++    public async Task StaleStatusChanged_IsIgnored()
++    {
++        SetupGateway("gw1", "ws://test");
++        _resolver.OperatorCredential = new GatewayCredential("tok", false, "test");
++
++        // First connect
++        await _manager.ConnectAsync("gw1");
++        var staleLifecycle = _factory.CreatedClients[^1];
++
++        // Disconnect + reconnect — increments generation, disposes first client
++        await _manager.DisconnectAsync();
++        await _manager.ConnectAsync("gw1");
++
++        // Capture snapshots after this point
++        var snapshots = new List<GatewayConnectionSnapshot>();
++        _manager.StateChanged += (_, s) => snapshots.Add(s);
++
++        // Fire Error on the stale lifecycle — should be ignored by the generation guard
++        staleLifecycle.SimulateStatusChanged(ConnectionStatus.Error);
++
++        // Give any async handler a moment to run
++        await Task.Delay(50);
++
++        // The manager should still be in Connecting (from the reconnect),
++        // not Error (from the stale event)
++        Assert.Equal(OverallConnectionState.Connecting, _manager.CurrentSnapshot.OverallState);
++        Assert.DoesNotContain(snapshots, s => s.OverallState == OverallConnectionState.Error);
++    }
++
++    [Fact]
++    public async Task ReconnectAsync_DisposesOldClient_CreatesNew()
++    {
++        SetupGateway("gw1", "ws://test");
++        _resolver.OperatorCredential = new GatewayCredential("tok", false, "test");
++
++        await _manager.ConnectAsync("gw1");
++        var oldLifecycle = _factory.CreatedClients[^1];
++
++        await _manager.ReconnectAsync();
++        var newLifecycle = _factory.CreatedClients[^1];
++
++        Assert.True(oldLifecycle.IsDisposed, "Old lifecycle should be disposed after ReconnectAsync");
++        Assert.False(newLifecycle.IsDisposed);
++        Assert.NotSame(oldLifecycle, newLifecycle);
++        Assert.Equal(OverallConnectionState.Connecting, _manager.CurrentSnapshot.OverallState);
++    }
++
++    [Fact]
++    public async Task MultipleRapidConnects_OnlyLastConnectionProcessesEvents()
++    {
++        SetupGateway("gw1", "ws://test");
++        _resolver.OperatorCredential = new GatewayCredential("tok", false, "test");
++
++        // Three connect cycles via disconnect between each
++        await _manager.ConnectAsync("gw1");
++        var first = _factory.CreatedClients[^1];
++
++        await _manager.DisconnectAsync();
++        await _manager.ConnectAsync("gw1");
++        var second = _factory.CreatedClients[^1];
++
++        await _manager.DisconnectAsync();
++        await _manager.ConnectAsync("gw1");
++        var third = _factory.CreatedClients[^1];
++
++        Assert.Equal(3, _factory.CreatedClients.Count);
++        Assert.True(first.IsDisposed);
++        Assert.True(second.IsDisposed);
++        Assert.False(third.IsDisposed);
++
++        var snapshots = new List<GatewayConnectionSnapshot>();
++        _manager.StateChanged += (_, s) => snapshots.Add(s);
++
++        // Fire Error on stale lifecycles — should be ignored by generation guard
++        first.SimulateStatusChanged(ConnectionStatus.Error);
++        second.SimulateStatusChanged(ConnectionStatus.Error);
++        await Task.Delay(50);
++
++        Assert.Equal(OverallConnectionState.Connecting, _manager.CurrentSnapshot.OverallState);
++        Assert.DoesNotContain(snapshots, s => s.OverallState == OverallConnectionState.Error);
++
++        // Fire Error on the current (third) lifecycle — should be processed
++        third.SimulateStatusChanged(ConnectionStatus.Error);
++        await Task.Delay(50);
++
++        Assert.Equal(OverallConnectionState.Error, _manager.CurrentSnapshot.OverallState);
++    }
++
++    [Fact]
++    public async Task DisconnectThenConnect_OldEventsIgnored()
++    {
++        SetupGateway("gw1", "ws://test");
++        _resolver.OperatorCredential = new GatewayCredential("tok", false, "test");
++
++        await _manager.ConnectAsync("gw1");
++        var oldLifecycle = _factory.CreatedClients[^1];
++
++        await _manager.DisconnectAsync();
++        Assert.Equal(OverallConnectionState.Idle, _manager.CurrentSnapshot.OverallState);
++
++        await _manager.ConnectAsync("gw1");
++        var newLifecycle = _factory.CreatedClients[^1];
++
++        var snapshots = new List<GatewayConnectionSnapshot>();
++        _manager.StateChanged += (_, s) => snapshots.Add(s);
++
++        // Fire error on the old lifecycle — should be ignored by generation guard
++        oldLifecycle.SimulateStatusChanged(ConnectionStatus.Error);
++        await Task.Delay(50);
++
++        // Manager should still be Connecting from the new connect, not Error
++        Assert.Equal(OverallConnectionState.Connecting, _manager.CurrentSnapshot.OverallState);
++        Assert.DoesNotContain(snapshots, s => s.OverallState == OverallConnectionState.Error);
++
++        // Current lifecycle's Error event should be processed
++        newLifecycle.SimulateStatusChanged(ConnectionStatus.Error);
++        await Task.Delay(50);
++
++        Assert.Equal(OverallConnectionState.Error, _manager.CurrentSnapshot.OverallState);
++        Assert.Contains(snapshots, s => s.OverallState == OverallConnectionState.Error);
++    }
++
++    // ─── Helpers ───
++
++    private void SetupGateway(string id, string url)
++    {
++        _registry.AddOrUpdate(new GatewayRecord { Id = id, Url = url });
++        _registry.SetActive(id);
++        Directory.CreateDirectory(_registry.GetIdentityDirectory(id));
++    }
++
++    // ─── Test Fakes ───
++
++    private sealed class MockCredentialResolver : ICredentialResolver
++    {
++        public GatewayCredential? OperatorCredential { get; set; }
++        public GatewayCredential? NodeCredential { get; set; }
++
++        public GatewayCredential? ResolveOperator(GatewayRecord record, string identityPath) => OperatorCredential;
++        public GatewayCredential? ResolveNode(GatewayRecord record, string identityPath) => NodeCredential;
++    }
++
++    private sealed class TrackingClientFactory : IGatewayClientFactory
++    {
++        public List<TrackingLifecycle> CreatedClients { get; } = [];
++
++        public IGatewayClientLifecycle Create(string gatewayUrl, GatewayCredential credential, string identityPath, IOpenClawLogger logger)
++        {
++            var lifecycle = new TrackingLifecycle(gatewayUrl);
++            CreatedClients.Add(lifecycle);
++            return lifecycle;
++        }
++    }
++
++    internal sealed class TrackingLifecycle : IGatewayClientLifecycle
++    {
++        private readonly MockGatewayClient _client;
++
++        public TrackingLifecycle(string url)
++        {
++            _client = new MockGatewayClient(url);
++        }
++
++        public bool IsDisposed { get; private set; }
++        public OpenClawGatewayClient DataClient => _client;
++        public event EventHandler<ConnectionStatus>? StatusChanged;
++        public event EventHandler<string>? AuthenticationFailed;
++
++        public Task ConnectAsync(CancellationToken ct) => Task.CompletedTask;
++
++        public void SimulateStatusChanged(ConnectionStatus status) =>
++            StatusChanged?.Invoke(this, status);
++
++        public void SimulateAuthFailed(string msg) =>
++            AuthenticationFailed?.Invoke(this, msg);
++
++        public void Dispose() => IsDisposed = true;
++    }
++
++    private sealed class MockGatewayClient : OpenClawGatewayClient
++    {
++        public MockGatewayClient(string url)
++            : base(url, "mock-token", NullLogger.Instance) { }
++    }
++}
+diff --git a/tests/OpenClaw.Tray.Tests/OpenClaw.Tray.Tests.csproj b/tests/OpenClaw.Tray.Tests/OpenClaw.Tray.Tests.csproj
+index 4a0bb1b..8dda731 100644
+--- a/tests/OpenClaw.Tray.Tests/OpenClaw.Tray.Tests.csproj
++++ b/tests/OpenClaw.Tray.Tests/OpenClaw.Tray.Tests.csproj
+@@ -72,7 +72,9 @@
+     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\OperatorClientChangedEventArgs.cs" Link="Services\Connection\OperatorClientChangedEventArgs.cs" />
+     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\SettingsChangeImpact.cs" Link="Services\Connection\SettingsChangeImpact.cs" />
+     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\INodeConnector.cs" Link="Services\Connection\INodeConnector.cs" />
++    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\NodeConnector.cs" Link="Services\Connection\NodeConnector.cs" />
+     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\NodeConnectionMode.cs" Link="Services\Connection\NodeConnectionMode.cs" />
++    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\ISshTunnelManager.cs" Link="Services\Connection\ISshTunnelManager.cs" />
+   </ItemGroup>
+ 
+ </Project>

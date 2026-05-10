@@ -55,12 +55,29 @@ public sealed class ConnectionManagerOperatorConnector : IGatewayOperatorConnect
 
         _logger.Info($"[SetupConnector] Connecting via manager to {GatewayUrlHelper.SanitizeForDisplay(normalized)}");
 
-        // Wait for state transition via a TaskCompletionSource
+        // If already connected or in a non-idle state, disconnect first
+        var current = _manager.CurrentSnapshot.OperatorState;
+        if (current is not RoleConnectionState.Idle)
+            await _manager.DisconnectAsync();
+
+        await _manager.ConnectAsync(recordId);
+
+        // Check if already in the target state (fast path — no subscription needed)
+        var snap = _manager.CurrentSnapshot;
+        if (snap.OperatorState == RoleConnectionState.Connected)
+            return new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.Connected);
+        if (snap.OperatorState == RoleConnectionState.PairingRequired)
+            return new GatewayOperatorConnectionResult(
+                GatewayOperatorConnectionStatus.PairingRequired,
+                "Gateway requires pairing approval.",
+                snap.OperatorPairingRequestId);
+
+        // Subscribe only when we actually need to wait for a state transition
         var tcs = new TaskCompletionSource<GatewayOperatorConnectionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        void OnStateChanged(object? sender, GatewayConnectionSnapshot snap)
+        void OnStateChanged(object? sender, GatewayConnectionSnapshot s)
         {
-            switch (snap.OperatorState)
+            switch (s.OperatorState)
             {
                 case RoleConnectionState.Connected:
                     tcs.TrySetResult(new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.Connected));
@@ -69,7 +86,7 @@ public sealed class ConnectionManagerOperatorConnector : IGatewayOperatorConnect
                     tcs.TrySetResult(new GatewayOperatorConnectionResult(
                         GatewayOperatorConnectionStatus.PairingRequired,
                         "Gateway requires pairing approval.",
-                        snap.OperatorPairingRequestId));
+                        s.OperatorPairingRequestId));
                     break;
                 case RoleConnectionState.PairingRejected:
                     tcs.TrySetResult(new GatewayOperatorConnectionResult(
@@ -77,7 +94,7 @@ public sealed class ConnectionManagerOperatorConnector : IGatewayOperatorConnect
                         "Pairing was rejected."));
                     break;
                 case RoleConnectionState.Error:
-                    var error = snap.OperatorError ?? "Connection error";
+                    var error = s.OperatorError ?? "Connection error";
                     var status = error.Contains("auth", StringComparison.OrdinalIgnoreCase)
                         || error.Contains("token", StringComparison.OrdinalIgnoreCase)
                         || error.Contains("signature", StringComparison.OrdinalIgnoreCase)
@@ -91,23 +108,6 @@ public sealed class ConnectionManagerOperatorConnector : IGatewayOperatorConnect
         _manager.StateChanged += OnStateChanged;
         try
         {
-            // If already connected or in a non-idle state, disconnect first
-            var current = _manager.CurrentSnapshot.OperatorState;
-            if (current is not RoleConnectionState.Idle)
-                await _manager.DisconnectAsync();
-
-            await _manager.ConnectAsync(recordId);
-
-            // Check if already in the target state (fast path for cached state)
-            var snap = _manager.CurrentSnapshot;
-            if (snap.OperatorState == RoleConnectionState.Connected)
-                return new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.Connected);
-            if (snap.OperatorState == RoleConnectionState.PairingRequired)
-                return new GatewayOperatorConnectionResult(
-                    GatewayOperatorConnectionStatus.PairingRequired,
-                    "Gateway requires pairing approval.",
-                    snap.OperatorPairingRequestId);
-
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(_timeout);
 
@@ -117,6 +117,8 @@ public sealed class ConnectionManagerOperatorConnector : IGatewayOperatorConnect
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
+                // Timeout — disconnect to clean up the manager's in-flight connection
+                try { await _manager.DisconnectAsync(); } catch { }
                 return new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.Timeout, "Timed out waiting for operator handshake.");
             }
         }
@@ -132,33 +134,34 @@ public sealed class ConnectionManagerOperatorConnector : IGatewayOperatorConnect
         _logger.Info("[SetupConnector] Reconnecting with stored device token via manager");
 
         // Reconnect — the credential resolver will pick up the stored device token
+        await _manager.ReconnectAsync();
+
+        // Fast path — no subscription needed
+        var snap = _manager.CurrentSnapshot;
+        if (snap.OperatorState == RoleConnectionState.Connected)
+            return new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.Connected);
+
+        // Subscribe only when we actually need to wait for a state transition
         var tcs = new TaskCompletionSource<GatewayOperatorConnectionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        void OnStateChanged(object? sender, GatewayConnectionSnapshot snap)
+        void OnStateChanged(object? sender, GatewayConnectionSnapshot s)
         {
-            if (snap.OperatorState == RoleConnectionState.Connected)
+            if (s.OperatorState == RoleConnectionState.Connected)
                 tcs.TrySetResult(new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.Connected));
-            else if (snap.OperatorState == RoleConnectionState.PairingRequired)
+            else if (s.OperatorState == RoleConnectionState.PairingRequired)
                 tcs.TrySetResult(new GatewayOperatorConnectionResult(
                     GatewayOperatorConnectionStatus.PairingRequired,
                     "Pairing required after reconnect.",
-                    snap.OperatorPairingRequestId));
-            else if (snap.OperatorState == RoleConnectionState.Error)
+                    s.OperatorPairingRequestId));
+            else if (s.OperatorState == RoleConnectionState.Error)
                 tcs.TrySetResult(new GatewayOperatorConnectionResult(
                     GatewayOperatorConnectionStatus.AuthFailed,
-                    snap.OperatorError ?? "Reconnect failed."));
+                    s.OperatorError ?? "Reconnect failed."));
         }
 
         _manager.StateChanged += OnStateChanged;
         try
         {
-            await _manager.ReconnectAsync();
-
-            // Fast path check
-            var snap = _manager.CurrentSnapshot;
-            if (snap.OperatorState == RoleConnectionState.Connected)
-                return new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.Connected);
-
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(_timeout);
 
@@ -168,6 +171,8 @@ public sealed class ConnectionManagerOperatorConnector : IGatewayOperatorConnect
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
+                // Timeout — disconnect to clean up the manager's in-flight connection
+                try { await _manager.DisconnectAsync(); } catch { }
                 return new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.Timeout, "Timed out waiting for operator reconnect.");
             }
         }

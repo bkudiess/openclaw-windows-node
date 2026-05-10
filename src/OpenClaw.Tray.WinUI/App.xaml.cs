@@ -79,35 +79,47 @@ public partial class App : Application
         // Suppress node auto-connect in the connection manager during setup.
         // The engine controls node pairing in its own phase (PairWindowsTrayNode).
         _suppressNodeDuringSetup = true;
-        // Use the connection manager's operator connector so all handshake/pairing
-        // events appear in the diagnostics window and reuse the manager's v2/v3
-        // signature fallback, credential resolution, and device token persistence.
-        IGatewayOperatorConnector? operatorConnector = null;
-        if (_connectionManager != null && _gatewayRegistry != null)
+        try
         {
-            operatorConnector = new ConnectionManagerOperatorConnector(
-                _connectionManager, _gatewayRegistry, new AppLogger());
-        }
-        var engine = LocalGatewaySetupEngineFactory.CreateLocalOnly(
-            settings,
-            new AppLogger(),
-            nodeService,
-            replaceExistingConfigurationConfirmed: replaceExistingConfigurationConfirmed,
-            gatewayRegistry: _gatewayRegistry,
-            operatorConnectorOverride: operatorConnector);
-        // Clear suppress flag when engine completes so normal node connections resume.
-        engine.StateChanged += (st) =>
-        {
-            if (st.Status is LocalGatewaySetupStatus.Complete or LocalGatewaySetupStatus.FailedTerminal
-                or LocalGatewaySetupStatus.FailedRetryable or LocalGatewaySetupStatus.Cancelled)
+            // Use the connection manager's operator connector so all handshake/pairing
+            // events appear in the diagnostics window and reuse the manager's v2/v3
+            // signature fallback, credential resolution, and device token persistence.
+            IGatewayOperatorConnector? operatorConnector = null;
+            if (_connectionManager != null && _gatewayRegistry != null)
             {
-                _suppressNodeDuringSetup = false;
+                operatorConnector = new ConnectionManagerOperatorConnector(
+                    _connectionManager, _gatewayRegistry, new AppLogger());
             }
-        };
-        // Bug #2: cache so OnPairingStatusChanged can read engine.IsAutoPairingWindowsNode
-        // and suppress the "copy pairing command" toast during the Phase 14 blip.
-        _localSetupEngine = engine;
-        return engine;
+            var engine = LocalGatewaySetupEngineFactory.CreateLocalOnly(
+                settings,
+                new AppLogger(),
+                nodeService,
+                replaceExistingConfigurationConfirmed: replaceExistingConfigurationConfirmed,
+                gatewayRegistry: _gatewayRegistry,
+                operatorConnectorOverride: operatorConnector);
+            // Clear suppress flag when engine completes so normal node connections resume.
+            // Only clear if this engine is still the active one (prevents stale engine #1
+            // from clearing the flag while engine #2 is running).
+            var capturedEngine = engine;
+            engine.StateChanged += (st) =>
+            {
+                if (st.Status is LocalGatewaySetupStatus.Complete or LocalGatewaySetupStatus.FailedTerminal
+                    or LocalGatewaySetupStatus.FailedRetryable or LocalGatewaySetupStatus.Cancelled)
+                {
+                    if (_localSetupEngine == capturedEngine)
+                        _suppressNodeDuringSetup = false;
+                }
+            };
+            // Bug #2: cache so OnPairingStatusChanged can read engine.IsAutoPairingWindowsNode
+            // and suppress the "copy pairing command" toast during the Phase 14 blip.
+            _localSetupEngine = engine;
+            return engine;
+        }
+        catch
+        {
+            _suppressNodeDuringSetup = false;
+            throw;
+        }
     }
 
     /// <summary>
@@ -477,9 +489,6 @@ public partial class App : Application
         // Initialize connections — always create operator client for UI data,
         // additionally create node service for gateway node mode or local MCP.
         InitializeGatewayClient();
-
-        // Always show diagnostics window on startup for connection debugging
-        ShowConnectionStatusWindow();
 
         // Pre-warm chat window (WebView2 init takes 1-3s, do it now so left-click is instant)
         if (_settings != null &&
@@ -1737,7 +1746,10 @@ public partial class App : Application
                         _settings.SshTunnelUser ?? "",
                         _settings.SshTunnelHost ?? "",
                         _settings.SshTunnelRemotePort,
-                        _settings.SshTunnelLocalPort)
+                        _settings.SshTunnelLocalPort,
+                        _settings.NodeBrowserProxyEnabled &&
+                            SshTunnelCommandLine.CanForwardBrowserProxyPort(
+                                _settings.SshTunnelRemotePort, _settings.SshTunnelLocalPort))
                     : null,
             };
             _gatewayRegistry.AddOrUpdate(record);

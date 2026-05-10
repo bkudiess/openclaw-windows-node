@@ -336,8 +336,19 @@ public sealed partial class ConnectionPage : Page
                         var client = _hub?.GatewayClient;
                         if (client != null)
                         {
-                            await client.DevicePairApproveAsync(capturedId);
-                            await client.RequestDevicePairListAsync();
+                            var ok = await client.DevicePairApproveAsync(capturedId);
+                            if (ok)
+                                await client.RequestDevicePairListAsync();
+                            else
+                            {
+                                approveBtn.IsEnabled = true;
+                                rejectBtn.IsEnabled = true;
+                            }
+                        }
+                        else
+                        {
+                            approveBtn.IsEnabled = true;
+                            rejectBtn.IsEnabled = true;
                         }
                     }
                     catch
@@ -355,8 +366,19 @@ public sealed partial class ConnectionPage : Page
                         var client = _hub?.GatewayClient;
                         if (client != null)
                         {
-                            await client.DevicePairRejectAsync(capturedId);
-                            await client.RequestDevicePairListAsync();
+                            var ok = await client.DevicePairRejectAsync(capturedId);
+                            if (ok)
+                                await client.RequestDevicePairListAsync();
+                            else
+                            {
+                                approveBtn.IsEnabled = true;
+                                rejectBtn.IsEnabled = true;
+                            }
+                        }
+                        else
+                        {
+                            approveBtn.IsEnabled = true;
+                            rejectBtn.IsEnabled = true;
                         }
                     }
                     catch

@@ -25,7 +25,7 @@ public sealed class SshTunnelManager : ISshTunnelManager
     public Task<string> StartAsync(SshTunnelConfig config, CancellationToken ct)
     {
         _logger.Info($"[SshTunnelMgr] Starting tunnel {config.User}@{config.Host}:{config.RemotePort} → localhost:{config.LocalPort}");
-        _service.EnsureStarted(config.User, config.Host, config.RemotePort, config.LocalPort);
+        _service.EnsureStarted(config.User, config.Host, config.RemotePort, config.LocalPort, config.IncludeBrowserProxyForward);
         var localUrl = $"ws://localhost:{config.LocalPort}";
         _logger.Info($"[SshTunnelMgr] Tunnel started, local URL: {localUrl}");
         return Task.FromResult(localUrl);

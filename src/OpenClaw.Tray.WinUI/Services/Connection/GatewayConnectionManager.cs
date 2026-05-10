@@ -253,12 +253,6 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         {
             var prev = _stateMachine.Current.OverallState;
             DisposeActiveClient();
-            // Stop SSH tunnel when disconnecting
-            if (_tunnelManager?.IsActive == true)
-            {
-                try { await _tunnelManager.StopAsync(); }
-                catch (Exception ex) { _logger.Warn($"[ConnMgr] Tunnel stop error: {ex.Message}"); }
-            }
             _stateMachine.TryTransition(ConnectionTrigger.DisconnectRequested);
             _diagnostics.RecordStateChange(prev, _stateMachine.Current.OverallState);
             EmitStateChanged(prev);
@@ -278,6 +272,12 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
     public async Task SwitchGatewayAsync(string gatewayId)
     {
         await DisconnectAsync();
+        // Stop tunnel when switching gateways — the new one may not need it
+        if (_tunnelManager?.IsActive == true)
+        {
+            try { await _tunnelManager.StopAsync(); }
+            catch (Exception ex) { _logger.Warn($"[ConnMgr] Tunnel stop error on gateway switch: {ex.Message}"); }
+        }
         _gatewayNeedsV2Signature = false; // new gateway might support v3
         _registry.SetActive(gatewayId);
         await ConnectAsync(gatewayId);
@@ -513,7 +513,16 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         }
 
         // Mark node as enabled in the state machine so UI reflects node state
-        _stateMachine.SetNodeEnabled(true);
+        // State machine is not thread-safe — acquire semaphore for mutation
+        await _transitionSemaphore.WaitAsync();
+        try
+        {
+            _stateMachine.SetNodeEnabled(true);
+        }
+        finally
+        {
+            _transitionSemaphore.Release();
+        }
 
         var nodeConnectUrl = record.SshTunnel != null
             ? $"ws://localhost:{record.SshTunnel.LocalPort}"
@@ -638,13 +647,14 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
 
                 if (canApprove)
                 {
-                    _lastAutoApprovedRequestId = e.RequestId;
                     _diagnostics.Record("node", $"Auto-approving node pairing (requestId={e.RequestId})");
                     try
                     {
                         var approved = await operatorClient.DevicePairApproveAsync(e.RequestId);
                         if (approved)
                         {
+                            // Only set guard after confirmed success to allow retry on transient failure
+                            _lastAutoApprovedRequestId = e.RequestId;
                             _diagnostics.Record("node", "Node pairing auto-approved — reconnecting node");
                             await Task.Delay(1000); // brief delay for gateway to process
                             await StartNodeConnectionAsync();
@@ -716,7 +726,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         // Disconnect node first
         if (_nodeConnector != null)
         {
-            try { _ = _nodeConnector.DisconnectAsync(); }
+            try { _nodeConnector.DisconnectAsync().Wait(TimeSpan.FromSeconds(2)); }
             catch (Exception ex) { _logger.Warn($"[ConnMgr] Node disconnect error: {ex.Message}"); }
         }
 
@@ -743,8 +753,21 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
     {
         if (_disposed) return;
         _disposed = true;
+        // Unsubscribe from node events before disposing the semaphore
+        // to prevent async void handlers from crashing via ObjectDisposedException.
+        if (_nodeConnector != null)
+        {
+            _nodeConnector.StatusChanged -= OnNodeStatusChanged;
+            _nodeConnector.PairingStatusChanged -= OnNodePairingStatusChanged;
+        }
         _stateMachine.TryTransition(ConnectionTrigger.Disposed);
         DisposeActiveClient();
+        // Stop tunnel on app shutdown
+        if (_tunnelManager?.IsActive == true)
+        {
+            try { _tunnelManager.StopAsync().GetAwaiter().GetResult(); }
+            catch { /* shutting down — best effort */ }
+        }
         _operationCts?.Cancel();
         _operationCts?.Dispose();
         _transitionSemaphore.Dispose();

@@ -275,6 +275,9 @@ internal sealed class ConnectionStateMachine
             OperatorState = _operatorState,
             OperatorError = _operatorError,
             OperatorPairingRequired = _operatorState == RoleConnectionState.PairingRequired,
+            // Clear requestId when no longer in PairingRequired to prevent stale reads
+            OperatorPairingRequestId = _operatorState == RoleConnectionState.PairingRequired
+                ? Current.OperatorPairingRequestId : null,
             NodeState = _nodeState,
             NodeError = _nodeError,
             NodePairingStatus = _nodeState switch

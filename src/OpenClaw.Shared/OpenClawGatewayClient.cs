@@ -630,18 +630,18 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
         _logger.Info($"  deviceId={_deviceIdentity.DeviceId[..Math.Min(16, _deviceIdentity.DeviceId.Length)]}...");
         _logger.Info($"  nonce={(!string.IsNullOrEmpty(connectNonce) ? connectNonce[..Math.Min(12, connectNonce.Length)] + "..." : "(empty)")}");
         _logger.Info($"  signedAt={signedAt}");
-        _logger.Info($"  sigToken(len)={signatureToken.Length}, preview={signatureToken[..Math.Min(8, signatureToken.Length)]}...");
+        _logger.Info($"  sigToken(len)={signatureToken.Length}, preview=[REDACTED]");
         _logger.Info($"  signature format={(_useV2Signature ? "v2" : "v3")}, platform={OperatorPlatform}, family={OperatorDeviceFamily}");
 
         var signedPayload = _useV2Signature
             ? _deviceIdentity.BuildConnectPayloadV2(connectNonce, signedAt, OperatorClientId, OperatorClientMode, role, requestedScopes, signatureToken)
             : _deviceIdentity.BuildConnectPayloadV3(connectNonce, signedAt, OperatorClientId, OperatorClientMode, role, requestedScopes, signatureToken, OperatorPlatform, OperatorDeviceFamily);
-        _logger.Info($"[HANDSHAKE] signed: {signedPayload}");
+        _logger.Info($"[HANDSHAKE] signed: {TokenSanitizer.Sanitize(signedPayload)}");
 
         // Also log what auth field we're sending
         var authObj = BuildAuthPayload();
         var authJson = JsonSerializer.Serialize(authObj);
-        _logger.Info($"[HANDSHAKE] auth: {authJson}");
+        _logger.Info($"[HANDSHAKE] auth: {RedactAuthPayload(authJson)}");
 
         // Try v3 first (matches reference client). Fall back to v2 if gateway rejects v3.
         var signature = _useV2Signature
@@ -1350,6 +1350,17 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
 
         nodes = default;
         return false;
+    }
+
+    private static readonly Regex AuthPayloadTokenPattern = new(
+        @"""(token|deviceToken|bootstrapToken)""\s*:\s*""[^""]+""",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static string RedactAuthPayload(string authJson)
+    {
+        return AuthPayloadTokenPattern.Replace(
+            authJson,
+            m => $"\"{m.Groups[1].Value}\":\"[REDACTED]\"");
     }
 
     private static string? TryGetErrorMessage(JsonElement root)
