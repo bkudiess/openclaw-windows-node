@@ -546,6 +546,7 @@ public partial class App : Application
         var iconPath = IconHelper.GetStatusIconPath(ConnectionStatus.Disconnected);
         _trayIcon = new TrayIcon(1, iconPath, BuildTrayTooltip());
         _trayIcon.IsVisible = true;
+        ApplyTrayTooltip(BuildTrayTooltip());
         _trayIcon.Selected += OnTrayIconSelected;
         _trayIcon.ContextMenu += OnTrayContextMenu;
     }
@@ -1280,7 +1281,7 @@ public partial class App : Application
         menu.AddMenuItem("Chat", "💬", "openchat");
         menu.AddMenuItem("Canvas", "🎨", "canvas");
         menu.AddMenuItem("Voice", "🎙️", "voice");
-        menu.AddMenuItem("Companion", "🦞", "companion");
+        menu.AddMenuItem("Companion Settings...", "🦞", "companion");
         menu.AddMenuItem(LocalizationHelper.GetString("Menu_QuickSend"), "📤", "quicksend");
 
         // Setup Guide / Reconfigure entry (PR #274 must-fix #6) — label flips
@@ -2953,12 +2954,25 @@ public partial class App : Application
         try
         {
             _trayIcon.SetIcon(iconPath);
-            _trayIcon.Tooltip = tooltip;
+            ApplyTrayTooltip(tooltip);
         }
         catch (Exception ex)
         {
             Logger.Warn($"Failed to update tray icon: {ex.Message}");
         }
+    }
+
+    private void ApplyTrayTooltip(string tooltip)
+    {
+        if (_trayIcon == null)
+            return;
+
+        if (string.Equals(_trayIcon.Tooltip, tooltip, StringComparison.Ordinal))
+        {
+            _trayIcon.Tooltip = string.Empty;
+        }
+
+        _trayIcon.Tooltip = tooltip;
     }
 
     private string BuildTrayTooltip()
