@@ -747,7 +747,10 @@ public sealed class WslStoreInstanceInstaller : IWslInstanceInstaller
         if (string.IsNullOrWhiteSpace(value))
             return string.Empty;
 
-        var sanitized = SecretRedactor.Redact(value).Replace("\0", string.Empty).Trim();
+        // Apply both passes: SecretRedactor catches key=value patterns (e.g. gateway-token=...),
+        // TokenSanitizer catches raw token formats (64-char hex, long base64url) that can appear
+        // in subprocess error output when a CLI tool echoes its own arguments.
+        var sanitized = TokenSanitizer.Sanitize(SecretRedactor.Redact(value)).Replace("\0", string.Empty).Trim();
         const int maxLength = 2000;
         return sanitized.Length <= maxLength ? sanitized : sanitized[..maxLength] + "...<truncated>";
     }
@@ -1164,7 +1167,10 @@ internal static class DiagnosticFormatter
         if (string.IsNullOrWhiteSpace(value))
             return string.Empty;
 
-        var sanitized = SecretRedactor.Redact(value).Replace("\0", string.Empty).Trim();
+        // Apply both passes: SecretRedactor catches key=value patterns (e.g. gateway-token=...),
+        // TokenSanitizer catches raw token formats (64-char hex, long base64url) that can appear
+        // in subprocess error output when a CLI tool echoes its own arguments.
+        var sanitized = TokenSanitizer.Sanitize(SecretRedactor.Redact(value)).Replace("\0", string.Empty).Trim();
         const int maxLength = 2000;
         return sanitized.Length <= maxLength ? sanitized : sanitized[..maxLength] + "...<truncated>";
     }
