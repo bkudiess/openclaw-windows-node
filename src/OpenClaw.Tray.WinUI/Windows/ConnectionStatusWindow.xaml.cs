@@ -83,6 +83,23 @@ public sealed partial class ConnectionStatusWindow : WindowEx
             RefreshStateMachine(snapshot);
             RefreshGateways();
             RefreshCredentials();
+
+            // Update connect button and status based on state
+            if (snapshot.OverallState == OverallConnectionState.PairingRequired)
+            {
+                ConnectButton.Content = "Connect (once approved)";
+                SetupCodeResult.Text = "🔐 Awaiting approval from gateway";
+                DirectConnectResult.Text = "🔐 Awaiting approval — approve then click Connect";
+            }
+            else if (snapshot.OverallState is OverallConnectionState.Connected or OverallConnectionState.Ready)
+            {
+                ConnectButton.Content = "Connect";
+                DirectConnectResult.Text = "✓ Connected";
+            }
+            else
+            {
+                ConnectButton.Content = "Connect";
+            }
         });
     }
 
@@ -308,6 +325,73 @@ public sealed partial class ConnectionStatusWindow : WindowEx
         if (_manager == null) return;
         await _manager.DisconnectAsync();
         SetupCodeResult.Text = "Disconnected";
+    }
+
+    private async void OnDirectConnect(object sender, RoutedEventArgs e)
+    {
+        if (_manager == null || _registry == null) return;
+
+        var url = DirectUrlBox.Text?.Trim();
+        var token = DirectTokenBox.Text?.Trim();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            DirectConnectResult.Text = "Enter a gateway URL";
+            return;
+        }
+
+        url = GatewayUrlHelper.NormalizeForWebSocket(url);
+
+        DirectConnectResult.Text = "Connecting…";
+        try
+        {
+            await _manager.DisconnectAsync();
+
+            // Create/update gateway record with shared token
+            var existing = _registry.FindByUrl(url);
+            var recordId = existing?.Id ?? Guid.NewGuid().ToString();
+            var record = new GatewayRecord
+            {
+                Id = recordId,
+                Url = url,
+                SharedGatewayToken = string.IsNullOrWhiteSpace(token) ? null : token,
+                BootstrapToken = null, // clear any stale bootstrap
+            };
+            _registry.AddOrUpdate(record);
+            _registry.SetActive(recordId);
+            _registry.Save();
+
+            // Clear stored device tokens so the shared token is used
+            // (device tokens from previous bootstrap pairing have limited scopes)
+            var identityDir = _registry.GetIdentityDirectory(recordId);
+            var keyPath = Path.Combine(identityDir, "device-key-ed25519.json");
+            if (File.Exists(keyPath))
+            {
+                try
+                {
+                    var json = System.Text.Json.JsonDocument.Parse(File.ReadAllText(keyPath));
+                    using var ms = new MemoryStream();
+                    using var writer = new System.Text.Json.Utf8JsonWriter(ms, new System.Text.Json.JsonWriterOptions { Indented = true });
+                    writer.WriteStartObject();
+                    foreach (var prop in json.RootElement.EnumerateObject())
+                    {
+                        if (prop.Name is "DeviceToken" or "DeviceTokenScopes" or "NodeDeviceToken" or "NodeDeviceTokenScopes")
+                            continue;
+                        prop.WriteTo(writer);
+                    }
+                    writer.WriteEndObject();
+                    writer.Flush();
+                    File.WriteAllBytes(keyPath, ms.ToArray());
+                }
+                catch { }
+            }
+
+            await _manager.ConnectAsync(recordId);
+            DirectConnectResult.Text = $"✓ Connected to {GatewayUrlHelper.SanitizeForDisplay(url)}";
+        }
+        catch (Exception ex)
+        {
+            DirectConnectResult.Text = $"✗ {ex.Message}";
+        }
     }
 
     // ── Timeline with colors ──

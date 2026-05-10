@@ -715,12 +715,9 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
 
         if (string.IsNullOrEmpty(_deviceIdentity.DeviceToken))
         {
-            // Fresh-device ordering is intentional:
-            // 1. QR/setup-code bootstrap keeps bounded handoff scopes.
-            // 2. Standard token auth against the local loopback gateway we installed requests
-            //    full operator scopes, including operator.admin, for the easy-button setup flow.
-            // 3. Remote/non-loopback fresh standard devices remain bounded and require manual approval.
-            if (!_tokenIsBootstrapToken && LocalGatewayUrlClassifier.IsLocalGatewayUrl(_currentGatewayUrl))
+            // Shared gateway token (non-bootstrap) → request admin scope.
+            // Bootstrap tokens get bounded scopes.
+            if (!_tokenIsBootstrapToken)
                 return s_operatorScopes;
 
             return s_operatorBootstrapScopes;

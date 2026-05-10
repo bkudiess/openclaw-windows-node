@@ -102,6 +102,27 @@
                     </Grid>
                 </StackPanel>
             </Border>
+
+            <!-- Direct Connect (URL + Token) -->
+            <TextBlock Text="DIRECT CONNECT" FontWeight="Bold" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,8,0,4" CharacterSpacing="100"/>
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="6" Padding="10">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Connect with a gateway URL and shared token (admin scope)." FontSize="10.5"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    <TextBox x:Name="DirectUrlBox" PlaceholderText="ws://localhost:18790" Text="ws://localhost:18790" FontSize="11" Header="Gateway URL"/>
+                    <TextBox x:Name="DirectTokenBox" PlaceholderText="Shared gateway token" FontSize="11" Header="Token"/>
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="DirectConnectResult" Grid.Column="0" FontSize="10.5"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"/>
+                        <Button Grid.Column="1" Content="Connect" Click="OnDirectConnect" Padding="8,3" FontSize="11"
+                                Style="{ThemeResource AccentButtonStyle}"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
         </StackPanel>
         </ScrollViewer>
 

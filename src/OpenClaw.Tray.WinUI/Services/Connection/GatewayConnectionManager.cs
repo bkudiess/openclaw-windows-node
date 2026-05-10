@@ -27,6 +27,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
     private string? _activeGatewayRecordId; // gateway record ID for node credential resolution
     private bool _disposed;
     private bool _gatewayNeedsV2Signature; // remembered across reconnects
+    private string? _lastAutoApprovedRequestId; // prevent auto-approve loops
 
     public event EventHandler<GatewayConnectionSnapshot>? StateChanged;
     public event EventHandler<ConnectionDiagnosticEvent>? DiagnosticEvent;
@@ -571,9 +572,44 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             _transitionSemaphore.Release();
         }
 
-        // Note: auto-approval of node pairing requires operator.pairing scope,
-        // which bootstrap-scoped sessions don't have. Node pairing must be
-        // approved manually on the gateway for bootstrap flows.
+        // Auto-approve node pairing if operator has admin/pairing scope
+        if (e.Status == PairingStatus.Pending && !string.IsNullOrWhiteSpace(e.RequestId)
+            && e.RequestId != _lastAutoApprovedRequestId)
+        {
+            var operatorClient = _activeLifecycle?.DataClient;
+            if (operatorClient?.IsConnectedToGateway == true)
+            {
+                var scopes = operatorClient.GrantedOperatorScopes;
+                var canApprove = scopes.Any(s =>
+                    s.Equals("operator.admin", StringComparison.OrdinalIgnoreCase) ||
+                    s.Equals("operator.pairing", StringComparison.OrdinalIgnoreCase));
+
+                if (canApprove)
+                {
+                    _lastAutoApprovedRequestId = e.RequestId;
+                    _diagnostics.Record("node", $"Auto-approving node pairing (requestId={e.RequestId})");
+                    try
+                    {
+                        var approved = await operatorClient.DevicePairApproveAsync(e.RequestId);
+                        if (approved)
+                        {
+                            _diagnostics.Record("node", "Node pairing auto-approved — reconnecting node");
+                            await Task.Delay(1000); // brief delay for gateway to process
+                            await StartNodeConnectionAsync();
+                        }
+                        else
+                        {
+                            _diagnostics.Record("node", "Node auto-approval failed");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warn($"[ConnMgr] Node auto-approve failed: {ex.Message}");
+                        _diagnostics.Record("node", $"Auto-approve error: {ex.Message}");
+                    }
+                }
+            }
+        }
     }
 
     // ─── Helpers ───
