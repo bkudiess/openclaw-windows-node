@@ -46,10 +46,10 @@ internal sealed class ConnectionStateMachine
                 _operatorState == RoleConnectionState.Connecting,
 
             ConnectionTrigger.WebSocketConnected =>
-                _operatorState == RoleConnectionState.Connecting,
+                _operatorState is RoleConnectionState.Connecting or RoleConnectionState.Error,
 
             ConnectionTrigger.HandshakeSucceeded =>
-                _operatorState == RoleConnectionState.Connecting,
+                _operatorState is RoleConnectionState.Connecting or RoleConnectionState.Error,
 
             ConnectionTrigger.PairingPending =>
                 _operatorState is RoleConnectionState.Connecting or RoleConnectionState.Connected or RoleConnectionState.Error,

@@ -14,6 +14,11 @@ public sealed record GatewayConnectionSnapshot
     public string? OperatorError { get; init; }
     public bool OperatorPairingRequired { get; init; }
     public string? OperatorDeviceId { get; init; }
+    /// <summary>
+    /// The requestId returned by the gateway when operator pairing is required.
+    /// Used by setup flows to approve the specific pairing request via CLI.
+    /// </summary>
+    public string? OperatorPairingRequestId { get; init; }
 
     // ─── Node ───
     public RoleConnectionState NodeState { get; init; }

@@ -47,6 +47,11 @@ public partial class App : Application
     /// setup has run in this app lifetime.
     /// </summary>
     private LocalGatewaySetupEngine? _localSetupEngine;
+    /// <summary>
+    /// When true, the connection manager suppresses node auto-connect after operator handshake.
+    /// Set during the WSL local-setup flow so the engine controls node pairing in its own phase.
+    /// </summary>
+    private volatile bool _suppressNodeDuringSetup;
 
     /// <summary>The persistent gateway client. Used by the onboarding wizard for RPC calls.</summary>
     public IOperatorGatewayClient? GatewayClient => _connectionManager?.OperatorClient;
@@ -71,12 +76,34 @@ public partial class App : Application
     {
         var settings = _settings ?? new SettingsManager();
         var nodeService = EnsureNodeServiceForLocalGatewaySetup(settings);
+        // Suppress node auto-connect in the connection manager during setup.
+        // The engine controls node pairing in its own phase (PairWindowsTrayNode).
+        _suppressNodeDuringSetup = true;
+        // Use the connection manager's operator connector so all handshake/pairing
+        // events appear in the diagnostics window and reuse the manager's v2/v3
+        // signature fallback, credential resolution, and device token persistence.
+        IGatewayOperatorConnector? operatorConnector = null;
+        if (_connectionManager != null && _gatewayRegistry != null)
+        {
+            operatorConnector = new ConnectionManagerOperatorConnector(
+                _connectionManager, _gatewayRegistry, new AppLogger());
+        }
         var engine = LocalGatewaySetupEngineFactory.CreateLocalOnly(
             settings,
             new AppLogger(),
             nodeService,
             replaceExistingConfigurationConfirmed: replaceExistingConfigurationConfirmed,
-            gatewayRegistry: _gatewayRegistry);
+            gatewayRegistry: _gatewayRegistry,
+            operatorConnectorOverride: operatorConnector);
+        // Clear suppress flag when engine completes so normal node connections resume.
+        engine.StateChanged += (st) =>
+        {
+            if (st.Status is LocalGatewaySetupStatus.Complete or LocalGatewaySetupStatus.FailedTerminal
+                or LocalGatewaySetupStatus.FailedRetryable or LocalGatewaySetupStatus.Cancelled)
+            {
+                _suppressNodeDuringSetup = false;
+            }
+        };
         // Bug #2: cache so OnPairingStatusChanged can read engine.IsAutoPairingWindowsNode
         // and suppress the "copy pairing command" toast during the Phase 14 blip.
         _localSetupEngine = engine;
@@ -2026,6 +2053,7 @@ public partial class App : Application
 
     private bool ShouldInitializeNodeService()
     {
+        if (_suppressNodeDuringSetup) return false;
         return _settings?.EnableNodeMode == true || _settings?.EnableMcpServer == true;
     }
 

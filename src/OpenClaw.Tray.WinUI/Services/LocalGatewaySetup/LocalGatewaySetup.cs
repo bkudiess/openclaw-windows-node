@@ -2941,7 +2941,8 @@ public static class LocalGatewaySetupEngineFactory
         bool replaceExistingConfigurationConfirmed = false,
         string? identityDataPath = null,
         string? setupStatePath = null,
-        OpenClawTray.Services.Connection.GatewayRegistry? gatewayRegistry = null)
+        OpenClawTray.Services.Connection.GatewayRegistry? gatewayRegistry = null,
+        IGatewayOperatorConnector? operatorConnectorOverride = null)
     {
         // Defense-in-depth fail-closed: refuse to construct the engine if any of the
         // 6 sync existing-config predicates fire and the caller has not passed explicit
@@ -2998,7 +2999,7 @@ public static class LocalGatewaySetupEngineFactory
 
         var wsl = new WslExeCommandRunner(logger, TimeSpan.FromMinutes(30));
         var settingsAdapter = new SettingsManagerLocalGatewaySetupSettings(settings, gatewayRegistry);
-        var operatorConnector = new OpenClawGatewayOperatorConnector(logger);
+        var operatorConnector = operatorConnectorOverride ?? (IGatewayOperatorConnector)new OpenClawGatewayOperatorConnector(logger);
         var bootstrapTokenProvider = new WslGatewayCliBootstrapTokenProvider(wsl, options.OpenClawInstallPrefix + "/bin/openclaw");
         var sharedGatewayTokenProvider = new WslGatewayCliSharedGatewayTokenProvider(wsl);
         var gatewayConfigurationPreparer = new OpenClawCliGatewayConfigurationPreparer(wsl);

@@ -479,6 +479,8 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             var prev = _stateMachine.Current.OverallState;
             _diagnostics.Record("pairing", $"Pairing required — waiting for approval (requestId={requestId})");
             _stateMachine.TryTransition(ConnectionTrigger.PairingPending);
+            // Store requestId in snapshot so setup flows can use it for explicit approval
+            _stateMachine.Current = _stateMachine.Current with { OperatorPairingRequestId = requestId };
             _diagnostics.RecordStateChange(prev, _stateMachine.Current.OverallState);
             EmitStateChanged(prev);
         }
