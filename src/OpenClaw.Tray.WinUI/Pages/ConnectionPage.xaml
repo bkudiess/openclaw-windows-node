@@ -28,6 +28,7 @@
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
                             <Ellipse x:Name="StatusDot" Width="12" Height="12" VerticalAlignment="Center" Fill="Gray"/>
@@ -38,6 +39,11 @@
                                 VerticalAlignment="Center" Click="OnReconnect" IsEnabled="False" Margin="0,0,8,0"/>
                         <Button x:Name="DisconnectButton" Grid.Column="2" Content="Disconnect"
                                 VerticalAlignment="Center" Click="OnDisconnect" Visibility="Collapsed"/>
+                        <Button x:Name="DiagnosticsButton" Grid.Column="3" Content="🔍"
+                                ToolTipService.ToolTip="Open Connection Diagnostics"
+                                VerticalAlignment="Center" Click="OnOpenDiagnostics"
+                                Padding="8,4" Margin="4,0,0,0" FontSize="14"
+                                Background="Transparent"/>
                     </Grid>
                     <!-- Row 2: Gateway details -->
                     <TextBlock x:Name="GatewayDetailText"
@@ -124,6 +130,20 @@
                                Style="{StaticResource CaptionTextBlockStyle}"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                Visibility="Collapsed"/>
+                </StackPanel>
+            </Border>
+
+            <!-- ═══ Section 1.5: Pending Device Pairing ═══ -->
+            <Border x:Name="DevicePairingCard" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16"
+                    Visibility="Collapsed">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="📋 Pending Device Pairing" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                    <TextBlock Text="Devices waiting for approval to connect to this gateway."
+                               Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    <StackPanel x:Name="DevicePairingListPanel" Spacing="6"/>
                 </StackPanel>
             </Border>
 

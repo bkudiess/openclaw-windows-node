@@ -72,7 +72,9 @@
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\OperatorClientChangedEventArgs.cs" Link="Services\Connection\OperatorClientChangedEventArgs.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\SettingsChangeImpact.cs" Link="Services\Connection\SettingsChangeImpact.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\INodeConnector.cs" Link="Services\Connection\INodeConnector.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\NodeConnector.cs" Link="Services\Connection\NodeConnector.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\NodeConnectionMode.cs" Link="Services\Connection\NodeConnectionMode.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\Connection\ISshTunnelManager.cs" Link="Services\Connection\ISshTunnelManager.cs" />
   </ItemGroup>
 
 </Project>

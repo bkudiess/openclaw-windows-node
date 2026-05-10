@@ -1,3 +1,5 @@
+using OpenClaw.Shared;
+
 namespace OpenClawTray.Services.Connection;
 
 /// <summary>
@@ -29,7 +31,7 @@ public interface IGatewayConnectionManager : IDisposable
     /// <summary>
     /// The active operator client for data requests. Null when disconnected.
     /// </summary>
-    OpenClaw.Shared.OpenClawGatewayClient? OperatorClient { get; }
+    IOperatorGatewayClient? OperatorClient { get; }
 
     // ─── Diagnostics ───
     ConnectionDiagnostics Diagnostics { get; }

@@ -255,6 +255,128 @@ public sealed partial class ConnectionPage : Page
         _ = _connectionManager?.ReconnectAsync();
     }
 
+    private void OnOpenDiagnostics(object sender, RoutedEventArgs e)
+    {
+        _hub?.OpenConnectionStatusAction?.Invoke();
+    }
+
+    /// <summary>
+    /// Called by HubWindow when device pairing list updates arrive.
+    /// Renders pending pairing request cards with scope-gated Approve/Reject buttons.
+    /// </summary>
+    public void UpdateDevicePairingRequests(DevicePairingListInfo data)
+    {
+        DevicePairingListPanel.Children.Clear();
+        if (data.Pending.Count == 0)
+        {
+            DevicePairingCard.Visibility = Visibility.Collapsed;
+            return;
+        }
+        DevicePairingCard.Visibility = Visibility.Visible;
+
+        // Check if operator has scope to approve/reject
+        var scopes = _hub?.GatewayClient?.GrantedOperatorScopes ?? (IReadOnlyList<string>)Array.Empty<string>();
+        var canPair = scopes.Any(s =>
+            s.Equals("operator.admin", StringComparison.OrdinalIgnoreCase) ||
+            s.Equals("operator.pairing", StringComparison.OrdinalIgnoreCase));
+
+        foreach (var req in data.Pending)
+        {
+            var card = new Border
+            {
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardBackgroundFillColorSecondaryBrush"],
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(16),
+            };
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            if (canPair)
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var info = new StackPanel { Spacing = 4 };
+            info.Children.Add(new TextBlock
+            {
+                Text = req.DisplayName ?? req.DeviceId,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+            });
+            var detail = $"{req.Platform ?? "unknown"}";
+            if (!string.IsNullOrEmpty(req.Role)) detail += $" · {req.Role}";
+            info.Children.Add(new TextBlock
+            {
+                Text = detail,
+                Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"]
+            });
+            if (req.Scopes is { Length: > 0 })
+            {
+                info.Children.Add(new TextBlock
+                {
+                    Text = $"Scopes: {string.Join(", ", req.Scopes)}",
+                    Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
+                    Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"]
+                });
+            }
+            Grid.SetColumn(info, 0);
+            grid.Children.Add(info);
+
+            if (canPair)
+            {
+                var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+                var approveBtn = new Button { Content = "Approve", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
+                var rejectBtn = new Button { Content = "Reject" };
+                var capturedId = req.RequestId;
+
+                approveBtn.Click += async (s, ev) =>
+                {
+                    approveBtn.IsEnabled = false;
+                    rejectBtn.IsEnabled = false;
+                    try
+                    {
+                        var client = _hub?.GatewayClient;
+                        if (client != null)
+                        {
+                            await client.DevicePairApproveAsync(capturedId);
+                            await client.RequestDevicePairListAsync();
+                        }
+                    }
+                    catch
+                    {
+                        approveBtn.IsEnabled = true;
+                        rejectBtn.IsEnabled = true;
+                    }
+                };
+                rejectBtn.Click += async (s, ev) =>
+                {
+                    approveBtn.IsEnabled = false;
+                    rejectBtn.IsEnabled = false;
+                    try
+                    {
+                        var client = _hub?.GatewayClient;
+                        if (client != null)
+                        {
+                            await client.DevicePairRejectAsync(capturedId);
+                            await client.RequestDevicePairListAsync();
+                        }
+                    }
+                    catch
+                    {
+                        approveBtn.IsEnabled = true;
+                        rejectBtn.IsEnabled = true;
+                    }
+                };
+
+                buttons.Children.Add(approveBtn);
+                buttons.Children.Add(rejectBtn);
+                Grid.SetColumn(buttons, 1);
+                grid.Children.Add(buttons);
+            }
+
+            card.Child = grid;
+            DevicePairingListPanel.Children.Add(card);
+        }
+    }
+
     private static string GetAuthErrorGuidance(string error)
     {
         if (error.Contains("token", StringComparison.OrdinalIgnoreCase))

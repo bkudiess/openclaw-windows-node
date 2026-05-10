@@ -17,6 +17,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
     private readonly IOpenClawLogger _logger;
     private readonly IDeviceIdentityStore? _identityStore;
     private readonly INodeConnector? _nodeConnector;
+    private readonly ISshTunnelManager? _tunnelManager;
     private readonly Func<bool>? _isNodeEnabled;
     private readonly SemaphoreSlim _transitionSemaphore = new(1, 1);
 
@@ -42,7 +43,8 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         IDeviceIdentityStore? identityStore = null,
         INodeConnector? nodeConnector = null,
         Func<bool>? isNodeEnabled = null,
-        ConnectionDiagnostics? diagnostics = null)
+        ConnectionDiagnostics? diagnostics = null,
+        ISshTunnelManager? tunnelManager = null)
     {
         _credentialResolver = credentialResolver ?? throw new ArgumentNullException(nameof(credentialResolver));
         _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
@@ -50,6 +52,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _identityStore = identityStore;
         _nodeConnector = nodeConnector;
+        _tunnelManager = tunnelManager;
         _isNodeEnabled = isNodeEnabled;
         _diagnostics = diagnostics ?? new ConnectionDiagnostics(clock: clock);
         _diagnostics.EventRecorded += (_, e) => DiagnosticEvent?.Invoke(this, e);
@@ -65,7 +68,9 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
 
     public GatewayConnectionSnapshot CurrentSnapshot => _stateMachine.Current;
     public string? ActiveGatewayUrl => _stateMachine.Current.GatewayUrl;
-    public OpenClawGatewayClient? OperatorClient => _activeLifecycle?.DataClient;
+    public IOperatorGatewayClient? OperatorClient => _activeLifecycle?.DataClient;
+    /// <summary>Internal access to the concrete client for auto-approve and other manager-internal operations.</summary>
+    internal OpenClawGatewayClient? ConcreteOperatorClient => _activeLifecycle?.DataClient;
     public ConnectionDiagnostics Diagnostics => _diagnostics;
 
     // ─── Lifecycle ───
@@ -140,10 +145,41 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
 
             // Create client via factory — use a diagnostic-tee logger so client handshake
             // logs appear in the Connection Status window timeline.
-            // When SSH tunnel is configured, connect to the local tunnel URL instead.
-            var connectUrl = record.SshTunnel != null
-                ? $"ws://localhost:{record.SshTunnel.LocalPort}"
-                : record.Url;
+            // When SSH tunnel is configured, start the tunnel and connect to the local URL.
+            var connectUrl = record.Url;
+            if (record.SshTunnel != null && _tunnelManager != null)
+            {
+                var tunnel = record.SshTunnel;
+                if (string.IsNullOrWhiteSpace(tunnel.User) || string.IsNullOrWhiteSpace(tunnel.Host) ||
+                    tunnel.RemotePort is < 1 or > 65535 || tunnel.LocalPort is < 1 or > 65535)
+                {
+                    _logger.Warn("[ConnMgr] SSH tunnel config is incomplete");
+                    _diagnostics.Record("tunnel", "SSH tunnel config is incomplete");
+                    var p = _stateMachine.Current.OverallState;
+                    _stateMachine.TryTransition(ConnectionTrigger.AuthenticationFailed, "SSH tunnel config is incomplete");
+                    EmitStateChanged(p);
+                    return;
+                }
+                try
+                {
+                    connectUrl = await _tunnelManager.StartAsync(tunnel, _operationCts!.Token);
+                    _diagnostics.Record("tunnel", $"SSH tunnel started → {connectUrl}");
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error($"[ConnMgr] SSH tunnel start failed: {ex.Message}");
+                    _diagnostics.Record("tunnel", "SSH tunnel start failed", ex.Message);
+                    var p = _stateMachine.Current.OverallState;
+                    _stateMachine.TryTransition(ConnectionTrigger.WebSocketError, $"SSH tunnel failed: {ex.Message}");
+                    EmitStateChanged(p);
+                    return;
+                }
+            }
+            else if (record.SshTunnel != null)
+            {
+                // Tunnel config present but no tunnel manager — use local URL directly
+                connectUrl = $"ws://localhost:{record.SshTunnel.LocalPort}";
+            }
             var diagLogger = new DiagnosticTeeLogger(_logger, _diagnostics);
             var lifecycle = _clientFactory.Create(connectUrl, credential, perGatewayIdentityDir, diagLogger);
             _activeLifecycle = lifecycle;
@@ -217,6 +253,12 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         {
             var prev = _stateMachine.Current.OverallState;
             DisposeActiveClient();
+            // Stop SSH tunnel when disconnecting
+            if (_tunnelManager?.IsActive == true)
+            {
+                try { await _tunnelManager.StopAsync(); }
+                catch (Exception ex) { _logger.Warn($"[ConnMgr] Tunnel stop error: {ex.Message}"); }
+            }
             _stateMachine.TryTransition(ConnectionTrigger.DisconnectRequested);
             _diagnostics.RecordStateChange(prev, _stateMachine.Current.OverallState);
             EmitStateChanged(prev);
