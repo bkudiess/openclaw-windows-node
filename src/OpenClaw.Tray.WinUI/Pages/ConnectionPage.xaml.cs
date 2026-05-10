@@ -51,43 +51,54 @@ public sealed partial class ConnectionPage : Page
         LoadRecentGateways();
     }
 
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush s_greenBrush = new(Microsoft.UI.ColorHelper.FromArgb(255, 76, 175, 80));
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush s_amberBrush = new(Microsoft.UI.ColorHelper.FromArgb(255, 255, 193, 7));
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush s_redBrush = new(Microsoft.UI.ColorHelper.FromArgb(255, 211, 47, 47));
+    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush s_dimBrush = new(Microsoft.UI.ColorHelper.FromArgb(40, 255, 255, 255));
+
+    private GatewayConnectionSnapshot? _lastSnapshot;
+
     private void OnManagerStateChanged(object? sender, GatewayConnectionSnapshot snapshot)
     {
         DispatcherQueue?.TryEnqueue(() =>
         {
-            var status = snapshot.OverallState switch
-            {
-                OverallConnectionState.Connected or OverallConnectionState.Ready or OverallConnectionState.Degraded
-                    => ConnectionStatus.Connected,
-                OverallConnectionState.Connecting => ConnectionStatus.Connecting,
-                OverallConnectionState.PairingRequired => ConnectionStatus.Connecting,
-                OverallConnectionState.Error => ConnectionStatus.Error,
-                _ => ConnectionStatus.Disconnected
-            };
-            UpdateStatus(status);
+            _lastSnapshot = snapshot;
+            UpdateFromSnapshot(snapshot);
             LoadRecentGateways();
         });
     }
 
     public void UpdateStatus(ConnectionStatus status)
     {
-        var (color, text) = status switch
+        // Legacy bridge — convert to snapshot-based update
+        var snapshot = _connectionManager?.CurrentSnapshot ?? GatewayConnectionSnapshot.Idle;
+        UpdateFromSnapshot(snapshot);
+    }
+
+    private void UpdateFromSnapshot(GatewayConnectionSnapshot snapshot)
+    {
+        // Overall status
+        var (color, text) = snapshot.OverallState switch
         {
-            ConnectionStatus.Connected => (Microsoft.UI.Colors.LimeGreen, "Connected"),
-            ConnectionStatus.Connecting => (Microsoft.UI.Colors.Orange, "Connecting…"),
-            ConnectionStatus.Error => (Microsoft.UI.Colors.Red, "Error"),
+            OverallConnectionState.Connected or OverallConnectionState.Ready => (Microsoft.UI.Colors.LimeGreen, "Connected"),
+            OverallConnectionState.Degraded => (Microsoft.UI.Colors.Orange, "Degraded"),
+            OverallConnectionState.Connecting => (Microsoft.UI.Colors.Orange, "Connecting…"),
+            OverallConnectionState.PairingRequired => (Microsoft.UI.Colors.Orange, "Awaiting Approval"),
+            OverallConnectionState.Error => (Microsoft.UI.Colors.Red, "Error"),
             _ => (Microsoft.UI.Colors.Gray, "Disconnected")
         };
 
         StatusDot.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
         StatusText.Text = text;
 
-        var isConnected = status == ConnectionStatus.Connected;
-        ReconnectButton.IsEnabled = status != ConnectionStatus.Connecting;
+        var isConnected = snapshot.OverallState is OverallConnectionState.Connected or OverallConnectionState.Ready or OverallConnectionState.Degraded;
+        var isPairing = snapshot.OverallState == OverallConnectionState.PairingRequired;
+        var isConnecting = snapshot.OverallState == OverallConnectionState.Connecting;
+        ReconnectButton.IsEnabled = !isConnecting && !isPairing;
         ReconnectButton.Visibility = isConnected ? Visibility.Collapsed : Visibility.Visible;
         DisconnectButton.Visibility = isConnected ? Visibility.Visible : Visibility.Collapsed;
 
-        if (status == ConnectionStatus.Connecting)
+        if (isConnecting)
         {
             _connectionAttempts++;
             ConnectionAttemptsText.Text = $"Connection attempt {_connectionAttempts}…";
@@ -95,15 +106,14 @@ public sealed partial class ConnectionPage : Page
         }
         else
         {
-            if (isConnected) _connectionAttempts = 0;
+            if (isConnected || isPairing) _connectionAttempts = 0;
             ConnectionAttemptsText.Visibility = Visibility.Collapsed;
         }
 
         // Gateway details
         var self = _hub?.LastGatewaySelf;
         var effectiveUrl = _hub?.Settings?.GetEffectiveGatewayUrl() ?? "";
-
-        if (self != null && status == ConnectionStatus.Connected)
+        if (self != null && isConnected)
         {
             var parts = new List<string>();
             if (!string.IsNullOrWhiteSpace(self.ServerVersion))
@@ -112,42 +122,20 @@ public sealed partial class ConnectionPage : Page
             if (self.PresenceCount is > 0)
                 parts.Add($"{self.PresenceCount} clients");
             GatewayDetailText.Text = string.Join(" · ", parts);
-
             var authLabel = string.IsNullOrWhiteSpace(self.AuthMode) ? "" : $" · {self.AuthMode} auth";
             GatewayUrlDetail.Text = $"{SanitizeUrl(effectiveUrl)}{authLabel}";
         }
         else
         {
             GatewayDetailText.Text = "";
-            GatewayUrlDetail.Text = !string.IsNullOrEmpty(effectiveUrl)
-                ? SanitizeUrl(effectiveUrl) : "";
+            GatewayUrlDetail.Text = !string.IsNullOrEmpty(effectiveUrl) ? SanitizeUrl(effectiveUrl) : "";
         }
 
-        // Operator status
-        OperatorStatusText.Text = status switch
-        {
-            ConnectionStatus.Connected => "Operator: ✓ Connected",
-            ConnectionStatus.Connecting => "Operator: ⏳ Connecting",
-            ConnectionStatus.Error => "Operator: ✗ Error",
-            _ => "Operator: — Disconnected"
-        };
+        // State machine pills
+        UpdateStatePills(snapshot);
 
-        // Node status
-        if (_hub != null && _hub.Settings?.EnableNodeMode == true)
-        {
-            if (_hub.NodeIsPaired)
-                NodeStatusText.Text = "Node: ✓ Paired";
-            else if (_hub.NodeIsPendingApproval)
-                NodeStatusText.Text = "Node: ⏳ Pending approval";
-            else if (_hub.NodeIsConnected)
-                NodeStatusText.Text = "Node: ✓ Connected";
-            else
-                NodeStatusText.Text = "Node: — Disconnected";
-        }
-        else
-        {
-            NodeStatusText.Text = "Node: — Disabled";
-        }
+        // Pairing guidance
+        UpdatePairingGuidance(snapshot);
 
         UpdateDeviceIdentity();
         LoadConnectionLog();
@@ -163,6 +151,108 @@ public sealed partial class ConnectionPage : Page
         {
             AuthErrorBar.IsOpen = false;
         }
+    }
+
+    private void UpdateStatePills(GatewayConnectionSnapshot snapshot)
+    {
+        // Operator pills
+        HighlightPill(CpOpOff, snapshot.OperatorState is RoleConnectionState.Idle or RoleConnectionState.Disabled, s_dimBrush);
+        HighlightPill(CpOpConnecting, snapshot.OperatorState == RoleConnectionState.Connecting, s_amberBrush);
+        HighlightPill(CpOpConnected, snapshot.OperatorState == RoleConnectionState.Connected, s_greenBrush);
+        HighlightPill(CpOpPairing, snapshot.OperatorState is RoleConnectionState.PairingRequired or RoleConnectionState.PairingRejected, s_amberBrush);
+        HighlightPill(CpOpError, snapshot.OperatorState is RoleConnectionState.Error or RoleConnectionState.RateLimited, s_redBrush);
+
+        CpOpDetailText.Text = snapshot.OperatorState switch
+        {
+            RoleConnectionState.PairingRequired => "Awaiting approval from gateway",
+            RoleConnectionState.PairingRejected => "Pairing rejected",
+            RoleConnectionState.Error => snapshot.OperatorError ?? "Error",
+            RoleConnectionState.Connected => $"device={snapshot.OperatorDeviceId ?? "—"}",
+            _ => ""
+        };
+
+        // Node pills
+        HighlightPill(CpNodeOff, snapshot.NodeState is RoleConnectionState.Idle or RoleConnectionState.Disabled, s_dimBrush);
+        HighlightPill(CpNodeConnecting, snapshot.NodeState == RoleConnectionState.Connecting, s_amberBrush);
+        HighlightPill(CpNodeConnected, snapshot.NodeState == RoleConnectionState.Connected, s_greenBrush);
+        HighlightPill(CpNodePairing, snapshot.NodeState is RoleConnectionState.PairingRequired or RoleConnectionState.PairingRejected, s_amberBrush);
+        HighlightPill(CpNodeError, snapshot.NodeState is RoleConnectionState.Error or RoleConnectionState.RateLimited, s_redBrush);
+
+        CpNodeDetailText.Text = snapshot.NodeState switch
+        {
+            RoleConnectionState.PairingRequired => "Awaiting approval from gateway",
+            RoleConnectionState.PairingRejected => "Pairing rejected",
+            RoleConnectionState.Error => snapshot.NodeError ?? "Error",
+            RoleConnectionState.Disabled => "disabled",
+            RoleConnectionState.Connected => $"device={snapshot.NodeDeviceId ?? "—"}",
+            _ => ""
+        };
+    }
+
+    private static void HighlightPill(Border pill, bool active, Microsoft.UI.Xaml.Media.SolidColorBrush activeBrush)
+    {
+        pill.Background = active ? activeBrush : s_dimBrush;
+        pill.Opacity = active ? 1.0 : 0.5;
+    }
+
+    private void UpdatePairingGuidance(GatewayConnectionSnapshot snapshot)
+    {
+        // Get device ID from snapshot or from the identity file
+        var deviceId = snapshot.OperatorDeviceId ?? snapshot.NodeDeviceId;
+        if (string.IsNullOrEmpty(deviceId))
+        {
+            // Try reading from identity file
+            try
+            {
+                var activeGw = _gatewayRegistry?.GetActive();
+                if (activeGw != null && _gatewayRegistry != null)
+                {
+                    var idDir = _gatewayRegistry.GetIdentityDirectory(activeGw.Id);
+                    var keyPath = System.IO.Path.Combine(idDir, "device-key-ed25519.json");
+                    if (System.IO.File.Exists(keyPath))
+                    {
+                        var json = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(keyPath));
+                        if (json.RootElement.TryGetProperty("DeviceId", out var did))
+                            deviceId = did.GetString();
+                    }
+                }
+            }
+            catch { }
+        }
+
+        if (snapshot.OperatorState == RoleConnectionState.PairingRequired)
+        {
+            PairingGuidanceCard.Visibility = Visibility.Visible;
+            PairingGuidanceText.Text = "🔐 Operator: Awaiting approval from gateway";
+            PairingApproveCommandText.Text = !string.IsNullOrEmpty(deviceId)
+                ? $"openclaw devices approve {deviceId}"
+                : "openclaw devices approve <deviceId>";
+        }
+        else if (snapshot.NodeState == RoleConnectionState.PairingRequired)
+        {
+            PairingGuidanceCard.Visibility = Visibility.Visible;
+            PairingGuidanceText.Text = "🔐 Node: Awaiting approval from gateway";
+            PairingApproveCommandText.Text = !string.IsNullOrEmpty(deviceId)
+                ? $"openclaw devices approve {deviceId}"
+                : "openclaw devices approve <deviceId>";
+        }
+        else
+        {
+            PairingGuidanceCard.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void OnCopyApproveCommand(object sender, RoutedEventArgs e)
+    {
+        var dp = new DataPackage();
+        dp.SetText(PairingApproveCommandText.Text);
+        Clipboard.SetContent(dp);
+    }
+
+    private void OnReconnectAfterApproval(object sender, RoutedEventArgs e)
+    {
+        _connectionAttempts = 0;
+        _ = _connectionManager?.ReconnectAsync();
     }
 
     private static string GetAuthErrorGuidance(string error)

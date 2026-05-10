@@ -49,15 +49,76 @@
                                Style="{StaticResource CaptionTextBlockStyle}"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                TextWrapping="Wrap"/>
-                    <!-- Row 4: Dual client status -->
-                    <StackPanel Orientation="Horizontal" Spacing="16">
-                        <TextBlock x:Uid="OperatorStatusText" x:Name="OperatorStatusText" Text="Operator: —"
-                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                        <TextBlock x:Uid="NodeStatusText" x:Name="NodeStatusText" Text="Node: —"
-                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                    </StackPanel>
+                    <!-- Row 4: State Machine Pills -->
+                    <Grid Margin="0,4,0,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Operator flow -->
+                        <StackPanel Grid.Row="0" Margin="0,0,0,4">
+                            <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,0,2">
+                                <TextBlock Text="OPERATOR" FontSize="9" FontWeight="Bold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" CharacterSpacing="80" VerticalAlignment="Center" Width="70"/>
+                                <Border x:Name="CpOpOff" CornerRadius="3" Padding="6,2"><TextBlock Text="Off" FontSize="10"/></Border>
+                                <TextBlock Text="→" VerticalAlignment="Center" FontSize="9" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                <Border x:Name="CpOpConnecting" CornerRadius="3" Padding="6,2"><TextBlock Text="Connecting" FontSize="10"/></Border>
+                                <TextBlock Text="→" VerticalAlignment="Center" FontSize="9" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                <Border x:Name="CpOpConnected" CornerRadius="3" Padding="6,2"><TextBlock Text="Connected" FontSize="10"/></Border>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="4" Margin="74,0,0,0">
+                                <Border x:Name="CpOpPairing" CornerRadius="3" Padding="6,2"><TextBlock Text="Pairing" FontSize="10"/></Border>
+                                <Border x:Name="CpOpError" CornerRadius="3" Padding="6,2"><TextBlock Text="Error" FontSize="10"/></Border>
+                            </StackPanel>
+                            <TextBlock x:Name="CpOpDetailText" FontSize="9" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="74,2,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <!-- Node flow -->
+                        <StackPanel Grid.Row="1">
+                            <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,0,2">
+                                <TextBlock Text="NODE" FontSize="9" FontWeight="Bold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" CharacterSpacing="80" VerticalAlignment="Center" Width="70"/>
+                                <Border x:Name="CpNodeOff" CornerRadius="3" Padding="6,2"><TextBlock Text="Off" FontSize="10"/></Border>
+                                <TextBlock Text="→" VerticalAlignment="Center" FontSize="9" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                <Border x:Name="CpNodeConnecting" CornerRadius="3" Padding="6,2"><TextBlock Text="Connecting" FontSize="10"/></Border>
+                                <TextBlock Text="→" VerticalAlignment="Center" FontSize="9" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                <Border x:Name="CpNodeConnected" CornerRadius="3" Padding="6,2"><TextBlock Text="Connected" FontSize="10"/></Border>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="4" Margin="74,0,0,0">
+                                <Border x:Name="CpNodePairing" CornerRadius="3" Padding="6,2"><TextBlock Text="Pairing" FontSize="10"/></Border>
+                                <Border x:Name="CpNodeError" CornerRadius="3" Padding="6,2"><TextBlock Text="Error" FontSize="10"/></Border>
+                            </StackPanel>
+                            <TextBlock x:Name="CpNodeDetailText" FontSize="9" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="74,2,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Row 5: Pairing guidance (shown when awaiting approval) -->
+                    <Border x:Name="PairingGuidanceCard" Visibility="Collapsed"
+                            Background="{ThemeResource SystemFillColorCautionBackgroundBrush}"
+                            CornerRadius="6" Padding="12" Margin="0,4,0,0">
+                        <StackPanel Spacing="6">
+                            <TextBlock x:Name="PairingGuidanceText" TextWrapping="Wrap"
+                                       FontSize="12" FontWeight="SemiBold"/>
+                            <TextBlock Text="Run this command on the gateway host to approve:"
+                                       Style="{StaticResource CaptionTextBlockStyle}" Opacity="0.8"/>
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="PairingApproveCommandText" Grid.Column="0"
+                                           IsTextSelectionEnabled="True" FontFamily="Consolas" FontSize="12"
+                                           TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                <Button x:Name="CopyApproveCommandButton" Grid.Column="1" Content="Copy"
+                                        Click="OnCopyApproveCommand" VerticalAlignment="Center"/>
+                            </Grid>
+                            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                                <Button x:Name="ReconnectAfterApprovalButton" Content="Connect (once approved)"
+                                        Style="{ThemeResource AccentButtonStyle}"
+                                        Click="OnReconnectAfterApproval"/>
+                                <Button Content="Disconnect" Click="OnDisconnect"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
                     <!-- Row 5: Connection attempts (shown when connecting) -->
                     <TextBlock x:Name="ConnectionAttemptsText"
                                Style="{StaticResource CaptionTextBlockStyle}"
