@@ -2975,13 +2975,26 @@ public static class LocalGatewaySetupEngineFactory
             GatewayUrl = settings.GetEffectiveGatewayUrl(),
             DistroName = ResolveDistroName(runtime, distroName),
             InstanceInstallLocation = string.IsNullOrWhiteSpace(instanceInstallLocation) ? runtime.InstanceInstallLocation : instanceInstallLocation,
-            AllowExistingDistro = allowExistingDistro || runtime.AllowExistingDistro,
+            AllowExistingDistro = allowExistingDistro || runtime.AllowExistingDistro || replaceExistingConfigurationConfirmed,
 #if OPENCLAW_TRAY_TESTS
             EnableWindowsTrayNodeByDefault = settings.EnableNodeMode
 #else
             EnableWindowsTrayNodeByDefault = settings.EnableNodeMode || nodeService != null
 #endif
         };
+
+        // When replacing existing configuration, clear persisted setup state
+        // so the engine starts from scratch instead of replaying a completed run.
+        var resolvedStatePath = setupStatePath ?? Path.Combine(
+            Environment.GetEnvironmentVariable("OPENCLAW_TRAY_LOCALAPPDATA_DIR")
+                ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "OpenClawTray",
+            "setup-state.json");
+        if (replaceExistingConfigurationConfirmed && File.Exists(resolvedStatePath))
+        {
+            try { File.Delete(resolvedStatePath); }
+            catch { /* best-effort — engine will overwrite on first save */ }
+        }
 
         var wsl = new WslExeCommandRunner(logger, TimeSpan.FromMinutes(30));
         var settingsAdapter = new SettingsManagerLocalGatewaySetupSettings(settings, gatewayRegistry);
