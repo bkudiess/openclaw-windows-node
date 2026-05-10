@@ -35,6 +35,11 @@ public class SettingsManager
     public string SshTunnelHost { get; set; } = "";
     public int SshTunnelRemotePort { get; set; } = 18789;
     public int SshTunnelLocalPort { get; set; } = 18789;
+    public string? LegacyToken { get; private set; }
+    public string? LegacyBootstrapToken { get; private set; }
+    public bool HasLegacyGatewayCredentials =>
+        !string.IsNullOrWhiteSpace(LegacyToken) ||
+        !string.IsNullOrWhiteSpace(LegacyBootstrapToken);
 
     // Startup
     public bool AutoStart { get; set; } = true;
@@ -132,11 +137,15 @@ public class SettingsManager
 
     public void Load()
     {
+        LegacyToken = null;
+        LegacyBootstrapToken = null;
+
         try
         {
             if (File.Exists(_settingsFilePath))
             {
                 var json = File.ReadAllText(_settingsFilePath);
+                LoadLegacyGatewayCredentials(json);
                 var loaded = SettingsData.FromJson(json);
                 if (loaded != null)
                 {
@@ -208,7 +217,34 @@ public class SettingsManager
         catch (Exception ex)
         {
             Logger.Warn($"Failed to load settings: {ex.Message}");
+            LegacyToken = null;
+            LegacyBootstrapToken = null;
         }
+    }
+
+    private void LoadLegacyGatewayCredentials(string json)
+    {
+        LegacyToken = null;
+        LegacyBootstrapToken = null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            LegacyToken = ReadLegacyString(document.RootElement, "Token");
+            LegacyBootstrapToken = ReadLegacyString(document.RootElement, "BootstrapToken");
+        }
+        catch (JsonException)
+        {
+            // SettingsData.FromJson handles invalid settings by falling back to defaults.
+        }
+    }
+
+    private static string? ReadLegacyString(JsonElement root, string propertyName)
+    {
+        return root.TryGetProperty(propertyName, out var property) &&
+            property.ValueKind == JsonValueKind.String
+                ? property.GetString()
+                : null;
     }
 
     /// <summary>

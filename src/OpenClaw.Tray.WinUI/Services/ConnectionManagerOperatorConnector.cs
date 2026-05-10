@@ -60,19 +60,6 @@ public sealed class ConnectionManagerOperatorConnector : IGatewayOperatorConnect
         if (current is not RoleConnectionState.Idle)
             await _manager.DisconnectAsync();
 
-        await _manager.ConnectAsync(recordId);
-
-        // Check if already in the target state (fast path — no subscription needed)
-        var snap = _manager.CurrentSnapshot;
-        if (snap.OperatorState == RoleConnectionState.Connected)
-            return new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.Connected);
-        if (snap.OperatorState == RoleConnectionState.PairingRequired)
-            return new GatewayOperatorConnectionResult(
-                GatewayOperatorConnectionStatus.PairingRequired,
-                "Gateway requires pairing approval.",
-                snap.OperatorPairingRequestId);
-
-        // Subscribe only when we actually need to wait for a state transition
         var tcs = new TaskCompletionSource<GatewayOperatorConnectionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         void OnStateChanged(object? sender, GatewayConnectionSnapshot s)
@@ -108,6 +95,10 @@ public sealed class ConnectionManagerOperatorConnector : IGatewayOperatorConnect
         _manager.StateChanged += OnStateChanged;
         try
         {
+            await _manager.ConnectAsync(recordId);
+            if (!tcs.Task.IsCompleted)
+                OnStateChanged(this, _manager.CurrentSnapshot);
+
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(_timeout);
 
@@ -133,15 +124,6 @@ public sealed class ConnectionManagerOperatorConnector : IGatewayOperatorConnect
     {
         _logger.Info("[SetupConnector] Reconnecting with stored device token via manager");
 
-        // Reconnect — the credential resolver will pick up the stored device token
-        await _manager.ReconnectAsync();
-
-        // Fast path — no subscription needed
-        var snap = _manager.CurrentSnapshot;
-        if (snap.OperatorState == RoleConnectionState.Connected)
-            return new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.Connected);
-
-        // Subscribe only when we actually need to wait for a state transition
         var tcs = new TaskCompletionSource<GatewayOperatorConnectionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         void OnStateChanged(object? sender, GatewayConnectionSnapshot s)
@@ -162,6 +144,11 @@ public sealed class ConnectionManagerOperatorConnector : IGatewayOperatorConnect
         _manager.StateChanged += OnStateChanged;
         try
         {
+            // Reconnect — the credential resolver will pick up the stored device token
+            await _manager.ReconnectAsync();
+            if (!tcs.Task.IsCompleted)
+                OnStateChanged(this, _manager.CurrentSnapshot);
+
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(_timeout);
 

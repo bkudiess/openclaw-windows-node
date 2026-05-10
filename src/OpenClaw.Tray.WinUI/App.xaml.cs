@@ -1711,6 +1711,14 @@ public partial class App : Application
             return;
         }
 
+        TryMigrateLegacyGatewaySettings(gatewayUrl, new AppLogger());
+        activeRecord = _gatewayRegistry.GetActive();
+        if (activeRecord != null)
+        {
+            _ = _connectionManager.ConnectAsync(activeRecord.Id);
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(gatewayUrl))
         {
             Logger.Info("Gateway URL not configured — skipping client initialization");
@@ -1775,6 +1783,37 @@ public partial class App : Application
         // Delegate to connection manager — it creates the client, fires OperatorClientChanged,
         // and our handler re-wires the 27 event subscriptions
         _ = _connectionManager.ConnectAsync(migratedRecord.Id);
+    }
+
+    private void TryMigrateLegacyGatewaySettings(string gatewayUrl, IOpenClawLogger logger)
+    {
+        if (_settings == null || _gatewayRegistry == null || string.IsNullOrWhiteSpace(gatewayUrl))
+        {
+            return;
+        }
+
+        var legacyIdentityPath = Path.Combine(SettingsManager.SettingsDirectoryPath, "device-key-ed25519.json");
+        if (!_settings.HasLegacyGatewayCredentials && !File.Exists(legacyIdentityPath))
+        {
+            return;
+        }
+
+        var migrated = _gatewayRegistry.MigrateFromSettings(
+            gatewayUrl,
+            _settings.LegacyToken,
+            _settings.LegacyBootstrapToken,
+            _settings.UseSshTunnel,
+            _settings.SshTunnelUser,
+            _settings.SshTunnelHost,
+            _settings.SshTunnelRemotePort,
+            _settings.SshTunnelLocalPort,
+            SettingsManager.SettingsDirectoryPath,
+            logger);
+
+        if (migrated)
+        {
+            Logger.Info("[GatewayRegistry] Migrated legacy gateway settings into registry");
+        }
     }
 
     /// <summary>
