@@ -177,23 +177,25 @@
                 </StackPanel>
             </Border>
 
-            <!-- ═══ Section 4: Advanced Connection Settings ═══ -->
-            <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsExpanded="False">
-                <Expander.Header>
-                    <TextBlock x:Uid="ConnectionPage_TextBlock_152" Text="Advanced Connection Settings" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                </Expander.Header>
-                <StackPanel Spacing="12" Padding="4">
-                    <TextBox x:Uid="GatewayUrlTextBox" x:Name="GatewayUrlTextBox" Header="Gateway URL"
-                             PlaceholderText="ws://localhost:18789 or https://host.tailnet.ts.net"/>
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <TextBox x:Uid="TokenTextBox" x:Name="TokenTextBox" Header="Token"
-                                 PlaceholderText="Your API token" Width="350"/>
-                        <Button x:Uid="TestButton" x:Name="TestButton" Content="Test" VerticalAlignment="Bottom"
-                                Click="OnTestConnection"/>
-                    </StackPanel>
-                    <TextBlock x:Name="TestResultText"
+            <!-- ═══ Section 4: Direct Connect ═══ -->
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="🔗 Direct Connect" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                    <TextBlock Text="Connect with a gateway URL and shared token (admin scope, no pairing required for node)."
                                Style="{StaticResource CaptionTextBlockStyle}"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    <TextBox x:Name="GatewayUrlTextBox" Header="Gateway URL"
+                             PlaceholderText="ws://localhost:18790" Text="ws://localhost:18790"/>
+                    <TextBox x:Name="TokenTextBox" Header="Token"
+                             PlaceholderText="Shared gateway token"/>
+                    <TextBlock x:Name="DirectConnectResultText"
+                               Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                        <Button Content="Connect" Style="{ThemeResource AccentButtonStyle}" Click="OnDirectConnect"/>
+                    </StackPanel>
 
                     <!-- SSH Tunnel -->
                     <ToggleSwitch x:Uid="SshToggle" x:Name="SshToggle" Header="SSH Tunnel"
@@ -216,12 +218,8 @@
                             <TextBox x:Uid="SshLocalPortBox" x:Name="SshLocalPortBox" Grid.Column="1" Header="Local Port" PlaceholderText="18789"/>
                         </Grid>
                     </StackPanel>
-
-                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
-                        <Button x:Uid="ConnectionPage_Button_190" Content="Save" Style="{ThemeResource AccentButtonStyle}" Click="OnSave"/>
-                    </StackPanel>
                 </StackPanel>
-            </Expander>
+            </Border>
 
             <!-- ═══ Section 5: Device Identity ═══ -->
             <Border x:Name="DeviceIdentityCard" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"

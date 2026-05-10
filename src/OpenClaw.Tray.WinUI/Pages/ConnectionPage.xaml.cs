@@ -363,46 +363,83 @@ public sealed partial class ConnectionPage : Page
         SshDetailsPanel.Visibility = SshToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private async void OnTestConnection(object sender, RoutedEventArgs e)
+    private async void OnDirectConnect(object sender, RoutedEventArgs e)
     {
-        TestResultText.Text = "Testing…";
-        TestButton.IsEnabled = false;
+        if (_connectionManager == null || _gatewayRegistry == null) return;
+
+        var url = GatewayUrlTextBox.Text?.Trim();
+        var token = TokenTextBox.Text?.Trim();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            DirectConnectResultText.Text = "Enter a gateway URL";
+            return;
+        }
+
+        url = GatewayUrlHelper.NormalizeForWebSocket(url);
+        DirectConnectResultText.Text = "Connecting…";
+
         try
         {
-            if (_hub?.GatewayClient != null)
+            await _connectionManager.DisconnectAsync();
+
+            // Create/update gateway record with shared token
+            var existing = _gatewayRegistry.FindByUrl(url);
+            var recordId = existing?.Id ?? Guid.NewGuid().ToString();
+            var record = new GatewayRecord
             {
-                await _hub.GatewayClient.CheckHealthAsync();
-                TestResultText.Text = "✓ Connection successful";
-            }
-            else
+                Id = recordId,
+                Url = url,
+                SharedGatewayToken = string.IsNullOrWhiteSpace(token) ? null : token,
+                BootstrapToken = null,
+            };
+            _gatewayRegistry.AddOrUpdate(record);
+            _gatewayRegistry.SetActive(recordId);
+            _gatewayRegistry.Save();
+
+            // Clear stored device tokens so the shared token is used
+            var identityDir = _gatewayRegistry.GetIdentityDirectory(recordId);
+            var keyPath = System.IO.Path.Combine(identityDir, "device-key-ed25519.json");
+            if (System.IO.File.Exists(keyPath))
             {
-                TestResultText.Text = "Not connected — save settings and reconnect";
+                try
+                {
+                    var json = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(keyPath));
+                    using var ms = new System.IO.MemoryStream();
+                    using var writer = new System.Text.Json.Utf8JsonWriter(ms, new System.Text.Json.JsonWriterOptions { Indented = true });
+                    writer.WriteStartObject();
+                    foreach (var prop in json.RootElement.EnumerateObject())
+                    {
+                        if (prop.Name is "DeviceToken" or "DeviceTokenScopes" or "NodeDeviceToken" or "NodeDeviceTokenScopes")
+                            continue;
+                        prop.WriteTo(writer);
+                    }
+                    writer.WriteEndObject();
+                    writer.Flush();
+                    System.IO.File.WriteAllBytes(keyPath, ms.ToArray());
+                }
+                catch { }
             }
+
+            // Save SSH settings if configured
+            var settings = _hub?.Settings;
+            if (settings != null)
+            {
+                settings.GatewayUrl = url;
+                settings.UseSshTunnel = SshToggle.IsOn;
+                settings.SshTunnelUser = SshUserBox.Text.Trim();
+                settings.SshTunnelHost = SshHostBox.Text.Trim();
+                if (int.TryParse(SshRemotePortBox.Text, out var rp)) settings.SshTunnelRemotePort = rp;
+                if (int.TryParse(SshLocalPortBox.Text, out var lp)) settings.SshTunnelLocalPort = lp;
+                settings.Save();
+            }
+
+            await _connectionManager.ConnectAsync(recordId);
+            DirectConnectResultText.Text = $"✓ Connected to {GatewayUrlHelper.SanitizeForDisplay(url)}";
         }
         catch (Exception ex)
         {
-            TestResultText.Text = $"✗ {ex.Message}";
+            DirectConnectResultText.Text = $"✗ {ex.Message}";
         }
-        finally
-        {
-            TestButton.IsEnabled = true;
-        }
-    }
-
-    private void OnSave(object sender, RoutedEventArgs e)
-    {
-        var settings = _hub?.Settings;
-        if (settings == null) return;
-
-        settings.GatewayUrl = GatewayUrlTextBox.Text.Trim();
-        settings.UseSshTunnel = SshToggle.IsOn;
-        settings.SshTunnelUser = SshUserBox.Text.Trim();
-        settings.SshTunnelHost = SshHostBox.Text.Trim();
-        if (int.TryParse(SshRemotePortBox.Text, out var rp)) settings.SshTunnelRemotePort = rp;
-        if (int.TryParse(SshLocalPortBox.Text, out var lp)) settings.SshTunnelLocalPort = lp;
-
-        settings.Save();
-        _hub?.RaiseSettingsSaved();
     }
 
     private async void OnApplySetupCode(object sender, RoutedEventArgs e)
