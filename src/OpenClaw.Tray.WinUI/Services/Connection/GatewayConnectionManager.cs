@@ -27,8 +27,6 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
     private string? _activeGatewayRecordId; // gateway record ID for node credential resolution
     private bool _disposed;
     private bool _gatewayNeedsV2Signature; // remembered across reconnects
-    private volatile bool _nodePairingPending; // suppress disconnect events during node pairing
-    private volatile bool _operatorPairingPending; // suppress disconnect events during operator pairing
 
     public event EventHandler<GatewayConnectionSnapshot>? StateChanged;
     public event EventHandler<ConnectionDiagnosticEvent>? DiagnosticEvent;
@@ -299,8 +297,9 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
 
     private async Task HandleOperatorStatusChangedAsync(ConnectionStatus status, long gen)
     {
-        // Suppress disconnect/error when pairing is pending
-        if (_operatorPairingPending && status is ConnectionStatus.Disconnected or ConnectionStatus.Error)
+        // Check client's pairing status directly — set synchronously before this handler runs
+        var isPairingPending = _activeLifecycle?.DataClient?.IsPairingRequired == true;
+        if (isPairingPending && status is ConnectionStatus.Disconnected or ConnectionStatus.Error)
             return;
 
         await _transitionSemaphore.WaitAsync();
@@ -312,7 +311,6 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             switch (status)
             {
                 case ConnectionStatus.Connected:
-                    _operatorPairingPending = false;
                     _diagnostics.RecordWebSocketEvent("WebSocket connected");
                     _stateMachine.TryTransition(ConnectionTrigger.WebSocketConnected);
                     break;
@@ -426,7 +424,6 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
 
     private async Task HandlePairingRequiredAsync(string? requestId, long gen)
     {
-        _operatorPairingPending = true;
         await _transitionSemaphore.WaitAsync();
         try
         {
@@ -488,9 +485,11 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
     {
         _diagnostics.Record("node", $"Node status: {status}");
 
-        // Suppress disconnect/error events when pairing is pending — the gateway
-        // closes the socket after PAIRING_REQUIRED but we want to keep Pairing state
-        if (_nodePairingPending && status is ConnectionStatus.Disconnected or ConnectionStatus.Error)
+        // Check connector's pairing status directly — it's set synchronously
+        // before this handler runs, so it's always up-to-date
+        var isPairingPending = _nodeConnector?.PairingStatus == PairingStatus.Pending;
+
+        if (isPairingPending && status is ConnectionStatus.Disconnected or ConnectionStatus.Error)
             return;
 
         await _transitionSemaphore.WaitAsync();
@@ -500,7 +499,6 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             switch (status)
             {
                 case ConnectionStatus.Connected:
-                    _nodePairingPending = false;
                     _stateMachine.TryTransition(ConnectionTrigger.NodeConnected);
                     break;
                 case ConnectionStatus.Disconnected:
@@ -533,10 +531,6 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
 
     private async void OnNodePairingStatusChanged(object? sender, PairingStatusEventArgs e)
     {
-        // Set flag BEFORE acquiring semaphore — prevents race with OnNodeStatusChanged
-        if (e.Status == PairingStatus.Pending)
-            _nodePairingPending = true;
-
         _diagnostics.Record("node", $"Node pairing: {e.Status}");
 
         await _transitionSemaphore.WaitAsync();
