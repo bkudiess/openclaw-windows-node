@@ -52,6 +52,7 @@ public partial class App : Application
     /// <summary>The persistent gateway client. Used by the onboarding wizard for RPC calls.</summary>
     public OpenClawGatewayClient? GatewayClient => _gatewayClient;
     public GatewayRegistry? Registry => _gatewayRegistry;
+    public GatewayConnectionManager? ConnectionManager => _connectionManager;
     internal SettingsManager Settings => _settings ?? throw new InvalidOperationException("Settings are not initialized.");
 
     /// <summary>
@@ -75,7 +76,8 @@ public partial class App : Application
             settings,
             new AppLogger(),
             nodeService,
-            replaceExistingConfigurationConfirmed: replaceExistingConfigurationConfirmed);
+            replaceExistingConfigurationConfirmed: replaceExistingConfigurationConfirmed,
+            gatewayRegistry: _gatewayRegistry);
         // Bug #2: cache so OnPairingStatusChanged can read engine.IsAutoPairingWindowsNode
         // and suppress the "copy pairing command" toast during the Phase 14 blip.
         _localSetupEngine = engine;

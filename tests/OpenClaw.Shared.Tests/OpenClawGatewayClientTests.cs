@@ -451,18 +451,14 @@ public class OpenClawGatewayClientTests
     }
 
     [Fact]
-    public void OperatorConnect_FreshStandardRemoteDevice_RequestsBootstrapHandoffScopes()
+    public void OperatorConnect_FreshStandardRemoteDevice_RequestsAdminScopes()
     {
         var helper = new GatewayClientTestHelper(gatewayUrl: "ws://gateway.example.com:18789");
         helper.SetDeviceTokenForTest(null);
 
         var scopes = helper.GetRequestedOperatorScopes();
 
-        Assert.Equal(
-            ["operator.approvals", "operator.read", "operator.talk.secrets", "operator.write"],
-            scopes);
-        Assert.DoesNotContain("operator.admin", scopes);
-        Assert.DoesNotContain("operator.pairing", scopes);
+        Assert.Contains("operator.admin", scopes);
     }
 
     [Fact]

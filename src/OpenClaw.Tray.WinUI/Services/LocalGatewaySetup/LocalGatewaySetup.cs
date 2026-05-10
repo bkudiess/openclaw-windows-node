@@ -1310,10 +1310,12 @@ public interface ILocalGatewaySetupSettings
 public sealed class SettingsManagerLocalGatewaySetupSettings : ILocalGatewaySetupSettings
 {
     private readonly SettingsManager _settings;
+    private readonly OpenClawTray.Services.Connection.GatewayRegistry? _registry;
 
-    public SettingsManagerLocalGatewaySetupSettings(SettingsManager settings)
+    public SettingsManagerLocalGatewaySetupSettings(SettingsManager settings, OpenClawTray.Services.Connection.GatewayRegistry? registry = null)
     {
         _settings = settings;
+        _registry = registry;
     }
 
     public string GatewayUrl { get => _settings.GatewayUrl; set => _settings.GatewayUrl = value; }
@@ -1321,7 +1323,29 @@ public sealed class SettingsManagerLocalGatewaySetupSettings : ILocalGatewaySetu
     public string BootstrapToken { get; set; } = "";
     public bool UseSshTunnel { get => _settings.UseSshTunnel; set => _settings.UseSshTunnel = value; }
     public bool EnableNodeMode { get => _settings.EnableNodeMode; set => _settings.EnableNodeMode = value; }
-    public void Save() => _settings.Save();
+
+    public void Save()
+    {
+        _settings.Save();
+
+        // Sync credentials to GatewayRegistry (source of truth for connection architecture)
+        if (_registry != null && !string.IsNullOrWhiteSpace(GatewayUrl))
+        {
+            var existing = _registry.FindByUrl(GatewayUrl);
+            var recordId = existing?.Id ?? System.Guid.NewGuid().ToString();
+            var record = new OpenClawTray.Services.Connection.GatewayRecord
+            {
+                Id = recordId,
+                Url = GatewayUrl,
+                SharedGatewayToken = !string.IsNullOrWhiteSpace(Token) ? Token : existing?.SharedGatewayToken,
+                BootstrapToken = !string.IsNullOrWhiteSpace(BootstrapToken) ? BootstrapToken : existing?.BootstrapToken,
+                IsLocal = true,
+            };
+            _registry.AddOrUpdate(record);
+            _registry.SetActive(recordId);
+            _registry.Save();
+        }
+    }
 }
 
 public sealed class DeferredBootstrapTokenProvisioner : IBootstrapTokenProvisioner
@@ -2916,7 +2940,8 @@ public static class LocalGatewaySetupEngineFactory
         bool allowExistingDistro = false,
         bool replaceExistingConfigurationConfirmed = false,
         string? identityDataPath = null,
-        string? setupStatePath = null)
+        string? setupStatePath = null,
+        OpenClawTray.Services.Connection.GatewayRegistry? gatewayRegistry = null)
     {
         // Defense-in-depth fail-closed: refuse to construct the engine if any of the
         // 6 sync existing-config predicates fire and the caller has not passed explicit
@@ -2959,7 +2984,7 @@ public static class LocalGatewaySetupEngineFactory
         };
 
         var wsl = new WslExeCommandRunner(logger, TimeSpan.FromMinutes(30));
-        var settingsAdapter = new SettingsManagerLocalGatewaySetupSettings(settings);
+        var settingsAdapter = new SettingsManagerLocalGatewaySetupSettings(settings, gatewayRegistry);
         var operatorConnector = new OpenClawGatewayOperatorConnector(logger);
         var bootstrapTokenProvider = new WslGatewayCliBootstrapTokenProvider(wsl, options.OpenClawInstallPrefix + "/bin/openclaw");
         var sharedGatewayTokenProvider = new WslGatewayCliSharedGatewayTokenProvider(wsl);
