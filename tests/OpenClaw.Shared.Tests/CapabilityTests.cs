@@ -1372,7 +1372,8 @@ public class CanvasCapabilityTests
         };
         var res = await cap.ExecuteAsync(req);
         Assert.False(res.Ok);
-        Assert.Contains("browser refused", res.Error);
+        Assert.Contains("Navigate failed", res.Error);
+        Assert.DoesNotContain("browser refused", res.Error);
     }
 
     [Fact]
@@ -1389,7 +1390,8 @@ public class CanvasCapabilityTests
         };
         var res = await cap.ExecuteAsync(req);
         Assert.False(res.Ok);
-        Assert.Contains("WebView2 not ready", res.Error);
+        Assert.Contains("Eval failed", res.Error);
+        Assert.DoesNotContain("WebView2 not ready", res.Error);
     }
 
     [Fact]
@@ -1426,7 +1428,8 @@ public class CanvasCapabilityTests
         var req = new NodeInvokeRequest { Id = "c15", Command = "canvas.snapshot", Args = Parse("""{}""") };
         var res = await cap.ExecuteAsync(req);
         Assert.False(res.Ok);
-        Assert.Contains("Canvas not visible", res.Error);
+        Assert.Contains("Snapshot failed", res.Error);
+        Assert.DoesNotContain("Canvas not visible", res.Error);
     }
 
     [Fact]
@@ -1541,7 +1544,7 @@ public class CanvasCapabilityTests
         var res = await cap.ExecuteAsync(req);
         Assert.False(res.Ok);
         Assert.Contains("CANVAS_DUMP_FAILED", res.Error);
-        Assert.Contains("dispatcher gone", res.Error);
+        Assert.DoesNotContain("dispatcher gone", res.Error);
     }
 
     [Fact]
