@@ -492,7 +492,8 @@ public partial class App : Application
 
         // Pre-warm chat window (WebView2 init takes 1-3s, do it now so left-click is instant)
         if (_settings != null &&
-            TryResolveChatCredentials(out var prewarmUrl, out var prewarmToken, out _))
+            TryResolveChatCredentials(out var prewarmUrl, out var prewarmToken, out _, out var prewarmIsBootstrapToken) &&
+            !prewarmIsBootstrapToken)
         {
             _chatWindow = new ChatWindow(prewarmUrl, prewarmToken);
             // Window is created but hidden — WebView2 initializes in the background
@@ -543,7 +544,7 @@ public partial class App : Application
         InitializeTrayMenuWindow();
         
         var iconPath = IconHelper.GetStatusIconPath(ConnectionStatus.Disconnected);
-        _trayIcon = new TrayIcon(1, iconPath, "OpenClaw Tray — Disconnected");
+        _trayIcon = new TrayIcon(1, iconPath, BuildTrayTooltip());
         _trayIcon.IsVisible = true;
         _trayIcon.Selected += OnTrayIconSelected;
         _trayIcon.ContextMenu += OnTrayContextMenu;
@@ -565,9 +566,19 @@ public partial class App : Application
     internal void ShowChatWindow()
     {
         if (_settings == null) return;
-        if (!TryResolveChatCredentials(out var url, out var token, out var credentialSource))
+        if (!TryResolveChatCredentials(out var url, out var token, out var credentialSource, out var isBootstrapToken))
         {
-            Logger.Warn("[ChatWindow] Gateway URL or credential not configured; cannot open quick chat");
+            ShowConnectionSettingsForPairingIssue(
+                "ChatWindow",
+                "Gateway URL or credential is not configured");
+            return;
+        }
+
+        if (isBootstrapToken)
+        {
+            ShowConnectionSettingsForPairingIssue(
+                "ChatWindow",
+                "Gateway pairing is not complete");
             return;
         }
 
@@ -612,6 +623,40 @@ public partial class App : Application
             }
         }
 
+    }
+
+    private void ShowCanvasWindow()
+    {
+        if (_settings?.NodeCanvasEnabled == false)
+        {
+            Logger.Warn("[Canvas] Canvas capability is disabled; opening capability settings");
+            ShowHub("capabilities");
+            return;
+        }
+
+        if (_nodeService == null)
+        {
+            ShowConnectionSettingsForPairingIssue(
+                "Canvas",
+                "Windows node is not initialized");
+            return;
+        }
+
+        if (_nodeService.IsPendingApproval || !_nodeService.IsPaired)
+        {
+            ShowConnectionSettingsForPairingIssue(
+                "Canvas",
+                "Windows node pairing is not complete");
+            return;
+        }
+
+        _nodeService.ShowCanvasWindow();
+    }
+
+    private void ShowConnectionSettingsForPairingIssue(string source, string reason)
+    {
+        Logger.Warn($"[{source}] {reason}; opening connection settings");
+        ShowHub("connection");
     }
 
     private VoiceOverlayWindow? _voiceOverlayWindow;
@@ -705,7 +750,7 @@ public partial class App : Application
             case "status": ShowStatusDetail(); break;
             case "reconnect": _ = _connectionManager?.ReconnectAsync(); break;
             case "dashboard": OpenDashboard(); break;
-            case "canvas": _nodeService?.ShowCanvasWindow(); break;
+            case "canvas": ShowCanvasWindow(); break;
             case "openchat": ShowChatWindow(); break;
             case "voice": ShowVoiceOverlay(); break;
             case "webchat": ShowWebChat(); break;
@@ -2941,20 +2986,19 @@ public partial class App : Application
         if (_lastChannels.Length == 0 && _currentStatus == ConnectionStatus.Connected)
             warningCount++;
 
-        var tooltip = new List<string>
-        {
-            $"OpenClaw Tray — {_currentStatus}",
-            $"Topology: {topology.DisplayName}",
-            $"Channels: {channelReady}/{_lastChannels.Length} ready · Nodes: {nodeOnline}/{nodeTotal} online",
-            $"Warnings: {warningCount} · Last check: {_lastCheckTime:HH:mm:ss}"
-        };
+        var tooltip = $"OpenClaw Tray - {_currentStatus}; " +
+            $"{topology.DisplayName}; " +
+            $"Channels {channelReady}/{_lastChannels.Length}; " +
+            $"Nodes {nodeOnline}/{nodeTotal}; " +
+            $"Warnings {warningCount}; " +
+            $"Last {_lastCheckTime:HH:mm:ss}";
 
         if (_currentActivity != null && !string.IsNullOrEmpty(_currentActivity.DisplayText))
         {
-            tooltip.Insert(1, _currentActivity.DisplayText);
+            tooltip = $"OpenClaw Tray - {_currentActivity.DisplayText}; {_currentStatus}";
         }
 
-        return string.Join("\n", tooltip);
+        return TrayTooltipFormatter.FitShellTooltip(tooltip);
     }
 
     #endregion
@@ -3156,6 +3200,23 @@ public partial class App : Application
 
     private void ShowWebChat()
     {
+        if (_settings == null) return;
+        if (!TryResolveChatCredentials(out _, out _, out _, out var isBootstrapToken))
+        {
+            ShowConnectionSettingsForPairingIssue(
+                "Chat",
+                "Gateway URL or credential is not configured");
+            return;
+        }
+
+        if (isBootstrapToken)
+        {
+            ShowConnectionSettingsForPairingIssue(
+                "Chat",
+                "Gateway pairing is not complete");
+            return;
+        }
+
         ShowHub("chat");
     }
 
@@ -3838,30 +3899,32 @@ public partial class App : Application
     private bool TryResolveChatCredentials(
         out string gatewayUrl,
         out string token,
-        out string credentialSource)
+        out string credentialSource,
+        out bool isBootstrapToken)
     {
         gatewayUrl = string.Empty;
         token = string.Empty;
         credentialSource = "none";
+        isBootstrapToken = false;
 
         if (_settings == null)
             return false;
 
-        gatewayUrl = _settings.GetEffectiveGatewayUrl();
-        if (string.IsNullOrWhiteSpace(gatewayUrl))
+        if (!InteractiveGatewayCredentialResolver.TryResolve(
+            _settings,
+            _gatewayRegistry,
+            SettingsManager.SettingsDirectoryPath,
+            DeviceIdentityFileReader.Instance,
+            out var credential) ||
+            credential == null)
+        {
             return false;
+        }
 
-        var identityPath = Path.Combine(SettingsManager.SettingsDirectoryPath, "device-key-ed25519.json");
-        var credential = OpenClawTray.Services.GatewayCredentialResolver.Resolve(
-            "", // Token removed from settings — use GatewayRegistry
-            "",
-            identityPath,
-            msg => Logger.Warn(msg));
-        if (credential == null)
-            return false;
-
+        gatewayUrl = credential.GatewayUrl;
         token = credential.Token;
         credentialSource = credential.Source;
+        isBootstrapToken = credential.IsBootstrapToken;
         return true;
     }
 
