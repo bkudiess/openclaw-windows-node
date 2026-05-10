@@ -132,13 +132,6 @@ public class WindowsNodeClient : WebSocketClientBase
             return bootstrap;
         }
 
-        // Fallback: use operator device token for role-upgrade pairing
-        var operatorToken = TryLoadStoredOperatorToken(dataPath, logger);
-        if (!string.IsNullOrEmpty(operatorToken))
-        {
-            return operatorToken;
-        }
-
         throw new ArgumentException("Token or bootstrap token is required.", nameof(token));
     }
 
@@ -154,20 +147,6 @@ public class WindowsNodeClient : WebSocketClientBase
             var identity = new DeviceIdentity(dataPath, logger);
             identity.Initialize();
             return string.IsNullOrWhiteSpace(identity.NodeDeviceToken) ? null : identity.NodeDeviceToken;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static string? TryLoadStoredOperatorToken(string dataPath, IOpenClawLogger? logger)
-    {
-        try
-        {
-            var identity = new DeviceIdentity(dataPath, logger);
-            identity.Initialize();
-            return string.IsNullOrWhiteSpace(identity.DeviceToken) ? null : identity.DeviceToken;
         }
         catch
         {
@@ -648,12 +627,6 @@ public class WindowsNodeClient : WebSocketClientBase
         if (!string.IsNullOrEmpty(_bootstrapToken))
         {
             return (new Dictionary<string, string> { ["bootstrapToken"] = _bootstrapToken }, _bootstrapToken);
-        }
-
-        // Fallback: use operator's device token for node role-upgrade pairing
-        if (!string.IsNullOrEmpty(_deviceIdentity.DeviceToken))
-        {
-            return (new Dictionary<string, string> { ["deviceToken"] = _deviceIdentity.DeviceToken }, _deviceIdentity.DeviceToken);
         }
 
         return (new Dictionary<string, string> { ["token"] = _gatewayToken }, _gatewayToken);

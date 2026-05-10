@@ -65,12 +65,6 @@ public sealed class CredentialResolver : ICredentialResolver
         if (!string.IsNullOrWhiteSpace(record.BootstrapToken))
             return new GatewayCredential(record.BootstrapToken!, true, SourceBootstrapToken);
 
-        // 4. Operator device token as fallback — enables node role-upgrade pairing
-        //    when operator is paired but node has no dedicated credential
-        var operatorToken = _identityReader.TryReadStoredDeviceToken(identityPath);
-        if (!string.IsNullOrWhiteSpace(operatorToken))
-            return new GatewayCredential(operatorToken!, false, "identity.DeviceToken (operator fallback for node)");
-
         return null;
     }
 }
