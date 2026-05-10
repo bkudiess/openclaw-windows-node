@@ -1671,16 +1671,7 @@ public partial class App : Application
         var activeRecord = _gatewayRegistry.GetActive();
         if (activeRecord != null)
         {
-            // Registry has an active gateway — connect directly, skip settings bridge
-            var idDir = _gatewayRegistry.GetIdentityDirectory(activeRecord.Id);
-            if (!Directory.Exists(idDir))
-                Directory.CreateDirectory(idDir);
-            var rootId = Path.Combine(SettingsManager.SettingsDirectoryPath, "device-key-ed25519.json");
-            var gwId = Path.Combine(idDir, "device-key-ed25519.json");
-            if (File.Exists(rootId))
-            {
-                try { File.Copy(rootId, gwId, overwrite: true); } catch { }
-            }
+            // Registry has an active gateway — connect directly
             _ = _connectionManager.ConnectAsync(activeRecord.Id);
             return;
         }

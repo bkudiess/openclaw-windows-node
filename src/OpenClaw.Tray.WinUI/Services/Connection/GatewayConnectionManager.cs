@@ -403,9 +403,9 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             }
         }
 
-        // After node pairing completes, clear the consumed bootstrap token from the registry.
-        // Both operator and node now have device tokens — bootstrap is no longer needed.
-        if (e.Role == "node" && _activeGatewayRecordId != null)
+        // After operator pairing completes, clear the consumed bootstrap token.
+        // The node will use the operator's device token for its own pairing handshake.
+        if (e.Role == "operator" && _activeGatewayRecordId != null)
         {
             var record = _registry.GetById(_activeGatewayRecordId);
             if (record?.BootstrapToken != null)
