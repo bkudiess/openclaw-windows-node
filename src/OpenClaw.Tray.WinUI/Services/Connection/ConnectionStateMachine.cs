@@ -52,7 +52,7 @@ internal sealed class ConnectionStateMachine
                 _operatorState == RoleConnectionState.Connecting,
 
             ConnectionTrigger.PairingPending =>
-                _operatorState is RoleConnectionState.Connecting or RoleConnectionState.Connected,
+                _operatorState is RoleConnectionState.Connecting or RoleConnectionState.Connected or RoleConnectionState.Error,
 
             ConnectionTrigger.PairingApproved =>
                 _operatorState == RoleConnectionState.PairingRequired,
@@ -96,7 +96,7 @@ internal sealed class ConnectionStateMachine
                 _nodeState is not RoleConnectionState.Idle and not RoleConnectionState.Disabled,
 
             ConnectionTrigger.NodePairingRequired =>
-                _nodeState is RoleConnectionState.Connecting or RoleConnectionState.Connected,
+                _nodeState is RoleConnectionState.Connecting or RoleConnectionState.Connected or RoleConnectionState.Error,
 
             ConnectionTrigger.NodePaired =>
                 _nodeState == RoleConnectionState.PairingRequired,
