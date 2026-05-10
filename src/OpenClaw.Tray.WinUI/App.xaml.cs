@@ -447,10 +447,6 @@ public partial class App : Application
         // Initialize connections — always create operator client for UI data,
         // additionally create node service for gateway node mode or local MCP.
         InitializeGatewayClient();
-        if (ShouldInitializeNodeService())
-        {
-            InitializeNodeService();
-        }
 
         // Always show diagnostics window on startup for connection debugging
         ShowConnectionStatusWindow();
@@ -1041,15 +1037,11 @@ public partial class App : Application
             ToolTipService.SetToolTip(connectBtn, on ? "Click to disconnect from gateway" : "Click to connect to gateway");
             if (on)
             {
-                InitializeGatewayClient();
-                if (ShouldInitializeNodeService()) InitializeNodeService();
+                _ = _connectionManager?.ReconnectAsync();
             }
             else
             {
                 _ = _connectionManager?.DisconnectAsync();
-                var oldNode = _nodeService;
-                _nodeService = null;
-                try { oldNode?.Dispose(); } catch { }
                 _currentStatus = ConnectionStatus.Disconnected;
                 _lastSessions = Array.Empty<SessionInfo>();
                 _lastNodePairList = null;
@@ -2936,15 +2928,11 @@ public partial class App : Application
             _hubWindow.GatewayRegistry = _gatewayRegistry;
             _hubWindow.ConnectAction = () =>
             {
-                InitializeGatewayClient();
-                if (ShouldInitializeNodeService()) InitializeNodeService();
+                _ = _connectionManager?.ReconnectAsync();
             };
             _hubWindow.DisconnectAction = () =>
             {
                 _ = _connectionManager?.DisconnectAsync();
-                var oldNode = _nodeService;
-                _nodeService = null;
-                try { oldNode?.Dispose(); } catch { }
                 _currentStatus = ConnectionStatus.Disconnected;
                 UpdateTrayIcon();
                 _hubWindow?.UpdateStatus(_currentStatus);
@@ -3059,11 +3047,7 @@ public partial class App : Application
             case SettingsChangeImpact.FullReconnectRequired:
             case SettingsChangeImpact.OperatorReconnectRequired:
                 // Full reconnect: tear down everything and rebuild
-                _ = _connectionManager?.DisconnectAsync();
                 _lastGatewaySelf = null;
-                var oldNodeService = _nodeService;
-                _nodeService = null;
-                try { oldNodeService?.Dispose(); } catch (Exception ex) { Logger.Warn($"Node dispose error: {ex.Message}"); }
                 if (_settings?.UseSshTunnel != true)
                 {
                     _sshTunnelService?.Stop();
@@ -3079,9 +3063,7 @@ public partial class App : Application
                     _chatWindow = null;
                 }
 
-                InitializeGatewayClient();
-                if (ShouldInitializeNodeService())
-                    InitializeNodeService();
+                _ = _connectionManager?.ReconnectAsync();
                 break;
 
             case SettingsChangeImpact.NodeReconnectRequired:
@@ -3129,19 +3111,7 @@ public partial class App : Application
     /// </summary>
     private void ReconnectGateway()
     {
-        _ = _connectionManager?.DisconnectAsync();
-        _lastGatewaySelf = null;
-        var oldNodeService = _nodeService;
-        _nodeService = null;
-        try { oldNodeService?.Dispose(); } catch (Exception ex) { Logger.Warn($"Node dispose error: {ex.Message}"); }
-
-        _currentStatus = ConnectionStatus.Disconnected;
-        _hubWindow?.UpdateStatus(_currentStatus);
-        UpdateTrayIcon();
-
-        InitializeGatewayClient();
-        if (ShouldInitializeNodeService())
-            InitializeNodeService();
+        _ = _connectionManager?.ReconnectAsync();
 
         if (_hubWindow != null && !_hubWindow.IsClosed)
         {
@@ -3157,12 +3127,7 @@ public partial class App : Application
     /// </summary>
     private void ReconnectNodeServiceOnly()
     {
-        var oldNodeService = _nodeService;
-        _nodeService = null;
-        try { oldNodeService?.Dispose(); } catch (Exception ex) { Logger.Warn($"Node dispose error: {ex.Message}"); }
-
-        if (ShouldInitializeNodeService())
-            InitializeNodeService();
+        _ = _connectionManager?.ReconnectAsync();
     }
 
     private void ShowWebChat()
@@ -3256,13 +3221,6 @@ public partial class App : Application
                 remotePort = _settings.SshTunnelRemotePort
             });
 
-            _ = _connectionManager?.DisconnectAsync();
-            _lastGatewaySelf = null;
-
-            var oldNodeService = _nodeService;
-            _nodeService = null;
-            try { oldNodeService?.Dispose(); } catch (Exception ex) { Logger.Warn($"Node dispose error: {ex.Message}"); }
-
             _sshTunnelService?.Stop();
             _currentStatus = ConnectionStatus.Disconnected;
             UpdateTrayIcon();
@@ -3276,14 +3234,7 @@ public partial class App : Application
                 return;
             }
 
-            if (_settings.EnableNodeMode)
-                InitializeNodeService();
-            else
-            {
-                InitializeGatewayClient();
-                if (_settings.EnableMcpServer)
-                    InitializeNodeService();
-            }
+            _ = _connectionManager?.ReconnectAsync();
 
             UpdateStatusDetailWindow();
             ShowToast(new ToastContentBuilder()
@@ -3762,19 +3713,7 @@ public partial class App : Application
             }
 
             // Otherwise reinitialize with saved settings
-            _ = _connectionManager?.DisconnectAsync();
-            var oldNodeService = _nodeService;
-            _nodeService = null;
-            try { oldNodeService?.Dispose(); } catch (Exception ex) { Logger.Warn($"Node dispose error: {ex.Message}"); }
-
-            _currentStatus = ConnectionStatus.Disconnected;
-            _hubWindow?.UpdateStatus(_currentStatus);
-            UpdateTrayIcon();
-
-            // Always reconnect operator client for UI data
-            InitializeGatewayClient();
-            if (ShouldInitializeNodeService())
-                InitializeNodeService();
+            _ = _connectionManager?.ReconnectAsync();
 
             // Keep hub window in sync with new client
             if (_hubWindow != null && !_hubWindow.IsClosed)
