@@ -311,11 +311,14 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                     break;
                 case ConnectionStatus.Disconnected:
                     _diagnostics.RecordWebSocketEvent("WebSocket disconnected");
-                    _stateMachine.TryTransition(ConnectionTrigger.WebSocketDisconnected);
+                    // Don't overwrite PairingRequired — gateway closes socket after pairing required
+                    if (_stateMachine.Current.OperatorState != RoleConnectionState.PairingRequired)
+                        _stateMachine.TryTransition(ConnectionTrigger.WebSocketDisconnected);
                     break;
                 case ConnectionStatus.Error:
                     _diagnostics.RecordWebSocketEvent("WebSocket error");
-                    _stateMachine.TryTransition(ConnectionTrigger.WebSocketError, "Transport error");
+                    if (_stateMachine.Current.OperatorState != RoleConnectionState.PairingRequired)
+                        _stateMachine.TryTransition(ConnectionTrigger.WebSocketError, "Transport error");
                     break;
                 case ConnectionStatus.Connecting:
                     _diagnostics.RecordWebSocketEvent("WebSocket connecting");
@@ -431,27 +434,6 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         {
             _transitionSemaphore.Release();
         }
-
-        // Auto-reconnect after pairing: the gateway closes the WebSocket after
-        // PAIRING_REQUIRED. Poll every 5s to check if the device was approved.
-        _ = PollForPairingApprovalAsync(gen);
-    }
-
-    private async Task PollForPairingApprovalAsync(long gen)
-    {
-        await Task.Delay(5000);
-
-        // Stop if generation changed (user disconnected or switched gateway)
-        if (Interlocked.Read(ref _generation) != gen) return;
-
-        // Stop if no longer in PairingRequired state
-        if (_stateMachine.Current.OverallState != OverallConnectionState.PairingRequired)
-            return;
-
-        _diagnostics.Record("pairing", "Auto-reconnecting to check if pairing was approved");
-        await ConnectAsync();
-        // If still not approved, HandlePairingRequiredAsync will fire again
-        // and schedule another poll — no explicit loop needed.
     }
 
     // ─── Node Connection ───
@@ -508,10 +490,14 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                     _stateMachine.TryTransition(ConnectionTrigger.NodeConnected);
                     break;
                 case ConnectionStatus.Disconnected:
-                    _stateMachine.TryTransition(ConnectionTrigger.NodeDisconnected);
+                    // Don't overwrite PairingRequired — the gateway closes the socket
+                    // after pairing required, but we want to keep showing Pairing state
+                    if (_stateMachine.Current.NodeState != RoleConnectionState.PairingRequired)
+                        _stateMachine.TryTransition(ConnectionTrigger.NodeDisconnected);
                     break;
                 case ConnectionStatus.Error:
-                    _stateMachine.TryTransition(ConnectionTrigger.NodeError, "Node transport error");
+                    if (_stateMachine.Current.NodeState != RoleConnectionState.PairingRequired)
+                        _stateMachine.TryTransition(ConnectionTrigger.NodeError, "Node transport error");
                     break;
             }
 
