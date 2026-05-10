@@ -1317,8 +1317,8 @@ public sealed class SettingsManagerLocalGatewaySetupSettings : ILocalGatewaySetu
     }
 
     public string GatewayUrl { get => _settings.GatewayUrl; set => _settings.GatewayUrl = value; }
-    public string Token { get => _settings.Token; set => _settings.Token = value; }
-    public string BootstrapToken { get => _settings.BootstrapToken; set => _settings.BootstrapToken = value; }
+    public string Token { get; set; } = "";
+    public string BootstrapToken { get; set; } = "";
     public bool UseSshTunnel { get => _settings.UseSshTunnel; set => _settings.UseSshTunnel = value; }
     public bool EnableNodeMode { get => _settings.EnableNodeMode; set => _settings.EnableNodeMode = value; }
     public void Save() => _settings.Save();

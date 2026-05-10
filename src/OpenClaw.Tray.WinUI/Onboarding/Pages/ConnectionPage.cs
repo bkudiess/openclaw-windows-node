@@ -82,7 +82,7 @@ public sealed class ConnectionPage : Component<OnboardingState>
             Props.Settings.SshTunnelLocalPort,
             GetDetectedLocalUrl);
         var (url, setUrl) = UseState(initialUrl);
-        var (token, setToken) = UseState(Props.Settings.Token);
+        var (token, setToken) = UseState("");
         var (nodeMode, setNodeMode) = UseState(Props.Settings.EnableNodeMode);
         var (setupCode, setSetupCode) = UseState("");
 
@@ -161,9 +161,7 @@ public sealed class ConnectionPage : Component<OnboardingState>
             if (result.Token != null)
             {
                 setToken(result.Token);
-                // Bootstrap token goes to BootstrapToken only — it's single-use for pairing.
-                // Don't save as Settings.Token (causes reconnect storms on restart).
-                Props.Settings.BootstrapToken = result.Token;
+                // Bootstrap token stored in GatewayRegistry via ApplySetupCodeAsync
             }
             setStatusMsg($"✅ {LocalizationHelper.GetString("Onboarding_Connection_StatusDecoded")}");
         }
@@ -179,8 +177,6 @@ public sealed class ConnectionPage : Component<OnboardingState>
         void OnTokenChanged(string v)
         {
             setToken(v);
-            Props.Settings.Token = v;
-            Props.Settings.BootstrapToken = "";
             Props.ConnectionTested = false;
             setStatusMsg("");
         }
@@ -208,13 +204,6 @@ public sealed class ConnectionPage : Component<OnboardingState>
         async void TestConnection()
         {
             Props.Settings.GatewayUrl = url;
-            // Only save to Settings.Token if the user entered a manual token,
-            // not a decoded bootstrap token (which belongs in BootstrapToken only).
-            if (string.IsNullOrWhiteSpace(Props.Settings.BootstrapToken) ||
-                !string.Equals(token, Props.Settings.BootstrapToken, StringComparison.Ordinal))
-            {
-                Props.Settings.Token = token;
-            }
 
             // When SSH mode, start the managed tunnel before health-checking the local URL.
             if (mode == ConnectionMode.Ssh)
@@ -296,9 +285,7 @@ public sealed class ConnectionPage : Component<OnboardingState>
                 if (existingClient == null ||
                     (!existingClient.IsConnectedToGateway && !existingClient.IsPairingRequired && !existingClient.IsAuthFailed))
                 {
-                    var useBootstrapHandoffAuth =
-                        !string.IsNullOrWhiteSpace(Props.Settings.BootstrapToken) &&
-                        string.Equals(token, Props.Settings.BootstrapToken, StringComparison.Ordinal);
+                    var useBootstrapHandoffAuth = !string.IsNullOrWhiteSpace(token);
                     app.ReinitializeGatewayClient(useBootstrapHandoffAuth);
                 }
 

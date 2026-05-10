@@ -30,8 +30,6 @@ public class SettingsManager
 
     // Connection
     public string GatewayUrl { get; set; } = "ws://localhost:18789";
-    public string Token { get; set; } = "";
-    public string BootstrapToken { get; set; } = "";
     public bool UseSshTunnel { get; set; } = false;
     public string SshTunnelUser { get; set; } = "";
     public string SshTunnelHost { get; set; } = "";
@@ -143,8 +141,6 @@ public class SettingsManager
                 if (loaded != null)
                 {
                     GatewayUrl = loaded.GatewayUrl ?? GatewayUrl;
-                    Token = loaded.Token ?? Token;
-                    BootstrapToken = loaded.BootstrapToken ?? BootstrapToken;
                     UseSshTunnel = loaded.UseSshTunnel;
                     SshTunnelUser = loaded.SshTunnelUser ?? SshTunnelUser;
                     SshTunnelHost = loaded.SshTunnelHost ?? SshTunnelHost;
@@ -215,6 +211,64 @@ public class SettingsManager
         }
     }
 
+    /// <summary>
+    /// Creates a snapshot of current settings as an immutable SettingsData record.
+    /// Used for settings change classification (no DPAPI protection applied).
+    /// </summary>
+    public SettingsData ToSettingsData() => new()
+    {
+        GatewayUrl = GatewayUrl,
+        // Token and BootstrapToken are no longer written — GatewayRegistry is the source of truth
+        UseSshTunnel = UseSshTunnel,
+        SshTunnelUser = SshTunnelUser,
+        SshTunnelHost = SshTunnelHost,
+        SshTunnelRemotePort = SshTunnelRemotePort,
+        SshTunnelLocalPort = SshTunnelLocalPort,
+        AutoStart = AutoStart,
+        GlobalHotkeyEnabled = GlobalHotkeyEnabled,
+        HasInjectedFirstRunBootstrap = HasInjectedFirstRunBootstrap,
+        ShowNotifications = ShowNotifications,
+        NotificationSound = NotificationSound,
+        NotifyHealth = NotifyHealth,
+        NotifyUrgent = NotifyUrgent,
+        NotifyReminder = NotifyReminder,
+        NotifyEmail = NotifyEmail,
+        NotifyCalendar = NotifyCalendar,
+        NotifyBuild = NotifyBuild,
+        NotifyStock = NotifyStock,
+        NotifyInfo = NotifyInfo,
+        EnableNodeMode = EnableNodeMode,
+        NodeCanvasEnabled = NodeCanvasEnabled,
+        NodeScreenEnabled = NodeScreenEnabled,
+        NodeCameraEnabled = NodeCameraEnabled,
+        ScreenRecordingConsentGiven = ScreenRecordingConsentGiven,
+        CameraRecordingConsentGiven = CameraRecordingConsentGiven,
+        NodeLocationEnabled = NodeLocationEnabled,
+        NodeBrowserProxyEnabled = NodeBrowserProxyEnabled,
+        NodeSttEnabled = NodeSttEnabled,
+        SttLanguage = SttLanguage,
+        SttModelName = SttModelName,
+        SttSilenceTimeout = SttSilenceTimeout,
+        VoiceTtsEnabled = VoiceTtsEnabled,
+        VoiceAudioFeedback = VoiceAudioFeedback,
+        NodeTtsEnabled = NodeTtsEnabled,
+        TtsProvider = TtsProvider,
+        TtsElevenLabsApiKey = TtsElevenLabsApiKey,
+        TtsElevenLabsModel = string.IsNullOrWhiteSpace(TtsElevenLabsModel) ? null : TtsElevenLabsModel,
+        TtsElevenLabsVoiceId = string.IsNullOrWhiteSpace(TtsElevenLabsVoiceId) ? null : TtsElevenLabsVoiceId,
+        TtsWindowsVoiceId = string.IsNullOrWhiteSpace(TtsWindowsVoiceId) ? null : TtsWindowsVoiceId,
+        HubNavPaneOpen = HubNavPaneOpen,
+        TtsPiperVoiceId = TtsPiperVoiceId,
+        EnableMcpServer = EnableMcpServer,
+        A2UIImageHosts = A2UIImageHosts.Count == 0 ? null : new List<string>(A2UIImageHosts),
+        HasSeenActivityStreamTip = HasSeenActivityStreamTip,
+        SkippedUpdateTag = string.IsNullOrWhiteSpace(SkippedUpdateTag) ? null : SkippedUpdateTag,
+        PreferredGatewayId = string.IsNullOrWhiteSpace(PreferredGatewayId) ? null : PreferredGatewayId,
+        NotifyChatResponses = NotifyChatResponses,
+        PreferStructuredCategories = PreferStructuredCategories,
+        UserRules = UserRules
+    };
+
     public void Save()
     {
         lock (_saveLock)
@@ -228,61 +282,9 @@ public class SettingsManager
                 // running as the same user could otherwise read these freely.
                 OpenClaw.Shared.Mcp.McpAuthToken.TryRestrictDataDirectoryAcl(_settingsDirectory);
 
-                var data = new SettingsData
-                {
-                    GatewayUrl = GatewayUrl,
-                    Token = Token,
-                    BootstrapToken = string.IsNullOrWhiteSpace(BootstrapToken) ? null : BootstrapToken,
-                    UseSshTunnel = UseSshTunnel,
-                    SshTunnelUser = SshTunnelUser,
-                    SshTunnelHost = SshTunnelHost,
-                    SshTunnelRemotePort = SshTunnelRemotePort,
-                    SshTunnelLocalPort = SshTunnelLocalPort,
-                    AutoStart = AutoStart,
-                    GlobalHotkeyEnabled = GlobalHotkeyEnabled,
-                    HasInjectedFirstRunBootstrap = HasInjectedFirstRunBootstrap,
-                    ShowNotifications = ShowNotifications,
-                    NotificationSound = NotificationSound,
-                    NotifyHealth = NotifyHealth,
-                    NotifyUrgent = NotifyUrgent,
-                    NotifyReminder = NotifyReminder,
-                    NotifyEmail = NotifyEmail,
-                    NotifyCalendar = NotifyCalendar,
-                    NotifyBuild = NotifyBuild,
-                    NotifyStock = NotifyStock,
-                    NotifyInfo = NotifyInfo,
-                    EnableNodeMode = EnableNodeMode,
-                    NodeCanvasEnabled = NodeCanvasEnabled,
-                    NodeScreenEnabled = NodeScreenEnabled,
-                    NodeCameraEnabled = NodeCameraEnabled,
-                    ScreenRecordingConsentGiven = ScreenRecordingConsentGiven,
-                    CameraRecordingConsentGiven = CameraRecordingConsentGiven,
-                    NodeLocationEnabled = NodeLocationEnabled,
-                    NodeBrowserProxyEnabled = NodeBrowserProxyEnabled,
-                    NodeSttEnabled = NodeSttEnabled,
-                    SttLanguage = SttLanguage,
-                    SttModelName = SttModelName,
-                    SttSilenceTimeout = SttSilenceTimeout,
-                    VoiceTtsEnabled = VoiceTtsEnabled,
-                    VoiceAudioFeedback = VoiceAudioFeedback,
-                    NodeTtsEnabled = NodeTtsEnabled,
-                    TtsProvider = TtsProvider,
-                    TtsElevenLabsApiKey = ProtectSettingSecret(TtsElevenLabsApiKey),
-                    TtsElevenLabsModel = string.IsNullOrWhiteSpace(TtsElevenLabsModel) ? null : TtsElevenLabsModel,
-                    TtsElevenLabsVoiceId = string.IsNullOrWhiteSpace(TtsElevenLabsVoiceId) ? null : TtsElevenLabsVoiceId,
-                    TtsWindowsVoiceId = string.IsNullOrWhiteSpace(TtsWindowsVoiceId) ? null : TtsWindowsVoiceId,
-                    HubNavPaneOpen = HubNavPaneOpen,
-                    TtsPiperVoiceId = TtsPiperVoiceId,
-                    EnableMcpServer = EnableMcpServer,
-                    A2UIImageHosts = A2UIImageHosts.Count == 0 ? null : new List<string>(A2UIImageHosts),
-                    // McpOnlyMode is legacy — never written; remains null in serialized output.
-                    HasSeenActivityStreamTip = HasSeenActivityStreamTip,
-                    SkippedUpdateTag = string.IsNullOrWhiteSpace(SkippedUpdateTag) ? null : SkippedUpdateTag,
-                    PreferredGatewayId = string.IsNullOrWhiteSpace(PreferredGatewayId) ? null : PreferredGatewayId,
-                    NotifyChatResponses = NotifyChatResponses,
-                    PreferStructuredCategories = PreferStructuredCategories,
-                    UserRules = UserRules
-                };
+                var data = ToSettingsData();
+                // Apply DPAPI protection to the API key for on-disk storage only
+                data.TtsElevenLabsApiKey = ProtectSettingSecret(data.TtsElevenLabsApiKey);
 
                 var json = data.ToJson();
                 File.WriteAllText(_settingsFilePath, json);

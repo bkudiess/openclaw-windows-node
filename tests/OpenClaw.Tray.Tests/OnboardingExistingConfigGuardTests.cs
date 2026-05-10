@@ -18,26 +18,6 @@ public class OnboardingExistingConfigGuardTests
     }
 
     [Fact]
-    public void HasExistingConfiguration_ReturnsTrue_WhenTokenExists()
-    {
-        using var temp = new TempDir();
-        var settings = new SettingsManager(temp.Path) { Token = "operator-token" };
-        var guard = new OnboardingExistingConfigGuard(settings, temp.Path, temp.StatePath);
-
-        Assert.True(guard.HasExistingConfiguration());
-    }
-
-    [Fact]
-    public void HasExistingConfiguration_ReturnsTrue_WhenBootstrapTokenExists()
-    {
-        using var temp = new TempDir();
-        var settings = new SettingsManager(temp.Path) { BootstrapToken = "bootstrap-token" };
-        var guard = new OnboardingExistingConfigGuard(settings, temp.Path, temp.StatePath);
-
-        Assert.True(guard.HasExistingConfiguration());
-    }
-
-    [Fact]
     public void HasExistingConfiguration_ReturnsTrue_WhenOperatorDeviceTokenExists()
     {
         using var temp = new TempDir();

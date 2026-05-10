@@ -46,8 +46,8 @@ public sealed class OnboardingExistingConfigGuard
     public ExistingConfigurationSummary GetSummary()
     {
         return new ExistingConfigurationSummary(
-            HasToken: !string.IsNullOrWhiteSpace(_settings.Token),
-            HasBootstrapToken: !string.IsNullOrWhiteSpace(_settings.BootstrapToken),
+            HasToken: false, // Tokens are managed by GatewayRegistry, not settings
+            HasBootstrapToken: false,
             HasNonDefaultGatewayUrl: !string.IsNullOrWhiteSpace(_settings.GatewayUrl)
                 && !string.Equals(_settings.GatewayUrl, DefaultGatewayUrl, StringComparison.OrdinalIgnoreCase),
             HasOperatorDeviceToken: DeviceIdentity.HasStoredDeviceToken(_identityDataPath),

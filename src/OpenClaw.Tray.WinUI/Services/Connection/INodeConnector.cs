@@ -20,6 +20,6 @@ public interface INodeConnector : IDisposable
     event EventHandler<PairingStatusEventArgs> PairingStatusChanged;
 
     // ─── Lifecycle ───
-    Task ConnectAsync(string gatewayUrl, GatewayCredential credential, string identityPath);
+    Task ConnectAsync(string gatewayUrl, GatewayCredential credential, string identityPath, bool useV2Signature = false);
     Task DisconnectAsync();
 }

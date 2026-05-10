@@ -24,7 +24,7 @@ public class SetupWarningPageGuardPolicyTests
     public void ChooseLocal_WithExistingConfig_RequiresConfirmation_BeforeAdvancing()
     {
         using var temp = new TempDir();
-        var settings = new SettingsManager(temp.Path) { Token = "existing-token" };
+        var settings = new SettingsManager(temp.Path) { GatewayUrl = "ws://remote:9000" };
         var guard = new OnboardingExistingConfigGuard(settings, temp.Path, temp.StatePath);
         var state = new OnboardingState(settings);
         state.ExistingConfigGuard = guard;

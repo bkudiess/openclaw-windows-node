@@ -14,6 +14,8 @@ public class OpenClawGatewayClientTests
     {
         private readonly OpenClawGatewayClient _client;
 
+        public OpenClawGatewayClient Client => _client;
+
         public GatewayClientTestHelper(bool tokenIsBootstrapToken = false, bool bootstrapPairAsNode = false, string gatewayUrl = "ws://localhost:18789")
         {
             _client = new OpenClawGatewayClient(
@@ -2101,12 +2103,26 @@ public class OpenClawGatewayClientTests
         var helper = new GatewayClientTestHelper(logger);
         var authEvents = helper.CaptureAuthenticationFailedEvents();
 
-        // With cascade removed, first signature rejection is a real error
-        helper.TrackPendingRequest("req-sig-fail", "connect");
+        // First rejection triggers v2 fallback (not auth failure)
+        helper.TrackPendingRequest("req-sig-v3", "connect");
         helper.ProcessRawMessage("""
         {
             "type": "res",
-            "id": "req-sig-fail",
+            "id": "req-sig-v3",
+            "ok": false,
+            "error": "device signature invalid"
+        }
+        """);
+
+        Assert.False(helper.GetAuthFailedFlag());
+        Assert.Empty(authEvents);
+
+        // Second rejection (v2 also rejected) is a real auth error
+        helper.TrackPendingRequest("req-sig-v2", "connect");
+        helper.ProcessRawMessage("""
+        {
+            "type": "res",
+            "id": "req-sig-v2",
             "ok": false,
             "error": "device signature invalid"
         }

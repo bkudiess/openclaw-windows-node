@@ -51,6 +51,7 @@ public partial class App : Application
 
     /// <summary>The persistent gateway client. Used by the onboarding wizard for RPC calls.</summary>
     public OpenClawGatewayClient? GatewayClient => _gatewayClient;
+    public GatewayRegistry? Registry => _gatewayRegistry;
     internal SettingsManager Settings => _settings ?? throw new InvalidOperationException("Settings are not initialized.");
 
     /// <summary>
@@ -97,6 +98,7 @@ public partial class App : Application
     public void ReinitializeGatewayClient(bool useBootstrapHandoffAuth = false) =>
         InitializeGatewayClient(useBootstrapHandoffAuth);
     private SettingsManager? _settings;
+    private SettingsData? _previousSettingsSnapshot;
     private SshTunnelService? _sshTunnelService;
     private GlobalHotkeyService? _globalHotkey;
     private Mutex? _mutex;
@@ -368,6 +370,7 @@ public partial class App : Application
 
         // Initialize settings before update check so skip selections can be remembered.
         _settings = new SettingsManager();
+        _previousSettingsSnapshot = _settings.ToSettingsData();
         DiagnosticsJsonlService.Configure(DataPath);
         DiagnosticsJsonlService.Write("app.start", new
         {
@@ -427,8 +430,15 @@ public partial class App : Application
         _gatewayRegistry.Load();
         var credentialResolver = new CredentialResolver(DeviceIdentityFileReader.Instance);
         var clientFactory = new GatewayClientFactory();
+        var appLogger = new AppLogger();
+        var diagnostics = new ConnectionDiagnostics();
+        var nodeConnector = new NodeConnector(appLogger, diagnostics);
         _connectionManager = new GatewayConnectionManager(
-            credentialResolver, clientFactory, _gatewayRegistry, new AppLogger());
+            credentialResolver, clientFactory, _gatewayRegistry, appLogger,
+            identityStore: new DeviceIdentityFileStore(appLogger),
+            nodeConnector: nodeConnector,
+            isNodeEnabled: ShouldInitializeNodeService,
+            diagnostics: diagnostics);
         _connectionManager.OperatorClientChanged += OnOperatorClientChanged;
         _connectionManager.StateChanged += OnManagerStateChanged;
 
@@ -1681,9 +1691,8 @@ public partial class App : Application
             return;
         }
 
-        // Bridge: create/update a GatewayRecord from current settings.
-        // If a record already exists in the registry for this URL (e.g. from ApplySetupCodeAsync),
-        // preserve its token classification — don't overwrite bootstrap with shared.
+        // Bridge: create/update a GatewayRecord from current settings URL.
+        // Credentials come from GatewayRegistry and DeviceIdentity, not settings.
         var existing = _gatewayRegistry.FindByUrl(gatewayUrl);
         if (existing != null)
         {
@@ -1692,15 +1701,12 @@ public partial class App : Application
         }
         else
         {
-            // No record yet — create one from settings (first launch / legacy migration).
-            // Only migrate if there's a non-bootstrap credential (shared token or device token).
-            // Stale bootstrap tokens from settings are one-time-use and already expired.
-            var hasSharedToken = !string.IsNullOrWhiteSpace(_settings.Token);
+            // No record yet — create one from settings URL if we have a stored device token.
             var hasStoredDeviceToken = DeviceIdentity.HasStoredDeviceToken(
                 Path.Combine(SettingsManager.SettingsDirectoryPath));
-            if (!hasSharedToken && !hasStoredDeviceToken)
+            if (!hasStoredDeviceToken)
             {
-                Logger.Info("No reusable credential in settings — skipping startup connect (use Setup Code)");
+                Logger.Info("No stored device token — skipping startup connect (use Setup Code)");
                 return;
             }
 
@@ -1709,7 +1715,6 @@ public partial class App : Application
             {
                 Id = recordId,
                 Url = gatewayUrl,
-                SharedGatewayToken = _settings.Token,
                 SshTunnel = _settings.UseSshTunnel
                     ? new SshTunnelConfig(
                         _settings.SshTunnelUser ?? "",
@@ -1906,7 +1911,7 @@ public partial class App : Application
             if (canRunGateway)
             {
                 Logger.Info($"Initializing Windows Node service (gateway{(enableMcp ? " + MCP" : "")})...");
-                _ = _nodeService.ConnectAsync(_settings.GetEffectiveGatewayUrl(), _settings.Token, _settings.BootstrapToken);
+                _ = _nodeService.ConnectAsync(_settings.GetEffectiveGatewayUrl(), "", null);
             }
             else
             {
@@ -3051,42 +3056,56 @@ public partial class App : Application
 
     private void OnSettingsSaved(object? sender, EventArgs e)
     {
-        // Reconnect with new settings — tear down via manager, then reconnect
-        _ = _connectionManager?.DisconnectAsync();
-        _lastGatewaySelf = null;
-        var oldNodeService = _nodeService;
-        _nodeService = null;
-        try { oldNodeService?.Dispose(); } catch (Exception ex) { Logger.Warn($"Node dispose error: {ex.Message}"); }
-        if (_settings?.UseSshTunnel != true)
+        var currentSnapshot = _settings?.ToSettingsData();
+        var impact = SettingsChangeClassifier.Classify(_previousSettingsSnapshot, currentSnapshot);
+        _previousSettingsSnapshot = currentSnapshot;
+        Logger.Info($"[SETTINGS] Change impact: {impact}");
+
+        switch (impact)
         {
-            _sshTunnelService?.Stop();
+            case SettingsChangeImpact.FullReconnectRequired:
+            case SettingsChangeImpact.OperatorReconnectRequired:
+                // Full reconnect: tear down everything and rebuild
+                _ = _connectionManager?.DisconnectAsync();
+                _lastGatewaySelf = null;
+                var oldNodeService = _nodeService;
+                _nodeService = null;
+                try { oldNodeService?.Dispose(); } catch (Exception ex) { Logger.Warn($"Node dispose error: {ex.Message}"); }
+                if (_settings?.UseSshTunnel != true)
+                {
+                    _sshTunnelService?.Stop();
+                }
+                _currentStatus = ConnectionStatus.Disconnected;
+                _hubWindow?.UpdateStatus(_currentStatus);
+                UpdateTrayIcon();
+
+                // Reset chat window — it has a stale URL/token
+                if (_chatWindow != null)
+                {
+                    _chatWindow.ForceClose();
+                    _chatWindow = null;
+                }
+
+                InitializeGatewayClient();
+                if (ShouldInitializeNodeService())
+                    InitializeNodeService();
+                break;
+
+            case SettingsChangeImpact.NodeReconnectRequired:
+                ReconnectNodeServiceOnly();
+                break;
+
+            case SettingsChangeImpact.CapabilityReload:
+                ReconnectNodeServiceOnly();
+                break;
+
+            case SettingsChangeImpact.UiOnly:
+            case SettingsChangeImpact.NoOp:
+                // No connection changes needed
+                break;
         }
 
-        // Reset status so the tray doesn't show a stale "Connected" from the previous mode
-        _currentStatus = ConnectionStatus.Disconnected;
-        _hubWindow?.UpdateStatus(_currentStatus);
-        UpdateTrayIcon();
-
-        // Reset chat window if gateway URL or token changed (pre-warmed window has stale URL)
-        if (_chatWindow != null)
-        {
-            _chatWindow.ForceClose();
-            _chatWindow = null;
-        }
-        
-        // Always reconnect operator client for UI data
-        InitializeGatewayClient();
-        
-        // Additionally reconnect node service if enabled
-        if (ShouldInitializeNodeService())
-        {
-            InitializeNodeService();
-        }
-
-        // Refresh the Hub window if it's open
-        _hubWindow?.UpdateStatus(_currentStatus);
-
-        // Update global hotkey
+        // Non-connection settings always applied regardless of impact
         if (_settings!.GlobalHotkeyEnabled)
         {
             _globalHotkey ??= new GlobalHotkeyService();
@@ -3099,10 +3118,9 @@ public partial class App : Application
             _globalHotkey?.Unregister();
         }
 
-        // Update auto-start
         AutoStartManager.SetAutoStart(_settings.AutoStart);
 
-        // Keep hub window in sync with new client
+        // Keep hub window in sync
         if (_hubWindow != null && !_hubWindow.IsClosed)
         {
             _hubWindow.Settings = _settings;
@@ -3476,7 +3494,6 @@ public partial class App : Application
     private IEnumerable<GatewayDiagnosticWarning> BuildBrowserProxyAuthWarnings(IReadOnlyList<NodeCapabilityHealthInfo> nodes)
     {
         if (_settings?.NodeBrowserProxyEnabled == false ||
-            !string.IsNullOrWhiteSpace(_settings?.Token) ||
             !nodes.Any(node => node.BrowserDeclaredCommands.Contains("browser.proxy", StringComparer.OrdinalIgnoreCase)))
         {
             yield break;
@@ -3879,8 +3896,8 @@ public partial class App : Application
 
         var identityPath = Path.Combine(SettingsManager.SettingsDirectoryPath, "device-key-ed25519.json");
         var credential = OpenClawTray.Services.GatewayCredentialResolver.Resolve(
-            _settings.Token,
-            _settings.BootstrapToken,
+            "", // Token removed from settings — use GatewayRegistry
+            "",
             identityPath,
             msg => Logger.Warn(msg));
         if (credential == null)
@@ -3907,10 +3924,11 @@ public partial class App : Application
             ? baseUrl
             : $"{baseUrl}/{path.TrimStart('/')}";
 
-        if (!string.IsNullOrEmpty(_settings.Token))
+        var activeToken = _gatewayRegistry?.GetActive()?.SharedGatewayToken;
+        if (!string.IsNullOrEmpty(activeToken))
         {
             var separator = url.Contains('?') ? "&" : "?";
-            url = $"{url}{separator}token={Uri.EscapeDataString(_settings.Token)}";
+            url = $"{url}{separator}token={Uri.EscapeDataString(activeToken)}";
         }
 
         try

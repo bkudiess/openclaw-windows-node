@@ -55,7 +55,9 @@ public sealed partial class ChatPage : Page
                 return;
             }
 
-            if (!TryBuildChatUrl(gatewayUrl, settings.Token, out var chatUrl, out var errorMessage))
+            // Get token from GatewayRegistry (source of truth for credentials)
+            var token = _hub?.GatewayRegistry?.GetActive()?.SharedGatewayToken ?? "";
+            if (!TryBuildChatUrl(gatewayUrl, token, out var chatUrl, out var errorMessage))
             {
                 PlaceholderPanel.Visibility = Visibility.Collapsed;
                 ErrorPanel.Visibility = Visibility.Visible;

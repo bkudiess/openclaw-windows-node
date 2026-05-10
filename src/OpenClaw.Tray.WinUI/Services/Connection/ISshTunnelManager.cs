@@ -33,11 +33,11 @@ public sealed class SshTunnelManager : ISshTunnelManager
 
     public Task<string> StartAsync(SshTunnelConfig config, CancellationToken ct)
     {
-        _logger.Info($"[SshTunnelMgr] Starting tunnel {config.User}@{config.Host}:{config.RemotePort}");
-        // SshTunnelService.EnsureStarted is synchronous — wrap
-        // Note: the actual tunnel is managed by the existing SshTunnelService via SettingsManager
-        // Full integration will come when the manager takes over tunnel lifecycle from App
-        return Task.FromResult($"ws://localhost:{config.LocalPort}");
+        _logger.Info($"[SshTunnelMgr] Starting tunnel {config.User}@{config.Host}:{config.RemotePort} → localhost:{config.LocalPort}");
+        _service.EnsureStarted(config.User, config.Host, config.RemotePort, config.LocalPort);
+        var localUrl = $"ws://localhost:{config.LocalPort}";
+        _logger.Info($"[SshTunnelMgr] Tunnel started, local URL: {localUrl}");
+        return Task.FromResult(localUrl);
     }
 
     public Task StopAsync()

@@ -220,9 +220,10 @@ public sealed partial class ConnectionStatusWindow : WindowEx
         sb.AppendLine($"  SharedGateway  {Redact(activeGw?.SharedGatewayToken)}");
         sb.AppendLine($"  Bootstrap      {Redact(activeGw?.BootstrapToken)}");
 
-        if (activeGw != null)
+        // Read identity from per-gateway directory
+        if (activeGw != null && _registry != null)
         {
-            var identityDir = _registry!.GetIdentityDirectory(activeGw.Id);
+            var identityDir = _registry.GetIdentityDirectory(activeGw.Id);
             var keyPath = Path.Combine(identityDir, "device-key-ed25519.json");
             sb.AppendLine();
             sb.AppendLine($"IDENTITY ({(File.Exists(keyPath) ? "✅" : "❌")})");

@@ -188,13 +188,13 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
     public IReadOnlyList<string> GrantedOperatorScopes => _grantedOperatorScopes;
     public bool IsConnectedToGateway => IsConnected;
 
-    public OpenClawGatewayClient(string gatewayUrl, string token, IOpenClawLogger? logger = null, bool tokenIsBootstrapToken = false, bool bootstrapPairAsNode = false)
+    public OpenClawGatewayClient(string gatewayUrl, string token, IOpenClawLogger? logger = null, bool tokenIsBootstrapToken = false, bool bootstrapPairAsNode = false, string? identityPath = null)
         : base(gatewayUrl, token, logger)
     {
         _tokenIsBootstrapToken = tokenIsBootstrapToken;
         _bootstrapPairAsNode = bootstrapPairAsNode;
         _currentGatewayUrl = gatewayUrl;
-        var dataPath = Path.Combine(
+        var dataPath = identityPath ?? Path.Combine(
             Environment.GetEnvironmentVariable("OPENCLAW_TRAY_APPDATA_DIR")
                 ?? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "OpenClawTray");

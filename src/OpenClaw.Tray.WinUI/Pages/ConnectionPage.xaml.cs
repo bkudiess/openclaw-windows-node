@@ -38,7 +38,6 @@ public sealed partial class ConnectionPage : Page
 
         // Populate manual connection fields
         GatewayUrlTextBox.Text = settings.GatewayUrl ?? "";
-        TokenTextBox.Text = settings.Token ?? "";
         SshToggle.IsOn = settings.UseSshTunnel;
         SshDetailsPanel.Visibility = settings.UseSshTunnel ? Visibility.Visible : Visibility.Collapsed;
         SshUserBox.Text = settings.SshTunnelUser ?? "";
@@ -306,7 +305,6 @@ public sealed partial class ConnectionPage : Page
         if (settings == null) return;
 
         settings.GatewayUrl = GatewayUrlTextBox.Text.Trim();
-        settings.Token = TokenTextBox.Text.Trim();
         settings.UseSshTunnel = SshToggle.IsOn;
         settings.SshTunnelUser = SshUserBox.Text.Trim();
         settings.SshTunnelHost = SshHostBox.Text.Trim();
@@ -352,7 +350,7 @@ public sealed partial class ConnectionPage : Page
         }
         else
         {
-            // Fallback: decode and apply via settings
+            // Fallback: decode and apply via settings (no connection manager available)
             var decoded = SetupCodeDecoder.Decode(code);
             if (!decoded.Success)
             {
@@ -365,8 +363,6 @@ public sealed partial class ConnectionPage : Page
 
             if (!string.IsNullOrEmpty(decoded.Url))
                 settings.GatewayUrl = decoded.Url;
-            if (!string.IsNullOrEmpty(decoded.Token))
-                settings.BootstrapToken = decoded.Token;
 
             settings.Save();
             SetupCodeResultText.Text = $"✓ Applied — gateway: {SanitizeUrl(decoded.Url ?? settings.GatewayUrl ?? "")}";

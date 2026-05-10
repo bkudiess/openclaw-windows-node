@@ -36,12 +36,6 @@ public static class SettingsChangeClassifier
         if (!string.Equals(prev.GatewayUrl, next.GatewayUrl, StringComparison.OrdinalIgnoreCase))
             return SettingsChangeImpact.FullReconnectRequired;
 
-        // Token changed → full reconnect
-        #pragma warning disable CS0618 // Obsolete - still needed for comparison
-        if (prev.Token != next.Token || prev.BootstrapToken != next.BootstrapToken)
-            return SettingsChangeImpact.FullReconnectRequired;
-        #pragma warning restore CS0618
-
         // SSH tunnel config changed → operator reconnect
         if (prev.UseSshTunnel != next.UseSshTunnel ||
             prev.SshTunnelUser != next.SshTunnelUser ||

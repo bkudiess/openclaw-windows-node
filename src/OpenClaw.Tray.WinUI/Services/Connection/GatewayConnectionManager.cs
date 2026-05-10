@@ -15,11 +15,16 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
     private readonly IGatewayClientFactory _clientFactory;
     private readonly GatewayRegistry _registry;
     private readonly IOpenClawLogger _logger;
+    private readonly IDeviceIdentityStore? _identityStore;
+    private readonly INodeConnector? _nodeConnector;
+    private readonly Func<bool>? _isNodeEnabled;
     private readonly SemaphoreSlim _transitionSemaphore = new(1, 1);
 
     private long _generation;
     private CancellationTokenSource? _operationCts;
     private IGatewayClientLifecycle? _activeLifecycle;
+    private string? _activeIdentityPath; // identity directory for the active connection
+    private string? _activeGatewayRecordId; // gateway record ID for node credential resolution
     private bool _disposed;
     private bool _gatewayNeedsV2Signature; // remembered across reconnects
 
@@ -32,14 +37,27 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         IGatewayClientFactory clientFactory,
         GatewayRegistry registry,
         IOpenClawLogger logger,
-        IClock? clock = null)
+        IClock? clock = null,
+        IDeviceIdentityStore? identityStore = null,
+        INodeConnector? nodeConnector = null,
+        Func<bool>? isNodeEnabled = null,
+        ConnectionDiagnostics? diagnostics = null)
     {
         _credentialResolver = credentialResolver ?? throw new ArgumentNullException(nameof(credentialResolver));
         _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _diagnostics = new ConnectionDiagnostics(clock: clock);
+        _identityStore = identityStore;
+        _nodeConnector = nodeConnector;
+        _isNodeEnabled = isNodeEnabled;
+        _diagnostics = diagnostics ?? new ConnectionDiagnostics(clock: clock);
         _diagnostics.EventRecorded += (_, e) => DiagnosticEvent?.Invoke(this, e);
+
+        if (_nodeConnector != null)
+        {
+            _nodeConnector.StatusChanged += OnNodeStatusChanged;
+            _nodeConnector.PairingStatusChanged += OnNodePairingStatusChanged;
+        }
     }
 
     // ─── State ───
@@ -88,31 +106,15 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 GatewayName = record.FriendlyName
             };
 
-            // Resolve credentials — use the root identity path since OpenClawGatewayClient
-            // always creates/reads DeviceIdentity from %APPDATA%/OpenClawTray (the root),
-            // not the per-gateway directory. Also ensure the per-gateway directory has a
-            // copy of the root identity for the credentials display and future migration.
-            var rootIdentityDir = Path.Combine(
-                Environment.GetEnvironmentVariable("OPENCLAW_TRAY_APPDATA_DIR")
-                    ?? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "OpenClawTray");
+            // Per-gateway identity directory — each gateway has its own keypair + tokens
             var perGatewayIdentityDir = _registry.GetIdentityDirectory(record.Id);
-
-            // Ensure per-gateway directory exists
             if (!Directory.Exists(perGatewayIdentityDir))
                 Directory.CreateDirectory(perGatewayIdentityDir);
 
-            // Sync: copy root identity → per-gateway (so credentials display and resolver work)
-            var rootIdentityFile = Path.Combine(rootIdentityDir, "device-key-ed25519.json");
-            var perGwIdentityFile = Path.Combine(perGatewayIdentityDir, "device-key-ed25519.json");
-            if (File.Exists(rootIdentityFile))
-            {
-                try { File.Copy(rootIdentityFile, perGwIdentityFile, overwrite: true); }
-                catch (Exception ex) { _logger.Warn($"[ConnMgr] Identity sync failed: {ex.Message}"); }
-            }
-
             var credential = _credentialResolver.ResolveOperator(record, perGatewayIdentityDir);
             _diagnostics.RecordCredentialResolution(credential);
+            _activeIdentityPath = perGatewayIdentityDir;
+            _activeGatewayRecordId = record.Id;
 
             if (credential == null)
             {
@@ -281,11 +283,6 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
 
         // Clear stored device tokens so we start fresh with the bootstrap token.
         // The keypair (device ID) stays — only the tokens are wiped.
-        var rootIdentityDir = Path.Combine(
-            Environment.GetEnvironmentVariable("OPENCLAW_TRAY_APPDATA_DIR")
-                ?? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "OpenClawTray");
-        ClearStoredDeviceTokens(rootIdentityDir);
         ClearStoredDeviceTokens(identityDir);
 
         _diagnostics.Record("setup", $"Setup code applied for {GatewayUrlHelper.SanitizeForDisplay(gatewayUrl)}");
@@ -377,12 +374,44 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         {
             _transitionSemaphore.Release();
         }
+
+        // Start node connection outside the semaphore to avoid deadlocks
+        if (_nodeConnector != null && (_isNodeEnabled?.Invoke() ?? false))
+        {
+            await StartNodeConnectionAsync();
+        }
     }
 
     private void HandleDeviceTokenReceived(DeviceTokenReceivedEventArgs e)
     {
         _diagnostics.Record("credential", $"Device token received for {e.Role}",
             $"Scopes={string.Join(",", e.Scopes ?? [])}");
+
+        if (_identityStore != null && _activeIdentityPath != null)
+        {
+            try
+            {
+                _identityStore.StoreToken(_activeIdentityPath, e.Token, e.Scopes, e.Role);
+                _logger.Info($"[ConnMgr] Persisted {e.Role} device token via identity store");
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"[ConnMgr] Failed to persist {e.Role} device token: {ex.Message}");
+            }
+        }
+
+        // After node pairing completes, clear the consumed bootstrap token from the registry.
+        // Both operator and node now have device tokens — bootstrap is no longer needed.
+        if (e.Role == "node" && _activeGatewayRecordId != null)
+        {
+            var record = _registry.GetById(_activeGatewayRecordId);
+            if (record?.BootstrapToken != null)
+            {
+                _registry.AddOrUpdate(record with { BootstrapToken = null });
+                _registry.Save();
+                _diagnostics.Record("credential", "Cleared consumed bootstrap token from registry");
+            }
+        }
     }
 
     private async Task HandlePairingRequiredAsync(string? requestId, long gen)
@@ -396,6 +425,124 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             _diagnostics.Record("pairing", $"Pairing required — waiting for approval (requestId={requestId})");
             _stateMachine.TryTransition(ConnectionTrigger.PairingPending);
             _diagnostics.RecordStateChange(prev, _stateMachine.Current.OverallState);
+            EmitStateChanged(prev);
+        }
+        finally
+        {
+            _transitionSemaphore.Release();
+        }
+    }
+
+    // ─── Node Connection ───
+
+    private async Task StartNodeConnectionAsync()
+    {
+        if (_nodeConnector == null || _activeGatewayRecordId == null || _activeIdentityPath == null) return;
+
+        var record = _registry.GetById(_activeGatewayRecordId);
+        if (record == null)
+        {
+            _logger.Warn("[ConnMgr] Cannot start node — gateway record not found");
+            return;
+        }
+
+        // Use root identity path — clients always read/write from root, not per-gateway
+        var nodeCredential = _credentialResolver.ResolveNode(record, _activeIdentityPath!);
+        if (nodeCredential == null)
+        {
+            _logger.Warn("[ConnMgr] No node credential available — skipping node connection");
+            _diagnostics.Record("node", "No node credential available");
+            return;
+        }
+
+        // Mark node as enabled in the state machine so UI reflects node state
+        _stateMachine.SetNodeEnabled(true);
+
+        _diagnostics.Record("node", $"Starting node connection to {record.Url}",
+            $"Credential source: {nodeCredential.Source}");
+
+        try
+        {
+            await _nodeConnector.ConnectAsync(record.Url, nodeCredential, _activeIdentityPath,
+                useV2Signature: _gatewayNeedsV2Signature);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"[ConnMgr] Node connect failed: {ex.Message}");
+            _diagnostics.Record("node", "Node connect failed", ex.Message);
+        }
+    }
+
+    private async void OnNodeStatusChanged(object? sender, ConnectionStatus status)
+    {
+        _diagnostics.Record("node", $"Node status: {status}");
+
+        await _transitionSemaphore.WaitAsync();
+        try
+        {
+            var prev = _stateMachine.Current.OverallState;
+            switch (status)
+            {
+                case ConnectionStatus.Connected:
+                    _stateMachine.TryTransition(ConnectionTrigger.NodeConnected);
+                    break;
+                case ConnectionStatus.Disconnected:
+                    _stateMachine.TryTransition(ConnectionTrigger.NodeDisconnected);
+                    break;
+                case ConnectionStatus.Error:
+                    _stateMachine.TryTransition(ConnectionTrigger.NodeError, "Node transport error");
+                    break;
+            }
+
+            // Update node state in snapshot
+            if (_nodeConnector != null)
+            {
+                _stateMachine.Current = _stateMachine.Current with
+                {
+                    NodeDeviceId = _nodeConnector.NodeDeviceId,
+                    NodePairingStatus = _nodeConnector.PairingStatus
+                };
+            }
+
+            EmitStateChanged(prev);
+        }
+        finally
+        {
+            _transitionSemaphore.Release();
+        }
+    }
+
+    private async void OnNodePairingStatusChanged(object? sender, PairingStatusEventArgs e)
+    {
+        _diagnostics.Record("node", $"Node pairing: {e.Status}");
+
+        await _transitionSemaphore.WaitAsync();
+        try
+        {
+            var prev = _stateMachine.Current.OverallState;
+            switch (e.Status)
+            {
+                case PairingStatus.Paired:
+                    _stateMachine.TryTransition(ConnectionTrigger.NodePaired);
+                    break;
+                case PairingStatus.Pending:
+                    _stateMachine.TryTransition(ConnectionTrigger.NodePairingRequired);
+                    break;
+                case PairingStatus.Rejected:
+                    _stateMachine.TryTransition(ConnectionTrigger.NodePairingRejected);
+                    break;
+            }
+
+            // Update snapshot
+            if (_nodeConnector != null)
+            {
+                _stateMachine.Current = _stateMachine.Current with
+                {
+                    NodePairingStatus = _nodeConnector.PairingStatus,
+                    NodeDeviceId = _nodeConnector.NodeDeviceId
+                };
+            }
+
             EmitStateChanged(prev);
         }
         finally
@@ -453,8 +600,16 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
 
     private void DisposeActiveClient()
     {
+        // Disconnect node first
+        if (_nodeConnector != null)
+        {
+            try { _ = _nodeConnector.DisconnectAsync(); }
+            catch (Exception ex) { _logger.Warn($"[ConnMgr] Node disconnect error: {ex.Message}"); }
+        }
+
         var old = _activeLifecycle;
         _activeLifecycle = null;
+        _activeGatewayRecordId = null;
         if (old != null)
         {
             OperatorClientChanged?.Invoke(this, new OperatorClientChangedEventArgs

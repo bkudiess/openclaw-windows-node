@@ -35,6 +35,7 @@ public class WindowsNodeClient : WebSocketClientBase
     private volatile bool _pairingBlocked;
     private volatile bool _rateLimited;
     private bool _useV2Signature; // true after v3 signature rejected by gateway
+    public bool UseV2Signature { get => _useV2Signature; set => _useV2Signature = value; }
     // Bug 3: source-side idempotency for PairingStatusChanged. HandleHelloOk runs on every
     // WS reconnect and re-fires PairingStatus.Paired even when nothing changed, causing a
     // toast storm in the tray UI. Track the last emitted status and only fire on transitions.
@@ -508,8 +509,6 @@ public class WindowsNodeClient : WebSocketClientBase
     
     private async Task HandleConnectChallengeAsync(JsonElement root)
     {
-        _logger.Info("Received connect challenge, sending node registration...");
-        
         string? nonce = null;
         long ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         
@@ -524,6 +523,8 @@ public class WindowsNodeClient : WebSocketClientBase
                 ts = tsProp.GetInt64();
             }
         }
+
+        _logger.Info($"[HANDSHAKE] Received connect.challenge: nonce={nonce}, ts={ts}");
         
         _pendingNonce = nonce;
         await SendNodeConnectAsync(nonce, ts);
@@ -535,11 +536,19 @@ public class WindowsNodeClient : WebSocketClientBase
     {
         var isPaired = !string.IsNullOrEmpty(_deviceIdentity.NodeDeviceToken);
         var usingBootstrap = !isPaired && !string.IsNullOrEmpty(_bootstrapToken);
+        var (auth, tokenForSig) = BuildConnectAuth();
+        var authType = auth.ContainsKey("deviceToken") ? "deviceToken"
+            : auth.ContainsKey("bootstrapToken") ? "bootstrapToken" : "token";
 
-        _logger.Info($"Connecting with Ed25519 device identity (paired: {isPaired}, bootstrap: {usingBootstrap})");
+        _logger.Info($"[HANDSHAKE] → Sending connect:");
+        _logger.Info($"[HANDSHAKE]   role=node, clientId={ClientId}, mode=node");
+        _logger.Info($"[HANDSHAKE]   isBootstrap={usingBootstrap}, hasNodeDeviceToken={isPaired}");
+        _logger.Info($"[HANDSHAKE]   deviceId={_deviceIdentity.DeviceId[..Math.Min(16, _deviceIdentity.DeviceId.Length)]}...");
+        _logger.Info($"[HANDSHAKE]   nonce={nonce?[..Math.Min(15, nonce?.Length ?? 0)]}...");
+        _logger.Info($"[HANDSHAKE]   signature format={(_useV2Signature ? "v2" : "v3")}, platform=windows, family=desktop");
+        _logger.Info($"[HANDSHAKE]   auth: {{{authType}}}");
 
         await SendRawAsync(BuildNodeConnectMessage(nonce, ts));
-        _logger.Info($"Sent node registration with device ID: {_deviceIdentity.DeviceId[..16]}..., paired: {isPaired}");
     }
 
     private string BuildNodeConnectMessage(string? nonce, long ts)
@@ -641,6 +650,7 @@ public class WindowsNodeClient : WebSocketClientBase
         // Handle hello-ok (successful registration)
         if (payload.TryGetProperty("type", out var t) && t.GetString() == "hello-ok")
         {
+            _logger.Info("[HANDSHAKE] Received hello-ok!");
             PublishGatewaySelf(GatewaySelfInfo.FromHelloOk(payload));
             var reconnectingAfterApproval = _pairingApprovedAwaitingReconnect;
             _isConnected = true;
@@ -768,6 +778,8 @@ public class WindowsNodeClient : WebSocketClientBase
                 }
             }
         }
+
+        _logger.Info($"[HANDSHAKE] Connect error: message=\"{error}\", code={errorCode}");
 
         if (string.Equals(errorCode, "NOT_PAIRED", StringComparison.OrdinalIgnoreCase))
         {
