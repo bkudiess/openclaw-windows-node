@@ -487,7 +487,8 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
 
         // Check connector's pairing status directly — it's set synchronously
         // before this handler runs, so it's always up-to-date
-        var isPairingPending = _nodeConnector?.PairingStatus == PairingStatus.Pending;
+        var connectorPairingStatus = _nodeConnector?.PairingStatus;
+        var isPairingPending = connectorPairingStatus == PairingStatus.Pending;
 
         if (isPairingPending && status is ConnectionStatus.Disconnected or ConnectionStatus.Error)
             return;
@@ -500,6 +501,9 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             {
                 case ConnectionStatus.Connected:
                     _stateMachine.TryTransition(ConnectionTrigger.NodeConnected);
+                    break;
+                case ConnectionStatus.Connecting:
+                    _stateMachine.StartNodeConnecting();
                     break;
                 case ConnectionStatus.Disconnected:
                     if (_stateMachine.Current.NodeState != RoleConnectionState.PairingRequired)
@@ -566,6 +570,10 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         {
             _transitionSemaphore.Release();
         }
+
+        // Note: auto-approval of node pairing requires operator.pairing scope,
+        // which bootstrap-scoped sessions don't have. Node pairing must be
+        // approved manually on the gateway for bootstrap flows.
     }
 
     // ─── Helpers ───
@@ -609,10 +617,10 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
     private void EmitStateChanged(OverallConnectionState previousOverall)
     {
         var snapshot = _stateMachine.Current;
-        if (snapshot.OverallState != previousOverall || snapshot != _stateMachine.Current)
-        {
-            StateChanged?.Invoke(this, snapshot);
-        }
+        // Always fire when any part of the snapshot changed — not just OverallState.
+        // Node sub-state changes (e.g. Idle→PairingRequired) may not change OverallState
+        // but the UI still needs to update.
+        StateChanged?.Invoke(this, snapshot);
     }
 
     private void DisposeActiveClient()

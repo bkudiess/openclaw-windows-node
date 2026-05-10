@@ -801,7 +801,8 @@ public class WindowsNodeClient : WebSocketClientBase
             EmitPairingStatusOnTransition(new PairingStatusEventArgs(
                 PairingStatus.Pending,
                 _deviceIdentity.DeviceId,
-                detail));
+                detail,
+                requestId: pairingRequestId));
             return;
         }
 
@@ -1121,14 +1122,22 @@ public class WindowsNodeClient : WebSocketClientBase
     protected override void OnDisconnected()
     {
         _isConnected = false;
-        _isPendingApproval = false;
-        _isPaired = false;
+        // Don't reset pairing state when disconnected due to pairing — gateway
+        // closes the socket after PAIRING_REQUIRED but we're still waiting for approval
+        if (!_pairingBlocked)
+        {
+            _isPendingApproval = false;
+            _isPaired = false;
+        }
     }
 
     protected override void OnError(Exception ex)
     {
         _isConnected = false;
-        _isPendingApproval = false;
-        _isPaired = false;
+        if (!_pairingBlocked)
+        {
+            _isPendingApproval = false;
+            _isPaired = false;
+        }
     }
 }
