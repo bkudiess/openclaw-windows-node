@@ -382,7 +382,21 @@ public sealed partial class ConnectionPage : Page
         {
             await _connectionManager.DisconnectAsync();
 
-            // Create/update gateway record with shared token
+            // Parse SSH config
+            var useSsh = SshToggle.IsOn;
+            SshTunnelConfig? sshConfig = null;
+            if (useSsh)
+            {
+                var sshUser = SshUserBox.Text.Trim();
+                var sshHost = SshHostBox.Text.Trim();
+                int.TryParse(SshRemotePortBox.Text, out var remotePort);
+                int.TryParse(SshLocalPortBox.Text, out var localPort);
+                if (remotePort <= 0) remotePort = 18789;
+                if (localPort <= 0) localPort = 18789;
+                sshConfig = new SshTunnelConfig(sshUser, sshHost, remotePort, localPort);
+            }
+
+            // Create/update gateway record with shared token + SSH config
             var existing = _gatewayRegistry.FindByUrl(url);
             var recordId = existing?.Id ?? Guid.NewGuid().ToString();
             var record = new GatewayRecord
@@ -391,6 +405,7 @@ public sealed partial class ConnectionPage : Page
                 Url = url,
                 SharedGatewayToken = string.IsNullOrWhiteSpace(token) ? null : token,
                 BootstrapToken = null,
+                SshTunnel = sshConfig,
             };
             _gatewayRegistry.AddOrUpdate(record);
             _gatewayRegistry.SetActive(recordId);
@@ -420,17 +435,28 @@ public sealed partial class ConnectionPage : Page
                 catch { }
             }
 
-            // Save SSH settings if configured
+            // Save settings (SSH config + gateway URL for legacy compat)
             var settings = _hub?.Settings;
             if (settings != null)
             {
                 settings.GatewayUrl = url;
-                settings.UseSshTunnel = SshToggle.IsOn;
-                settings.SshTunnelUser = SshUserBox.Text.Trim();
-                settings.SshTunnelHost = SshHostBox.Text.Trim();
-                if (int.TryParse(SshRemotePortBox.Text, out var rp)) settings.SshTunnelRemotePort = rp;
-                if (int.TryParse(SshLocalPortBox.Text, out var lp)) settings.SshTunnelLocalPort = lp;
+                settings.UseSshTunnel = useSsh;
+                if (useSsh && sshConfig != null)
+                {
+                    settings.SshTunnelUser = sshConfig.User;
+                    settings.SshTunnelHost = sshConfig.Host;
+                    settings.SshTunnelRemotePort = sshConfig.RemotePort;
+                    settings.SshTunnelLocalPort = sshConfig.LocalPort;
+                }
                 settings.Save();
+            }
+
+            // Start SSH tunnel if configured
+            if (useSsh)
+            {
+                DirectConnectResultText.Text = "Starting SSH tunnel…";
+                var app = (App)Microsoft.UI.Xaml.Application.Current;
+                app.EnsureSshTunnelStarted();
             }
 
             await _connectionManager.ConnectAsync(recordId);
