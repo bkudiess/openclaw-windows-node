@@ -52,6 +52,9 @@ public sealed partial class ConnectionStatusWindow : WindowEx
         _manager = manager;
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
 
+        ExtendsContentIntoTitleBar = true;
+        this.SetIcon("Assets\\openclaw.ico");
+
         // Load existing events (oldest first)
         foreach (var evt in _diagnostics.GetAll())
             AppendTimelineRich(evt);

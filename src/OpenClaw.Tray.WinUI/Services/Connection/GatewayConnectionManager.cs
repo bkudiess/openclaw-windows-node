@@ -431,6 +431,27 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         {
             _transitionSemaphore.Release();
         }
+
+        // Auto-reconnect after pairing: the gateway closes the WebSocket after
+        // PAIRING_REQUIRED. Poll every 5s to check if the device was approved.
+        _ = PollForPairingApprovalAsync(gen);
+    }
+
+    private async Task PollForPairingApprovalAsync(long gen)
+    {
+        await Task.Delay(5000);
+
+        // Stop if generation changed (user disconnected or switched gateway)
+        if (Interlocked.Read(ref _generation) != gen) return;
+
+        // Stop if no longer in PairingRequired state
+        if (_stateMachine.Current.OverallState != OverallConnectionState.PairingRequired)
+            return;
+
+        _diagnostics.Record("pairing", "Auto-reconnecting to check if pairing was approved");
+        await ConnectAsync();
+        // If still not approved, HandlePairingRequiredAsync will fire again
+        // and schedule another poll — no explicit loop needed.
     }
 
     // ─── Node Connection ───
