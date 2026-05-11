@@ -395,6 +395,64 @@ public sealed class NodeService : IDisposable
     }
 
     /// <summary>
+    /// Adopt a <see cref="WindowsNodeClient"/> created by an outside party
+    /// (typically <see cref="OpenClawTray.Services.Connection.NodeConnector"/>)
+    /// and register all current capabilities on it. Called via
+    /// <see cref="OpenClawTray.Services.Connection.INodeConnector.ClientCreated"/>
+    /// every time the connector spins up a fresh client (initial connect AND
+    /// reconnect). Idempotent on the capability list — the same capability
+    /// objects get registered against the new client; <c>WindowsNodeClient</c>
+    /// dedupes by category+command into its <c>_registration</c> structure.
+    ///
+    /// Must run synchronously before the client's outbound "connect" message
+    /// is serialized — otherwise the gateway sees this node as having no
+    /// advertised commands and the agent can't invoke anything.
+    /// </summary>
+    public void AttachClient(WindowsNodeClient client)
+    {
+        if (client is null) return;
+
+        _nodeClient = client;
+        lock (_capabilitiesLock)
+        {
+            // First connect after app startup may not have built capability objects yet.
+            // RegisterCapabilities() populates _capabilities AND also calls
+            // _nodeClient.RegisterCapability(...) via Register() — covers both cases.
+            if (_capabilities.Count == 0)
+            {
+                _logger.Info("[NodeService] AttachClient: capabilities not yet built, calling RegisterCapabilities()");
+                // Cannot call RegisterCapabilities() under the lock — it acquires the same lock.
+                // Release and re-enter handled by the lock keyword (re-entrant); but to keep
+                // semantics obvious we exit the lock body first.
+            }
+        }
+
+        if (_capabilities.Count == 0)
+        {
+            RegisterCapabilities();
+        }
+        else
+        {
+            // Reconnect path: capabilities already exist, just re-bind to the new client.
+            lock (_capabilitiesLock)
+            {
+                foreach (var capability in _capabilities)
+                {
+                    try
+                    {
+                        client.RegisterCapability(capability);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warn($"[NodeService] AttachClient: failed to register {capability.Category}: {ex.Message}");
+                    }
+                }
+            }
+            _logger.Info($"[NodeService] AttachClient: re-registered {_capabilities.Count} capabilities on new client");
+        }
+    }
+
+    /// <summary>
     /// Build the <see cref="ICommandRunner"/> for system.run. Picks
     /// <see cref="MxcCommandRunner"/> wrapping a one-shot AppContainer when MXC is
     /// available; falls back to <see cref="LocalCommandRunner"/> with an explanatory
