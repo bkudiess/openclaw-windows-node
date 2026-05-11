@@ -43,7 +43,6 @@ public sealed partial class SandboxPage : Page
             SandboxOffWarning.Visibility = settings.SystemRunSandboxEnabled ? Visibility.Collapsed : Visibility.Visible;
 
             NetInternetToggle.IsOn = settings.SystemRunAllowOutbound;
-            NetLanToggle.IsOn = settings.SystemRunAllowLocalNetwork;
 
             SelectAccessTag(DocsAccessCombo, settings.SandboxDocumentsAccess);
             SelectAccessTag(DownloadsAccessCombo, settings.SandboxDownloadsAccess);
@@ -149,14 +148,6 @@ public sealed partial class SandboxPage : Page
         if (_suppress) return;
         if (_hub?.Settings is not { } s) return;
         s.SystemRunAllowOutbound = NetInternetToggle.IsOn;
-        Save();
-    }
-
-    private void OnNetLanToggled(object sender, RoutedEventArgs e)
-    {
-        if (_suppress) return;
-        if (_hub?.Settings is not { } s) return;
-        s.SystemRunAllowLocalNetwork = NetLanToggle.IsOn;
         Save();
     }
 

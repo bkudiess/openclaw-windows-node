@@ -34,7 +34,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
-const MAX_OUTPUT_BYTES = 4 * 1024 * 1024; // mirrors C# DefaultMaxOutputBytes
+const DEFAULT_MAX_OUTPUT_BYTES = 4 * 1024 * 1024; // mirrors C# DefaultMaxOutputBytes
+const HARD_MAX_OUTPUT_BYTES = 256 * 1024 * 1024;  // safety ceiling regardless of caller
 
 async function main() {
   const req = await readJsonFromStdin();
@@ -50,6 +51,12 @@ async function main() {
   }
 
   const startTime = Date.now();
+
+  // Honor the caller-supplied maxOutputBytes (from C# bridge). Clamp to a
+  // hard ceiling so a misconfigured caller can't OOM the bridge process.
+  const callerMaxOutput = Number.isFinite(req.maxOutputBytes) && req.maxOutputBytes > 0
+    ? Math.min(req.maxOutputBytes, HARD_MAX_OUTPUT_BYTES)
+    : DEFAULT_MAX_OUTPUT_BYTES;
 
   // Compose host-discovered tool/temp paths into the policy supplied by C#.
   const tools = getAvailableToolsPolicy(process.env, { containerType: 'appcontainer' });
@@ -98,9 +105,9 @@ async function main() {
 
   child.stdout?.on('data', (chunk) => {
     const text = chunk.toString();
-    if (stdoutBytes + text.length > MAX_OUTPUT_BYTES) {
-      stdout += text.substring(0, MAX_OUTPUT_BYTES - stdoutBytes);
-      stdoutBytes = MAX_OUTPUT_BYTES;
+    if (stdoutBytes + text.length > callerMaxOutput) {
+      stdout += text.substring(0, callerMaxOutput - stdoutBytes);
+      stdoutBytes = callerMaxOutput;
       truncated = true;
     } else {
       stdout += text;
@@ -109,9 +116,9 @@ async function main() {
   });
   child.stderr?.on('data', (chunk) => {
     const text = chunk.toString();
-    if (stderrBytes + text.length > MAX_OUTPUT_BYTES) {
-      stderr += text.substring(0, MAX_OUTPUT_BYTES - stderrBytes);
-      stderrBytes = MAX_OUTPUT_BYTES;
+    if (stderrBytes + text.length > callerMaxOutput) {
+      stderr += text.substring(0, callerMaxOutput - stderrBytes);
+      stderrBytes = callerMaxOutput;
       truncated = true;
     } else {
       stderr += text;
@@ -128,7 +135,7 @@ async function main() {
   });
 
   if (truncated) {
-    stderr += '\n[bridge] output truncated at 4 MiB cap';
+    stderr += `\n[bridge] output truncated at ${callerMaxOutput} bytes`;
   }
 
   emit({

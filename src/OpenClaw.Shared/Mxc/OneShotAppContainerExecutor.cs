@@ -76,6 +76,7 @@ public sealed class OneShotAppContainerExecutor : ISandboxExecutor
             Cwd: request.Cwd,
             Env: request.Env,
             TimeoutMs: request.TimeoutMs,
+            MaxOutputBytes: request.MaxOutputBytes ?? _maxOutputBytes,
             WxcExecPath: _availability.WxcExecPath);
 
         var requestJson = JsonSerializer.Serialize(bridgeRequest, BridgeJson);
@@ -125,8 +126,14 @@ public sealed class OneShotAppContainerExecutor : ISandboxExecutor
             throw;
         }
 
-        var stdoutTask = ReadCappedAsync(process.StandardOutput, _maxOutputBytes, cts.Token);
-        var stderrTask = ReadCappedAsync(process.StandardError, _maxOutputBytes, cts.Token);
+        var stdoutCap = Math.Max(_maxOutputBytes, request.MaxOutputBytes ?? 0);
+        // C# side cap: allow a bit of headroom so the bridge JSON envelope
+        // (which contains the Node-capped command output) doesn't get truncated
+        // by the outer reader. Add 256 KiB envelope overhead.
+        var envelopeCap = stdoutCap + (256L * 1024L);
+
+        var stdoutTask = ReadCappedAsync(process.StandardOutput, envelopeCap, cts.Token);
+        var stderrTask = ReadCappedAsync(process.StandardError, envelopeCap, cts.Token);
 
         bool timedOut = false;
         try
@@ -258,6 +265,7 @@ public sealed class OneShotAppContainerExecutor : ISandboxExecutor
         string? Cwd,
         IReadOnlyDictionary<string, string>? Env,
         int TimeoutMs,
+        long MaxOutputBytes,
         string? WxcExecPath);
 
     private sealed record BridgeResponse(

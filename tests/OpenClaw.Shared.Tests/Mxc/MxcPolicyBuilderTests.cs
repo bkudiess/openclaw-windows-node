@@ -58,17 +58,20 @@ public class MxcPolicyBuilderTests
     }
 
     [Fact]
-    public void ForSystemRun_AllowLocalNetwork_SetsNetworkFlag()
+    public void ForSystemRun_AllowLocalNetwork_IgnoredByDesign()
     {
+        // LAN access (privateNetworkClientServer cap) is intentionally NOT exposed —
+        // MXC team confirmed only internetClient is validated today. The setting
+        // field is retained for forward compat but the policy builder forces it false.
         var settings = new SettingsData { SystemRunAllowLocalNetwork = true };
         var policy = MxcPolicyBuilder.ForSystemRun(settings, "C:\\settings");
 
         Assert.False(policy.Network!.AllowOutbound);
-        Assert.True(policy.Network.AllowLocalNetwork);
+        Assert.False(policy.Network.AllowLocalNetwork);
     }
 
     [Fact]
-    public void ForSystemRun_BothNetworkFlags_SetIndependently()
+    public void ForSystemRun_AllowOutbound_AllowLocalNetwork_OutboundHonoredLanNot()
     {
         var settings = new SettingsData
         {
@@ -78,7 +81,8 @@ public class MxcPolicyBuilderTests
         var policy = MxcPolicyBuilder.ForSystemRun(settings, "C:\\settings");
 
         Assert.True(policy.Network!.AllowOutbound);
-        Assert.True(policy.Network.AllowLocalNetwork);
+        // LAN is force-disabled regardless of setting.
+        Assert.False(policy.Network.AllowLocalNetwork);
     }
 
     [Fact]

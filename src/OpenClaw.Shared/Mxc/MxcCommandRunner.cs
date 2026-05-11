@@ -54,13 +54,22 @@ public sealed class MxcCommandRunner : ICommandRunner
 
         var policy = MxcPolicyBuilder.ForSystemRun(settings, _settingsDirectoryPathProvider());
         var argsJson = SerializeArgs(request);
+
+        // Compute the effective timeout: take the smaller of the agent-supplied
+        // timeout (request.TimeoutMs) and the user's sandbox cap (policy.TimeoutMs).
+        // A zero/null on either side means "no cap from that side".
+        var effectiveTimeoutMs = CombineTimeouts(request.TimeoutMs, policy.TimeoutMs);
+
         var sandboxRequest = new SandboxExecutionRequest(
             CapabilityCommand: "system.run",
             Args: argsJson,
             Policy: policy,
-            TimeoutMs: request.TimeoutMs,
+            TimeoutMs: effectiveTimeoutMs,
             Cwd: request.Cwd,
-            Env: request.Env);
+            Env: request.Env,
+            MaxOutputBytes: settings.SandboxMaxOutputBytes > 0
+                ? settings.SandboxMaxOutputBytes
+                : null);
 
         try
         {
@@ -107,5 +116,16 @@ public sealed class MxcCommandRunner : ICommandRunner
         var json = JsonSerializer.Serialize(payload);
         using var doc = JsonDocument.Parse(json);
         return doc.RootElement.Clone();
+    }
+
+    internal static int CombineTimeouts(int agentMs, int? policyMs)
+    {
+        // Treat <= 0 as "no cap on this side."
+        var hasAgent = agentMs > 0;
+        var hasPolicy = policyMs is > 0;
+        if (hasAgent && hasPolicy) return Math.Min(agentMs, policyMs!.Value);
+        if (hasAgent) return agentMs;
+        if (hasPolicy) return policyMs!.Value;
+        return 0;
     }
 }

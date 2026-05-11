@@ -407,34 +407,39 @@ public sealed class NodeService : IDisposable
         var availability = _mxcAvailability ??= MxcAvailability.Probe(_logger);
         var hostRunner = new LocalCommandRunner(_logger);
 
-        // No MXC backend → host-only path. The MxcCommandRunner adapter still routes
-        // through this when SandboxMode == Off, but if MXC isn't even installed there's
-        // nothing to gain from going through the adapter.
-        if (!availability.HasAnyBackend)
+        ISandboxExecutor executor;
+        if (!availability.HasAnyBackend || availability.RunCommandScriptPath is null)
         {
+            // No MXC on this host. We still route through MxcCommandRunner so the
+            // SystemRunSandboxEnabled toggle is honored: when ON, invocation is
+            // denied (fail-closed); when OFF, the inner runner falls back to host.
+            var reason = !availability.HasAnyBackend
+                ? string.Join("; ", availability.UnsupportedReasons)
+                : "tools/mxc/run-command.cjs not found";
+            executor = new UnavailableSandboxExecutor(reason);
+            _logger.Info($"[mxc] system.run runner = MxcCommandRunner (MXC unavailable: {reason})");
+        }
+        else
+        {
+            executor = new OneShotAppContainerExecutor(
+                availability,
+                availability.RunCommandScriptPath,
+                _logger,
+                maxOutputBytes: _settings?.SandboxMaxOutputBytes is > 0 and var bytes
+                    ? bytes
+                    : OneShotAppContainerExecutor.DefaultMaxOutputBytes);
             _logger.Info(
-                $"[mxc] system.run runner = LocalCommandRunner (MXC unavailable: " +
-                $"{string.Join("; ", availability.UnsupportedReasons)})");
-            return hostRunner;
+                $"[mxc] system.run runner = MxcCommandRunner " +
+                $"(executor={executor.Name}, sandboxEnabled={(_settings?.SystemRunSandboxEnabled ?? true)})");
         }
 
-        var executor = new OneShotAppContainerExecutor(
-            availability,
-            availability.RunCommandScriptPath!,
-            _logger);
-
         var settingsDirectory = SettingsManager.SettingsDirectoryPath;
-        var mxcRunner = new MxcCommandRunner(
+        return new MxcCommandRunner(
             executor,
             hostRunner,
             () => SnapshotSettings(),
             () => settingsDirectory,
             _logger);
-
-        _logger.Info(
-            $"[mxc] system.run runner = MxcCommandRunner " +
-            $"(executor={executor.Name}, sandboxEnabled={(_settings?.SystemRunSandboxEnabled ?? true)})");
-        return mxcRunner;
     }
 
     /// <summary>
@@ -457,6 +462,16 @@ public sealed class NodeService : IDisposable
             SystemRunSandboxEnabled = _settings.SystemRunSandboxEnabled,
             SystemRunAllowOutbound = _settings.SystemRunAllowOutbound,
             SystemRunAllowLocalNetwork = _settings.SystemRunAllowLocalNetwork,
+            // Sandbox page fields — read by MxcPolicyBuilder.ForSystemRun.
+            SandboxClipboard = _settings.SandboxClipboard,
+            SandboxDocumentsAccess = _settings.SandboxDocumentsAccess,
+            SandboxDownloadsAccess = _settings.SandboxDownloadsAccess,
+            SandboxDesktopAccess = _settings.SandboxDesktopAccess,
+            SandboxCustomFolders = _settings.SandboxCustomFolders is { Count: > 0 } src
+                ? new List<SandboxCustomFolder>(src)
+                : null,
+            SandboxTimeoutMs = _settings.SandboxTimeoutMs,
+            SandboxMaxOutputBytes = _settings.SandboxMaxOutputBytes,
         };
     }
 

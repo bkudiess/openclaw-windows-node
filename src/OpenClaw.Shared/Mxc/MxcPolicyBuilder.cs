@@ -75,7 +75,10 @@ public static class MxcPolicyBuilder
                 ClearPolicyOnExit: true),
             Network: new NetworkPolicy(
                 AllowOutbound: settings.SystemRunAllowOutbound,
-                AllowLocalNetwork: settings.SystemRunAllowLocalNetwork),
+                // LAN access (privateNetworkClientServer capability) intentionally not
+                // exposed: MXC team confirmed only internetClient is validated today.
+                // The setting field is retained for forward compat but ignored here.
+                AllowLocalNetwork: false),
             Ui: new UiPolicy(
                 AllowWindows: false,
                 Clipboard: MapClipboard(settings.SandboxClipboard),
@@ -103,11 +106,39 @@ public static class MxcPolicyBuilder
         List<string> readwritePaths)
     {
         if (access is null) return;
-        // SpecialFolder has no Downloads on .NET; fall back to %USERPROFILE%\Downloads.
-        var path = Path.Combine(userProfile, "Downloads");
+        // .NET has no SpecialFolder.Downloads. Use the Win32 known-folder API so we
+        // honor user redirection (e.g., OneDrive\Downloads). Fall back to the
+        // %USERPROFILE%\Downloads convention if the API isn't available.
+        var path = ResolveKnownFolderDownloads() ?? Path.Combine(userProfile, "Downloads");
         if (access == SandboxFolderAccess.ReadWrite) readwritePaths.Add(path);
         else readonlyPaths.Add(path);
     }
+
+    private static readonly Guid s_folderIdDownloads =
+        new("374DE290-123F-4565-9164-39C4925E467B");
+
+    private static string? ResolveKnownFolderDownloads()
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        try
+        {
+            var hr = SHGetKnownFolderPath(s_folderIdDownloads, 0, IntPtr.Zero, out var ptr);
+            if (hr != 0 || ptr == IntPtr.Zero) return null;
+            try { return System.Runtime.InteropServices.Marshal.PtrToStringUni(ptr); }
+            finally { System.Runtime.InteropServices.Marshal.FreeCoTaskMem(ptr); }
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, ExactSpelling = true, PreserveSig = false)]
+    private static extern int SHGetKnownFolderPath(
+        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPStruct)] Guid rfid,
+        uint dwFlags,
+        IntPtr hToken,
+        out IntPtr ppszPath);
 
     private static ClipboardPolicy MapClipboard(SandboxClipboardMode mode) => mode switch
     {

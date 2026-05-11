@@ -161,4 +161,61 @@ public class MxcCommandRunnerTests
             return Task.FromResult(Result);
         }
     }
+
+    [Theory]
+    [InlineData(0, null, 0)]              // both unset → 0 (no cap)
+    [InlineData(30_000, null, 30_000)]    // agent only
+    [InlineData(0, 60_000, 60_000)]       // policy only
+    [InlineData(30_000, 60_000, 30_000)]  // agent smaller → use agent
+    [InlineData(90_000, 60_000, 60_000)]  // policy smaller → use policy (sandbox cap wins)
+    [InlineData(-1, 60_000, 60_000)]      // negative agent treated as no cap
+    public void CombineTimeouts_TakesMinOfAgentAndPolicy(int agentMs, int? policyMs, int expected)
+    {
+        Assert.Equal(expected, MxcCommandRunner.CombineTimeouts(agentMs, policyMs));
+    }
+
+    [Fact]
+    public async Task RunAsync_PassesMaxOutputBytesToExecutor()
+    {
+        var executor = new FakeSandboxExecutor();
+        var fallback = new FakeCommandRunner();
+        var settings = NewSettings(sandboxEnabled: true);
+        settings.SandboxMaxOutputBytes = 16 * 1024 * 1024;
+        var runner = NewRunner(executor, fallback, settings);
+
+        await runner.RunAsync(new CommandRequest { Command = "echo hi" });
+
+        Assert.NotNull(executor.LastRequest);
+        Assert.Equal(16L * 1024L * 1024L, executor.LastRequest!.MaxOutputBytes);
+    }
+
+    [Fact]
+    public async Task RunAsync_PolicyTimeoutCapsAgentTimeout()
+    {
+        var executor = new FakeSandboxExecutor();
+        var fallback = new FakeCommandRunner();
+        var settings = NewSettings(sandboxEnabled: true);
+        settings.SandboxTimeoutMs = 10_000; // sandbox cap is 10s
+        var runner = NewRunner(executor, fallback, settings);
+
+        // Agent asks for 60s; policy caps to 10s.
+        await runner.RunAsync(new CommandRequest { Command = "echo hi", TimeoutMs = 60_000 });
+
+        Assert.NotNull(executor.LastRequest);
+        Assert.Equal(10_000, executor.LastRequest!.TimeoutMs);
+    }
+
+    [Fact]
+    public async Task RunAsync_UnavailableExecutor_DeniesWithReason()
+    {
+        var executor = new UnavailableSandboxExecutor("test: MXC not installed");
+        var fallback = new FakeCommandRunner();
+        var runner = NewRunner(executor, fallback, NewSettings(sandboxEnabled: true));
+
+        var result = await runner.RunAsync(new CommandRequest { Command = "echo hi" });
+
+        Assert.Equal(-1, result.ExitCode);
+        Assert.Contains("MXC not installed", result.Stderr);
+        Assert.Null(fallback.LastRequest); // never delegated to host
+    }
 }

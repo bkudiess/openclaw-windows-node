@@ -50,11 +50,10 @@
                                   OffContent="Off — agent cannot reach any website"
                                   OnContent="On — agent can call any HTTPS site"
                                   Toggled="OnNetInternetToggled" />
-                    <ToggleSwitch x:Name="NetLanToggle"
-                                  Header="Allow local network"
-                                  OffContent="Off — agent cannot reach LAN devices"
-                                  OnContent="On — agent can reach other devices on your LAN"
-                                  Toggled="OnNetLanToggled" />
+                    <TextBlock Text="Local network (LAN) access is intentionally not exposed — MXC has not yet validated the privateNetworkClientServer capability."
+                               TextWrapping="Wrap"
+                               FontSize="11"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
             </Expander>
 
