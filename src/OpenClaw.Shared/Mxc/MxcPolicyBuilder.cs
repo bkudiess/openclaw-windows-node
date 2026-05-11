@@ -42,17 +42,35 @@ public static class MxcPolicyBuilder
         if (!string.IsNullOrWhiteSpace(settingsDirectoryPath))
             deniedPaths.Add(settingsDirectoryPath);
 
-        var sshPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".ssh");
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var sshPath = Path.Combine(userProfile, ".ssh");
         if (!string.IsNullOrWhiteSpace(sshPath))
             deniedPaths.Add(sshPath);
+
+        var readonlyPaths = new List<string>();
+        var readwritePaths = new List<string>();
+
+        AddWellKnownFolder(Environment.SpecialFolder.MyDocuments, settings.SandboxDocumentsAccess, readonlyPaths, readwritePaths);
+        AddWellKnownFolder(Environment.SpecialFolder.Desktop, settings.SandboxDesktopAccess, readonlyPaths, readwritePaths);
+        AddDownloadsFolder(userProfile, settings.SandboxDownloadsAccess, readonlyPaths, readwritePaths);
+
+        if (settings.SandboxCustomFolders is { Count: > 0 } customFolders)
+        {
+            foreach (var folder in customFolders)
+            {
+                if (string.IsNullOrWhiteSpace(folder.Path)) continue;
+                if (folder.Access == SandboxFolderAccess.ReadWrite)
+                    readwritePaths.Add(folder.Path);
+                else
+                    readonlyPaths.Add(folder.Path);
+            }
+        }
 
         return new SandboxPolicy(
             Version: SupportedPolicyVersion,
             Filesystem: new FilesystemPolicy(
-                ReadwritePaths: Array.Empty<string>(),
-                ReadonlyPaths: Array.Empty<string>(),
+                ReadwritePaths: readwritePaths,
+                ReadonlyPaths: readonlyPaths,
                 DeniedPaths: deniedPaths,
                 ClearPolicyOnExit: true),
             Network: new NetworkPolicy(
@@ -60,8 +78,42 @@ public static class MxcPolicyBuilder
                 AllowLocalNetwork: settings.SystemRunAllowLocalNetwork),
             Ui: new UiPolicy(
                 AllowWindows: false,
-                Clipboard: ClipboardPolicy.None,
+                Clipboard: MapClipboard(settings.SandboxClipboard),
                 AllowInputInjection: false),
-            TimeoutMs: null);
+            TimeoutMs: settings.SandboxTimeoutMs > 0 ? settings.SandboxTimeoutMs : null);
     }
+
+    private static void AddWellKnownFolder(
+        Environment.SpecialFolder folder,
+        SandboxFolderAccess? access,
+        List<string> readonlyPaths,
+        List<string> readwritePaths)
+    {
+        if (access is null) return;
+        var path = Environment.GetFolderPath(folder);
+        if (string.IsNullOrWhiteSpace(path)) return;
+        if (access == SandboxFolderAccess.ReadWrite) readwritePaths.Add(path);
+        else readonlyPaths.Add(path);
+    }
+
+    private static void AddDownloadsFolder(
+        string userProfile,
+        SandboxFolderAccess? access,
+        List<string> readonlyPaths,
+        List<string> readwritePaths)
+    {
+        if (access is null) return;
+        // SpecialFolder has no Downloads on .NET; fall back to %USERPROFILE%\Downloads.
+        var path = Path.Combine(userProfile, "Downloads");
+        if (access == SandboxFolderAccess.ReadWrite) readwritePaths.Add(path);
+        else readonlyPaths.Add(path);
+    }
+
+    private static ClipboardPolicy MapClipboard(SandboxClipboardMode mode) => mode switch
+    {
+        SandboxClipboardMode.Read => ClipboardPolicy.Read,
+        SandboxClipboardMode.Write => ClipboardPolicy.Write,
+        SandboxClipboardMode.Both => ClipboardPolicy.All,
+        _ => ClipboardPolicy.None,
+    };
 }

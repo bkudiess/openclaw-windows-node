@@ -110,6 +110,37 @@ public class SettingsData
     /// </summary>
     public bool SystemRunAllowLocalNetwork { get; set; } = false;
 
+    /// <summary>
+    /// Clipboard access policy inside the sandbox. Default <c>None</c> — the
+    /// sandboxed payload cannot see or change the user's clipboard.
+    /// </summary>
+    public SandboxClipboardMode SandboxClipboard { get; set; } = SandboxClipboardMode.None;
+
+    /// <summary>
+    /// Per-folder access grants. Each well-known user folder can be
+    /// individually opened to the sandbox in read-only or read-write mode.
+    /// Default for all: <c>null</c> (blocked).
+    /// </summary>
+    public SandboxFolderAccess? SandboxDocumentsAccess { get; set; }
+    public SandboxFolderAccess? SandboxDownloadsAccess { get; set; }
+    public SandboxFolderAccess? SandboxDesktopAccess { get; set; }
+
+    /// <summary>
+    /// User-picked custom folders to expose to the sandbox.
+    /// </summary>
+    public List<SandboxCustomFolder>? SandboxCustomFolders { get; set; }
+
+    /// <summary>
+    /// Maximum execution time per sandboxed command. Default 30s.
+    /// Range enforced in UI: 5_000 .. 300_000 ms.
+    /// </summary>
+    public int SandboxTimeoutMs { get; set; } = 30_000;
+
+    /// <summary>
+    /// Maximum stdout/stderr returned from a sandboxed command. Default 4 MiB.
+    /// </summary>
+    public long SandboxMaxOutputBytes { get; set; } = 4 * 1024 * 1024;
+
     // ── (Voice / STT settings consolidated into the block above.) ──
 
     private static readonly JsonSerializerOptions s_options = new()

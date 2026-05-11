@@ -30,70 +30,9 @@ public sealed partial class DebugPage : Page
         LoadLog();
         LoadConnectionStatus();
         LoadDeviceIdentity();
-        LoadSandboxSettings();
     }
 
-    // ── MXC sandbox toggles ─────────────────────────────────────────
-
-    private bool _suppressSandboxToggleEvents;
-
-    private void LoadSandboxSettings()
-    {
-        var settings = _hub?.Settings;
-        if (settings is null) return;
-
-        _suppressSandboxToggleEvents = true;
-        try
-        {
-            SandboxEnabledToggle.IsOn = settings.SystemRunSandboxEnabled;
-            SandboxAllowOutboundToggle.IsOn = settings.SystemRunAllowOutbound;
-            SandboxAllowLocalNetworkToggle.IsOn = settings.SystemRunAllowLocalNetwork;
-        }
-        finally
-        {
-            _suppressSandboxToggleEvents = false;
-        }
-
-        // Probe MXC availability and surface the result so the user knows whether
-        // turning the sandbox on will actually do anything.
-        var availability = OpenClaw.Shared.Mxc.MxcAvailability.Probe();
-        if (availability.HasAnyBackend)
-        {
-            SandboxStatusText.Text =
-                $"Sandbox available ✓  appcontainer={availability.IsAppContainerAvailable}, " +
-                $"isolation_session={availability.IsIsolationSessionAvailable}";
-        }
-        else
-        {
-            SandboxStatusText.Text =
-                "Sandbox UNAVAILABLE on this machine. " +
-                string.Join(" · ", availability.UnsupportedReasons);
-        }
-    }
-
-    private void OnSandboxEnabledToggled(object sender, RoutedEventArgs e)
-    {
-        if (_suppressSandboxToggleEvents) return;
-        if (_hub?.Settings is not { } settings) return;
-        settings.SystemRunSandboxEnabled = SandboxEnabledToggle.IsOn;
-        settings.Save();
-    }
-
-    private void OnSandboxAllowOutboundToggled(object sender, RoutedEventArgs e)
-    {
-        if (_suppressSandboxToggleEvents) return;
-        if (_hub?.Settings is not { } settings) return;
-        settings.SystemRunAllowOutbound = SandboxAllowOutboundToggle.IsOn;
-        settings.Save();
-    }
-
-    private void OnSandboxAllowLocalNetworkToggled(object sender, RoutedEventArgs e)
-    {
-        if (_suppressSandboxToggleEvents) return;
-        if (_hub?.Settings is not { } settings) return;
-        settings.SystemRunAllowLocalNetwork = SandboxAllowLocalNetworkToggle.IsOn;
-        settings.Save();
-    }
+    // Sandbox toggles moved to SandboxPage.
 
     // ── Log Viewer ───────────────────────────────────────────────────
 

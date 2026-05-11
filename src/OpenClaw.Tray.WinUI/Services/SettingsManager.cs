@@ -120,6 +120,15 @@ public class SettingsManager
     /// <summary>When sandboxed, allow system.run commands to reach the local network. Default false.</summary>
     public bool SystemRunAllowLocalNetwork { get; set; } = false;
 
+    // ── MXC sandbox: additional knobs (Sandbox page) ─────────────────
+    public SandboxClipboardMode SandboxClipboard { get; set; } = SandboxClipboardMode.None;
+    public SandboxFolderAccess? SandboxDocumentsAccess { get; set; }
+    public SandboxFolderAccess? SandboxDownloadsAccess { get; set; }
+    public SandboxFolderAccess? SandboxDesktopAccess { get; set; }
+    public List<SandboxCustomFolder> SandboxCustomFolders { get; set; } = new();
+    public int SandboxTimeoutMs { get; set; } = 30_000;
+    public long SandboxMaxOutputBytes { get; set; } = 4 * 1024 * 1024;
+
     public SettingsManager() : this(GetDefaultSettingsDirectory())
     {
     }
@@ -224,6 +233,17 @@ public class SettingsManager
                     SystemRunSandboxEnabled = loaded.SystemRunSandboxEnabled;
                     SystemRunAllowOutbound = loaded.SystemRunAllowOutbound;
                     SystemRunAllowLocalNetwork = loaded.SystemRunAllowLocalNetwork;
+
+                    // MXC sandbox settings (Sandbox page)
+                    SandboxClipboard = loaded.SandboxClipboard;
+                    SandboxDocumentsAccess = loaded.SandboxDocumentsAccess;
+                    SandboxDownloadsAccess = loaded.SandboxDownloadsAccess;
+                    SandboxDesktopAccess = loaded.SandboxDesktopAccess;
+                    SandboxCustomFolders = loaded.SandboxCustomFolders ?? new();
+                    if (loaded.SandboxTimeoutMs > 0)
+                        SandboxTimeoutMs = loaded.SandboxTimeoutMs;
+                    if (loaded.SandboxMaxOutputBytes > 0)
+                        SandboxMaxOutputBytes = loaded.SandboxMaxOutputBytes;
                 }
             }
         }
@@ -319,7 +339,15 @@ public class SettingsManager
         // MXC sandbox settings (Slice 1)
         SystemRunSandboxEnabled = SystemRunSandboxEnabled,
         SystemRunAllowOutbound = SystemRunAllowOutbound,
-        SystemRunAllowLocalNetwork = SystemRunAllowLocalNetwork
+        SystemRunAllowLocalNetwork = SystemRunAllowLocalNetwork,
+        // MXC sandbox settings (Sandbox page)
+        SandboxClipboard = SandboxClipboard,
+        SandboxDocumentsAccess = SandboxDocumentsAccess,
+        SandboxDownloadsAccess = SandboxDownloadsAccess,
+        SandboxDesktopAccess = SandboxDesktopAccess,
+        SandboxCustomFolders = SandboxCustomFolders.Count == 0 ? null : new List<SandboxCustomFolder>(SandboxCustomFolders),
+        SandboxTimeoutMs = SandboxTimeoutMs,
+        SandboxMaxOutputBytes = SandboxMaxOutputBytes
     };
 
     public void Save()

@@ -118,37 +118,7 @@
                 </StackPanel>
             </Expander>
 
-            <!-- system.run sandbox controls (MXC) -->
-            <Expander x:Name="SandboxExpander" IsExpanded="True"
-                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                <Expander.Header>
-                    <TextBlock Text="🛡 system.run Sandbox (MXC)" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                </Expander.Header>
-                <StackPanel Spacing="12" Padding="4">
-                    <TextBlock x:Name="SandboxStatusText"
-                               Text="Sandbox availability: probing..."
-                               TextWrapping="Wrap"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-
-                    <ToggleSwitch x:Name="SandboxEnabledToggle"
-                                  Header="Sandbox system.run via MXC AppContainer"
-                                  OffContent="Off — runs on host"
-                                  OnContent="On — sandboxed; denies if MXC unavailable"
-                                  Toggled="OnSandboxEnabledToggled"/>
-
-                    <ToggleSwitch x:Name="SandboxAllowOutboundToggle"
-                                  Header="Allow internet from sandboxed commands"
-                                  OffContent="Off — no public internet"
-                                  OnContent="On — outbound allowed"
-                                  Toggled="OnSandboxAllowOutboundToggled"/>
-
-                    <ToggleSwitch x:Name="SandboxAllowLocalNetworkToggle"
-                                  Header="Allow LAN access from sandboxed commands"
-                                  OffContent="Off — no LAN"
-                                  OnContent="On — local network allowed"
-                                  Toggled="OnSandboxAllowLocalNetworkToggled"/>
-                </StackPanel>
-            </Expander>
+            <!-- system.run sandbox controls moved to the Sandbox page -->
 
         </StackPanel>
     </ScrollViewer>
