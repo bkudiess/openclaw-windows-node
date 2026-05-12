@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using OpenClaw.Shared;
+using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System;
 using System.Collections.ObjectModel;
@@ -17,6 +18,57 @@ public sealed partial class SandboxPage : Page
 
     public ObservableCollection<CustomFolderRow> CustomFolders { get; } = new();
 
+    // ── Quick-preset definitions ─────────────────────────────────────
+    //
+    // Picking a preset writes ALL the values below into SettingsManager
+    // in one go (auto-saves like any other change). Users can override any
+    // individual control afterward — the cards just highlight whichever
+    // preset matches the current state.
+
+    private sealed record SandboxPreset(
+        string Tag,
+        bool SandboxEnabled,
+        bool AllowOutbound,
+        SandboxFolderAccess? DocumentsAccess,
+        SandboxFolderAccess? DownloadsAccess,
+        SandboxFolderAccess? DesktopAccess,
+        SandboxClipboardMode Clipboard,
+        int TimeoutMs,
+        long MaxOutputBytes);
+
+    private static readonly SandboxPreset s_lockedDown = new(
+        Tag: "LockedDown",
+        SandboxEnabled: true,
+        AllowOutbound: false,
+        DocumentsAccess: null,
+        DownloadsAccess: null,
+        DesktopAccess: null,
+        Clipboard: SandboxClipboardMode.None,
+        TimeoutMs: 30_000,
+        MaxOutputBytes: 4 * 1024 * 1024);
+
+    private static readonly SandboxPreset s_balanced = new(
+        Tag: "Balanced",
+        SandboxEnabled: true,
+        AllowOutbound: true,
+        DocumentsAccess: SandboxFolderAccess.ReadOnly,
+        DownloadsAccess: SandboxFolderAccess.ReadOnly,
+        DesktopAccess: SandboxFolderAccess.ReadOnly,
+        Clipboard: SandboxClipboardMode.Read,
+        TimeoutMs: 60_000,
+        MaxOutputBytes: 16 * 1024 * 1024);
+
+    private static readonly SandboxPreset s_permissive = new(
+        Tag: "Permissive",
+        SandboxEnabled: true,
+        AllowOutbound: true,
+        DocumentsAccess: SandboxFolderAccess.ReadWrite,
+        DownloadsAccess: SandboxFolderAccess.ReadWrite,
+        DesktopAccess: SandboxFolderAccess.ReadWrite,
+        Clipboard: SandboxClipboardMode.Both,
+        TimeoutMs: 300_000,
+        MaxOutputBytes: 64 * 1024 * 1024);
+
     public SandboxPage()
     {
         InitializeComponent();
@@ -28,6 +80,7 @@ public sealed partial class SandboxPage : Page
         _hub = hub;
         LoadState();
         ProbeStatus();
+        UpdateControlsEnabledState();
     }
 
     // ── Load + probe ─────────────────────────────────────────────────
@@ -40,7 +93,6 @@ public sealed partial class SandboxPage : Page
         try
         {
             SandboxEnabledToggle.IsOn = settings.SystemRunSandboxEnabled;
-            SandboxOffWarning.Visibility = settings.SystemRunSandboxEnabled ? Visibility.Collapsed : Visibility.Visible;
 
             NetInternetToggle.IsOn = settings.SystemRunAllowOutbound;
 
@@ -63,7 +115,7 @@ public sealed partial class SandboxPage : Page
 
             var secs = Math.Clamp(settings.SandboxTimeoutMs / 1000, 5, 300);
             TimeoutSlider.Value = secs;
-            TimeoutLabel.Text = $"Max time per command: {secs} sec";
+            TimeoutLabel.Text = $"Command timeout: {secs} sec";
 
             SelectMaxOutputTag(settings.SandboxMaxOutputBytes);
         }
@@ -71,21 +123,282 @@ public sealed partial class SandboxPage : Page
         {
             _suppress = false;
         }
+
+        UpdatePresetHighlight();
+        UpdateSandboxStatusCard();
+        UpdateControlsEnabledState();
+    }
+
+    /// <summary>
+    /// Drives the page header (icon + title + subtext + toggle visibility) based on
+    /// MXC availability AND the current sandbox toggle state. Three visual states:
+    ///   1. Available + ON   → 🛡 "Sandbox is on" + toggle visible
+    ///   2. Available + OFF  → ⚠ "Sandbox is off — high risk" + toggle visible
+    ///   3. Unavailable      → ⚠ "Sandbox unavailable — agent commands are blocked" + toggle hidden
+    /// </summary>
+    private void UpdateSandboxStatusCard()
+    {
+        var availability = OpenClaw.Shared.Mxc.MxcAvailability.Probe();
+        var enabled = SandboxEnabledToggle.IsOn;
+        var available = availability.HasAnyBackend;
+
+        // Always refresh the unavailable-action InfoBar in sync with header state.
+        UpdateUnavailableActionBar(availability);
+
+        if (!available)
+        {
+            SandboxStatusIcon.Text = "⚠";
+            SandboxStatusTitle.Text = "Sandbox unavailable — agent commands are blocked";
+            SandboxStatusSubtext.Text = "See the details below to fix this.";
+            SandboxEnabledToggle.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        SandboxEnabledToggle.Visibility = Visibility.Visible;
+
+        if (enabled)
+        {
+            SandboxStatusIcon.Text = "🛡";
+            SandboxStatusTitle.Text = "Sandbox is on";
+            SandboxStatusSubtext.Text = "Windows commands started by agents run in a restricted AppContainer with only the access enabled below.";
+        }
+        else
+        {
+            SandboxStatusIcon.Text = "⚠";
+            SandboxStatusTitle.Text = "Sandbox is off — high risk";
+            SandboxStatusSubtext.Text = "Agent-started Windows commands run as your Windows user and can access your files, network, clipboard, and OpenClaw settings.";
+        }
+    }
+
+    /// <summary>
+    /// Shows or hides the prominent "Sandbox unavailable" InfoBar based on availability,
+    /// and categorizes the failure mode so we can suggest a relevant action:
+    ///   - Windows build/UBR too old → "Open Windows Update"
+    ///   - wxc-exec.exe or run-command.cjs missing → "Show install instructions"
+    ///   - Anything else → no primary action, just the learn-more hyperlink
+    /// </summary>
+    private void UpdateUnavailableActionBar(OpenClaw.Shared.Mxc.MxcAvailability availability)
+    {
+        if (availability.HasAnyBackend)
+        {
+            UnavailableActionBar.IsOpen = false;
+            return;
+        }
+
+        var reasons = availability.UnsupportedReasons;
+        var reasonText = reasons.Count > 0
+            ? string.Join("  ·  ", reasons)
+            : "MXC sandboxing primitives are not available on this machine.";
+
+        var isWindowsIssue = reasons.Any(r =>
+            r.Contains("Windows build", StringComparison.OrdinalIgnoreCase) ||
+            r.Contains("Windows UBR", StringComparison.OrdinalIgnoreCase));
+
+        var isSetupIssue = !availability.IsWxcExecResolvable
+            || availability.RunCommandScriptPath is null;
+
+        if (isWindowsIssue)
+        {
+            UnavailableActionBar.Title = "Your Windows version doesn't support sandboxing yet";
+            UnavailableActionMessage.Text =
+                $"{reasonText}\n\nMXC sandboxing requires a recent Windows build with the AppContainer primitives shipped. " +
+                "Install the latest Windows updates (or join the Windows Insider Program for the newest builds).";
+            UnavailablePrimaryButton.Content = "Open Windows Update";
+            UnavailablePrimaryButton.Tag = "windowsupdate";
+            UnavailablePrimaryButton.Visibility = Visibility.Visible;
+        }
+        else if (isSetupIssue)
+        {
+            UnavailableActionBar.Title = "Sandboxing components are missing";
+            UnavailableActionMessage.Text =
+                $"{reasonText}\n\nThe MXC bridge script or the wxc-exec binary couldn't be located. " +
+                "If this is a developer build, run `npm install` in the tools/mxc folder. " +
+                "Otherwise reinstall the companion app.";
+            UnavailablePrimaryButton.Content = "Show install instructions";
+            UnavailablePrimaryButton.Tag = "install";
+            UnavailablePrimaryButton.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            UnavailableActionBar.Title = "Sandbox unavailable";
+            UnavailableActionMessage.Text = reasonText;
+            UnavailablePrimaryButton.Visibility = Visibility.Collapsed;
+        }
+
+        UnavailableActionBar.IsOpen = true;
+    }
+
+    private async void OnUnavailableActionClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn) return;
+        var tag = btn.Tag as string;
+        try
+        {
+            var uri = tag switch
+            {
+                "windowsupdate" => new Uri("ms-settings:windowsupdate"),
+                "install" => new Uri("https://github.com/microsoft/mxc#getting-started"),
+                _ => null,
+            };
+            if (uri != null)
+                await global::Windows.System.Launcher.LaunchUriAsync(uri);
+        }
+        catch
+        {
+            // Best-effort — if the URI handler isn't available we just no-op.
+        }
+    }
+
+    /// <summary>
+    /// Enables/disables sub-sections based on MXC availability AND master toggle state.
+    /// When sandbox is off (or MXC unavailable), the entire page below the master
+    /// toggle dims — presets and their heading included — so users can't tweak
+    /// settings that don't apply.
+    /// </summary>
+    private void UpdateControlsEnabledState()
+    {
+        var availability = OpenClaw.Shared.Mxc.MxcAvailability.Probe();
+        var available = availability.HasAnyBackend;
+        var sandboxOn = SandboxEnabledToggle.IsOn;
+        var active = available && sandboxOn;
+
+        // StackPanel doesn't expose IsEnabled, so we mimic the disabled look manually:
+        // block hit-testing (no clicks reach children) and dim opacity for visual cue.
+        SandboxControlsContainer.IsHitTestVisible = active;
+        SandboxControlsContainer.Opacity = active ? 1.0 : 0.45;
+
+        // Dim the Security-level section (heading + subtitle + preset cards) too.
+        PresetSection.IsHitTestVisible = active;
+        PresetSection.Opacity = active ? 1.0 : 0.45;
+
+        PresetLockedButton.IsEnabled = active;
+        PresetBalancedButton.IsEnabled = active;
+        PresetPermissiveButton.IsEnabled = active;
     }
 
     private void ProbeStatus()
     {
-        var a = OpenClaw.Shared.Mxc.MxcAvailability.Probe();
-        if (a.HasAnyBackend)
+        UpdateSandboxStatusCard();
+    }
+
+    // ── Presets ──────────────────────────────────────────────────────
+
+    private void ApplyPreset(SandboxPreset preset)
+    {
+        if (_hub?.Settings is not { } s) return;
+
+        _suppress = true;
+        try
         {
-            StatusBannerHeader.Text = "Sandbox available ✓";
-            StatusBannerDetail.Text = $"appcontainer={a.IsAppContainerAvailable}, isolation_session={a.IsIsolationSessionAvailable}";
+            s.SystemRunSandboxEnabled = preset.SandboxEnabled;
+            s.SystemRunAllowOutbound = preset.AllowOutbound;
+            s.SandboxDocumentsAccess = preset.DocumentsAccess;
+            s.SandboxDownloadsAccess = preset.DownloadsAccess;
+            s.SandboxDesktopAccess = preset.DesktopAccess;
+            s.SandboxClipboard = preset.Clipboard;
+            s.SandboxTimeoutMs = preset.TimeoutMs;
+            s.SandboxMaxOutputBytes = preset.MaxOutputBytes;
+            // Note: custom folders are NOT touched by presets — users curate them.
+        }
+        finally
+        {
+            _suppress = false;
+        }
+
+        // Reflect into the UI controls and persist.
+        LoadState();
+        s.Save();
+
+        // If the user just applied a preset and still has custom folder grants,
+        // warn them — they may override the preset's intent (especially Locked Down).
+        var customCount = s.SandboxCustomFolders?.Count ?? 0;
+        if (customCount > 0)
+        {
+            var plural = customCount == 1 ? "" : "s";
+            PresetCustomFoldersWarning.Message = preset.Tag == s_lockedDown.Tag
+                ? $"Locked Down applied, but {customCount} custom folder grant{plural} remain active. Remove them in the Files section below for a fully locked-down sandbox."
+                : $"{customCount} custom folder grant{plural} remain active alongside this preset.";
+            PresetCustomFoldersWarning.IsOpen = true;
         }
         else
         {
-            StatusBannerHeader.Text = "⚠ Sandbox UNAVAILABLE on this machine";
-            StatusBannerDetail.Text = string.Join(" · ", a.UnsupportedReasons);
+            PresetCustomFoldersWarning.IsOpen = false;
         }
+    }
+
+    private void OnPresetLockedClick(object sender, RoutedEventArgs e) => ApplyPreset(s_lockedDown);
+    private void OnPresetBalancedClick(object sender, RoutedEventArgs e) => ApplyPreset(s_balanced);
+    private void OnPresetPermissiveClick(object sender, RoutedEventArgs e) => ApplyPreset(s_permissive);
+
+    private void UpdatePresetHighlight()
+    {
+        var s = _hub?.Settings;
+        var active = s is null ? null : DetectActivePreset(s);
+        SetPresetCardActive(PresetLockedButton, active?.Tag == s_lockedDown.Tag);
+        SetPresetCardActive(PresetBalancedButton, active?.Tag == s_balanced.Tag);
+        SetPresetCardActive(PresetPermissiveButton, active?.Tag == s_permissive.Tag);
+    }
+
+    private static void SetPresetCardActive(Button button, bool active)
+    {
+        // Visual cue for the active preset: accent-themed border, slightly thicker.
+        // The default ButtonStyle has visual states for BOTH the background and the
+        // border brush (PointerOver / Pressed). Setting button.BorderBrush directly
+        // only paints the Normal state — on hover the template animates to
+        // ButtonBorderBrushPointerOver (grey), which is what was "stealing" the
+        // accent. To stop that we override the per-state resources locally on the
+        // button so hover/pressed keep the accent (or no change at all when idle).
+        button.BorderThickness = new Thickness(active ? 2 : 1);
+        var accent = (Microsoft.UI.Xaml.Media.Brush)Microsoft.UI.Xaml.Application.Current.Resources["AccentFillColorDefaultBrush"];
+        var defaultStroke = (Microsoft.UI.Xaml.Media.Brush)Microsoft.UI.Xaml.Application.Current.Resources["CardStrokeColorDefaultBrush"];
+        button.BorderBrush = active ? accent : defaultStroke;
+
+        if (active)
+        {
+            var defaultBg = (Microsoft.UI.Xaml.Media.Brush)Microsoft.UI.Xaml.Application.Current.Resources["ControlFillColorDefaultBrush"];
+
+            // Pin background to default fill for all states (no grey flash).
+            button.Resources["ButtonBackground"] = defaultBg;
+            button.Resources["ButtonBackgroundPointerOver"] = defaultBg;
+            button.Resources["ButtonBackgroundPressed"] = defaultBg;
+
+            // Pin border brush to accent for all states (no grey/dark-stroke flash).
+            button.Resources["ButtonBorderBrush"] = accent;
+            button.Resources["ButtonBorderBrushPointerOver"] = accent;
+            button.Resources["ButtonBorderBrushPressed"] = accent;
+        }
+        else
+        {
+            button.Resources.Remove("ButtonBackground");
+            button.Resources.Remove("ButtonBackgroundPointerOver");
+            button.Resources.Remove("ButtonBackgroundPressed");
+            button.Resources.Remove("ButtonBorderBrush");
+            button.Resources.Remove("ButtonBorderBrushPointerOver");
+            button.Resources.Remove("ButtonBorderBrushPressed");
+        }
+
+        // Force the visual state to refresh so the new resources take effect immediately.
+        Microsoft.UI.Xaml.VisualStateManager.GoToState(button, "Normal", false);
+    }
+
+    private static SandboxPreset? DetectActivePreset(SettingsManager s)
+    {
+        if (Matches(s, s_lockedDown)) return s_lockedDown;
+        if (Matches(s, s_balanced)) return s_balanced;
+        if (Matches(s, s_permissive)) return s_permissive;
+        return null;
+    }
+
+    private static bool Matches(SettingsManager s, SandboxPreset p)
+    {
+        return s.SystemRunSandboxEnabled == p.SandboxEnabled
+            && s.SystemRunAllowOutbound == p.AllowOutbound
+            && s.SandboxDocumentsAccess == p.DocumentsAccess
+            && s.SandboxDownloadsAccess == p.DownloadsAccess
+            && s.SandboxDesktopAccess == p.DesktopAccess
+            && s.SandboxClipboard == p.Clipboard
+            && s.SandboxTimeoutMs == p.TimeoutMs
+            && s.SandboxMaxOutputBytes == p.MaxOutputBytes;
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
@@ -124,6 +437,7 @@ public sealed partial class SandboxPage : Page
     {
         if (_suppress) return;
         _hub?.Settings?.Save();
+        UpdatePresetHighlight();
     }
 
     private void RefreshCustomFoldersUi()
@@ -134,12 +448,38 @@ public sealed partial class SandboxPage : Page
 
     // ── Event handlers ───────────────────────────────────────────────
 
-    private void OnSandboxEnabledToggled(object sender, RoutedEventArgs e)
+    private async void OnSandboxEnabledToggled(object sender, RoutedEventArgs e)
     {
         if (_suppress) return;
         if (_hub?.Settings is not { } s) return;
-        s.SystemRunSandboxEnabled = SandboxEnabledToggle.IsOn;
-        SandboxOffWarning.Visibility = SandboxEnabledToggle.IsOn ? Visibility.Collapsed : Visibility.Visible;
+
+        var newValue = SandboxEnabledToggle.IsOn;
+        var oldValue = s.SystemRunSandboxEnabled;
+
+        // Confirm before turning sandbox OFF — this is the high-risk transition.
+        if (!newValue && oldValue)
+        {
+            var dialog = new ContentDialog
+            {
+                Title = "Turn off sandboxing?",
+                Content = "Agent-started Windows commands will run as you and may access your files, network, clipboard, and OpenClaw settings.\n\nThis is the high-risk mode. Only do this if you trust the agent and need it for debugging or performance.",
+                PrimaryButtonText = "Turn off",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Close,
+                XamlRoot = this.XamlRoot,
+            };
+            var result = await dialog.ShowAsync();
+            if (result != ContentDialogResult.Primary)
+            {
+                _suppress = true;
+                try { SandboxEnabledToggle.IsOn = true; } finally { _suppress = false; }
+                return;
+            }
+        }
+
+        s.SystemRunSandboxEnabled = newValue;
+        UpdateSandboxStatusCard();
+        UpdateControlsEnabledState();
         Save();
     }
 
@@ -198,7 +538,13 @@ public sealed partial class SandboxPage : Page
         if (folder is null || string.IsNullOrWhiteSpace(folder.Path)) return;
         if (CustomFolders.Any(f => string.Equals(f.Path, folder.Path, StringComparison.OrdinalIgnoreCase))) return;
 
-        CustomFolders.Add(new CustomFolderRow(folder.Path, access));
+        var row = new CustomFolderRow(folder.Path, access);
+        // Mark "initial" as already fired — when the ListView materializes this row's
+        // ComboBox and its SelectedIndex binding fires SelectionChanged, we want to
+        // skip processing (this isn't a user-driven change, the settings entry was
+        // already added below).
+        row.InitialSelectionFired = true;
+        CustomFolders.Add(row);
         RefreshCustomFoldersUi();
 
         if (_hub.Settings is { } s)
@@ -206,6 +552,57 @@ public sealed partial class SandboxPage : Page
             s.SandboxCustomFolders.Add(new SandboxCustomFolder { Path = folder.Path, Access = access });
             Save();
         }
+    }
+
+    private void OnCustomFolderAccessChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppress) return;
+        if (sender is not ComboBox combo) return;
+        if (combo.DataContext is not CustomFolderRow row) return;
+
+        // The ComboBox's SelectedIndex binding fires SelectionChanged once on
+        // initial materialization. Skip that "fake" change — only act on real
+        // user-driven changes.
+        if (!row.InitialSelectionFired)
+        {
+            row.InitialSelectionFired = true;
+            return;
+        }
+
+        if (_hub?.Settings is not { } s) return;
+
+        var newIndex = combo.SelectedIndex;
+        var newAccess = newIndex switch
+        {
+            1 => (SandboxFolderAccess?)SandboxFolderAccess.ReadOnly,
+            2 => (SandboxFolderAccess?)SandboxFolderAccess.ReadWrite,
+            _ => null, // 0 = Blocked → remove the grant
+        };
+
+        var existing = s.SandboxCustomFolders.FirstOrDefault(f =>
+            string.Equals(f.Path, row.Path, StringComparison.OrdinalIgnoreCase));
+
+        if (newAccess is null)
+        {
+            // User picked "Blocked" — drop the grant entirely.
+            if (existing != null) s.SandboxCustomFolders.Remove(existing);
+            var rowToRemove = CustomFolders.FirstOrDefault(f =>
+                string.Equals(f.Path, row.Path, StringComparison.OrdinalIgnoreCase));
+            if (rowToRemove != null) CustomFolders.Remove(rowToRemove);
+            RefreshCustomFoldersUi();
+        }
+        else if (existing != null)
+        {
+            existing.Access = newAccess.Value;
+        }
+        else
+        {
+            // Defensive: row exists in UI but not in settings (shouldn't happen).
+            s.SandboxCustomFolders.Add(new SandboxCustomFolder { Path = row.Path, Access = newAccess.Value });
+        }
+
+        row.AccessIndex = newIndex;
+        Save();
     }
 
     private void OnRemoveCustomFolder(object sender, RoutedEventArgs e)
@@ -262,12 +659,24 @@ public sealed partial class SandboxPage : Page
     public sealed class CustomFolderRow
     {
         public string Path { get; }
-        public string AccessLabel { get; }
+        public int AccessIndex { get; set; }
+
+        /// <summary>
+        /// Tracks whether the ComboBox's SelectedIndex-binding has already fired
+        /// its initial SelectionChanged event during materialization. Used by
+        /// OnCustomFolderAccessChanged to skip that "fake" change.
+        /// </summary>
+        public bool InitialSelectionFired { get; set; }
 
         public CustomFolderRow(string path, SandboxFolderAccess access)
         {
             Path = path;
-            AccessLabel = access == SandboxFolderAccess.ReadWrite ? "✏️ Read+Write" : "🔒 Read only";
+            AccessIndex = access switch
+            {
+                SandboxFolderAccess.ReadWrite => 2,
+                SandboxFolderAccess.ReadOnly => 1,
+                _ => 0,
+            };
         }
     }
 }
