@@ -33,6 +33,23 @@
                     </StackPanel>
                 </Expander>
 
+                <!-- User interface -->
+                <Expander x:Name="UserInterfaceExpander" IsExpanded="True"
+                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                          AutomationProperties.AutomationId="UserInterfaceExpander">
+                    <Expander.Header>
+                        <TextBlock Text="User interface" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                    </Expander.Header>
+                    <StackPanel Spacing="12" Padding="4">
+                        <ToggleSwitch x:Name="UseLegacyWebChatToggle" Header="Use standard Gateway Chat interface"
+                                      AutomationProperties.AutomationId="SettingsPageUseLegacyWebChat"/>
+                        <TextBlock Text="When on, the Chat tab and tray Chat popup host the gateway's chat interface instead of the custom Windows interface."
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Expander>
+
                 <!-- Notifications -->
                 <Expander x:Name="NotificationsExpander" IsExpanded="True"
                           HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"

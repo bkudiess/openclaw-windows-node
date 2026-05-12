@@ -1644,15 +1644,6 @@
   <data name="ChatPage_TextBlock_53.Text" xml:space="preserve">
     <value>連線到閘道以開始聊天</value>
   </data>
-  <data name="ChatPage_TextBlock_56.Text" xml:space="preserve">
-    <value>建立閘道連線後，WebView2 聊天會在這裡載入。</value>
-  </data>
-  <data name="ChatPage_TextBlock_65.Text" xml:space="preserve">
-    <value>網頁聊天不可用</value>
-  </data>
-  <data name="ChatPage_Button_69.Content" xml:space="preserve">
-    <value>改在瀏覽器中開啟</value>
-  </data>
   <data name="ConfigPage_TextBlock_17.Text" xml:space="preserve">
     <value>⚙️ 設定</value>
   </data>
@@ -2136,12 +2127,6 @@
   <data name="ChatWindow_TextBlock_60.Text" xml:space="preserve">
     <value>連線到閘道以開始聊天</value>
   </data>
-  <data name="ChatWindow_TextBlock_67.Text" xml:space="preserve">
-    <value>聊天無法使用</value>
-  </data>
-  <data name="ChatWindow_Button_71.Content" xml:space="preserve">
-    <value>改在瀏覽器中開啟</value>
-  </data>
   <data name="TitleText.Text" xml:space="preserve">
     <value>OpenClaw Windows Companion</value>
   </data>
@@ -2373,29 +2358,14 @@
   <data name="UsagePage_TextBlock_10.Text" xml:space="preserve">
     <value>📊 使用量與成本</value>
   </data>
-  <data name="ChatWindowHomeToolTip.Content" xml:space="preserve">
-    <value>首頁</value>
-  </data>
-  <data name="ChatWindowRefreshToolTip.Content" xml:space="preserve">
-    <value>重新整理</value>
-  </data>
   <data name="ChatWindowOpenInBrowserToolTip.Content" xml:space="preserve">
     <value>在瀏覽器中開啟</value>
   </data>
   <data name="ChatWindowCloseToolTip.Content" xml:space="preserve">
     <value>關閉</value>
   </data>
-  <data name="ChatPageHomeToolTip.Content" xml:space="preserve">
-    <value>首頁</value>
-  </data>
-  <data name="ChatPageRefreshToolTip.Content" xml:space="preserve">
-    <value>重新整理</value>
-  </data>
   <data name="ChatPageOpenInBrowserToolTip.Content" xml:space="preserve">
     <value>在瀏覽器中開啟</value>
-  </data>
-  <data name="ChatPageDeveloperToolsToolTip.Content" xml:space="preserve">
-    <value>開發人員工具</value>
   </data>
   <data name="CronPageRemoveJobToolTip.Content" xml:space="preserve">
     <value>刪除工作</value>
@@ -2747,6 +2717,149 @@
   </data>
   <data name="VoiceSettingsPage_PreviewVoiceButtonContent" xml:space="preserve">
     <value>▶ 預覽語音</value>
+  </data>  <data name="DebugPage_TextBlock_OverridesHeader.Text" xml:space="preserve">
+    <value>偵錯覆寫</value>
+  </data>
+  <data name="DebugPage_TextBlock_OverridesCaption.Text" xml:space="preserve">
+    <value>按聊天容器覆寫全域的「使用標準閘道聊天介面」設定。應用程式重新啟動後將重設。</value>
+  </data>
+  <data name="DebugPage_TextBlock_HubChatLabel.Text" xml:space="preserve">
+    <value>中心聊天分頁 UI：</value>
+  </data>
+  <data name="DebugPage_TextBlock_TrayChatLabel.Text" xml:space="preserve">
+    <value>系統匣聊天彈出視窗 UI：</value>
+  </data>
+  <data name="DebugPage_ChatOverride_NoOverride_Hub.Content" xml:space="preserve">
+    <value>不覆寫</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceLegacy_Hub.Content" xml:space="preserve">
+    <value>強制使用閘道聊天 UI</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceNative_Hub.Content" xml:space="preserve">
+    <value>強制使用伴侶聊天 UI</value>
+  </data>
+  <data name="DebugPage_ChatOverride_NoOverride_Tray.Content" xml:space="preserve">
+    <value>不覆寫</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceLegacy_Tray.Content" xml:space="preserve">
+    <value>強制使用閘道聊天 UI</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceNative_Tray.Content" xml:space="preserve">
+    <value>強制使用伴侶聊天 UI</value>
+  </data>
+  <data name="Chat_Status_Done" xml:space="preserve">
+    <value>完成</value>
+  </data>
+  <data name="Chat_Status_Running" xml:space="preserve">
+    <value>執行中</value>
+  </data>
+  <data name="Chat_Status_Error" xml:space="preserve">
+    <value>錯誤</value>
+  </data>
+  <data name="Chat_Timeline_LoadEarlier" xml:space="preserve">
+    <value>載入較早的訊息</value>
+  </data>
+  <data name="Chat_Tool_CallLabel" xml:space="preserve">
+    <value>工具呼叫</value>
+  </data>
+  <data name="Chat_Tool_OutputLabel" xml:space="preserve">
+    <value>工具輸出</value>
+  </data>
+  <data name="Chat_Tool_ErrorLabel" xml:space="preserve">
+    <value>工具錯誤</value>
+  </data>
+  <data name="Chat_Tool_InputSection" xml:space="preserve">
+    <value>工具輸入</value>
+  </data>
+  <data name="Chat_Tool_FooterLabel" xml:space="preserve">
+    <value>工具</value>
+  </data>
+  <data name="Chat_Tool_FooterWithTimeFormat" xml:space="preserve">
+    <value>工具 · {0}</value>
+  </data>
+  <data name="Chat_Reasoning_ThinkingHeader" xml:space="preserve">
+    <value>🧠 思考中</value>
+  </data>
+  <data name="Chat_Reasoning_ThinkingEllipsis" xml:space="preserve">
+    <value>🧠 思考中…</value>
+  </data>
+  <data name="Chat_Timeline_AssistantThinkingFormat" xml:space="preserve">
+    <value>{0} 正在思考…</value>
+  </data>
+  <data name="Chat_Composer_Reasoning_Default" xml:space="preserve">
+    <value>預設</value>
+  </data>
+  <data name="Chat_Composer_Reasoning_Auto" xml:space="preserve">
+    <value>自動</value>
+  </data>
+  <data name="Chat_Composer_Reasoning_Maximum" xml:space="preserve">
+    <value>最大</value>
+  </data>
+  <data name="Chat_Composer_Placeholder_Connected" xml:space="preserve">
+    <value>傳訊息給助理（按 Enter 傳送）</value>
+  </data>
+  <data name="Chat_Composer_Placeholder_Connecting" xml:space="preserve">
+    <value>連線中…</value>
+  </data>
+  <data name="Chat_Composer_Placeholder_NotConnected" xml:space="preserve">
+    <value>未連線</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Attach" xml:space="preserve">
+    <value>附加</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Voice" xml:space="preserve">
+    <value>語音</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_More" xml:space="preserve">
+    <value>更多</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Send" xml:space="preserve">
+    <value>傳送</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Stop" xml:space="preserve">
+    <value>停止</value>
+  </data>
+  <data name="Chat_Composer_AssistantWorking" xml:space="preserve">
+    <value>助理處理中…</value>
+  </data>
+  <data name="Chat_Assistant_Action_Copy" xml:space="preserve">
+    <value>複製訊息</value>
+  </data>
+  <data name="Chat_Assistant_Action_ReadAloud" xml:space="preserve">
+    <value>朗讀</value>
+  </data>
+  <data name="Chat_User_Action_Delete" xml:space="preserve">
+    <value>刪除訊息</value>
+  </data>
+  <data name="Chat_TruncationMarkerFormat" xml:space="preserve">
+    <value> … [已截斷 {0} 位元組]</value>
+  </data>
+  <data name="Chat_Permission_Allow" xml:space="preserve">
+    <value>允許</value>
+  </data>
+  <data name="Chat_Permission_Deny" xml:space="preserve">
+    <value>拒絕</value>
+  </data>
+  <data name="Chat_Root_ConnectingToGateway" xml:space="preserve">
+    <value>連線到閘道中…</value>
+  </data>
+  <data name="Chat_Root_EmptyState_SelectSession" xml:space="preserve">
+    <value>在側邊欄選擇一個工作階段以開始聊天。</value>
+  </data>
+  <data name="Chat_Notification_SendFailed" xml:space="preserve">
+    <value>傳送失敗</value>
+  </data>
+  <data name="Chat_Notification_AbortFailed" xml:space="preserve">
+    <value>中止失敗</value>
+  </data>
+  <data name="Chat_Notification_LoadHistoryFailed" xml:space="preserve">
+    <value>載入歷史記錄失敗</value>
+  </data>
+  <data name="Chat_Notification_AssistantReplied" xml:space="preserve">
+    <value>助理已回覆</value>
+  </data>
+  <data name="Chat_Notification_ConnectionInterrupted" xml:space="preserve">
+    <value>連線已中斷 — 回覆已中斷。</value>
   </data>
   <data name="VoiceSettingsPage_TestVoiceButtonText.Text" xml:space="preserve">
     <value>測試語音輸入</value>

@@ -1,22 +1,24 @@
-<?xml version='1.0' encoding='utf-8'?>
-<root xmlns:ns1="urn:schemas-microsoft-com:xml-msdata" xmlns:xs="http://www.w3.org/2001/XMLSchema">
-  <xs:schema id="root">
-    <xs:element name="root" ns1:IsDataSet="true">
-      <xs:complexType>
-        <xs:choice maxOccurs="unbounded">
-          <xs:element name="data">
-            <xs:complexType>
-              <xs:sequence>
-                <xs:element name="value" type="xsd:string" minOccurs="0" ns1:Ordinal="1" />
-                <xs:element name="comment" type="xsd:string" minOccurs="0" ns1:Ordinal="2" />
-              </xs:sequence>
-              <xs:attribute name="name" type="xsd:string" use="required" />
-            </xs:complexType>
-          </xs:element>
-        </xs:choice>
-      </xs:complexType>
-    </xs:element>
-  </xs:schema>
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <!-- ==================== SettingsWindow.xaml ==================== -->
+  <!-- Section headers -->
   <data name="SettingsConnectionHeader.Text" xml:space="preserve">
     <value>CONNECTION</value>
   </data>
@@ -29,6 +31,7 @@
   <data name="SettingsAdvancedHeader.Text" xml:space="preserve">
     <value>ADVANCED (EXPERIMENTAL)</value>
   </data>
+  <!-- TextBox headers and placeholders -->
   <data name="SettingsGatewayUrlTextBox.Header" xml:space="preserve">
     <value>Gateway URL</value>
   </data>
@@ -41,6 +44,7 @@
   <data name="SettingsTokenTextBox.PlaceholderText" xml:space="preserve">
     <value>Your API token</value>
   </data>
+  <!-- Toggle headers -->
   <data name="SettingsAutoStartToggle.Header" xml:space="preserve">
     <value>Start automatically with Windows</value>
   </data>
@@ -53,6 +57,7 @@
   <data name="SettingsNodeModeToggle.Header" xml:space="preserve">
     <value>Enable Node Mode</value>
   </data>
+  <!-- ComboBox -->
   <data name="SettingsSoundComboBox.Header" xml:space="preserve">
     <value>Sound</value>
   </data>
@@ -65,12 +70,14 @@
   <data name="SettingsSoundSubtle.Content" xml:space="preserve">
     <value>Subtle</value>
   </data>
+  <!-- Notification filter labels -->
   <data name="SettingsNotifyForLabel.Text" xml:space="preserve">
     <value>Show notifications for:</value>
   </data>
   <data name="SettingsNotifyFilterHint.Text" xml:space="preserve">
     <value>Filters by keywords in the message (e.g., 'email', 'reminder')</value>
   </data>
+  <!-- Notification filter checkboxes -->
   <data name="SettingsNotifyHealthCb.Content" xml:space="preserve">
     <value>Health alerts</value>
   </data>
@@ -95,6 +102,7 @@
   <data name="SettingsNotifyInfoCb.Content" xml:space="preserve">
     <value>Info messages</value>
   </data>
+  <!-- Buttons -->
   <data name="SettingsTestConnectionButton.Content" xml:space="preserve">
     <value>Test</value>
   </data>
@@ -107,9 +115,12 @@
   <data name="SettingsCancelButton.Content" xml:space="preserve">
     <value>Cancel</value>
   </data>
+  <!-- Node mode description -->
   <data name="SettingsNodeModeDescription.Text" xml:space="preserve">
     <value>When enabled, this PC can receive commands from the agent (canvas, screenshots, etc.)</value>
   </data>
+  <!-- ==================== StatusDetailWindow.xaml ==================== -->
+  <!-- Section headers -->
   <data name="StatusUsageHeader.Text" xml:space="preserve">
     <value>USAGE</value>
   </data>
@@ -143,6 +154,7 @@
   <data name="StatusRecentActivityHeader.Text" xml:space="preserve">
     <value>RECENT ACTIVITY</value>
   </data>
+  <!-- Labels -->
   <data name="StatusCostLabel.Text" xml:space="preserve">
     <value>Cost (window):</value>
   </data>
@@ -152,6 +164,7 @@
   <data name="StatusProvidersLabel.Text" xml:space="preserve">
     <value>Providers:</value>
   </data>
+  <!-- Default values -->
   <data name="StatusConnectedText.Text" xml:space="preserve">
     <value>Connected</value>
   </data>
@@ -185,6 +198,7 @@
   <data name="StatusCronDescription.Text" xml:space="preserve">
     <value>Open scheduled automation controls when the connected gateway supports them.</value>
   </data>
+  <!-- Buttons -->
   <data name="StatusRefreshButton.Content" xml:space="preserve">
     <value>Refresh</value>
   </data>
@@ -233,9 +247,12 @@
   <data name="StatusOpenStreamButton.Content" xml:space="preserve">
     <value>Open Stream</value>
   </data>
+  <!-- ==================== ActivityStreamWindow.xaml ==================== -->
+  <!-- Header -->
   <data name="ActivityStreamTitle.Text" xml:space="preserve">
     <value>⚡ Activity Stream</value>
   </data>
+  <!-- Filter items -->
   <data name="ActivityFilterAll.Content" xml:space="preserve">
     <value>All activity</value>
   </data>
@@ -251,9 +268,11 @@
   <data name="ActivityFilterNotifications.Content" xml:space="preserve">
     <value>Notifications</value>
   </data>
+  <!-- Empty state -->
   <data name="ActivityEmptyText.Text" xml:space="preserve">
     <value>No activity yet</value>
   </data>
+  <!-- Buttons -->
   <data name="ActivityOpenDashboardButton.Content" xml:space="preserve">
     <value>Open Dashboard</value>
   </data>
@@ -263,18 +282,24 @@
   <data name="ActivityCloseButton.Content" xml:space="preserve">
     <value>Close</value>
   </data>
+  <!-- ==================== NotificationHistoryWindow.xaml ==================== -->
+  <!-- Header -->
   <data name="NotificationHistoryTitle.Text" xml:space="preserve">
     <value>📋 Notification History</value>
   </data>
+  <!-- Empty state -->
   <data name="NotificationEmptyText.Text" xml:space="preserve">
     <value>No notifications yet</value>
   </data>
+  <!-- Buttons -->
   <data name="NotificationClearAllButton.Content" xml:space="preserve">
     <value>Clear All</value>
   </data>
   <data name="NotificationCloseButton.Content" xml:space="preserve">
     <value>Close</value>
   </data>
+  <!-- ==================== Runtime strings (C# code) ==================== -->
+  <!-- Window titles -->
   <data name="WindowTitle_Settings" xml:space="preserve">
     <value>Settings — OpenClaw Tray</value>
   </data>
@@ -299,6 +324,7 @@
   <data name="WindowTitle_Update" xml:space="preserve">
     <value>OpenClaw Update</value>
   </data>
+  <!-- Settings runtime status -->
   <data name="Status_Testing" xml:space="preserve">
     <value>Testing...</value>
   </data>
@@ -308,6 +334,7 @@
   <data name="Status_ConnectionFailed" xml:space="preserve">
     <value>❌ Connection failed</value>
   </data>
+  <!-- QuickSend dialog -->
   <data name="QuickSend_Header" xml:space="preserve">
     <value>📤 Quick Send</value>
   </data>
@@ -332,6 +359,7 @@
   <data name="QuickSend_ToastBody" xml:space="preserve">
     <value>Your message was sent to OpenClaw.</value>
   </data>
+  <!-- WelcomeDialog -->
   <data name="Welcome_Title" xml:space="preserve">
     <value>Welcome to OpenClaw!</value>
   </data>
@@ -356,6 +384,7 @@
   <data name="Welcome_OpenSettingsButton" xml:space="preserve">
     <value>Open Settings</value>
   </data>
+  <!-- UpdateDialog -->
   <data name="Update_VersionAvailable" xml:space="preserve">
     <value>🎉 Version {0} is available!</value>
   </data>
@@ -374,6 +403,7 @@
   <data name="Update_DownloadButton" xml:space="preserve">
     <value>Download &amp; Install</value>
   </data>
+  <!-- Tray menu items -->
   <data name="Menu_OpenDashboard" xml:space="preserve">
     <value>Open Dashboard</value>
   </data>
@@ -467,6 +497,7 @@
   <data name="Menu_RestartSshTunnel" xml:space="preserve">
     <value>Restart SSH Tunnel</value>
   </data>
+  <!-- Tray menu dynamic text -->
   <data name="Menu_StatusFormat" xml:space="preserve">
     <value>Status: {0}</value>
   </data>
@@ -503,15 +534,18 @@
   <data name="Menu_NodeDisconnected" xml:space="preserve">
     <value>⚪ Disconnected</value>
   </data>
+  <!-- Notification test -->
   <data name="TestNotification_Title" xml:space="preserve">
     <value>Test Notification</value>
   </data>
   <data name="TestNotification_Body" xml:space="preserve">
     <value>This is a test notification from OpenClaw Tray.</value>
   </data>
+  <!-- Status detail runtime -->
   <data name="Status_LastCheckFormat" xml:space="preserve">
     <value>Last check: {0}</value>
   </data>
+  <!-- Time ago strings -->
   <data name="TimeAgo_JustNow" xml:space="preserve">
     <value>Just now</value>
   </data>
@@ -521,12 +555,14 @@
   <data name="TimeAgo_HoursFormat" xml:space="preserve">
     <value>{0}h ago</value>
   </data>
+  <!-- Activity stream runtime -->
   <data name="Activity_ClickToOpen" xml:space="preserve">
     <value>Click to open in dashboard</value>
   </data>
   <data name="TimeAgo_DaysFormat" xml:space="preserve">
     <value>{0}d ago</value>
   </data>
+  <!-- Status display text (plain, no emoji) -->
   <data name="StatusDisplay_Connected" xml:space="preserve">
     <value>Connected</value>
   </data>
@@ -545,6 +581,7 @@
   <data name="Status_NotAvailable" xml:space="preserve">
     <value>n/a</value>
   </data>
+  <!-- ==================== CanvasWindow.xaml ==================== -->
   <data name="WindowTitle_Canvas" xml:space="preserve">
     <value>Canvas</value>
   </data>
@@ -578,6 +615,7 @@
   <data name="A2UI_MultipleChoiceSelect" xml:space="preserve">
     <value>Select...</value>
   </data>
+  <!-- ==================== WebChatWindow.xaml ==================== -->
   <data name="WebChatErrorTitle.Text" xml:space="preserve">
     <value>Web Chat Unavailable</value>
   </data>
@@ -616,9 +654,11 @@ Use one of these options:
 • If self-signed, import your gateway CA/cert into Windows Trusted Root (certmgr.msc)
 • Or tunnel to localhost: ssh -N -L 18789:localhost:18789 &lt;server&gt;</value>
   </data>
+  <!-- ==================== TrayMenuWindow.xaml ==================== -->
   <data name="WindowTitle_TrayMenu" xml:space="preserve">
     <value>OpenClaw Menu</value>
   </data>
+  <!-- ==================== Toast: Device / Node ==================== -->
   <data name="Toast_DeviceIdCopied" xml:space="preserve">
     <value>📋 Device ID Copied</value>
   </data>
@@ -631,12 +671,14 @@ Use one of these options:
   <data name="Toast_NodeSummaryCopiedDetail" xml:space="preserve">
     <value>{0} node(s) copied to clipboard</value>
   </data>
+  <!-- ==================== Toast: Session ==================== -->
   <data name="Toast_SessionActionFailed" xml:space="preserve">
     <value>❌ Session action failed</value>
   </data>
   <data name="Toast_SessionActionFailedDetail" xml:space="preserve">
     <value>Could not send request to gateway.</value>
   </data>
+  <!-- ==================== Toast: Node Mode ==================== -->
   <data name="Toast_NodeModeActive" xml:space="preserve">
     <value>🔌 Node Mode Active</value>
   </data>
@@ -667,6 +709,7 @@ Use one of these options:
   <data name="Toast_PairingRejectedDetail" xml:space="preserve">
     <value>The gateway rejected this device pairing request.</value>
   </data>
+  <!-- ==================== Toast: Health Check ==================== -->
   <data name="Toast_HealthCheck" xml:space="preserve">
     <value>Health Check</value>
   </data>
@@ -679,6 +722,7 @@ Use one of these options:
   <data name="Toast_HealthCheckFailed" xml:space="preserve">
     <value>Health Check Failed</value>
   </data>
+  <!-- ==================== Toast: Screen / Camera ==================== -->
   <data name="Toast_ScreenCaptured" xml:space="preserve">
     <value>📸 Screen Captured</value>
   </data>
@@ -810,6 +854,7 @@ Use one of these options:
   <data name="Toast_ActivityStreamTipButton" xml:space="preserve">
     <value>Open Activity Stream</value>
   </data>
+  <!-- ==================== SetupWizardWindow (C# code) ==================== -->
   <data name="Setup_Title" xml:space="preserve">
     <value>OpenClaw Setup</value>
   </data>
@@ -960,6 +1005,7 @@ On your gateway host (Mac/Linux), run:
   <data name="Setup_StepDone" xml:space="preserve">
     <value>Step 3 of 3 — Done</value>
   </data>
+  <!-- ==================== Local MCP server (SettingsWindow) ==================== -->
   <data name="SettingsDeveloperModeHeader.Text" xml:space="preserve">
     <value>DEVELOPER MODE</value>
   </data>
@@ -993,6 +1039,7 @@ On your gateway host (Mac/Linux), run:
   <data name="Mcp_Status_FailedToStart" xml:space="preserve">
     <value>Failed to start: </value>
   </data>
+  <!-- ==================== MCP token (SettingsWindow) ==================== -->
   <data name="SettingsMcpTokenLabel.Text" xml:space="preserve">
     <value>Bearer token:</value>
   </data>
@@ -1041,12 +1088,14 @@ On your gateway host (Mac/Linux), run:
   <data name="SettingsMcpTokenResetDialog_CloseButton" xml:space="preserve">
     <value>Cancel</value>
   </data>
+  <!-- ==================== DownloadProgressDialog ==================== -->
   <data name="WindowTitle_Downloading" xml:space="preserve">
     <value>Downloading Update...</value>
   </data>
   <data name="Download_ProgressText" xml:space="preserve">
     <value>Downloading update...</value>
   </data>
+  <!-- ==================== UrlNavigationApprovalService prompt ==================== -->
   <data name="UrlApproval_Caption" xml:space="preserve">
     <value>OpenClaw — Approve URL</value>
   </data>
@@ -1643,15 +1692,6 @@ On your gateway host (Mac/Linux), run:
   <data name="ChatPage_TextBlock_53.Text" xml:space="preserve">
     <value>Connect to gateway to start chatting</value>
   </data>
-  <data name="ChatPage_TextBlock_56.Text" xml:space="preserve">
-    <value>WebView2 chat will load here once a gateway connection is established.</value>
-  </data>
-  <data name="ChatPage_TextBlock_65.Text" xml:space="preserve">
-    <value>Web Chat Unavailable</value>
-  </data>
-  <data name="ChatPage_Button_69.Content" xml:space="preserve">
-    <value>Open in Browser Instead</value>
-  </data>
   <data name="ConfigPage_TextBlock_17.Text" xml:space="preserve">
     <value>⚙️ Config</value>
   </data>
@@ -2135,12 +2175,6 @@ On your gateway host (Mac/Linux), run:
   <data name="ChatWindow_TextBlock_60.Text" xml:space="preserve">
     <value>Connect to gateway to start chatting</value>
   </data>
-  <data name="ChatWindow_TextBlock_67.Text" xml:space="preserve">
-    <value>Chat Unavailable</value>
-  </data>
-  <data name="ChatWindow_Button_71.Content" xml:space="preserve">
-    <value>Open in Browser Instead</value>
-  </data>
   <data name="TitleText.Text" xml:space="preserve">
     <value>OpenClaw Windows Companion</value>
   </data>
@@ -2372,29 +2406,14 @@ On your gateway host (Mac/Linux), run:
   <data name="UsagePage_TextBlock_10.Text" xml:space="preserve">
     <value>📊 Usage &amp; Cost</value>
   </data>
-  <data name="ChatWindowHomeToolTip.Content" xml:space="preserve">
-    <value>Home</value>
-  </data>
-  <data name="ChatWindowRefreshToolTip.Content" xml:space="preserve">
-    <value>Refresh</value>
-  </data>
   <data name="ChatWindowOpenInBrowserToolTip.Content" xml:space="preserve">
-    <value>Open in Browser</value>
+    <value>Open in Companion app</value>
   </data>
   <data name="ChatWindowCloseToolTip.Content" xml:space="preserve">
     <value>Close</value>
   </data>
-  <data name="ChatPageHomeToolTip.Content" xml:space="preserve">
-    <value>Home</value>
-  </data>
-  <data name="ChatPageRefreshToolTip.Content" xml:space="preserve">
-    <value>Refresh</value>
-  </data>
   <data name="ChatPageOpenInBrowserToolTip.Content" xml:space="preserve">
     <value>Open in Browser</value>
-  </data>
-  <data name="ChatPageDeveloperToolsToolTip.Content" xml:space="preserve">
-    <value>Developer Tools</value>
   </data>
   <data name="CronPageRemoveJobToolTip.Content" xml:space="preserve">
     <value>Remove job</value>
@@ -2746,6 +2765,149 @@ On your gateway host (Mac/Linux), run:
   </data>
   <data name="VoiceSettingsPage_PreviewVoiceButtonContent" xml:space="preserve">
     <value>▶ Preview Voice</value>
+  </data>  <data name="DebugPage_TextBlock_OverridesHeader.Text" xml:space="preserve">
+    <value>Debug Overrides</value>
+  </data>
+  <data name="DebugPage_TextBlock_OverridesCaption.Text" xml:space="preserve">
+    <value>Override the global 'Use standard Gateway Chat interface' setting per chat container. Resets when the app restarts.</value>
+  </data>
+  <data name="DebugPage_TextBlock_HubChatLabel.Text" xml:space="preserve">
+    <value>Hub Chat tab UI:</value>
+  </data>
+  <data name="DebugPage_TextBlock_TrayChatLabel.Text" xml:space="preserve">
+    <value>Tray Chat popup UI:</value>
+  </data>
+  <data name="DebugPage_ChatOverride_NoOverride_Hub.Content" xml:space="preserve">
+    <value>No override</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceLegacy_Hub.Content" xml:space="preserve">
+    <value>Force Gateway Chat UI</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceNative_Hub.Content" xml:space="preserve">
+    <value>Force Companion Chat UI</value>
+  </data>
+  <data name="DebugPage_ChatOverride_NoOverride_Tray.Content" xml:space="preserve">
+    <value>No override</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceLegacy_Tray.Content" xml:space="preserve">
+    <value>Force Gateway Chat UI</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceNative_Tray.Content" xml:space="preserve">
+    <value>Force Companion Chat UI</value>
+  </data>
+  <data name="Chat_Status_Done" xml:space="preserve">
+    <value>Done</value>
+  </data>
+  <data name="Chat_Status_Running" xml:space="preserve">
+    <value>Running</value>
+  </data>
+  <data name="Chat_Status_Error" xml:space="preserve">
+    <value>Error</value>
+  </data>
+  <data name="Chat_Timeline_LoadEarlier" xml:space="preserve">
+    <value>Load earlier messages</value>
+  </data>
+  <data name="Chat_Tool_CallLabel" xml:space="preserve">
+    <value>Tool call</value>
+  </data>
+  <data name="Chat_Tool_OutputLabel" xml:space="preserve">
+    <value>Tool output</value>
+  </data>
+  <data name="Chat_Tool_ErrorLabel" xml:space="preserve">
+    <value>Tool error</value>
+  </data>
+  <data name="Chat_Tool_InputSection" xml:space="preserve">
+    <value>Tool input</value>
+  </data>
+  <data name="Chat_Tool_FooterLabel" xml:space="preserve">
+    <value>Tool</value>
+  </data>
+  <data name="Chat_Tool_FooterWithTimeFormat" xml:space="preserve">
+    <value>Tool · {0}</value>
+  </data>
+  <data name="Chat_Reasoning_ThinkingHeader" xml:space="preserve">
+    <value>🧠 Thinking</value>
+  </data>
+  <data name="Chat_Reasoning_ThinkingEllipsis" xml:space="preserve">
+    <value>🧠 thinking…</value>
+  </data>
+  <data name="Chat_Timeline_AssistantThinkingFormat" xml:space="preserve">
+    <value>{0} is thinking…</value>
+  </data>
+  <data name="Chat_Composer_Reasoning_Default" xml:space="preserve">
+    <value>Default</value>
+  </data>
+  <data name="Chat_Composer_Reasoning_Auto" xml:space="preserve">
+    <value>Auto</value>
+  </data>
+  <data name="Chat_Composer_Reasoning_Maximum" xml:space="preserve">
+    <value>Maximum</value>
+  </data>
+  <data name="Chat_Composer_Placeholder_Connected" xml:space="preserve">
+    <value>Message Assistant (Enter to send)</value>
+  </data>
+  <data name="Chat_Composer_Placeholder_Connecting" xml:space="preserve">
+    <value>Connecting…</value>
+  </data>
+  <data name="Chat_Composer_Placeholder_NotConnected" xml:space="preserve">
+    <value>Not connected</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Attach" xml:space="preserve">
+    <value>Attach</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Voice" xml:space="preserve">
+    <value>Voice</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_More" xml:space="preserve">
+    <value>More</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Send" xml:space="preserve">
+    <value>Send</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Stop" xml:space="preserve">
+    <value>Stop</value>
+  </data>
+  <data name="Chat_Composer_AssistantWorking" xml:space="preserve">
+    <value>Assistant is working…</value>
+  </data>
+  <data name="Chat_Assistant_Action_Copy" xml:space="preserve">
+    <value>Copy message</value>
+  </data>
+  <data name="Chat_Assistant_Action_ReadAloud" xml:space="preserve">
+    <value>Read aloud</value>
+  </data>
+  <data name="Chat_User_Action_Delete" xml:space="preserve">
+    <value>Delete message</value>
+  </data>
+  <data name="Chat_TruncationMarkerFormat" xml:space="preserve">
+    <value> … [{0} bytes truncated]</value>
+  </data>
+  <data name="Chat_Permission_Allow" xml:space="preserve">
+    <value>Allow</value>
+  </data>
+  <data name="Chat_Permission_Deny" xml:space="preserve">
+    <value>Deny</value>
+  </data>
+  <data name="Chat_Root_ConnectingToGateway" xml:space="preserve">
+    <value>Connecting to gateway…</value>
+  </data>
+  <data name="Chat_Root_EmptyState_SelectSession" xml:space="preserve">
+    <value>Select a session from the sidebar to start chatting.</value>
+  </data>
+  <data name="Chat_Notification_SendFailed" xml:space="preserve">
+    <value>Send failed</value>
+  </data>
+  <data name="Chat_Notification_AbortFailed" xml:space="preserve">
+    <value>Abort failed</value>
+  </data>
+  <data name="Chat_Notification_LoadHistoryFailed" xml:space="preserve">
+    <value>Failed to load history</value>
+  </data>
+  <data name="Chat_Notification_AssistantReplied" xml:space="preserve">
+    <value>Assistant replied</value>
+  </data>
+  <data name="Chat_Notification_ConnectionInterrupted" xml:space="preserve">
+    <value>Connection lost — response interrupted.</value>
   </data>
   <data name="VoiceSettingsPage_TestVoiceButtonText.Text" xml:space="preserve">
     <value>Test Voice Input</value>

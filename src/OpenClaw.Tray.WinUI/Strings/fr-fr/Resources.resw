@@ -1644,15 +1644,6 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
   <data name="ChatPage_TextBlock_53.Text" xml:space="preserve">
     <value>Connectez-vous à la passerelle pour commencer la discussion</value>
   </data>
-  <data name="ChatPage_TextBlock_56.Text" xml:space="preserve">
-    <value>La discussion WebView2 se chargera ici une fois la connexion à la passerelle établie.</value>
-  </data>
-  <data name="ChatPage_TextBlock_65.Text" xml:space="preserve">
-    <value>Chat indisponible</value>
-  </data>
-  <data name="ChatPage_Button_69.Content" xml:space="preserve">
-    <value>Ouvrir plutôt dans le navigateur</value>
-  </data>
   <data name="ConfigPage_TextBlock_17.Text" xml:space="preserve">
     <value>⚙️ Configuration</value>
   </data>
@@ -2136,12 +2127,6 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
   <data name="ChatWindow_TextBlock_60.Text" xml:space="preserve">
     <value>Connectez-vous à la passerelle pour commencer la discussion</value>
   </data>
-  <data name="ChatWindow_TextBlock_67.Text" xml:space="preserve">
-    <value>Discussion indisponible</value>
-  </data>
-  <data name="ChatWindow_Button_71.Content" xml:space="preserve">
-    <value>Ouvrir plutôt dans le navigateur</value>
-  </data>
   <data name="TitleText.Text" xml:space="preserve">
     <value>OpenClaw Windows Companion</value>
   </data>
@@ -2373,29 +2358,14 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
   <data name="UsagePage_TextBlock_10.Text" xml:space="preserve">
     <value>📊 Utilisation et coût</value>
   </data>
-  <data name="ChatWindowHomeToolTip.Content" xml:space="preserve">
-    <value>Accueil</value>
-  </data>
-  <data name="ChatWindowRefreshToolTip.Content" xml:space="preserve">
-    <value>Actualiser</value>
-  </data>
   <data name="ChatWindowOpenInBrowserToolTip.Content" xml:space="preserve">
     <value>Ouvrir dans le navigateur</value>
   </data>
   <data name="ChatWindowCloseToolTip.Content" xml:space="preserve">
     <value>Fermer</value>
   </data>
-  <data name="ChatPageHomeToolTip.Content" xml:space="preserve">
-    <value>Accueil</value>
-  </data>
-  <data name="ChatPageRefreshToolTip.Content" xml:space="preserve">
-    <value>Actualiser</value>
-  </data>
   <data name="ChatPageOpenInBrowserToolTip.Content" xml:space="preserve">
     <value>Ouvrir dans le navigateur</value>
-  </data>
-  <data name="ChatPageDeveloperToolsToolTip.Content" xml:space="preserve">
-    <value>Outils de développement</value>
   </data>
   <data name="CronPageRemoveJobToolTip.Content" xml:space="preserve">
     <value>Supprimer la tâche</value>
@@ -2747,6 +2717,149 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
   </data>
   <data name="VoiceSettingsPage_PreviewVoiceButtonContent" xml:space="preserve">
     <value>▶ Aperçu de la voix</value>
+  </data>  <data name="DebugPage_TextBlock_OverridesHeader.Text" xml:space="preserve">
+    <value>Substitutions de débogage</value>
+  </data>
+  <data name="DebugPage_TextBlock_OverridesCaption.Text" xml:space="preserve">
+    <value>Substituer le paramètre global « Utiliser l'interface de discussion standard de la passerelle » pour chaque conteneur de discussion. Réinitialisé au redémarrage de l'application.</value>
+  </data>
+  <data name="DebugPage_TextBlock_HubChatLabel.Text" xml:space="preserve">
+    <value>Onglet Discussion du hub :</value>
+  </data>
+  <data name="DebugPage_TextBlock_TrayChatLabel.Text" xml:space="preserve">
+    <value>Pop-up Discussion de la barre d'état :</value>
+  </data>
+  <data name="DebugPage_ChatOverride_NoOverride_Hub.Content" xml:space="preserve">
+    <value>Aucune substitution</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceLegacy_Hub.Content" xml:space="preserve">
+    <value>Forcer l'interface de discussion de la passerelle</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceNative_Hub.Content" xml:space="preserve">
+    <value>Forcer l'interface de discussion du compagnon</value>
+  </data>
+  <data name="DebugPage_ChatOverride_NoOverride_Tray.Content" xml:space="preserve">
+    <value>Aucune substitution</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceLegacy_Tray.Content" xml:space="preserve">
+    <value>Forcer l'interface de discussion de la passerelle</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceNative_Tray.Content" xml:space="preserve">
+    <value>Forcer l'interface de discussion du compagnon</value>
+  </data>
+  <data name="Chat_Status_Done" xml:space="preserve">
+    <value>Terminé</value>
+  </data>
+  <data name="Chat_Status_Running" xml:space="preserve">
+    <value>En cours</value>
+  </data>
+  <data name="Chat_Status_Error" xml:space="preserve">
+    <value>Erreur</value>
+  </data>
+  <data name="Chat_Timeline_LoadEarlier" xml:space="preserve">
+    <value>Charger les messages précédents</value>
+  </data>
+  <data name="Chat_Tool_CallLabel" xml:space="preserve">
+    <value>Appel d'outil</value>
+  </data>
+  <data name="Chat_Tool_OutputLabel" xml:space="preserve">
+    <value>Sortie d'outil</value>
+  </data>
+  <data name="Chat_Tool_ErrorLabel" xml:space="preserve">
+    <value>Erreur d'outil</value>
+  </data>
+  <data name="Chat_Tool_InputSection" xml:space="preserve">
+    <value>Entrée d'outil</value>
+  </data>
+  <data name="Chat_Tool_FooterLabel" xml:space="preserve">
+    <value>Outil</value>
+  </data>
+  <data name="Chat_Tool_FooterWithTimeFormat" xml:space="preserve">
+    <value>Outil · {0}</value>
+  </data>
+  <data name="Chat_Reasoning_ThinkingHeader" xml:space="preserve">
+    <value>🧠 Réflexion</value>
+  </data>
+  <data name="Chat_Reasoning_ThinkingEllipsis" xml:space="preserve">
+    <value>🧠 réflexion en cours…</value>
+  </data>
+  <data name="Chat_Timeline_AssistantThinkingFormat" xml:space="preserve">
+    <value>{0} réfléchit…</value>
+  </data>
+  <data name="Chat_Composer_Reasoning_Default" xml:space="preserve">
+    <value>Par défaut</value>
+  </data>
+  <data name="Chat_Composer_Reasoning_Auto" xml:space="preserve">
+    <value>Automatique</value>
+  </data>
+  <data name="Chat_Composer_Reasoning_Maximum" xml:space="preserve">
+    <value>Maximal</value>
+  </data>
+  <data name="Chat_Composer_Placeholder_Connected" xml:space="preserve">
+    <value>Envoyer un message à l'assistant (Entrée pour envoyer)</value>
+  </data>
+  <data name="Chat_Composer_Placeholder_Connecting" xml:space="preserve">
+    <value>Connexion…</value>
+  </data>
+  <data name="Chat_Composer_Placeholder_NotConnected" xml:space="preserve">
+    <value>Non connecté</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Attach" xml:space="preserve">
+    <value>Joindre</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Voice" xml:space="preserve">
+    <value>Voix</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_More" xml:space="preserve">
+    <value>Plus</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Send" xml:space="preserve">
+    <value>Envoyer</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Stop" xml:space="preserve">
+    <value>Arrêter</value>
+  </data>
+  <data name="Chat_Composer_AssistantWorking" xml:space="preserve">
+    <value>L'assistant travaille…</value>
+  </data>
+  <data name="Chat_Assistant_Action_Copy" xml:space="preserve">
+    <value>Copier le message</value>
+  </data>
+  <data name="Chat_Assistant_Action_ReadAloud" xml:space="preserve">
+    <value>Lire à voix haute</value>
+  </data>
+  <data name="Chat_User_Action_Delete" xml:space="preserve">
+    <value>Supprimer le message</value>
+  </data>
+  <data name="Chat_TruncationMarkerFormat" xml:space="preserve">
+    <value> … [{0} octets tronqués]</value>
+  </data>
+  <data name="Chat_Permission_Allow" xml:space="preserve">
+    <value>Autoriser</value>
+  </data>
+  <data name="Chat_Permission_Deny" xml:space="preserve">
+    <value>Refuser</value>
+  </data>
+  <data name="Chat_Root_ConnectingToGateway" xml:space="preserve">
+    <value>Connexion à la passerelle…</value>
+  </data>
+  <data name="Chat_Root_EmptyState_SelectSession" xml:space="preserve">
+    <value>Sélectionnez une session dans la barre latérale pour commencer à discuter.</value>
+  </data>
+  <data name="Chat_Notification_SendFailed" xml:space="preserve">
+    <value>Échec de l'envoi</value>
+  </data>
+  <data name="Chat_Notification_AbortFailed" xml:space="preserve">
+    <value>Échec de l'abandon</value>
+  </data>
+  <data name="Chat_Notification_LoadHistoryFailed" xml:space="preserve">
+    <value>Échec du chargement de l'historique</value>
+  </data>
+  <data name="Chat_Notification_AssistantReplied" xml:space="preserve">
+    <value>L'assistant a répondu</value>
+  </data>
+  <data name="Chat_Notification_ConnectionInterrupted" xml:space="preserve">
+    <value>Connexion perdue — réponse interrompue.</value>
   </data>
   <data name="VoiceSettingsPage_TestVoiceButtonText.Text" xml:space="preserve">
     <value>Tester la saisie vocale</value>

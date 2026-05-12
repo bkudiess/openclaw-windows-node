@@ -68,6 +68,14 @@ public class SettingsManager
     public bool NotifyChatResponses { get; set; } = true;
     public bool PreferStructuredCategories { get; set; } = true;
     public List<OpenClaw.Shared.UserNotificationRule> UserRules { get; set; } = new();
+
+    // User interface
+    /// <summary>
+    /// When true, host the legacy WebView2 gateway chat UI instead of the
+    /// native chat surface in both the Hub Chat tab and tray Chat popup.
+    /// Default false (native).
+    /// </summary>
+    public bool UseLegacyWebChat { get; set; } = false;
     
     // Node mode (gateway WebSocket connection — separate from MCP)
     public bool EnableNodeMode { get; set; } = false;
@@ -224,6 +232,7 @@ public class SettingsManager
                     PreferredGatewayId = loaded.PreferredGatewayId ?? PreferredGatewayId;
                     NotifyChatResponses = loaded.NotifyChatResponses;
                     PreferStructuredCategories = loaded.PreferStructuredCategories;
+                    UseLegacyWebChat = loaded.UseLegacyWebChat;
                     if (loaded.UserRules != null)
                         UserRules = loaded.UserRules;
 
@@ -332,6 +341,7 @@ public class SettingsManager
         PreferredGatewayId = string.IsNullOrWhiteSpace(PreferredGatewayId) ? null : PreferredGatewayId,
         NotifyChatResponses = NotifyChatResponses,
         PreferStructuredCategories = PreferStructuredCategories,
+        UseLegacyWebChat = UseLegacyWebChat,
         UserRules = UserRules,
         // MXC sandbox settings
         SystemRunSandboxEnabled = SystemRunSandboxEnabled,

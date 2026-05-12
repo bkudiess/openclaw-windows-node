@@ -86,6 +86,13 @@ public class SettingsData
     public string? SkippedUpdateTag { get; set; }
     public bool NotifyChatResponses { get; set; } = true;
     public bool PreferStructuredCategories { get; set; } = true;
+    /// <summary>
+    /// When true, the Hub Chat tab and tray Chat popup host the legacy
+    /// WebView2-based gateway chat UI instead of the native chat surface.
+    /// Default false (native chat). Surfaced as a toggle in SettingsPage's
+    /// "User interface" section.
+    /// </summary>
+    public bool UseLegacyWebChat { get; set; } = false;
     public List<UserNotificationRule>? UserRules { get; set; }
 
     // ── MXC sandbox ─────────────────────────────────────────────────────
