@@ -223,6 +223,77 @@
                 </StackPanel>
             </Border>
 
+            <!-- ═══ Advanced settings — deep-link to existing detail pages ═══ -->
+            <!-- For users who want fine-grained control beyond the Security Level
+                 + per-row toggles. Sandbox folder/network/clipboard policy lives
+                 on the Sandbox page; exec-policy rules and OS permission status
+                 live on the Permissions page. -->
+            <Border x:Name="AdvancedSettingsCard"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,16,0,0"
+                    AutomationProperties.AutomationId="AdvancedSettingsCard">
+                <StackPanel Spacing="12">
+                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <FontIcon Glyph="&#xE713;" FontSize="16" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        <TextBlock Text="Advanced settings" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                    </StackPanel>
+                    <TextBlock Text="The Security Level above covers most users. For fine-grained control, use these:"
+                               Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               TextWrapping="Wrap"/>
+
+                    <Grid ColumnSpacing="12" RowSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition/>
+                            <RowDefinition/>
+                            <RowDefinition/>
+                        </Grid.RowDefinitions>
+
+                        <FontIcon Grid.Row="0" Grid.Column="0" Glyph="&#xE72E;" FontSize="14" VerticalAlignment="Center"
+                                  Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"/>
+                        <StackPanel Grid.Row="0" Grid.Column="1" Spacing="2">
+                            <TextBlock Text="Run Programs container (Sandbox)"/>
+                            <TextBlock Text="Folders agents can reach, network egress, clipboard, timeout."
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <Button Grid.Row="0" Grid.Column="2" Content="Open" Click="OnOpenSandbox"
+                                AutomationProperties.AutomationId="OpenSandboxButton"/>
+
+                        <FontIcon Grid.Row="1" Grid.Column="0" Glyph="&#xE8D7;" FontSize="14" VerticalAlignment="Center"
+                                  Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"/>
+                        <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
+                            <TextBlock Text="Permissions"/>
+                            <TextBlock Text="Exec policy rules · gateway allowlist · Windows OS permission status."
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <Button Grid.Row="1" Grid.Column="2" Content="Open" Click="OnOpenPermissions"
+                                AutomationProperties.AutomationId="OpenPermissionsButton"/>
+
+                        <FontIcon Grid.Row="2" Grid.Column="0" Glyph="&#xE770;" FontSize="14" VerticalAlignment="Center"
+                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        <StackPanel Grid.Row="2" Grid.Column="1" Spacing="2">
+                            <TextBlock Text="🪟 Windows Privacy settings"/>
+                            <TextBlock Text="OS-level camera, microphone, and screen capture permissions."
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <Button Grid.Row="2" Grid.Column="2" Content="Open" Click="OnOpenWindowsPrivacy"
+                                AutomationProperties.AutomationId="OpenWindowsPrivacyButton"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
         </StackPanel>
     </ScrollViewer>
 </Page>

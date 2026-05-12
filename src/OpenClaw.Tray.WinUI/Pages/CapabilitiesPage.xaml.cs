@@ -167,6 +167,22 @@ public sealed partial class CapabilitiesPage : Page
         UpdateLevelPicker(_hub);
     }
 
+    // ============================================================
+    // Advanced settings deep-links
+    // ============================================================
+
+    private void OnOpenSandbox(object sender, RoutedEventArgs e)
+        => _hub?.NavigateTo("sandbox");
+
+    private void OnOpenPermissions(object sender, RoutedEventArgs e)
+        => _hub?.NavigateTo("permissions");
+
+    private void OnOpenWindowsPrivacy(object sender, RoutedEventArgs e)
+    {
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ms-settings:privacy") { UseShellExecute = true }); }
+        catch { }
+    }
+
     private void BuildCapabilityToggles(HubWindow hub)
     {
         if (hub.Settings == null) return;
