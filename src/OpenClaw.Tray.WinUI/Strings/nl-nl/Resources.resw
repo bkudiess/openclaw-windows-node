@@ -2754,6 +2754,12 @@ Voer op uw gateway-host (Mac/Linux) uit:
   <data name="DebugPage_ChatOverride_ForceNative_Tray.Content" xml:space="preserve">
     <value>Companion-chatinterface forceren</value>
   </data>
+  <data name="Chat_ZeroState_WelcomeTitle" xml:space="preserve">
+    <value>Welkom bij OpenClaw</value>
+  </data>
+  <data name="Chat_ZeroState_WelcomeSubtitle" xml:space="preserve">
+    <value>Waarmee kan ik je vandaag helpen?</value>
+  </data>
   <data name="Chat_Status_Done" xml:space="preserve">
     <value>Voltooid</value>
   </data>

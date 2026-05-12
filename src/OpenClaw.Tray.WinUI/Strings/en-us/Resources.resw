@@ -2801,6 +2801,12 @@ On your gateway host (Mac/Linux), run:
   <data name="DebugPage_ChatOverride_ForceNative_Tray.Content" xml:space="preserve">
     <value>Force Companion Chat UI</value>
   </data>
+  <data name="Chat_ZeroState_WelcomeTitle" xml:space="preserve">
+    <value>Welcome to OpenClaw</value>
+  </data>
+  <data name="Chat_ZeroState_WelcomeSubtitle" xml:space="preserve">
+    <value>How can I help you today?</value>
+  </data>
   <data name="Chat_Status_Done" xml:space="preserve">
     <value>Done</value>
   </data>

@@ -2753,6 +2753,12 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
   <data name="DebugPage_ChatOverride_ForceNative_Tray.Content" xml:space="preserve">
     <value>Forcer l'interface de discussion du compagnon</value>
   </data>
+  <data name="Chat_ZeroState_WelcomeTitle" xml:space="preserve">
+    <value>Bienvenue dans OpenClaw</value>
+  </data>
+  <data name="Chat_ZeroState_WelcomeSubtitle" xml:space="preserve">
+    <value>Comment puis-je vous aider aujourd'hui ?</value>
+  </data>
   <data name="Chat_Status_Done" xml:space="preserve">
     <value>Terminé</value>
   </data>

@@ -2753,6 +2753,12 @@
   <data name="DebugPage_ChatOverride_ForceNative_Tray.Content" xml:space="preserve">
     <value>強制使用伴侶聊天 UI</value>
   </data>
+  <data name="Chat_ZeroState_WelcomeTitle" xml:space="preserve">
+    <value>歡迎使用 OpenClaw</value>
+  </data>
+  <data name="Chat_ZeroState_WelcomeSubtitle" xml:space="preserve">
+    <value>今天我能幫你做什麼？</value>
+  </data>
   <data name="Chat_Status_Done" xml:space="preserve">
     <value>完成</value>
   </data>

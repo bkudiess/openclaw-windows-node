@@ -317,11 +317,8 @@ public sealed class OpenClawChatRoot : Component
     /// </summary>
     private static Element RenderZeroState(Action<string> onSuggestionPicked)
     {
-        var welcomeTitle = LocalizationHelper.GetString("Chat_ZeroState_WelcomeTitle");
-        if (string.IsNullOrEmpty(welcomeTitle)) welcomeTitle = "Welcome to OpenClaw";
-
-        var welcomeSubtitle = LocalizationHelper.GetString("Chat_ZeroState_WelcomeSubtitle");
-        if (string.IsNullOrEmpty(welcomeSubtitle)) welcomeSubtitle = "How can I help you today?";
+        var welcomeTitle = LocalizedOrDefault("Chat_ZeroState_WelcomeTitle", "Welcome to OpenClaw");
+        var welcomeSubtitle = LocalizedOrDefault("Chat_ZeroState_WelcomeSubtitle", "How can I help you today?");
 
         var suggestions = new[]
         {
@@ -370,6 +367,14 @@ public sealed class OpenClawChatRoot : Component
                 })
             ).VAlign(VerticalAlignment.Center).HAlign(HorizontalAlignment.Center)
         ).Padding(24, 24, 24, 24);
+    }
+
+    private static string LocalizedOrDefault(string key, string fallback)
+    {
+        var value = LocalizationHelper.GetString(key);
+        return string.IsNullOrWhiteSpace(value) || string.Equals(value, key, StringComparison.Ordinal)
+            ? fallback
+            : value;
     }
 
     private static Element PlaceholderEmptyThreadState(string connectionState)
