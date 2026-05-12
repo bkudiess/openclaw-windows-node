@@ -277,12 +277,23 @@ public sealed class NodeService : IDisposable
         _appCapability = new AppCapability(_logger);
         Register(_appCapability);
 
-        // System capability (notifications + command execution)
+        // System capability (notifications + command execution).
+        // Notifications are always available; system.run is gated by
+        // NodeSystemRunEnabled — when false the runner is replaced with a
+        // deny stub so the gateway gets a clean rejection instead of a
+        // silent no-op.
         _systemCapability = new SystemCapability(_logger);
         _systemCapability.NotifyRequested += OnSystemNotify;
-        _systemCapability.SetCommandRunner(BuildSystemRunRunner());
-        _systemCapability.SetApprovalPolicy(new ExecApprovalPolicy(_dataPath, _logger));
-        _systemCapability.SetPromptHandler(new ExecApprovalPromptService(_dispatcherQueue, _rootProvider, _logger));
+        if (NodeCapabilityGating.ShouldRegisterSystemRun(_settings))
+        {
+            _systemCapability.SetCommandRunner(BuildSystemRunRunner());
+            _systemCapability.SetApprovalPolicy(new ExecApprovalPolicy(_dataPath, _logger));
+            _systemCapability.SetPromptHandler(new ExecApprovalPromptService(_dispatcherQueue, _rootProvider, _logger));
+        }
+        else
+        {
+            _logger.Info("[node] system.run disabled (NodeSystemRunEnabled=false) — runner left unset; invocations will return CapabilityDisabled");
+        }
         Register(_systemCapability);
 
         if (NodeCapabilityGating.ShouldRegisterCanvas(_settings))

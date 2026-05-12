@@ -74,6 +74,14 @@ public class SettingsManager
     public bool NodeCanvasEnabled { get; set; } = true;
     public bool NodeScreenEnabled { get; set; } = true;
     public bool NodeCameraEnabled { get; set; } = true;
+    /// <summary>
+    /// First-class kill switch for the system.run capability. When false,
+    /// SystemCapability is not registered with the node — the gateway will
+    /// receive a "no such capability" response and cannot run programs on
+    /// this PC. Default true to preserve current behavior; flipped off by
+    /// the Locked Down security level.
+    /// </summary>
+    public bool NodeSystemRunEnabled { get; set; } = true;
     public bool ScreenRecordingConsentGiven { get; set; } = false;
     public bool CameraRecordingConsentGiven { get; set; } = false;
     public bool NodeLocationEnabled { get; set; } = true;
@@ -187,6 +195,7 @@ public class SettingsManager
                     NodeCanvasEnabled = loaded.NodeCanvasEnabled;
                     NodeScreenEnabled = loaded.NodeScreenEnabled;
                     NodeCameraEnabled = loaded.NodeCameraEnabled;
+                    NodeSystemRunEnabled = loaded.NodeSystemRunEnabled;
                     ScreenRecordingConsentGiven = loaded.ScreenRecordingConsentGiven;
                     CameraRecordingConsentGiven = loaded.CameraRecordingConsentGiven;
                     NodeLocationEnabled = loaded.NodeLocationEnabled;
@@ -307,6 +316,7 @@ public class SettingsManager
         NodeCanvasEnabled = NodeCanvasEnabled,
         NodeScreenEnabled = NodeScreenEnabled,
         NodeCameraEnabled = NodeCameraEnabled,
+        NodeSystemRunEnabled = NodeSystemRunEnabled,
         ScreenRecordingConsentGiven = ScreenRecordingConsentGiven,
         CameraRecordingConsentGiven = CameraRecordingConsentGiven,
         NodeLocationEnabled = NodeLocationEnabled,

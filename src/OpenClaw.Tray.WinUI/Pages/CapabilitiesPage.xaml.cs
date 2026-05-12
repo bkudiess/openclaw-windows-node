@@ -53,6 +53,7 @@ public sealed partial class CapabilitiesPage : Page
             ("🎨", "Canvas", settings.NodeCanvasEnabled, v => settings.NodeCanvasEnabled = v),
             ("🖥️", "Screen Capture", settings.NodeScreenEnabled, v => settings.NodeScreenEnabled = v),
             ("📍", "Location", settings.NodeLocationEnabled, v => settings.NodeLocationEnabled = v),
+            ("⌨️", "Run Programs", settings.NodeSystemRunEnabled, v => settings.NodeSystemRunEnabled = v),
             ("🔊", "Text-to-Speech", settings.NodeTtsEnabled, v => settings.NodeTtsEnabled = v),
             ("🎤", "Speech-to-Text", settings.NodeSttEnabled, v => settings.NodeSttEnabled = v),
         };

@@ -23,4 +23,11 @@ internal static class NodeCapabilityGating
     public static bool ShouldRegisterBrowserProxy(SettingsManager? s) => s?.NodeBrowserProxyEnabled != false;
     public static bool ShouldRegisterTts(SettingsManager? s)          => s?.NodeTtsEnabled          == true;
     public static bool ShouldRegisterStt(SettingsManager? s)          => s?.NodeSttEnabled          == true;
+    /// <summary>
+    /// system.run is privacy-sensitive but defaults ON for back-compat —
+    /// existing installs would have been registering it unconditionally.
+    /// Locked Down level flips this off; users can also flip it off
+    /// directly from the Run Programs row in Capabilities.
+    /// </summary>
+    public static bool ShouldRegisterSystemRun(SettingsManager? s)    => s?.NodeSystemRunEnabled    != false;
 }
