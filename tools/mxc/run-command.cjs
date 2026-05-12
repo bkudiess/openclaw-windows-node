@@ -67,6 +67,41 @@ function isUserTempRoot(p) {
   return candidates.some(c => c === norm);
 }
 
+/**
+ * Remove any allow-list entry equal to or nested inside any denied path.
+ * Mirrors C# MxcPolicyBuilder.FilterOutDenied. Case-insensitive (NTFS
+ * semantics) and tolerant of trailing slashes / mixed separators. Returns
+ * a new array; doesn't mutate the input.
+ */
+function filterOutDenied(allowed, denied) {
+  if (!Array.isArray(allowed) || allowed.length === 0) return allowed || [];
+  if (!Array.isArray(denied) || denied.length === 0) return allowed;
+  const normalizedDenied = denied
+    .map(normalizePath)
+    .filter(Boolean);
+  if (normalizedDenied.length === 0) return allowed;
+  return allowed.filter(a => {
+    const na = normalizePath(a);
+    if (!na) return false;
+    for (const d of normalizedDenied) {
+      if (na === d) return false;
+      // Match either separator after the denied path. Cover both `\` and `/`
+      // since SDK-injected paths may use forward slashes.
+      if (na.startsWith(d + '\\') || na.startsWith(d + '/')) return false;
+    }
+    return true;
+  });
+}
+
+function normalizePath(p) {
+  if (!p) return '';
+  try {
+    return path.resolve(p).replace(/[\\/]+$/, '').toLowerCase();
+  } catch {
+    return String(p).toLowerCase();
+  }
+}
+
 async function main() {
   const startTime = Date.now();
   const req = await readJsonFromStdin();
@@ -104,6 +139,17 @@ async function main() {
   //     so commands that write to %TEMP% land in our scratch dir.
   policy.filesystem.readonlyPaths = (policy.filesystem.readonlyPaths || []).filter(p => !isDriveRoot(p));
   policy.filesystem.readwritePaths = (policy.filesystem.readwritePaths || []).filter(p => !isUserTempRoot(p));
+
+  // Mirror the C# MxcPolicyBuilder.FilterOutDenied logic on the JS side after
+  // merging the SDK's tools/temp policies. The C# side already stripped any
+  // allow-list entry that overlapped a denied path, but the SDK merge re-adds
+  // its own allow grants (PATH dirs, PSReadLine history, etc.) that the C#
+  // filter never saw. Without this pass, the SDK could grant access to a
+  // parent of a denied path — e.g., %LOCALAPPDATA% which contains the browser
+  // profile dirs we deny in MxcPolicyBuilder. Belt-and-suspenders deny precedence
+  // independent of the @microsoft/mxc-sdk's (undocumented, alpha) deny semantics.
+  policy.filesystem.readonlyPaths = filterOutDenied(policy.filesystem.readonlyPaths, policy.filesystem.deniedPaths);
+  policy.filesystem.readwritePaths = filterOutDenied(policy.filesystem.readwritePaths, policy.filesystem.deniedPaths);
 
   let scratchDir = null;
   try {
@@ -249,15 +295,16 @@ function dedupe(arr) {
 function buildShellCommandLine(shell, command, argv) {
   const sh = shell.toLowerCase();
   if (sh === 'cmd') {
-    // For cmd.exe, wrap the entire command line in outer quotes via /S /C so
-    // the OS-level argv parser doesn't split on whitespace inside `command`.
-    // Inside those quotes, double-quote characters from the inputs are doubled
-    // (cmd's escape convention). Caller-supplied args are individually quoted
-    // first via quoteArg() so they remain a separate token from `command`.
+    // For cmd.exe, wrap the entire command line in outer quotes via /S /C.
+    // /S strips exactly the first and last `"` of the operand before parsing,
+    // so the inner content (already quoteArg-escaped for args) is passed
+    // through verbatim. DO NOT double-escape `"` here — quoteArg already
+    // doubles inner quotes per cmd's escape convention; running .replace on
+    // the concatenated string would quadruple them.
     const argsSuffix = (argv && argv.length > 0)
       ? ' ' + argv.map((a) => quoteArg(a, /*isCmd*/ true)).join(' ')
       : '';
-    const inner = (command + argsSuffix).replace(/"/g, '""');
+    const inner = command + argsSuffix;
     return `cmd.exe /S /C "${inner}"`;
   }
   // PowerShell variants: use -EncodedCommand with UTF-16LE Base64. PowerShell
@@ -276,7 +323,21 @@ function buildShellCommandLine(shell, command, argv) {
   return `powershell.exe -NoProfile -NonInteractive -EncodedCommand ${encoded}`;
 }
 
+// Shell metacharacters whose presence forces quoting. Matches the set used by
+// OpenClaw.Shared.ShellQuoting.NeedsQuoting on the C# side so the bridge has
+// the same quoting behavior as LocalCommandRunner. Quoting a switch like
+// `-Name` would break PowerShell parameter binding (PowerShell sees it as a
+// string literal, not a parameter) — we conditional-quote like the host does.
+const SHELL_METACHARS = /[ \t"'&|;<>()^%!$`*?\[\]{}~\n\r]/;
+
+function needsQuoting(arg) {
+  // Empty string needs explicit quotes so it's preserved as an argv element.
+  if (arg === '' || arg == null) return true;
+  return SHELL_METACHARS.test(arg);
+}
+
 function quoteArg(arg, isCmd) {
+  if (!needsQuoting(arg)) return String(arg);
   // Minimal quoting; matches OpenClaw.Shared/ShellQuoting semantics for cmd
   // (double-quote with escaped inner quotes) and PowerShell (single quotes).
   if (isCmd) {

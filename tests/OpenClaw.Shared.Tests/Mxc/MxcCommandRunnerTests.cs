@@ -28,6 +28,7 @@ public class MxcCommandRunnerTests
             () => settings,
             () => "C:\\test\\settings",
             () => sandboxAvailable,
+            invalidateAvailability: null,
             NullLogger.Instance);
     }
 
@@ -177,6 +178,72 @@ public class MxcCommandRunnerTests
         Assert.Null(fallback.LastRequest);
     }
 
+    [Fact]
+    public async Task RunAsync_SandboxUnavailableException_InvalidatesAvailabilityCache()
+    {
+        // When the executor throws SandboxUnavailableException, the runner should
+        // invoke its invalidate-availability callback so the next command re-probes.
+        // Handles the case where MXC components were removed between this NodeService
+        // starting up and the agent invoking a command.
+        var executor = new FakeSandboxExecutor { ThrowsUnavailable = true, UnavailableReason = "wxc-exec went missing" };
+        var fallback = new FakeCommandRunner();
+        var invalidationCount = 0;
+        var runner = new MxcCommandRunner(
+            executor,
+            fallback,
+            () => NewSettings(sandboxEnabled: true),
+            () => "C:\\test\\settings",
+            () => true,
+            invalidateAvailability: () => invalidationCount++,
+            NullLogger.Instance);
+
+        var result = await runner.RunAsync(new CommandRequest { Command = "echo hi" });
+
+        Assert.Equal(-1, result.ExitCode);
+        Assert.Equal(1, invalidationCount);
+        Assert.Contains("wxc-exec went missing", result.Stderr);
+    }
+
+    [Fact]
+    public async Task RunAsync_GenericException_ReturnsDeny_DoesNotPropagate()
+    {
+        // The catch-all in RunAsync handles unexpected bridge/JSON/IO failures by
+        // returning a -1 CommandResult instead of letting the exception escape.
+        // Without this, a bridge crash could take down the node loop.
+        var executor = new FakeSandboxExecutor
+        {
+            ThrowsArbitrary = new InvalidOperationException("bridge JSON parse error"),
+        };
+        var fallback = new FakeCommandRunner();
+        var runner = NewRunner(executor, fallback, NewSettings(sandboxEnabled: true));
+
+        var result = await runner.RunAsync(new CommandRequest { Command = "echo hi" });
+
+        Assert.Equal(-1, result.ExitCode);
+        Assert.Contains("bridge JSON parse error", result.Stderr);
+        Assert.Contains("InvalidOperationException", result.Stderr);
+        // Host fallback must NOT have been touched — fail closed, not fallback.
+        Assert.Null(fallback.LastRequest);
+    }
+
+    [Fact]
+    public async Task RunAsync_OperationCanceled_Propagates()
+    {
+        // OperationCanceledException is the ONE exception type that propagates.
+        // The catch-all would otherwise swallow it and the caller would see a
+        // -1 result instead of the actual cancellation.
+        var executor = new FakeSandboxExecutor
+        {
+            ThrowsArbitrary = new OperationCanceledException("caller cancelled"),
+        };
+        var fallback = new FakeCommandRunner();
+        var runner = NewRunner(executor, fallback, NewSettings(sandboxEnabled: true));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await runner.RunAsync(new CommandRequest { Command = "echo hi" }));
+        Assert.Null(fallback.LastRequest);
+    }
+
     private sealed class FakeSandboxExecutor : ISandboxExecutor
     {
         public string Name => "fake";
@@ -187,12 +254,15 @@ public class MxcCommandRunnerTests
             new(0, string.Empty, string.Empty, false, 0, "mxc");
         public bool ThrowsUnavailable { get; set; }
         public string UnavailableReason { get; set; } = "fake unavailable";
+        public Exception? ThrowsArbitrary { get; set; }
 
         public Task<SandboxExecutionResult> ExecuteAsync(
             SandboxExecutionRequest request,
             CancellationToken ct = default)
         {
             LastRequest = request;
+            if (ThrowsArbitrary != null)
+                throw ThrowsArbitrary;
             if (ThrowsUnavailable)
                 throw new SandboxUnavailableException(UnavailableReason);
             return Task.FromResult(Result);

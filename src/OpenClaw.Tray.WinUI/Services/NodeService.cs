@@ -494,7 +494,10 @@ public sealed class NodeService : IDisposable
             hostRunner,
             () => SnapshotSettings(),
             () => settingsDirectory,
-            () => (_mxcAvailability ?? MxcAvailability.Probe(_logger)).HasAnyBackend,
+            // Re-probe on demand if the cache was invalidated by a prior
+            // SandboxUnavailableException (see invalidateAvailability below).
+            () => (_mxcAvailability ??= MxcAvailability.Probe(_logger)).HasAnyBackend,
+            invalidateAvailability: () => _mxcAvailability = null,
             _logger);
     }
 

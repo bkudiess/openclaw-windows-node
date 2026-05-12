@@ -38,9 +38,12 @@ public class MxcAvailabilityTests
             Assert.False(string.IsNullOrWhiteSpace(availability.WxcExecPath));
         }
 
-        // HasAnyBackend == OR of the two backend flags.
+        // HasAnyBackend requires: a backend supported, wxc-exec resolvable, AND
+        // the run-command.cjs bridge script present. All three must be true.
         Assert.Equal(
-            availability.IsAppContainerAvailable || availability.IsIsolationSessionAvailable,
+            (availability.IsAppContainerAvailable || availability.IsIsolationSessionAvailable)
+                && availability.IsWxcExecResolvable
+                && availability.RunCommandScriptPath is not null,
             availability.HasAnyBackend);
     }
 

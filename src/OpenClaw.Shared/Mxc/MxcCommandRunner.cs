@@ -27,6 +27,7 @@ public sealed class MxcCommandRunner : ICommandRunner
     private readonly Func<SettingsData> _settingsProvider;
     private readonly Func<string> _settingsDirectoryPathProvider;
     private readonly Func<bool> _isSandboxAvailable;
+    private readonly Action? _invalidateAvailability;
     private readonly IOpenClawLogger _logger;
 
     public MxcCommandRunner(
@@ -35,6 +36,7 @@ public sealed class MxcCommandRunner : ICommandRunner
         Func<SettingsData> settingsProvider,
         Func<string> settingsDirectoryPathProvider,
         Func<bool> isSandboxAvailable,
+        Action? invalidateAvailability = null,
         IOpenClawLogger? logger = null)
     {
         _executor = executor;
@@ -42,6 +44,7 @@ public sealed class MxcCommandRunner : ICommandRunner
         _settingsProvider = settingsProvider;
         _settingsDirectoryPathProvider = settingsDirectoryPathProvider;
         _isSandboxAvailable = isSandboxAvailable;
+        _invalidateAvailability = invalidateAvailability;
         _logger = logger ?? NullLogger.Instance;
     }
 
@@ -110,6 +113,12 @@ public sealed class MxcCommandRunner : ICommandRunner
         }
         catch (SandboxUnavailableException ex)
         {
+            // Invalidate any cached availability — what we thought was available
+            // turned out not to be. Next command re-probes. This handles the
+            // case where MXC components were uninstalled (or wxc-exec moved)
+            // between this NodeService starting and now.
+            _invalidateAvailability?.Invoke();
+
             _logger.Warn(
                 $"[mxc] system.run DENIED (sandbox enabled but unavailable: {ex.Message}). " +
                 "Disable the sandbox toggle in Debug to fall back to host execution.");
