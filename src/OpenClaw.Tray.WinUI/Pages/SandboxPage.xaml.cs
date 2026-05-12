@@ -557,11 +557,8 @@ public sealed partial class SandboxPage : Page
         Save();
     }
 
-    private async void OnAddCustomFolderReadOnly(object sender, RoutedEventArgs e)
+    private async void OnAddCustomFolder(object sender, RoutedEventArgs e)
         => await PickCustomFolderAsync(SandboxFolderAccess.ReadOnly);
-
-    private async void OnAddCustomFolderReadWrite(object sender, RoutedEventArgs e)
-        => await PickCustomFolderAsync(SandboxFolderAccess.ReadWrite);
 
     private async System.Threading.Tasks.Task PickCustomFolderAsync(SandboxFolderAccess access)
     {

@@ -16,7 +16,7 @@
                 <TextBlock x:Name="SandboxStatusIcon"
                            Grid.Column="0"
                            Text="🛡"
-                           FontSize="40"
+                           FontSize="32"
                            VerticalAlignment="Center" />
 
                 <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
@@ -24,7 +24,7 @@
                                Text="Sandbox is on"
                                Style="{StaticResource TitleTextBlockStyle}" />
                     <TextBlock x:Name="SandboxStatusSubtext"
-                               Text="Windows commands started by agents run in a restricted AppContainer with only the access enabled below."
+                               Text="Restricts what agent-started Windows commands can see. Doesn't cover commands run inside WSL or files you paste into chat."
                                TextWrapping="Wrap"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
@@ -35,16 +35,9 @@
                               MinWidth="0"
                               OffContent=""
                               OnContent=""
+                              AutomationProperties.Name="Sandbox enabled"
                               Toggled="OnSandboxEnabledToggled" />
             </Grid>
-
-            <!-- Scope callout — what this page does and doesn't cover -->
-            <InfoBar x:Name="ScopeCallout"
-                     IsOpen="True"
-                     IsClosable="False"
-                     Severity="Informational"
-                     Title="What this protects"
-                     Message="Controls Windows commands an agent runs through this companion app. Does NOT control commands run inside WSL, gateway-side file tools (dir_list, file_get, etc.), or files you paste into chat." />
 
             <!-- Prominent error + fix action when MXC sandboxing is unavailable -->
             <InfoBar x:Name="UnavailableActionBar"
@@ -92,7 +85,7 @@
                             <TextBlock Text="🔒 Locked Down"
                                        FontSize="18"
                                        FontWeight="SemiBold" />
-                            <TextBlock Text="No internet, no clipboard, no standard user folders. Commands can still use a temporary workspace."
+                            <TextBlock Text="No internet, no clipboard, no standard user folders."
                                        TextWrapping="Wrap"
                                        FontSize="13"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -113,7 +106,7 @@
                             <TextBlock Text="⚖ Balanced"
                                        FontSize="18"
                                        FontWeight="SemiBold" />
-                            <TextBlock Text="Internet on. Documents, Downloads, Desktop are readable but not writable. Clipboard read on — anything readable may be sent over the internet."
+                            <TextBlock Text="Internet on. Read-only on Documents, Downloads, Desktop. Clipboard read."
                                        TextWrapping="Wrap"
                                        FontSize="13"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -134,7 +127,7 @@
                             <TextBlock Text="🔓 Permissive"
                                        FontSize="18"
                                        FontWeight="SemiBold" />
-                            <TextBlock Text="Internet on. Documents, Downloads, Desktop are read+write. Clipboard both ways. Long timeouts. Use sparingly."
+                            <TextBlock Text="Internet on. Read+write on Documents, Downloads, Desktop. Clipboard read+write."
                                        TextWrapping="Wrap"
                                        FontSize="13"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -252,8 +245,7 @@
                                            FontSize="12"
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <Button Content="➕ Add folder (read-only)" Click="OnAddCustomFolderReadOnly" />
-                                    <Button Content="➕ Add folder (read+write)" Click="OnAddCustomFolderReadWrite" />
+                                    <Button Content="➕ Add folder" Click="OnAddCustomFolder" />
                                 </StackPanel>
                             </StackPanel>
                         </Border>
