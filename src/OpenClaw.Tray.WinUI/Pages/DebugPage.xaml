@@ -118,8 +118,6 @@
                 </StackPanel>
             </Expander>
 
-            <!-- system.run sandbox controls moved to the Sandbox page -->
-
         </StackPanel>
     </ScrollViewer>
 </Page>

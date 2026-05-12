@@ -32,8 +32,6 @@ public sealed partial class DebugPage : Page
         LoadDeviceIdentity();
     }
 
-    // Sandbox toggles moved to SandboxPage.
-
     // ── Log Viewer ───────────────────────────────────────────────────
 
     private void LoadLog()
