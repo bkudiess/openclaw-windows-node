@@ -68,7 +68,7 @@ function isUserTempRoot(p) {
 }
 
 /**
- * Remove any allow-list entry equal to or nested inside any denied path.
+ * Remove any allow-list entry that overlaps a denied path.
  * Mirrors C# MxcPolicyBuilder.FilterOutDenied. Case-insensitive (NTFS
  * semantics) and tolerant of trailing slashes / mixed separators. Returns
  * a new array; doesn't mutate the input.
@@ -84,13 +84,18 @@ function filterOutDenied(allowed, denied) {
     const na = normalizePath(a);
     if (!na) return false;
     for (const d of normalizedDenied) {
-      if (na === d) return false;
-      // Match either separator after the denied path. Cover both `\` and `/`
-      // since SDK-injected paths may use forward slashes.
-      if (na.startsWith(d + '\\') || na.startsWith(d + '/')) return false;
+      if (pathsOverlap(na, d)) return false;
     }
     return true;
   });
+}
+
+function pathsOverlap(left, right) {
+  return isSameOrNested(left, right) || isSameOrNested(right, left);
+}
+
+function isSameOrNested(child, parent) {
+  return child === parent || child.startsWith(parent + '\\') || child.startsWith(parent + '/');
 }
 
 function normalizePath(p) {
@@ -174,11 +179,7 @@ async function main() {
     // Override TEMP/TMP/TMPDIR so commands inside the sandbox write to our
     // scratch dir, not the user's real %TEMP% (which we stripped above).
     // New-TemporaryFile, mkdtemp(), etc. all respect these.
-    const sandboxEnv = req.env && typeof req.env === 'object' ? { ...req.env } : {};
-    sandboxEnv.TEMP = scratchDir;
-    sandboxEnv.TMP = scratchDir;
-    sandboxEnv.TMPDIR = scratchDir;
-    config.process.env = Object.entries(sandboxEnv).map(([k, v]) => `${k}=${v}`);
+    config.process.env = buildSandboxEnv(req.env, scratchDir);
     const sdkTimeoutMs = req.timeoutMs > 0 ? req.timeoutMs : 30000;
     config.process.timeout = sdkTimeoutMs;
 
@@ -291,6 +292,114 @@ function mergePolicy(callerPolicy, tools, temp) {
 
 function dedupe(arr) {
   return Array.from(new Set(arr.filter(Boolean)));
+}
+
+const BASE_ENV_ALLOWLIST = [
+  'ALLUSERSPROFILE',
+  'APPDATA',
+  'ComSpec',
+  'CommonProgramFiles',
+  'CommonProgramFiles(x86)',
+  'CommonProgramW6432',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'LOCALAPPDATA',
+  'NUMBER_OF_PROCESSORS',
+  'OS',
+  'PATH',
+  'PATHEXT',
+  'PROCESSOR_ARCHITECTURE',
+  'PROCESSOR_IDENTIFIER',
+  'PROCESSOR_LEVEL',
+  'PROCESSOR_REVISION',
+  'ProgramData',
+  'ProgramFiles',
+  'ProgramFiles(x86)',
+  'ProgramW6432',
+  'PUBLIC',
+  'SystemDrive',
+  'SystemRoot',
+  'USERDOMAIN',
+  'USERNAME',
+  'USERPROFILE',
+  'windir',
+];
+
+function buildSandboxEnv(requestEnv, scratchDir) {
+  const env = {};
+  for (const name of BASE_ENV_ALLOWLIST) {
+    if (Object.prototype.hasOwnProperty.call(process.env, name)) {
+      env[name] = process.env[name];
+    }
+  }
+
+  if (requestEnv && typeof requestEnv === 'object') {
+    for (const [name, value] of Object.entries(requestEnv)) {
+      if (isRequestEnvNameBlocked(name) || value == null) continue;
+      env[name] = String(value);
+    }
+  }
+
+  env.TEMP = scratchDir;
+  env.TMP = scratchDir;
+  env.TMPDIR = scratchDir;
+  return Object.entries(env).map(([k, v]) => `${k}=${v}`);
+}
+
+function isRequestEnvNameBlocked(name) {
+  if (!name || /[=\0\r\n\s]/.test(name)) return true;
+  const upper = String(name).toUpperCase();
+  if ([
+    'PATH',
+    'PATHEXT',
+    'COMSPEC',
+    'PSMODULEPATH',
+    'NODE_OPTIONS',
+    'NODE_PATH',
+    'PYTHONPATH',
+    'PYTHONSTARTUP',
+    'PYTHONUSERBASE',
+    'RUBYOPT',
+    'RUBYLIB',
+    'PERL5OPT',
+    'PERL5LIB',
+    'PERLIO',
+    'GIT_SSH',
+    'GIT_SSH_COMMAND',
+    'GIT_EXEC_PATH',
+    'GIT_PROXY_COMMAND',
+    'GIT_ASKPASS',
+    'BASH_ENV',
+    'ENV',
+    'CDPATH',
+    'PROMPT_COMMAND',
+    'ZDOTDIR',
+  ].includes(upper)) return true;
+  if (upper.startsWith('LD_') || upper.startsWith('DYLD_')) return true;
+  return hasCredentialMarker(upper);
+}
+
+function hasCredentialMarker(name) {
+  const segments = name.split(/[_\-.]/).filter(Boolean);
+  const has = (segment) => segments.includes(segment);
+  const hasPair = (first, second) => {
+    for (let i = 0; i < segments.length - 1; i++) {
+      if (segments[i] === first && segments[i + 1] === second) return true;
+    }
+    return false;
+  };
+  return has('TOKEN') ||
+    has('SECRET') ||
+    has('PASSWORD') ||
+    has('PASSWD') ||
+    has('CREDENTIAL') ||
+    has('CREDENTIALS') ||
+    hasPair('API', 'KEY') ||
+    hasPair('ACCESS', 'KEY') ||
+    hasPair('PRIVATE', 'KEY') ||
+    hasPair('CLIENT', 'SECRET') ||
+    hasPair('CONNECTION', 'STRING') ||
+    name.includes('CONNSTR');
 }
 
 function buildShellCommandLine(shell, command, argv) {

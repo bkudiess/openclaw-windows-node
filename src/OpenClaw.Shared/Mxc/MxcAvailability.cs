@@ -40,9 +40,9 @@ public sealed class MxcAvailability
 
     /// <summary>
     /// Resolved path to <c>tools/mxc/run-command.cjs</c> (the productized Node bridge
-    /// for MxcCommandRunner). Walks up from the app base directory looking for the
-    /// repo's <c>tools/mxc/</c> folder; falls back to the worktree path when running
-    /// from a build output directory.
+    /// for MxcCommandRunner). The tray build copies this under the app base
+    /// directory; probing intentionally does not walk parent directories so a
+    /// user-writable parent cannot inject a replacement bridge.
     /// </summary>
     public string? RunCommandScriptPath { get; }
 
@@ -109,7 +109,7 @@ public sealed class MxcAvailability
 
         var (wxcResolvable, wxcPath) = ResolveWxcExec();
         if (!wxcResolvable)
-            reasons.Add($"wxc-exec.exe not found. Set {WxcExecOverrideEnvVar} or run `npm install`.");
+            reasons.Add($"wxc-exec.exe not found. Set {WxcExecOverrideEnvVar} or run `npm ci` at the repository root.");
 
         var runCommandScriptPath = ResolveRunCommandScript();
         if (runCommandScriptPath is null)
@@ -173,7 +173,6 @@ public sealed class MxcAvailability
         var arch = MxcArchHelper.GetSdkArchString();
         var probeRoots = new[]
         {
-            Environment.CurrentDirectory,
             AppContext.BaseDirectory,
             Path.GetDirectoryName(typeof(MxcAvailability).Assembly.Location) ?? string.Empty,
         };
@@ -183,15 +182,11 @@ public sealed class MxcAvailability
             if (string.IsNullOrWhiteSpace(root))
                 continue;
 
-            var current = new DirectoryInfo(root);
-            for (var depth = 0; depth < 10 && current != null; depth++, current = current.Parent)
-            {
-                var candidate = Path.Combine(
-                    current.FullName,
-                    "node_modules", "@microsoft", "mxc-sdk", "bin", arch, "wxc-exec.exe");
-                if (File.Exists(candidate))
-                    return (true, candidate);
-            }
+            var candidate = Path.Combine(
+                root,
+                "node_modules", "@microsoft", "mxc-sdk", "bin", arch, "wxc-exec.exe");
+            if (File.Exists(candidate))
+                return (true, candidate);
         }
 
         return (false, null);
@@ -201,7 +196,6 @@ public sealed class MxcAvailability
     {
         var probeRoots = new[]
         {
-            Environment.CurrentDirectory,
             AppContext.BaseDirectory,
             Path.GetDirectoryName(typeof(MxcAvailability).Assembly.Location) ?? string.Empty,
         };
@@ -211,13 +205,9 @@ public sealed class MxcAvailability
             if (string.IsNullOrWhiteSpace(root))
                 continue;
 
-            var current = new DirectoryInfo(root);
-            for (var depth = 0; depth < 10 && current != null; depth++, current = current.Parent)
-            {
-                var candidate = Path.Combine(current.FullName, "tools", "mxc", "run-command.cjs");
-                if (File.Exists(candidate))
-                    return candidate;
-            }
+            var candidate = Path.Combine(root, "tools", "mxc", "run-command.cjs");
+            if (File.Exists(candidate))
+                return candidate;
         }
 
         return null;

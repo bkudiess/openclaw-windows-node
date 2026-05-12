@@ -256,7 +256,7 @@ public class PairingFlowTests : IDisposable
         public event EventHandler<ConnectionStatus>? StatusChanged;
         public event EventHandler<PairingStatusEventArgs>? PairingStatusChanged;
 #pragma warning disable CS0067 // never raised in this test fixture — the bridge to NodeService isn't exercised here
-        public event EventHandler<WindowsNodeClient>? ClientCreated;
+        public event EventHandler<NodeClientCreatedEventArgs>? ClientCreated;
 #pragma warning restore CS0067
 
         public Task ConnectAsync(string gatewayUrl, GatewayCredential credential,

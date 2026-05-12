@@ -30,9 +30,21 @@ public interface INodeConnector : IDisposable
     /// Fires on first connect AND on every reconnect (the connector destroys
     /// and re-creates the client on every <see cref="ConnectAsync"/>).
     /// </summary>
-    event EventHandler<WindowsNodeClient> ClientCreated;
+    event EventHandler<NodeClientCreatedEventArgs> ClientCreated;
 
     // ─── Lifecycle ───
     Task ConnectAsync(string gatewayUrl, GatewayCredential credential, string identityPath, bool useV2Signature = false);
     Task DisconnectAsync();
+}
+
+public sealed class NodeClientCreatedEventArgs : EventArgs
+{
+    public NodeClientCreatedEventArgs(WindowsNodeClient client, string? bearerToken)
+    {
+        Client = client;
+        BearerToken = bearerToken;
+    }
+
+    public WindowsNodeClient Client { get; }
+    public string? BearerToken { get; }
 }

@@ -408,27 +408,23 @@ public sealed class NodeService : IDisposable
     /// is serialized — otherwise the gateway sees this node as having no
     /// advertised commands and the agent can't invoke anything.
     /// </summary>
-    public void AttachClient(WindowsNodeClient client)
+    public void AttachClient(WindowsNodeClient client, string? bearerToken = null)
     {
         if (client is null) return;
 
+        _token = bearerToken;
         _nodeClient = client;
+        bool capabilitiesBuilt;
         lock (_capabilitiesLock)
         {
-            // First connect after app startup may not have built capability objects yet.
-            // RegisterCapabilities() populates _capabilities AND also calls
-            // _nodeClient.RegisterCapability(...) via Register() — covers both cases.
-            if (_capabilities.Count == 0)
-            {
-                _logger.Info("[NodeService] AttachClient: capabilities not yet built, calling RegisterCapabilities()");
-                // Cannot call RegisterCapabilities() under the lock — it acquires the same lock.
-                // Release and re-enter handled by the lock keyword (re-entrant); but to keep
-                // semantics obvious we exit the lock body first.
-            }
+            capabilitiesBuilt = _capabilities.Count > 0;
         }
 
-        if (_capabilities.Count == 0)
+        // First connect after app startup may not have built capability objects yet.
+        // RegisterCapabilities() populates _capabilities and registers them on _nodeClient.
+        if (!capabilitiesBuilt)
         {
+            _logger.Info("[NodeService] AttachClient: capabilities not yet built, calling RegisterCapabilities()");
             RegisterCapabilities();
         }
         else

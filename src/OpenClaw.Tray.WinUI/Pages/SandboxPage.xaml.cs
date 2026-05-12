@@ -225,7 +225,7 @@ public sealed partial class SandboxPage : Page
             UnavailableActionBar.Title = "Sandboxing components are missing";
             UnavailableActionMessage.Text =
                 $"{reasonText}\n\nThe MXC bridge script or the wxc-exec binary couldn't be located. " +
-                "If this is a developer build, run `npm install` in the tools/mxc folder. " +
+                "If this is a developer build, run `npm ci` at the repository root. " +
                 "Otherwise reinstall the companion app.";
             UnavailablePrimaryButton.Content = "Show install instructions";
             UnavailablePrimaryButton.Tag = "install";

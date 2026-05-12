@@ -189,6 +189,7 @@ public class MxcPolicyBuilderTests
         Assert.Contains(denied, p => p.EndsWith("Microsoft\\Edge\\User Data", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(denied, p => p.EndsWith("Mozilla\\Firefox\\Profiles", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(denied, p => p.EndsWith("BraveSoftware\\Brave-Browser\\User Data", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(denied, p => p.EndsWith("Microsoft\\Windows\\PowerShell\\PSReadLine", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -236,6 +237,24 @@ public class MxcPolicyBuilderTests
             Path.GetFullPath(p).StartsWith(
                 Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(userProfile, ".ssh"))),
                 StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ForSystemRun_CustomFolder_ParentOfDeniedPath_FilteredOut()
+    {
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var settings = new SettingsData
+        {
+            SandboxCustomFolders = new()
+            {
+                new SandboxCustomFolder { Path = userProfile, Access = SandboxFolderAccess.ReadWrite },
+            },
+        };
+
+        var policy = MxcPolicyBuilder.ForSystemRun(settings, "C:\\settings");
+
+        Assert.DoesNotContain(policy.Filesystem!.ReadwritePaths!, p =>
+            string.Equals(Path.GetFullPath(p), Path.GetFullPath(userProfile), StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

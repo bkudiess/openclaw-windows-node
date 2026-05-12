@@ -649,11 +649,11 @@ public partial class App : Application
         // anything on it. _nodeService may be null at app startup (constructed
         // lazily); when null we no-op and the gateway will see an empty caps list
         // until the next reconnect after _nodeService becomes available.
-        nodeConnector.ClientCreated += (_, client) =>
+        nodeConnector.ClientCreated += (_, args) =>
         {
             try
             {
-                _nodeService?.AttachClient(client);
+                _nodeService?.AttachClient(args.Client, args.BearerToken);
             }
             catch (Exception ex)
             {

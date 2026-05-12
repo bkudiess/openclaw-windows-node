@@ -16,7 +16,7 @@ public sealed class NodeConnector : INodeConnector
 
     public event EventHandler<ConnectionStatus>? StatusChanged;
     public event EventHandler<PairingStatusEventArgs>? PairingStatusChanged;
-    public event EventHandler<WindowsNodeClient>? ClientCreated;
+    public event EventHandler<NodeClientCreatedEventArgs>? ClientCreated;
 
     public NodeConnector(IOpenClawLogger logger, ConnectionDiagnostics? diagnostics = null)
     {
@@ -70,7 +70,11 @@ public sealed class NodeConnector : INodeConnector
         // the gateway sees an empty caps array for this session.
         try
         {
-            ClientCreated?.Invoke(this, _client);
+            ClientCreated?.Invoke(
+                this,
+                new NodeClientCreatedEventArgs(
+                    _client,
+                    credential.IsBootstrapToken ? null : credential.Token));
         }
         catch (Exception ex)
         {

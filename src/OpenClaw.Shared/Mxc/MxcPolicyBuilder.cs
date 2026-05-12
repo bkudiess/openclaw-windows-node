@@ -65,6 +65,7 @@ public static class MxcPolicyBuilder
         if (!string.IsNullOrWhiteSpace(appData))
         {
             deniedPaths.Add(Path.Combine(appData, "Mozilla", "Firefox", "Profiles"));
+            deniedPaths.Add(Path.Combine(appData, "Microsoft", "Windows", "PowerShell", "PSReadLine"));
         }
 
         var readonlyPaths = new List<string>();
@@ -115,7 +116,7 @@ public static class MxcPolicyBuilder
     }
 
     /// <summary>
-    /// Remove any allow-list entry equal to or nested inside any denied path.
+    /// Remove any allow-list entry that overlaps a denied path.
     /// Case-insensitive (NTFS semantics) and tolerant of trailing slashes.
     /// </summary>
     private static List<string> FilterOutDenied(List<string> allowed, List<string> denied)
@@ -132,13 +133,25 @@ public static class MxcPolicyBuilder
                 if (string.IsNullOrEmpty(na)) return false;
                 foreach (var d in normalizedDenied)
                 {
-                    if (string.Equals(na, d, StringComparison.OrdinalIgnoreCase)) return false;
-                    if (na.StartsWith(d + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return false;
-                    if (na.StartsWith(d + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return false;
+                    if (PathsOverlap(na, d)) return false;
                 }
                 return true;
             })
             .ToList();
+    }
+
+    private static bool PathsOverlap(string left, string right)
+    {
+        return IsSameOrNested(left, right) || IsSameOrNested(right, left);
+    }
+
+    private static bool IsSameOrNested(string path, string candidateParent)
+    {
+        if (string.Equals(path, candidateParent, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return path.StartsWith(candidateParent + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(candidateParent + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string NormalizePath(string path)
@@ -203,7 +216,7 @@ public static class MxcPolicyBuilder
         }
     }
 
-    [System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, ExactSpelling = true, PreserveSig = false)]
+    [System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, ExactSpelling = true)]
     private static extern int SHGetKnownFolderPath(
         [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPStruct)] Guid rfid,
         uint dwFlags,
