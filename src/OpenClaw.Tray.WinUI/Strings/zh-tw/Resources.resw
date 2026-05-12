@@ -2103,11 +2103,17 @@
   <data name="UsagePage_TextBlock_55.Text" xml:space="preserve">
     <value>提供者</value>
   </data>
-  <data name="Period7DaysButton.Content" xml:space="preserve">
+  <data name="Period7DaysItem.Text" xml:space="preserve">
     <value>7 天</value>
   </data>
-  <data name="Period30DaysButton.Content" xml:space="preserve">
+  <data name="Period30DaysItem.Text" xml:space="preserve">
     <value>30 天</value>
+  </data>
+  <data name="UsagePage_ProviderLoading.Text" xml:space="preserve">
+    <value>正在載入提供者…</value>
+  </data>
+  <data name="UsagePage_NoProviders.Text" xml:space="preserve">
+    <value>未設定任何提供者</value>
   </data>
   <data name="UsagePage_TextBlock_70.Text" xml:space="preserve">
     <value>提供者明細</value>

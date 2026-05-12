@@ -59,60 +59,90 @@
                 </Border>
             </StackPanel>
 
-            <!-- Time period buttons -->
-            <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button x:Uid="Period7DaysButton" x:Name="Period7DaysButton" Content="7 Days" Click="OnPeriod7Days"
-                        Style="{ThemeResource AccentButtonStyle}"/>
-                <Button x:Uid="Period30DaysButton" x:Name="Period30DaysButton" Content="30 Days" Click="OnPeriod30Days"/>
-            </StackPanel>
+            <!-- Provider Breakdown card — real-time provider status (independent of the time range below). -->
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,8,0,0">
+                <StackPanel Spacing="12">
+                    <TextBlock x:Uid="UsagePage_TextBlock_70" Text="Provider Breakdown"
+                               Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                    <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}"/>
+                    <StackPanel x:Name="ProviderLoadingPanel" Orientation="Horizontal" Spacing="12"
+                                HorizontalAlignment="Center" Padding="0,24,0,16">
+                        <ProgressRing IsActive="True" Width="20" Height="20"/>
+                        <TextBlock x:Uid="UsagePage_ProviderLoading" Text="Loading providers…"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <TextBlock x:Uid="UsagePage_NoProviders" x:Name="ProviderEmptyText"
+                               Text="No providers configured"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               HorizontalAlignment="Center" Padding="0,24,0,16"
+                               Visibility="Collapsed"/>
+                    <ListView x:Name="ProviderListView" SelectionMode="None" Visibility="Collapsed">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Padding="4,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding Plan}" Margin="16,0"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="2" Text="{Binding Usage}" Margin="16,0"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="3" Text="{Binding Status}" FontWeight="SemiBold"
+                                               VerticalAlignment="Center"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </StackPanel>
+            </Border>
 
-            <!-- Provider Breakdown -->
-            <TextBlock x:Uid="UsagePage_TextBlock_70" Text="Provider Breakdown" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,8,0,0"/>
-            <ListView x:Name="ProviderListView" SelectionMode="None">
-                <ListView.ItemTemplate>
-                    <DataTemplate>
-                        <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,4">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                <TextBlock Grid.Column="1" Text="{Binding Requests}" Margin="16,0"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                           VerticalAlignment="Center"/>
-                                <TextBlock Grid.Column="2" Text="{Binding Tokens}" Margin="16,0"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                           VerticalAlignment="Center"/>
-                                <TextBlock Grid.Column="3" Text="{Binding Cost}" FontWeight="SemiBold"
-                                           VerticalAlignment="Center"/>
-                            </Grid>
-                        </Border>
-                    </DataTemplate>
-                </ListView.ItemTemplate>
-            </ListView>
-
-            <!-- Daily Cost -->
-            <TextBlock x:Uid="UsagePage_TextBlock_100" Text="Daily Cost" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,8,0,0"/>
-            <ListView x:Name="DailyListView" SelectionMode="None">
-                <ListView.ItemTemplate>
-                    <DataTemplate>
-                        <Grid Padding="4,6">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="{Binding Date}"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                            <TextBlock Grid.Column="1" Text="{Binding Cost}" FontWeight="SemiBold"/>
-                        </Grid>
-                    </DataTemplate>
-                </ListView.ItemTemplate>
-            </ListView>
+            <!-- Daily Cost card — header + time-range selector grouped together so
+                 the filter is visually scoped to the data inside the same card. -->
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,8,0,0">
+                <StackPanel Spacing="12">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Uid="UsagePage_TextBlock_100" Text="Daily Cost"
+                                   Style="{StaticResource BodyStrongTextBlockStyle}"
+                                   VerticalAlignment="Center"/>
+                        <SelectorBar Grid.Column="1" x:Name="PeriodSelector"
+                                     SelectionChanged="OnPeriodSelectionChanged">
+                            <SelectorBarItem x:Uid="Period7DaysItem"  x:Name="Period7DaysItem"  Text="7 Days" IsSelected="True"/>
+                            <SelectorBarItem x:Uid="Period30DaysItem" x:Name="Period30DaysItem" Text="30 Days"/>
+                        </SelectorBar>
+                    </Grid>
+                    <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}"/>
+                    <ListView x:Name="DailyListView" SelectionMode="None">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Padding="4,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Date}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding Cost}" FontWeight="SemiBold"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </StackPanel>
+            </Border>
 
         </StackPanel>
     </ScrollViewer>
