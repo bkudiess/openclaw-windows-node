@@ -1919,6 +1919,7 @@ public partial class App : Application
             old.GatewaySelfUpdated -= OnGatewaySelfUpdated;
             old.CronListUpdated -= OnCronListUpdated;
             old.CronStatusUpdated -= OnCronStatusUpdated;
+            old.CronRunsUpdated -= OnCronRunsUpdated;
             old.ConfigUpdated -= OnConfigUpdated;
             old.ConfigSchemaUpdated -= OnConfigSchemaUpdated;
             old.SkillsStatusUpdated -= OnSkillsStatusUpdated;
@@ -1952,6 +1953,7 @@ public partial class App : Application
             client.GatewaySelfUpdated += OnGatewaySelfUpdated;
             client.CronListUpdated += OnCronListUpdated;
             client.CronStatusUpdated += OnCronStatusUpdated;
+            client.CronRunsUpdated += OnCronRunsUpdated;
             client.ConfigUpdated += OnConfigUpdated;
             client.ConfigSchemaUpdated += OnConfigSchemaUpdated;
             client.SkillsStatusUpdated += OnSkillsStatusUpdated;
@@ -2703,6 +2705,11 @@ public partial class App : Application
     private void OnCronStatusUpdated(object? sender, System.Text.Json.JsonElement data)
     {
         _dispatcherQueue?.TryEnqueue(() => _hubWindow?.UpdateCronStatus(data));
+    }
+
+    private void OnCronRunsUpdated(object? sender, System.Text.Json.JsonElement data)
+    {
+        _dispatcherQueue?.TryEnqueue(() => _hubWindow?.UpdateCronRuns(data));
     }
 
     private void OnSkillsStatusUpdated(object? sender, System.Text.Json.JsonElement data)
