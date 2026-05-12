@@ -84,6 +84,11 @@ public class SettingsManager
     public bool NodeSystemRunEnabled { get; set; } = true;
     public bool ScreenRecordingConsentGiven { get; set; } = false;
     public bool CameraRecordingConsentGiven { get; set; } = false;
+    /// <summary>
+    /// User's chosen base security level. Drives defaults for the
+    /// capability/sandbox/MCP settings via SecurityLevelResolver.
+    /// </summary>
+    public SecurityLevel SecurityLevel { get; set; } = SecurityLevel.Recommended;
     public bool NodeLocationEnabled { get; set; } = true;
     public bool NodeBrowserProxyEnabled { get; set; } = true;
     public bool NodeSttEnabled { get; set; } = false;
@@ -198,6 +203,7 @@ public class SettingsManager
                     NodeSystemRunEnabled = loaded.NodeSystemRunEnabled;
                     ScreenRecordingConsentGiven = loaded.ScreenRecordingConsentGiven;
                     CameraRecordingConsentGiven = loaded.CameraRecordingConsentGiven;
+                    SecurityLevel = loaded.SecurityLevel;
                     NodeLocationEnabled = loaded.NodeLocationEnabled;
                     NodeBrowserProxyEnabled = loaded.NodeBrowserProxyEnabled;
                     NodeSttEnabled = loaded.NodeSttEnabled;
@@ -319,6 +325,7 @@ public class SettingsManager
         NodeSystemRunEnabled = NodeSystemRunEnabled,
         ScreenRecordingConsentGiven = ScreenRecordingConsentGiven,
         CameraRecordingConsentGiven = CameraRecordingConsentGiven,
+        SecurityLevel = SecurityLevel,
         NodeLocationEnabled = NodeLocationEnabled,
         NodeBrowserProxyEnabled = NodeBrowserProxyEnabled,
         NodeSttEnabled = NodeSttEnabled,

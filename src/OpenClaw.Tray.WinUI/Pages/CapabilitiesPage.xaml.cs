@@ -38,6 +38,133 @@ public sealed partial class CapabilitiesPage : Page
         UpdateSttCard(hub);
         UpdateTtsCard(hub);
         UpdateNodeStatus(hub);
+        UpdateLevelPicker(hub);
+    }
+
+    // ============================================================
+    // Security Level picker
+    // ============================================================
+
+    private void UpdateLevelPicker(HubWindow hub)
+    {
+        if (hub.Settings == null) return;
+        var settings = hub.Settings;
+        var drift = SecurityLevelResolver.DriftCount(settings);
+        var baseLevel = settings.SecurityLevel == SecurityLevel.Custom
+            ? SecurityLevel.Recommended
+            : settings.SecurityLevel;
+
+        var (label, brush) = (settings.SecurityLevel, drift) switch
+        {
+            (_, > 0)                          => ($"{LevelLabel(baseLevel)} + {drift} change{(drift == 1 ? "" : "s")}", "SystemFillColorCautionBackgroundBrush"),
+            (SecurityLevel.LockedDown, _)     => ("Locked Down",  "AccentFillColorTertiaryBrush"),
+            (SecurityLevel.Trusted, _)        => ("Trusted",      "AccentFillColorTertiaryBrush"),
+            _                                 => ("Recommended",  "AccentFillColorTertiaryBrush"),
+        };
+        LevelBadgeText.Text = label;
+        if (Application.Current.Resources[brush] is Microsoft.UI.Xaml.Media.Brush b)
+            LevelBadge.Background = b;
+
+        DriftPanel.Visibility = drift > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (drift > 0)
+        {
+            DriftText.Text = $"{drift} setting{(drift == 1 ? "" : "s")} differ{(drift == 1 ? "s" : "")} from {LevelLabel(baseLevel)}.";
+        }
+    }
+
+    private static string LevelLabel(SecurityLevel l) => l switch
+    {
+        SecurityLevel.LockedDown => "Locked Down",
+        SecurityLevel.Trusted    => "Trusted",
+        _                        => "Recommended",
+    };
+
+    private void OnLevelLockedDownClick(object sender, RoutedEventArgs e)
+        => ApplyLevel(SecurityLevel.LockedDown, requireConfirm: false);
+
+    private void OnLevelRecommendedClick(object sender, RoutedEventArgs e)
+        => ApplyLevel(SecurityLevel.Recommended, requireConfirm: false);
+
+    private async void OnLevelTrustedClick(object sender, RoutedEventArgs e)
+    {
+        // Trusted is dangerous as a one-click choice — confirm what the
+        // user is about to opt into so it's never accidental.
+        var content = new StackPanel { Spacing = 8 };
+        content.Children.Add(new TextBlock
+        {
+            Text = "Switching to Trusted (developer) will:",
+            TextWrapping = TextWrapping.Wrap
+        });
+        content.Children.Add(new TextBlock
+        {
+            Text = "• Run programs directly on this PC, with no container isolation\n" +
+                   "• Pre-approve camera and screen capture (no per-call prompt)\n" +
+                   "• Allow outbound internet access from agent code\n" +
+                   "• Enable the local MCP server",
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.8
+        });
+        content.Children.Add(new TextBlock
+        {
+            Text = "Use this only if you trust every agent that connects to your gateway. You can switch back at any time.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 4, 0, 0),
+            Opacity = 0.7
+        });
+
+        var dialog = new ContentDialog
+        {
+            Title = "Switch to Trusted?",
+            Content = content,
+            PrimaryButtonText = "Switch to Trusted",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = XamlRoot
+        };
+        var result = await dialog.ShowAsync();
+        if (result == ContentDialogResult.Primary)
+            ApplyLevel(SecurityLevel.Trusted, requireConfirm: false);
+    }
+
+    private void OnResetLevelClick(object sender, RoutedEventArgs e)
+    {
+        if (_hub?.Settings == null) return;
+        var baseLevel = _hub.Settings.SecurityLevel == SecurityLevel.Custom
+            ? SecurityLevel.Recommended
+            : _hub.Settings.SecurityLevel;
+        ApplyLevel(baseLevel, requireConfirm: false);
+    }
+
+    private void ApplyLevel(SecurityLevel level, bool requireConfirm)
+    {
+        if (_hub?.Settings == null) return;
+        SecurityLevelResolver.ApplyTo(_hub.Settings, level);
+        _hub.Settings.Save();
+        _hub.RaiseSettingsSaved();
+        // Rebuild toggles so per-row IsOn reflects the newly applied defaults
+        BuildCapabilityToggles(_hub);
+        UpdateMcpStatus(_hub);
+        UpdateSttCard(_hub);
+        UpdateTtsCard(_hub);
+        UpdateNodeStatus(_hub);
+        UpdateLevelPicker(_hub);
+    }
+
+    /// <summary>
+    /// Called by per-row toggles after they mutate level-driven settings,
+    /// so the level badge can flip to "+ N changes" or back to base.
+    /// </summary>
+    private void OnLevelDrivenSettingChanged()
+    {
+        if (_hub?.Settings == null) return;
+        var drift = SecurityLevelResolver.DriftCount(_hub.Settings);
+        // Promote stored level to Custom only when the user has actually drifted;
+        // demote back to base level when drift returns to zero.
+        var baseLevel = _hub.Settings.SecurityLevel == SecurityLevel.Custom
+            ? SecurityLevel.Recommended
+            : _hub.Settings.SecurityLevel;
+        _hub.Settings.SecurityLevel = drift > 0 ? SecurityLevel.Custom : baseLevel;
+        UpdateLevelPicker(_hub);
     }
 
     private void BuildCapabilityToggles(HubWindow hub)
@@ -50,9 +177,9 @@ public sealed partial class CapabilitiesPage : Page
         {
             ("🔌", "Node Mode",        settings.EnableNodeMode,           v => settings.EnableNodeMode = v,           null),
             ("🌐", "Browser Control",  settings.NodeBrowserProxyEnabled,  v => settings.NodeBrowserProxyEnabled = v,  null),
-            ("📷", "Camera",           settings.NodeCameraEnabled,        v => settings.NodeCameraEnabled = v,        BuildAlwaysAllowSub("Always allow camera (no per-call prompt)", settings.CameraRecordingConsentGiven, v => settings.CameraRecordingConsentGiven = v, hub)),
+            ("📷", "Camera",           settings.NodeCameraEnabled,        v => settings.NodeCameraEnabled = v,        BuildAlwaysAllowSub(this, "Always allow camera (no per-call prompt)", settings.CameraRecordingConsentGiven, v => settings.CameraRecordingConsentGiven = v, hub)),
             ("🎨", "Canvas",           settings.NodeCanvasEnabled,        v => settings.NodeCanvasEnabled = v,        null),
-            ("🖥️", "Screen Capture",   settings.NodeScreenEnabled,        v => settings.NodeScreenEnabled = v,        BuildAlwaysAllowSub("Always allow screen recording (no per-call prompt)", settings.ScreenRecordingConsentGiven, v => settings.ScreenRecordingConsentGiven = v, hub)),
+            ("🖥️", "Screen Capture",   settings.NodeScreenEnabled,        v => settings.NodeScreenEnabled = v,        BuildAlwaysAllowSub(this, "Always allow screen recording (no per-call prompt)", settings.ScreenRecordingConsentGiven, v => settings.ScreenRecordingConsentGiven = v, hub)),
             ("📍", "Location",         settings.NodeLocationEnabled,      v => settings.NodeLocationEnabled = v,      null),
             ("⌨️", "Run Programs",     settings.NodeSystemRunEnabled,     v => settings.NodeSystemRunEnabled = v,     null),
             ("🔊", "Text-to-Speech",   settings.NodeTtsEnabled,           v => settings.NodeTtsEnabled = v,           null),
@@ -92,6 +219,7 @@ public sealed partial class CapabilitiesPage : Page
                     UpdateSttCard(hub);
                     UpdateTtsCard(hub);
                     UpdateNodeStatus(hub);
+                    OnLevelDrivenSettingChanged();
                 };
             }
             else
@@ -104,6 +232,7 @@ public sealed partial class CapabilitiesPage : Page
                     UpdateSttCard(hub);
                     UpdateTtsCard(hub);
                     UpdateNodeStatus(hub);
+                    OnLevelDrivenSettingChanged();
                 };
                 rowContent = toggle;
             }
@@ -114,7 +243,7 @@ public sealed partial class CapabilitiesPage : Page
         CapabilityRepeater.ItemsSource = items;
     }
 
-    private static CheckBox BuildAlwaysAllowSub(string label, bool value, Action<bool> setter, HubWindow hub)
+    private static CheckBox BuildAlwaysAllowSub(CapabilitiesPage page, string label, bool value, Action<bool> setter, HubWindow hub)
     {
         var cb = new CheckBox
         {
@@ -128,12 +257,14 @@ public sealed partial class CapabilitiesPage : Page
             setter(true);
             hub.Settings?.Save();
             hub.RaiseSettingsSaved();
+            page.OnLevelDrivenSettingChanged();
         };
         cb.Unchecked += (s, e) =>
         {
             setter(false);
             hub.Settings?.Save();
             hub.RaiseSettingsSaved();
+            page.OnLevelDrivenSettingChanged();
         };
         return cb;
     }

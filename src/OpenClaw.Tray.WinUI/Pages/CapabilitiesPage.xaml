@@ -12,6 +12,88 @@
                        Style="{StaticResource SubtitleTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
 
+            <!-- ═══ Security Level picker ═══ -->
+            <Border x:Name="SecurityLevelCard"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16"
+                    AutomationProperties.AutomationId="SecurityLevelCard">
+                <StackPanel Spacing="12">
+                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <FontIcon Glyph="&#xE72E;" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"/>
+                        <TextBlock Text="🛡️ Security level" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                        <Border x:Name="LevelBadge" CornerRadius="10" Padding="8,1"
+                                Background="{ThemeResource AccentFillColorTertiaryBrush}">
+                            <TextBlock x:Name="LevelBadgeText" Text="Recommended" FontSize="11"
+                                       Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"/>
+                        </Border>
+                    </StackPanel>
+                    <TextBlock Text="How careful should this PC be when agents access it?"
+                               Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <Button x:Name="LockedDownButton" Grid.Column="0"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                Padding="12,10"
+                                Click="OnLevelLockedDownClick"
+                                AutomationProperties.AutomationId="LockedDownButton">
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="🔒 Locked Down" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                                <TextBlock Text="Blocks program execution. Asks for camera/screen."
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Button x:Name="RecommendedButton" Grid.Column="1"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                Padding="12,10"
+                                Click="OnLevelRecommendedClick"
+                                AutomationProperties.AutomationId="RecommendedButton">
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="⚖️ Recommended" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                                <TextBlock Text="Safe defaults for most people. Programs run in container."
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Button x:Name="TrustedButton" Grid.Column="2"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                Padding="12,10"
+                                Click="OnLevelTrustedClick"
+                                AutomationProperties.AutomationId="TrustedButton">
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="🌐 Trusted (developer)" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                                <TextBlock Text="Programs run directly. Camera/screen pre-approved. Confirmation required to switch."
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+
+                    <StackPanel x:Name="DriftPanel" Orientation="Horizontal" Spacing="8" Visibility="Collapsed">
+                        <FontIcon Glyph="&#xE946;" FontSize="14" Foreground="{ThemeResource SystemFillColorCautionBrush}" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="DriftText" VerticalAlignment="Center"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        <HyperlinkButton x:Name="ResetLevelButton" Content="Reset to base level"
+                                         Click="OnResetLevelClick"
+                                         Padding="0"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
             <TextBlock x:Uid="CapabilitiesPage_TextBlock_15" Text="Device capabilities provided to agents via the gateway. Toggle what this computer can do."
                        Style="{StaticResource CaptionTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
