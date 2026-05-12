@@ -1923,8 +1923,12 @@ public partial class App : Application
         var activeRecord = _gatewayRegistry.GetActive();
         if (activeRecord != null)
         {
-            // Registry has an active gateway — connect directly
-            _ = _connectionManager.ConnectAsync(activeRecord.Id);
+            if (!TryConnectGatewayIfCredentialAvailable(activeRecord, "startup"))
+            {
+                // Still start MCP-only node if enabled — the active record may be stale
+                // and MCP-only mode must work without gateway credentials.
+                TryStartLocalMcpOnlyNode();
+            }
             return;
         }
 
@@ -1932,7 +1936,8 @@ public partial class App : Application
         activeRecord = _gatewayRegistry.GetActive();
         if (activeRecord != null)
         {
-            _ = _connectionManager.ConnectAsync(activeRecord.Id);
+            if (!TryConnectGatewayIfCredentialAvailable(activeRecord, "legacy migration"))
+                TryStartLocalMcpOnlyNode();
             return;
         }
 
@@ -2006,7 +2011,55 @@ public partial class App : Application
 
         // Delegate to connection manager — it creates the client, fires OperatorClientChanged,
         // and our handler re-wires the 27 event subscriptions
-        _ = _connectionManager.ConnectAsync(migratedRecord.Id);
+        if (!TryConnectGatewayIfCredentialAvailable(migratedRecord, "startup bridge"))
+            TryStartLocalMcpOnlyNode();
+    }
+
+    /// <summary>
+    /// Connects only when the active gateway has a usable operator credential:
+    /// device token, shared gateway token, or bootstrap token.
+    /// </summary>
+    private bool TryConnectGatewayIfCredentialAvailable(GatewayRecord record, string context)
+    {
+        if (_connectionManager == null)
+            return false;
+
+        var credential = ResolveStartupOperatorCredential(record);
+        if (credential == null)
+        {
+            Logger.Info($"Active gateway has no usable credential — skipping {context} connect");
+            return false;
+        }
+
+        var connectionKind = record.LastConnected.HasValue
+            ? "last successful gateway"
+            : "credentialed gateway";
+        Logger.Info($"Connecting to {connectionKind} during {context}: {record.Url} ({credential.Source})");
+        _ = _connectionManager.ConnectAsync(record.Id);
+        return true;
+    }
+
+    private OpenClawTray.Services.Connection.GatewayCredential? ResolveStartupOperatorCredential(GatewayRecord record)
+    {
+        if (_gatewayRegistry == null)
+            return null;
+
+        var resolver = new CredentialResolver(DeviceIdentityFileReader.Instance);
+        var identityDir = _gatewayRegistry.GetIdentityDirectory(record.Id);
+        var credential = resolver.ResolveOperator(record, identityDir);
+        if (credential != null)
+            return credential;
+
+        // Backfill for legacy installs that still have the identity file at the
+        // root settings path while the active registry record points at that URL.
+        var effectiveUrl = _settings?.GetEffectiveGatewayUrl();
+        if (!string.IsNullOrWhiteSpace(effectiveUrl) &&
+            string.Equals(record.Url, effectiveUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            return resolver.ResolveOperator(record, SettingsManager.SettingsDirectoryPath);
+        }
+
+        return null;
     }
 
     private void TryMigrateLegacyGatewaySettings(string gatewayUrl, IOpenClawLogger logger)
@@ -3613,9 +3666,23 @@ public partial class App : Application
             try { _onboardingWindow.Activate(); return; } catch { _onboardingWindow = null; }
         }
 
+        // Disconnect existing gateway connection for a clean setup flow.
+        // ActiveId is preserved so it can be restored if setup is cancelled.
+        var restoreGatewayId = _gatewayRegistry?.ActiveGatewayId;
+        var disconnectedForOnboarding = false;
+        if (_connectionManager != null &&
+            _connectionManager.CurrentSnapshot.OverallState is not OverallConnectionState.Idle)
+        {
+            Logger.Info("Disconnecting existing gateway connection for clean setup");
+            await _connectionManager.DisconnectAsync();
+            disconnectedForOnboarding = restoreGatewayId != null;
+        }
+
+        var onboardingCompleted = false;
         _onboardingWindow = new OnboardingWindow(_settings, IdentityDataPath);
         _onboardingWindow.OnboardingCompleted += (s, e) =>
         {
+            onboardingCompleted = true;
             Logger.Info("Onboarding completed");
             _onboardingWindow = null;
 
@@ -3626,8 +3693,18 @@ public partial class App : Application
                 return;
             }
 
-            // Otherwise reinitialize with saved settings
-            _ = _connectionManager?.ReconnectAsync();
+            // Reconnect only if there's an active gateway with credentials —
+            // don't blindly reconnect a pre-setup gateway the user may be replacing.
+            var activeRecord = _gatewayRegistry?.GetActive();
+            if (activeRecord != null && TryConnectGatewayIfCredentialAvailable(activeRecord, "post-onboarding"))
+            {
+                Logger.Info("Reconnecting to active gateway after onboarding");
+            }
+            else
+            {
+                Logger.Info("No previously connected gateway after onboarding — skipping reconnect");
+                TryStartLocalMcpOnlyNode();
+            }
 
             // Keep hub window in sync with new client
             if (_hubWindow != null && !_hubWindow.IsClosed)
@@ -3637,7 +3714,15 @@ public partial class App : Application
                 _hubWindow.CurrentStatus = _currentStatus;
             }
         };
-        _onboardingWindow.Closed += (s, e) => _onboardingWindow = null;
+        _onboardingWindow.Closed += (s, e) =>
+        {
+            _onboardingWindow = null;
+            if (!onboardingCompleted && disconnectedForOnboarding && restoreGatewayId != null)
+            {
+                Logger.Info("Onboarding closed before completion — restoring previous gateway connection");
+                _ = _connectionManager?.ConnectAsync(restoreGatewayId);
+            }
+        };
         _onboardingWindow.Activate();
     }
 
