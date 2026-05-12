@@ -100,6 +100,30 @@ public sealed class MxcCommandRunner : ICommandRunner
                 DurationMs = 0,
             };
         }
+        catch (OperationCanceledException)
+        {
+            // Caller cancelled (gateway disconnect, agent abort). Propagate so the
+            // caller sees the cancellation rather than a fake "exited 0" response.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Fail closed for ANY other error (bridge crashed, JSON malformed, IO
+            // failure on stdin). Returning a -1 CommandResult is what the agent
+            // pipeline understands — letting the exception escape here can crash
+            // the node loop and ultimately the tray.
+            _logger.Warn($"[mxc] system.run sandbox execution failed: {ex.GetType().Name}: {ex.Message}");
+            return new CommandResult
+            {
+                Stdout = string.Empty,
+                Stderr =
+                    "Sandboxed system.run failed with an unexpected error: " +
+                    $"{ex.GetType().Name}: {ex.Message}",
+                ExitCode = -1,
+                TimedOut = false,
+                DurationMs = 0,
+            };
+        }
     }
 
     private static JsonElement SerializeArgs(CommandRequest request)

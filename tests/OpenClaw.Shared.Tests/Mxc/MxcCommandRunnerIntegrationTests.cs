@@ -43,7 +43,6 @@ public class MxcCommandRunnerIntegrationTests
         {
             SystemRunSandboxEnabled = sandboxEnabled,
             SystemRunAllowOutbound = false,
-            SystemRunAllowLocalNetwork = false,
         };
 
         var hostFallback = new LocalCommandRunner(NullLogger.Instance);
@@ -94,19 +93,22 @@ public class MxcCommandRunnerIntegrationTests
     }
 
     [IntegrationFact]
-    public async Task SystemRun_DeniesAccessToSettingsDirectory()
+    public async Task SystemRun_PipelineSmokeTest_WithDenyPaths_ReturnsResult()
     {
-        // Tracking: MXC's deniedPaths semantics need investigation. Vicente's
-        // ws-agos-openclaw thread demonstrated `dir C:\local\sources` returned
-        // Access Denied, but a file under %TEMP% appears NOT to be denied
-        // even when its parent is in deniedPaths. Possibly because:
+        // NOTE: This is a SMOKE TEST, not a deny-paths assertion. The actual
+        // semantics of MXC's deniedPaths (does deny win over allow? subtractive
+        // vs strict-deny?) are not yet validated. Vicente's ws-agos-openclaw
+        // thread saw `dir C:\local\sources` return Access Denied, but a file
+        // under %TEMP% appeared not denied even when its parent was in
+        // deniedPaths. Possible causes:
         //   - %TEMP% has implicit AppContainer access (default capabilities)
-        //   - deniedPaths is a strict-subtract operation; only effective
-        //     against paths otherwise granted by readonly/readwrite
+        //   - deniedPaths is strict-subtract: only effective against paths
+        //     otherwise granted by readonly/readwrite
         //   - Q-NESTED-APPCONTAINER outcome (Slice 8) may change the picture
         //
         // For Slice 1 we only assert the runner returns SOMETHING (not a crash).
-        // Slice 4/8 will revisit with proper deny semantics tests.
+        // A proper deny-paths integration test belongs in a later slice and
+        // needs a controlled allow-grant + deny-of-child scenario to exercise.
         var runner = TryBuildRunner();
         if (runner is null) return; // skip — MXC unavailable on this host
 

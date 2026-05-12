@@ -58,30 +58,15 @@ public class MxcPolicyBuilderTests
     }
 
     [Fact]
-    public void ForSystemRun_AllowLocalNetwork_IgnoredByDesign()
+    public void ForSystemRun_AllowOutbound_TrueWhenSettingTrue()
     {
-        // LAN access (privateNetworkClientServer cap) is intentionally NOT exposed —
-        // MXC team confirmed only internetClient is validated today. The setting
-        // field is retained for forward compat but the policy builder forces it false.
-        var settings = new SettingsData { SystemRunAllowLocalNetwork = true };
-        var policy = MxcPolicyBuilder.ForSystemRun(settings, "C:\\settings");
-
-        Assert.False(policy.Network!.AllowOutbound);
-        Assert.False(policy.Network.AllowLocalNetwork);
-    }
-
-    [Fact]
-    public void ForSystemRun_AllowOutbound_AllowLocalNetwork_OutboundHonoredLanNot()
-    {
-        var settings = new SettingsData
-        {
-            SystemRunAllowOutbound = true,
-            SystemRunAllowLocalNetwork = true,
-        };
+        var settings = new SettingsData { SystemRunAllowOutbound = true };
         var policy = MxcPolicyBuilder.ForSystemRun(settings, "C:\\settings");
 
         Assert.True(policy.Network!.AllowOutbound);
-        // LAN is force-disabled regardless of setting.
+        // LAN access is intentionally NOT exposed regardless of any caller intent —
+        // MXC team confirmed only internetClient is validated today. The policy
+        // builder forces AllowLocalNetwork=false.
         Assert.False(policy.Network.AllowLocalNetwork);
     }
 
@@ -186,5 +171,87 @@ public class MxcPolicyBuilderTests
         var policy = MxcPolicyBuilder.ForSystemRun(settings, "C:\\s");
 
         Assert.Null(policy.TimeoutMs);
+    }
+
+    [Fact]
+    public void ForSystemRun_BrowserProfileDirectories_AreDenied()
+    {
+        // The UI claims SSH keys, browser profiles, and OpenClaw's own settings
+        // are always blocked. Verify the policy backs that claim for browsers —
+        // these paths must always appear in DeniedPaths regardless of settings,
+        // even if the browser isn't installed (the AppContainer policy treats
+        // nonexistent denies as a no-op).
+        var settings = new SettingsData();
+        var policy = MxcPolicyBuilder.ForSystemRun(settings, "C:\\settings");
+
+        var denied = policy.Filesystem!.DeniedPaths!;
+        Assert.Contains(denied, p => p.EndsWith("Google\\Chrome\\User Data", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(denied, p => p.EndsWith("Microsoft\\Edge\\User Data", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(denied, p => p.EndsWith("Mozilla\\Firefox\\Profiles", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(denied, p => p.EndsWith("BraveSoftware\\Brave-Browser\\User Data", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ForSystemRun_CustomFolder_PointingAtDeniedPath_FilteredOut()
+    {
+        // A user (or malicious settings.json) can't punch through the always-denied
+        // list by adding a custom folder grant equal to one of the denies.
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var sshPath = Path.Combine(userProfile, ".ssh");
+        var settings = new SettingsData
+        {
+            SandboxCustomFolders = new()
+            {
+                new SandboxCustomFolder { Path = sshPath, Access = SandboxFolderAccess.ReadWrite },
+            },
+        };
+
+        var policy = MxcPolicyBuilder.ForSystemRun(settings, "C:\\settings");
+
+        Assert.DoesNotContain(policy.Filesystem!.ReadwritePaths!, p =>
+            string.Equals(Path.GetFullPath(p), Path.GetFullPath(sshPath), StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(policy.Filesystem.ReadonlyPaths!, p =>
+            string.Equals(Path.GetFullPath(p), Path.GetFullPath(sshPath), StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ForSystemRun_CustomFolder_NestedInsideDeniedPath_FilteredOut()
+    {
+        // Even subdirectories of denied paths must be stripped — a grant of
+        // ~\.ssh\config or %LOCALAPPDATA%\Google\Chrome\User Data\Default
+        // can't bleed through.
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var sshConfig = Path.Combine(userProfile, ".ssh", "config");
+        var settings = new SettingsData
+        {
+            SandboxCustomFolders = new()
+            {
+                new SandboxCustomFolder { Path = sshConfig, Access = SandboxFolderAccess.ReadOnly },
+            },
+        };
+
+        var policy = MxcPolicyBuilder.ForSystemRun(settings, "C:\\settings");
+
+        Assert.DoesNotContain(policy.Filesystem!.ReadonlyPaths!, p =>
+            Path.GetFullPath(p).StartsWith(
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(userProfile, ".ssh"))),
+                StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ForSystemRun_CustomFolder_NotOverlappingDeny_StillGranted()
+    {
+        // Sanity: regular custom folder grants OUTSIDE any denied path still flow through.
+        var settings = new SettingsData
+        {
+            SandboxCustomFolders = new()
+            {
+                new SandboxCustomFolder { Path = "D:\\code\\my-project", Access = SandboxFolderAccess.ReadWrite },
+            },
+        };
+
+        var policy = MxcPolicyBuilder.ForSystemRun(settings, "C:\\settings");
+
+        Assert.Contains("D:\\code\\my-project", policy.Filesystem!.ReadwritePaths!);
     }
 }

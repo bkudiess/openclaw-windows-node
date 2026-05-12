@@ -47,6 +47,24 @@ public static class MxcPolicyBuilder
         if (!string.IsNullOrWhiteSpace(sshPath))
             deniedPaths.Add(sshPath);
 
+        // Always-blocked browser profile roots. Cookies, saved passwords, autofill,
+        // and session tokens live here — they must remain unreachable even if the
+        // user (or a malicious settings.json) tries to grant a parent folder.
+        // Add these regardless of whether the browser is installed; the AppContainer
+        // policy treats nonexistent denies as a no-op.
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        if (!string.IsNullOrWhiteSpace(localAppData))
+        {
+            deniedPaths.Add(Path.Combine(localAppData, "Google", "Chrome", "User Data"));
+            deniedPaths.Add(Path.Combine(localAppData, "Microsoft", "Edge", "User Data"));
+            deniedPaths.Add(Path.Combine(localAppData, "BraveSoftware", "Brave-Browser", "User Data"));
+        }
+        if (!string.IsNullOrWhiteSpace(appData))
+        {
+            deniedPaths.Add(Path.Combine(appData, "Mozilla", "Firefox", "Profiles"));
+        }
+
         var readonlyPaths = new List<string>();
         var readwritePaths = new List<string>();
 
@@ -66,6 +84,15 @@ public static class MxcPolicyBuilder
             }
         }
 
+        // Defense-in-depth: strip any allow-list entry that is equal to, or a
+        // child of, a denied path. The AppContainer policy SHOULD already
+        // prioritize deny over allow per the @microsoft/mxc-sdk schema, but
+        // that's an undocumented invariant on an alpha SDK. Filtering here
+        // means a misconfigured / malicious custom-folder grant pointing at
+        // `~\.ssh` or a browser profile cannot bleed through.
+        readonlyPaths = FilterOutDenied(readonlyPaths, deniedPaths);
+        readwritePaths = FilterOutDenied(readwritePaths, deniedPaths);
+
         return new SandboxPolicy(
             Version: SupportedPolicyVersion,
             Filesystem: new FilesystemPolicy(
@@ -77,13 +104,54 @@ public static class MxcPolicyBuilder
                 AllowOutbound: settings.SystemRunAllowOutbound,
                 // LAN access (privateNetworkClientServer capability) intentionally not
                 // exposed: MXC team confirmed only internetClient is validated today.
-                // The setting field is retained for forward compat but ignored here.
                 AllowLocalNetwork: false),
             Ui: new UiPolicy(
                 AllowWindows: false,
                 Clipboard: MapClipboard(settings.SandboxClipboard),
                 AllowInputInjection: false),
             TimeoutMs: settings.SandboxTimeoutMs > 0 ? settings.SandboxTimeoutMs : null);
+    }
+
+    /// <summary>
+    /// Remove any allow-list entry equal to or nested inside any denied path.
+    /// Case-insensitive (NTFS semantics) and tolerant of trailing slashes.
+    /// </summary>
+    private static List<string> FilterOutDenied(List<string> allowed, List<string> denied)
+    {
+        if (allowed.Count == 0 || denied.Count == 0) return allowed;
+        var normalizedDenied = denied
+            .Select(NormalizePath)
+            .Where(p => !string.IsNullOrEmpty(p))
+            .ToList();
+        return allowed
+            .Where(a =>
+            {
+                var na = NormalizePath(a);
+                if (string.IsNullOrEmpty(na)) return false;
+                foreach (var d in normalizedDenied)
+                {
+                    if (string.Equals(na, d, StringComparison.OrdinalIgnoreCase)) return false;
+                    if (na.StartsWith(d + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return false;
+                    if (na.StartsWith(d + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return false;
+                }
+                return true;
+            })
+            .ToList();
+    }
+
+    private static string NormalizePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+        try
+        {
+            // Path.GetFullPath collapses .. / . and resolves relative parts.
+            // Trim trailing separators so "C:\foo\" and "C:\foo" compare equal.
+            return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        }
+        catch
+        {
+            return path;
+        }
     }
 
     private static void AddWellKnownFolder(

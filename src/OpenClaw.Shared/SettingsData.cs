@@ -105,12 +105,6 @@ public class SettingsData
     public bool SystemRunAllowOutbound { get; set; } = false;
 
     /// <summary>
-    /// When sandboxed, allow system.run commands to reach the local network
-    /// (RFC1918 addresses, link-local). Default false.
-    /// </summary>
-    public bool SystemRunAllowLocalNetwork { get; set; } = false;
-
-    /// <summary>
     /// Clipboard access policy inside the sandbox. Default <c>None</c> — the
     /// sandboxed payload cannot see or change the user's clipboard.
     /// </summary>

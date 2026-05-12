@@ -15,8 +15,19 @@ public sealed partial class SandboxPage : Page
 {
     private HubWindow? _hub;
     private bool _suppress;
+    private bool _confirmDialogOpen;
+    private OpenClaw.Shared.Mxc.MxcAvailability? _cachedAvailability;
 
     public ObservableCollection<CustomFolderRow> CustomFolders { get; } = new();
+
+    /// <summary>
+    /// Cached MxcAvailability for the lifetime of this page instance. Probe() does
+    /// registry reads and filesystem walks; we don't need to repeat that work on every
+    /// toggle/preset change. The result is stable as long as the OS doesn't change
+    /// under us, which is fine for a settings page.
+    /// </summary>
+    private OpenClaw.Shared.Mxc.MxcAvailability GetAvailability()
+        => _cachedAvailability ??= OpenClaw.Shared.Mxc.MxcAvailability.Probe();
 
     // ── Quick-preset definitions ─────────────────────────────────────
     //
@@ -138,7 +149,7 @@ public sealed partial class SandboxPage : Page
     /// </summary>
     private void UpdateSandboxStatusCard()
     {
-        var availability = OpenClaw.Shared.Mxc.MxcAvailability.Probe();
+        var availability = GetAvailability();
         var enabled = SandboxEnabledToggle.IsOn;
         var available = availability.HasAnyBackend;
 
@@ -257,7 +268,7 @@ public sealed partial class SandboxPage : Page
     /// </summary>
     private void UpdateControlsEnabledState()
     {
-        var availability = OpenClaw.Shared.Mxc.MxcAvailability.Probe();
+        var availability = GetAvailability();
         var available = availability.HasAnyBackend;
         var sandboxOn = SandboxEnabledToggle.IsOn;
         var active = available && sandboxOn;
@@ -459,6 +470,16 @@ public sealed partial class SandboxPage : Page
         // Confirm before turning sandbox OFF — this is the high-risk transition.
         if (!newValue && oldValue)
         {
+            // Re-entrancy guard: rapid toggling could otherwise stack ContentDialog
+            // instances, which raises a COMException ("Cannot show another dialog
+            // until the previous one is dismissed"). Snap the toggle back and bail.
+            if (_confirmDialogOpen)
+            {
+                _suppress = true;
+                try { SandboxEnabledToggle.IsOn = true; } finally { _suppress = false; }
+                return;
+            }
+
             var dialog = new ContentDialog
             {
                 Title = "Turn off sandboxing?",
@@ -468,7 +489,26 @@ public sealed partial class SandboxPage : Page
                 DefaultButton = ContentDialogButton.Close,
                 XamlRoot = this.XamlRoot,
             };
-            var result = await dialog.ShowAsync();
+
+            ContentDialogResult result;
+            _confirmDialogOpen = true;
+            try
+            {
+                result = await dialog.ShowAsync();
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                // Another dialog is already open (e.g., system surface popped
+                // one underneath us). Treat as cancel — keep sandbox on.
+                _suppress = true;
+                try { SandboxEnabledToggle.IsOn = true; } finally { _suppress = false; }
+                return;
+            }
+            finally
+            {
+                _confirmDialogOpen = false;
+            }
+
             if (result != ContentDialogResult.Primary)
             {
                 _suppress = true;

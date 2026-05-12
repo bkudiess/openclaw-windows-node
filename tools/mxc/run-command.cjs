@@ -38,6 +38,7 @@ const DEFAULT_MAX_OUTPUT_BYTES = 4 * 1024 * 1024; // mirrors C# DefaultMaxOutput
 const HARD_MAX_OUTPUT_BYTES = 256 * 1024 * 1024;  // safety ceiling regardless of caller
 
 async function main() {
+  const startTime = Date.now();
   const req = await readJsonFromStdin();
 
   // Args specific to system.run. Other capabilities will have their own shapes.
@@ -49,8 +50,6 @@ async function main() {
   if (!command) {
     return emit(failResponse(-1, 'Missing required arg: command', startTime));
   }
-
-  const startTime = Date.now();
 
   // Honor the caller-supplied maxOutputBytes (from C# bridge). Clamp to a
   // hard ceiling so a misconfigured caller can't OOM the bridge process.
@@ -77,7 +76,8 @@ async function main() {
   if (req.env && typeof req.env === 'object') {
     config.process.env = Object.entries(req.env).map(([k, v]) => `${k}=${v}`);
   }
-  config.process.timeout = req.timeoutMs > 0 ? req.timeoutMs : 30000;
+  const sdkTimeoutMs = req.timeoutMs > 0 ? req.timeoutMs : 30000;
+  config.process.timeout = sdkTimeoutMs;
 
   // CRITICAL: usePty:false — the @microsoft/mxc-sdk default uses node-pty which
   // conflates stdout/stderr and rounds exit codes through PTY signals. Per
@@ -138,12 +138,19 @@ async function main() {
     stderr += `\n[bridge] output truncated at ${callerMaxOutput} bytes`;
   }
 
+  // Heuristic for SDK-level timeout: if elapsed >= the timeout we passed to the
+  // SDK and the child exited non-zero, we treat it as a timeout. The SDK kills
+  // the child on timeout but doesn't surface a distinct exit code, so this is
+  // the cleanest signal available without poking SDK internals.
+  const durationMs = Date.now() - startTime;
+  const timedOut = exitCode !== 0 && durationMs >= sdkTimeoutMs;
+
   emit({
     exitCode,
     stdout,
     stderr,
-    timedOut: false,
-    durationMs: Date.now() - startTime,
+    timedOut,
+    durationMs,
     containmentTag: 'mxc',
   });
 }
@@ -175,17 +182,33 @@ function dedupe(arr) {
 }
 
 function buildShellCommandLine(shell, command, argv) {
-  const isCmd = shell.toLowerCase() === 'cmd';
+  const sh = shell.toLowerCase();
+  if (sh === 'cmd') {
+    // For cmd.exe, wrap the entire command line in outer quotes via /S /C so
+    // the OS-level argv parser doesn't split on whitespace inside `command`.
+    // Inside those quotes, double-quote characters from the inputs are doubled
+    // (cmd's escape convention). Caller-supplied args are individually quoted
+    // first via quoteArg() so they remain a separate token from `command`.
+    const argsSuffix = (argv && argv.length > 0)
+      ? ' ' + argv.map((a) => quoteArg(a, /*isCmd*/ true)).join(' ')
+      : '';
+    const inner = (command + argsSuffix).replace(/"/g, '""');
+    return `cmd.exe /S /C "${inner}"`;
+  }
+  // PowerShell variants: use -EncodedCommand with UTF-16LE Base64. PowerShell
+  // decodes it back into a single command expression that is NOT subject to
+  // outer command-line metacharacter interpretation. This is the most robust
+  // way to pass an agent-supplied command without leaking control characters
+  // (`;`, `|`, `&`, etc.) into the outer cmdline parser.
   const argsSuffix = (argv && argv.length > 0)
-    ? ' ' + argv.map((a) => quoteArg(a, isCmd)).join(' ')
+    ? ' ' + argv.map((a) => quoteArg(a, /*isCmd*/ false)).join(' ')
     : '';
-  if (isCmd) {
-    return `cmd.exe /C ${command}${argsSuffix}`;
+  const psExpression = command + argsSuffix;
+  const encoded = Buffer.from(psExpression, 'utf16le').toString('base64');
+  if (sh === 'pwsh') {
+    return `pwsh.exe -NoProfile -NonInteractive -EncodedCommand ${encoded}`;
   }
-  if (shell.toLowerCase() === 'pwsh') {
-    return `pwsh.exe -NoProfile -NonInteractive -Command ${command}${argsSuffix}`;
-  }
-  return `powershell.exe -NoProfile -NonInteractive -Command ${command}${argsSuffix}`;
+  return `powershell.exe -NoProfile -NonInteractive -EncodedCommand ${encoded}`;
 }
 
 function quoteArg(arg, isCmd) {

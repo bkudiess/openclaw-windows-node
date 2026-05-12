@@ -13,7 +13,6 @@ public class MxcCommandRunnerTests
         {
             SystemRunSandboxEnabled = sandboxEnabled,
             SystemRunAllowOutbound = false,
-            SystemRunAllowLocalNetwork = false,
         };
     }
 

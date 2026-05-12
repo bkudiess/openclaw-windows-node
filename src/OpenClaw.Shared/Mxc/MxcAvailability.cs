@@ -52,8 +52,13 @@ public sealed class MxcAvailability
     /// </summary>
     public IReadOnlyList<string> UnsupportedReasons { get; }
 
-    /// <summary>True iff at least one MXC backend is supported and the bridge script is found.</summary>
-    public bool HasAnyBackend => (IsAppContainerAvailable || IsIsolationSessionAvailable) && RunCommandScriptPath is not null;
+    /// <summary>True iff at least one MXC backend is supported, the bridge script is found,
+    /// AND <c>wxc-exec.exe</c> is resolvable. (Without wxc-exec the executor will refuse
+    /// to run, so reporting "available" would lie to the UI.)</summary>
+    public bool HasAnyBackend =>
+        (IsAppContainerAvailable || IsIsolationSessionAvailable)
+        && RunCommandScriptPath is not null
+        && IsWxcExecResolvable;
 
     public MxcAvailability(
         bool isAppContainerAvailable,

@@ -27,7 +27,6 @@ public sealed class OneShotAppContainerExecutor : ISandboxExecutor
     private readonly string _runCommandScriptPath;
     private readonly string _nodeExecutablePath;
     private readonly IOpenClawLogger _logger;
-    private readonly long _maxOutputBytes;
 
     /// <summary>Default cap on stdout/stderr returned to the host (4 MiB).</summary>
     public const long DefaultMaxOutputBytes = 4 * 1024 * 1024;
@@ -42,13 +41,11 @@ public sealed class OneShotAppContainerExecutor : ISandboxExecutor
         MxcAvailability availability,
         string runCommandScriptPath,
         IOpenClawLogger? logger = null,
-        long maxOutputBytes = DefaultMaxOutputBytes,
         string? nodeExecutableOverride = null)
     {
         _availability = availability;
         _runCommandScriptPath = runCommandScriptPath;
         _logger = logger ?? NullLogger.Instance;
-        _maxOutputBytes = maxOutputBytes;
         _nodeExecutablePath = nodeExecutableOverride
             ?? Environment.GetEnvironmentVariable(NodeExecutableOverrideEnvVar)
             ?? "node.exe";
@@ -69,6 +66,12 @@ public sealed class OneShotAppContainerExecutor : ISandboxExecutor
             throw new SandboxUnavailableException(
                 $"run-command.cjs not found at {_runCommandScriptPath}");
 
+        // Per-request output cap. Default applies only when the caller doesn't
+        // pass one. Used to be baked at construction; that caused stale floors
+        // when the user lowered SandboxMaxOutputBytes after the executor was
+        // built (Math.Max(stale, new) kept the larger old value).
+        var capBytes = request.MaxOutputBytes is > 0 ? request.MaxOutputBytes.Value : DefaultMaxOutputBytes;
+
         var bridgeRequest = new BridgeRequest(
             CapabilityCommand: request.CapabilityCommand,
             Args: request.Args,
@@ -76,7 +79,7 @@ public sealed class OneShotAppContainerExecutor : ISandboxExecutor
             Cwd: request.Cwd,
             Env: request.Env,
             TimeoutMs: request.TimeoutMs,
-            MaxOutputBytes: request.MaxOutputBytes ?? _maxOutputBytes,
+            MaxOutputBytes: capBytes,
             WxcExecPath: _availability.WxcExecPath);
 
         var requestJson = JsonSerializer.Serialize(bridgeRequest, BridgeJson);
@@ -89,6 +92,7 @@ public sealed class OneShotAppContainerExecutor : ISandboxExecutor
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
+            StandardInputEncoding = Encoding.UTF8,
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
         };
@@ -122,15 +126,17 @@ public sealed class OneShotAppContainerExecutor : ISandboxExecutor
         }
         catch (OperationCanceledException)
         {
+            // Either the caller cancelled or the timeout fired — in both cases
+            // the spawned node + sandboxed payload must be killed so we don't
+            // leak processes after the host gives up.
             KillProcessTree(process);
             throw;
         }
 
-        var stdoutCap = Math.Max(_maxOutputBytes, request.MaxOutputBytes ?? 0);
-        // C# side cap: allow a bit of headroom so the bridge JSON envelope
-        // (which contains the Node-capped command output) doesn't get truncated
-        // by the outer reader. Add 256 KiB envelope overhead.
-        var envelopeCap = stdoutCap + (256L * 1024L);
+        // Envelope cap: caller-cap covers stdout AND stderr each. Allow up to
+        // 2× that plus envelope/JSON overhead so a worst-case bridge response
+        // (large stdout + large stderr) still fits without truncation.
+        var envelopeCap = (capBytes * 2L) + (256L * 1024L);
 
         var stdoutTask = ReadCappedAsync(process.StandardOutput, envelopeCap, cts.Token);
         var stderrTask = ReadCappedAsync(process.StandardError, envelopeCap, cts.Token);
@@ -140,10 +146,18 @@ public sealed class OneShotAppContainerExecutor : ISandboxExecutor
         {
             await process.WaitForExitAsync(cts.Token);
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
-            timedOut = true;
+            // ALWAYS kill the process tree on cancellation, whether the source is
+            // the caller's CancellationToken (agent abort) or our local timeout.
+            // Without this the sandboxed payload keeps running after we return.
             KillProcessTree(process);
+
+            // Distinguish caller cancel from local-timeout for the return path.
+            if (!ct.IsCancellationRequested)
+                timedOut = true;
+            else
+                throw;
         }
 
         var stdout = await stdoutTask;

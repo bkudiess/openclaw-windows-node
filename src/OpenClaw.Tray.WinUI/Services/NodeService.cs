@@ -482,10 +482,7 @@ public sealed class NodeService : IDisposable
             executor = new OneShotAppContainerExecutor(
                 availability,
                 availability.RunCommandScriptPath,
-                _logger,
-                maxOutputBytes: _settings?.SandboxMaxOutputBytes is > 0 and var bytes
-                    ? bytes
-                    : OneShotAppContainerExecutor.DefaultMaxOutputBytes);
+                _logger);
             _logger.Info(
                 $"[mxc] system.run runner = MxcCommandRunner " +
                 $"(executor={executor.Name}, sandboxEnabled={(_settings?.SystemRunSandboxEnabled ?? true)})");
@@ -512,21 +509,22 @@ public sealed class NodeService : IDisposable
             {
                 SystemRunSandboxEnabled = true,
                 SystemRunAllowOutbound = false,
-                SystemRunAllowLocalNetwork = false,
             };
 
         return new SettingsData
         {
             SystemRunSandboxEnabled = _settings.SystemRunSandboxEnabled,
             SystemRunAllowOutbound = _settings.SystemRunAllowOutbound,
-            SystemRunAllowLocalNetwork = _settings.SystemRunAllowLocalNetwork,
             // Sandbox page fields — read by MxcPolicyBuilder.ForSystemRun.
             SandboxClipboard = _settings.SandboxClipboard,
             SandboxDocumentsAccess = _settings.SandboxDocumentsAccess,
             SandboxDownloadsAccess = _settings.SandboxDownloadsAccess,
             SandboxDesktopAccess = _settings.SandboxDesktopAccess,
+            // Deep-copy each SandboxCustomFolder so a concurrent UI thread mutation of
+            // Access (between snapshot and policy build) can't race with us. The class
+            // is mutable so a shallow copy of the list would share references.
             SandboxCustomFolders = _settings.SandboxCustomFolders is { Count: > 0 } src
-                ? new List<SandboxCustomFolder>(src)
+                ? src.Select(f => new SandboxCustomFolder { Path = f.Path, Access = f.Access }).ToList()
                 : null,
             SandboxTimeoutMs = _settings.SandboxTimeoutMs,
             SandboxMaxOutputBytes = _settings.SandboxMaxOutputBytes,

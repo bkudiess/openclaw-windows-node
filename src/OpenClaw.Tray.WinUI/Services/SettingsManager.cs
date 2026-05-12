@@ -117,8 +117,6 @@ public class SettingsManager
     public bool SystemRunSandboxEnabled { get; set; } = true;
     /// <summary>When sandboxed, allow system.run commands to reach the public internet. Default false.</summary>
     public bool SystemRunAllowOutbound { get; set; } = false;
-    /// <summary>When sandboxed, allow system.run commands to reach the local network. Default false.</summary>
-    public bool SystemRunAllowLocalNetwork { get; set; } = false;
 
     // ── MXC sandbox: additional knobs (Sandbox page) ─────────────────
     public SandboxClipboardMode SandboxClipboard { get; set; } = SandboxClipboardMode.None;
@@ -232,7 +230,6 @@ public class SettingsManager
                     // MXC sandbox settings (Slice 1)
                     SystemRunSandboxEnabled = loaded.SystemRunSandboxEnabled;
                     SystemRunAllowOutbound = loaded.SystemRunAllowOutbound;
-                    SystemRunAllowLocalNetwork = loaded.SystemRunAllowLocalNetwork;
 
                     // MXC sandbox settings (Sandbox page)
                     SandboxClipboard = loaded.SandboxClipboard;
@@ -339,7 +336,6 @@ public class SettingsManager
         // MXC sandbox settings (Slice 1)
         SystemRunSandboxEnabled = SystemRunSandboxEnabled,
         SystemRunAllowOutbound = SystemRunAllowOutbound,
-        SystemRunAllowLocalNetwork = SystemRunAllowLocalNetwork,
         // MXC sandbox settings (Sandbox page)
         SandboxClipboard = SandboxClipboard,
         SandboxDocumentsAccess = SandboxDocumentsAccess,
