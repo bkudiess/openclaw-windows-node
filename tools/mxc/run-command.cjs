@@ -37,6 +37,36 @@ const os = require('node:os');
 const DEFAULT_MAX_OUTPUT_BYTES = 4 * 1024 * 1024; // mirrors C# DefaultMaxOutputBytes
 const HARD_MAX_OUTPUT_BYTES = 256 * 1024 * 1024;  // safety ceiling regardless of caller
 
+/**
+ * Match a drive root like "C:\", "D:", "c:\\", etc. The MXC SDK's
+ * getAvailableToolsPolicy adds the system drive root as readonly when pwsh.exe
+ * is on PATH. That's WAY more access than any preset claims to give the agent
+ * (e.g., Locked Down promises "no standard user folders"). We strip drive
+ * roots from the merged policy; PATH-specific tool dirs and PSReadLine paths
+ * stay, so commands still run.
+ */
+function isDriveRoot(p) {
+  if (!p) return false;
+  const norm = path.normalize(p).replace(/[\\/]+$/, '');
+  return /^[A-Za-z]:$/.test(norm);
+}
+
+/**
+ * Match the user's real %TEMP% / %TMP% / os.tmpdir() roots so we can strip
+ * them from the merged policy. The bridge substitutes a fresh per-invocation
+ * scratch directory in their place (see createScratchDir below).
+ */
+function isUserTempRoot(p) {
+  if (!p) return false;
+  const norm = path.normalize(p).toLowerCase().replace(/[\\/]+$/, '');
+  const candidates = [
+    process.env.TEMP,
+    process.env.TMP,
+    os.tmpdir(),
+  ].filter(Boolean).map(c => path.normalize(c).toLowerCase().replace(/[\\/]+$/, ''));
+  return candidates.some(c => c === norm);
+}
+
 async function main() {
   const startTime = Date.now();
   const req = await readJsonFromStdin();
@@ -63,96 +93,131 @@ async function main() {
 
   const policy = mergePolicy(req.policy, tools, temp);
 
-  let config;
+  // SCOPE the merged policy: strip the SDK's "convenience" grants that
+  // bypass the user's explicit choices in the Sandbox UI.
+  //   - Drive root (C:\) — SDK adds this when pwsh.exe is on PATH. Strip it;
+  //     PATH-specific tool dirs (git, node, python, etc.) stay because they
+  //     remain in the filtered list.
+  //   - User's real %TEMP% — wholesale temp access leaks other apps' files.
+  //     We substitute a fresh per-invocation scratch dir as the only writable
+  //     temp area, and override TEMP/TMP/TMPDIR in the spawned process's env
+  //     so commands that write to %TEMP% land in our scratch dir.
+  policy.filesystem.readonlyPaths = (policy.filesystem.readonlyPaths || []).filter(p => !isDriveRoot(p));
+  policy.filesystem.readwritePaths = (policy.filesystem.readwritePaths || []).filter(p => !isUserTempRoot(p));
+
+  let scratchDir = null;
   try {
-    config = createConfigFromPolicy(policy, 'process');
+    scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-mxc-'));
   } catch (e) {
-    return emit(failResponse(-1, `Policy invalid: ${e.message}`, startTime));
+    return emit(failResponse(-1, `Failed to create scratch dir: ${e.message}`, startTime));
   }
+  policy.filesystem.readwritePaths.push(scratchDir);
 
-  // Build the shell command line. Quote the inner command for the chosen shell.
-  config.process.commandLine = buildShellCommandLine(shell, command, argv);
-  if (req.cwd) config.process.cwd = req.cwd;
-  if (req.env && typeof req.env === 'object') {
-    config.process.env = Object.entries(req.env).map(([k, v]) => `${k}=${v}`);
-  }
-  const sdkTimeoutMs = req.timeoutMs > 0 ? req.timeoutMs : 30000;
-  config.process.timeout = sdkTimeoutMs;
-
-  // CRITICAL: usePty:false — the @microsoft/mxc-sdk default uses node-pty which
-  // conflates stdout/stderr and rounds exit codes through PTY signals. Per
-  // rubber-duck #5 we want LocalCommandRunner-equivalent semantics.
-  const spawnOptions = {
-    usePty: false,
-    debug: false,
-  };
-  if (req.wxcExecPath) {
-    spawnOptions.executablePath = req.wxcExecPath;
-  }
-
-  let child;
   try {
-    child = spawnSandboxFromConfig(config, spawnOptions);
-  } catch (e) {
-    return emit(failResponse(-1, `spawnSandboxFromConfig failed: ${e.message}`, startTime));
-  }
-
-  let stdout = '';
-  let stderr = '';
-  let stdoutBytes = 0;
-  let stderrBytes = 0;
-  let truncated = false;
-
-  child.stdout?.on('data', (chunk) => {
-    const text = chunk.toString();
-    if (stdoutBytes + text.length > callerMaxOutput) {
-      stdout += text.substring(0, callerMaxOutput - stdoutBytes);
-      stdoutBytes = callerMaxOutput;
-      truncated = true;
-    } else {
-      stdout += text;
-      stdoutBytes += text.length;
+    let config;
+    try {
+      config = createConfigFromPolicy(policy, 'process');
+    } catch (e) {
+      return emit(failResponse(-1, `Policy invalid: ${e.message}`, startTime));
     }
-  });
-  child.stderr?.on('data', (chunk) => {
-    const text = chunk.toString();
-    if (stderrBytes + text.length > callerMaxOutput) {
-      stderr += text.substring(0, callerMaxOutput - stderrBytes);
-      stderrBytes = callerMaxOutput;
-      truncated = true;
-    } else {
-      stderr += text;
-      stderrBytes += text.length;
-    }
-  });
 
-  const exitCode = await new Promise((resolve) => {
-    child.on('close', (code) => resolve(code ?? -1));
-    child.on('error', (err) => {
-      stderr += `\n[bridge] spawn error: ${err.message}`;
-      resolve(-1);
+    // Build the shell command line. Quote the inner command for the chosen shell.
+    config.process.commandLine = buildShellCommandLine(shell, command, argv);
+    if (req.cwd) config.process.cwd = req.cwd;
+
+    // Override TEMP/TMP/TMPDIR so commands inside the sandbox write to our
+    // scratch dir, not the user's real %TEMP% (which we stripped above).
+    // New-TemporaryFile, mkdtemp(), etc. all respect these.
+    const sandboxEnv = req.env && typeof req.env === 'object' ? { ...req.env } : {};
+    sandboxEnv.TEMP = scratchDir;
+    sandboxEnv.TMP = scratchDir;
+    sandboxEnv.TMPDIR = scratchDir;
+    config.process.env = Object.entries(sandboxEnv).map(([k, v]) => `${k}=${v}`);
+    const sdkTimeoutMs = req.timeoutMs > 0 ? req.timeoutMs : 30000;
+    config.process.timeout = sdkTimeoutMs;
+
+    // CRITICAL: usePty:false — the @microsoft/mxc-sdk default uses node-pty which
+    // conflates stdout/stderr and rounds exit codes through PTY signals. Per
+    // rubber-duck #5 we want LocalCommandRunner-equivalent semantics.
+    const spawnOptions = {
+      usePty: false,
+      debug: false,
+    };
+    if (req.wxcExecPath) {
+      spawnOptions.executablePath = req.wxcExecPath;
+    }
+
+    let child;
+    try {
+      child = spawnSandboxFromConfig(config, spawnOptions);
+    } catch (e) {
+      return emit(failResponse(-1, `spawnSandboxFromConfig failed: ${e.message}`, startTime));
+    }
+
+    let stdout = '';
+    let stderr = '';
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let truncated = false;
+
+    child.stdout?.on('data', (chunk) => {
+      const text = chunk.toString();
+      if (stdoutBytes + text.length > callerMaxOutput) {
+        stdout += text.substring(0, callerMaxOutput - stdoutBytes);
+        stdoutBytes = callerMaxOutput;
+        truncated = true;
+      } else {
+        stdout += text;
+        stdoutBytes += text.length;
+      }
     });
-  });
+    child.stderr?.on('data', (chunk) => {
+      const text = chunk.toString();
+      if (stderrBytes + text.length > callerMaxOutput) {
+        stderr += text.substring(0, callerMaxOutput - stderrBytes);
+        stderrBytes = callerMaxOutput;
+        truncated = true;
+      } else {
+        stderr += text;
+        stderrBytes += text.length;
+      }
+    });
 
-  if (truncated) {
-    stderr += `\n[bridge] output truncated at ${callerMaxOutput} bytes`;
+    const exitCode = await new Promise((resolve) => {
+      child.on('close', (code) => resolve(code ?? -1));
+      child.on('error', (err) => {
+        stderr += `\n[bridge] spawn error: ${err.message}`;
+        resolve(-1);
+      });
+    });
+
+    if (truncated) {
+      stderr += `\n[bridge] output truncated at ${callerMaxOutput} bytes`;
+    }
+
+    // Heuristic for SDK-level timeout: if elapsed >= the timeout we passed to the
+    // SDK and the child exited non-zero, we treat it as a timeout. The SDK kills
+    // the child on timeout but doesn't surface a distinct exit code, so this is
+    // the cleanest signal available without poking SDK internals.
+    const durationMs = Date.now() - startTime;
+    const timedOut = exitCode !== 0 && durationMs >= sdkTimeoutMs;
+
+    emit({
+      exitCode,
+      stdout,
+      stderr,
+      timedOut,
+      durationMs,
+      containmentTag: 'mxc',
+    });
+  } finally {
+    // Best-effort scratch cleanup. If the user's command spawned a detached
+    // process that's still using the dir we may fail here — that's fine, the
+    // OS will reap it eventually since these live under %TEMP%.
+    if (scratchDir) {
+      try { fs.rmSync(scratchDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
   }
-
-  // Heuristic for SDK-level timeout: if elapsed >= the timeout we passed to the
-  // SDK and the child exited non-zero, we treat it as a timeout. The SDK kills
-  // the child on timeout but doesn't surface a distinct exit code, so this is
-  // the cleanest signal available without poking SDK internals.
-  const durationMs = Date.now() - startTime;
-  const timedOut = exitCode !== 0 && durationMs >= sdkTimeoutMs;
-
-  emit({
-    exitCode,
-    stdout,
-    stderr,
-    timedOut,
-    durationMs,
-    containmentTag: 'mxc',
-  });
 }
 
 function mergePolicy(callerPolicy, tools, temp) {
