@@ -145,7 +145,10 @@ public sealed partial class SandboxPage : Page
     /// MXC availability AND the current sandbox toggle state. Three visual states:
     ///   1. Available + ON   → 🛡 "Sandbox is on" + toggle visible
     ///   2. Available + OFF  → ⚠ "Sandbox is off — high risk" + toggle visible
-    ///   3. Unavailable      → ⚠ "Sandbox unavailable — agent commands are blocked" + toggle hidden
+    ///   3. Unavailable      → ⚠ "Sandbox unavailable — commands blocked" + toggle hidden
+    /// When MXC is unavailable the toggle is hidden AND the runner fails closed
+    /// (MxcCommandRunner.RunAsync short-circuits to a deny response). The user
+    /// cannot opt out of the block on an unsupported machine — they must fix MXC.
     /// </summary>
     private void UpdateSandboxStatusCard()
     {
@@ -153,14 +156,13 @@ public sealed partial class SandboxPage : Page
         var enabled = SandboxEnabledToggle.IsOn;
         var available = availability.HasAnyBackend;
 
-        // Always refresh the unavailable-action InfoBar in sync with header state.
         UpdateUnavailableActionBar(availability);
 
         if (!available)
         {
             SandboxStatusIcon.Text = "⚠";
-            SandboxStatusTitle.Text = "Sandbox unavailable — agent commands are blocked";
-            SandboxStatusSubtext.Text = "See the details below to fix this.";
+            SandboxStatusTitle.Text = "Sandbox unavailable — commands blocked";
+            SandboxStatusSubtext.Text = "MXC sandboxing isn't supported on this machine. Agent commands won't run until you fix it — see below.";
             SandboxEnabledToggle.Visibility = Visibility.Collapsed;
             return;
         }

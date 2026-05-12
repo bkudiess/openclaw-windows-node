@@ -26,6 +26,7 @@ public sealed class MxcCommandRunner : ICommandRunner
     private readonly ICommandRunner _hostFallback;
     private readonly Func<SettingsData> _settingsProvider;
     private readonly Func<string> _settingsDirectoryPathProvider;
+    private readonly Func<bool> _isSandboxAvailable;
     private readonly IOpenClawLogger _logger;
 
     public MxcCommandRunner(
@@ -33,18 +34,42 @@ public sealed class MxcCommandRunner : ICommandRunner
         ICommandRunner hostFallback,
         Func<SettingsData> settingsProvider,
         Func<string> settingsDirectoryPathProvider,
+        Func<bool> isSandboxAvailable,
         IOpenClawLogger? logger = null)
     {
         _executor = executor;
         _hostFallback = hostFallback;
         _settingsProvider = settingsProvider;
         _settingsDirectoryPathProvider = settingsDirectoryPathProvider;
+        _isSandboxAvailable = isSandboxAvailable;
         _logger = logger ?? NullLogger.Instance;
     }
 
     public async Task<CommandResult> RunAsync(CommandRequest request, CancellationToken ct = default)
     {
         var settings = _settingsProvider();
+
+        // Fail-closed when MXC is unavailable. We do NOT route to host even if the
+        // persisted toggle is OFF — the UI hides the toggle in that state so any
+        // OFF value is stale (e.g., flipped on a previous run / different machine).
+        // The UI's "Sandbox unavailable — commands blocked" claim must match
+        // actual behavior or it's a lie.
+        if (!_isSandboxAvailable())
+        {
+            _logger.Warn(
+                "[mxc] system.run DENIED: sandbox unavailable. " +
+                "Update Windows or install missing components to enable.");
+            return new CommandResult
+            {
+                Stdout = string.Empty,
+                Stderr =
+                    "Sandboxing is unavailable on this machine, so agent-started Windows " +
+                    "commands are blocked. Open the Sandbox page for fix instructions.",
+                ExitCode = -1,
+                TimedOut = false,
+                DurationMs = 0,
+            };
+        }
 
         if (!settings.SystemRunSandboxEnabled)
         {

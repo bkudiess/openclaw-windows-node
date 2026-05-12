@@ -494,6 +494,7 @@ public sealed class NodeService : IDisposable
             hostRunner,
             () => SnapshotSettings(),
             () => settingsDirectory,
+            () => (_mxcAvailability ?? MxcAvailability.Probe(_logger)).HasAnyBackend,
             _logger);
     }
 

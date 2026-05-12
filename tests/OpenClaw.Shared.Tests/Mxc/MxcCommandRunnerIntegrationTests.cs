@@ -52,6 +52,7 @@ public class MxcCommandRunnerIntegrationTests
             hostFallback,
             () => settings,
             () => Path.Combine(Path.GetTempPath(), "openclaw-mxc-smoke-test-settings"),
+            () => true, // integration test runs only when MXC is available
             new ConsoleLogger());
     }
 

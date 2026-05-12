@@ -19,13 +19,15 @@ public class MxcCommandRunnerTests
     private static MxcCommandRunner NewRunner(
         ISandboxExecutor executor,
         ICommandRunner hostFallback,
-        SettingsData settings)
+        SettingsData settings,
+        bool sandboxAvailable = true)
     {
         return new MxcCommandRunner(
             executor,
             hostFallback,
             () => settings,
             () => "C:\\test\\settings",
+            () => sandboxAvailable,
             NullLogger.Instance);
     }
 
@@ -61,6 +63,54 @@ public class MxcCommandRunnerTests
         Assert.NotNull(fallback.LastRequest);
         // Executor must not have been touched.
         Assert.Null(executor.LastRequest);
+    }
+
+    [Fact]
+    public async Task RunAsync_MxcUnavailable_BlocksEvenWithSandboxToggleOff()
+    {
+        // The UI hides the toggle when MXC is unavailable. A persisted toggle=OFF
+        // (from a previous run or different machine) must NOT cause the runner to
+        // silently route to host — the page says "commands blocked" and the
+        // runner must match that promise.
+        var executor = new FakeSandboxExecutor();
+        var fallback = new FakeCommandRunner
+        {
+            Result = new CommandResult { ExitCode = 0, Stdout = "host" },
+        };
+        var runner = NewRunner(
+            executor,
+            fallback,
+            NewSettings(sandboxEnabled: false),
+            sandboxAvailable: false);
+
+        var result = await runner.RunAsync(new CommandRequest { Command = "echo hi" });
+
+        Assert.Equal(-1, result.ExitCode);
+        Assert.Contains("unavailable", result.Stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("blocked", result.Stderr, StringComparison.OrdinalIgnoreCase);
+        // Neither the sandbox executor nor the host fallback should have run.
+        Assert.Null(executor.LastRequest);
+        Assert.Null(fallback.LastRequest);
+    }
+
+    [Fact]
+    public async Task RunAsync_MxcUnavailable_BlocksEvenWithSandboxToggleOn()
+    {
+        // Same as the toggle-off variant but with toggle=ON. The unavailability
+        // short-circuit should fire BEFORE we get to the executor path.
+        var executor = new FakeSandboxExecutor { ThrowsUnavailable = true, UnavailableReason = "MXC missing" };
+        var fallback = new FakeCommandRunner();
+        var runner = NewRunner(
+            executor,
+            fallback,
+            NewSettings(sandboxEnabled: true),
+            sandboxAvailable: false);
+
+        var result = await runner.RunAsync(new CommandRequest { Command = "echo hi" });
+
+        Assert.Equal(-1, result.ExitCode);
+        Assert.Contains("unavailable", result.Stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(fallback.LastRequest);
     }
 
     [Fact]
