@@ -99,18 +99,18 @@ public class MxcCommandRunnerIntegrationTests
     {
         // NOTE: This is a SMOKE TEST, not a deny-paths assertion. The actual
         // semantics of MXC's deniedPaths (does deny win over allow? subtractive
-        // vs strict-deny?) are not yet validated. Vicente's ws-agos-openclaw
-        // thread saw `dir C:\local\sources` return Access Denied, but a file
-        // under %TEMP% appeared not denied even when its parent was in
-        // deniedPaths. Possible causes:
+        // vs strict-deny?) are not yet validated against the alpha SDK; observed
+        // behavior so far is that `dir` on a denied directory returns Access
+        // Denied but a file under %TEMP% appears not denied even when its parent
+        // is in deniedPaths. Possible causes:
         //   - %TEMP% has implicit AppContainer access (default capabilities)
         //   - deniedPaths is strict-subtract: only effective against paths
         //     otherwise granted by readonly/readwrite
-        //   - Q-NESTED-APPCONTAINER outcome (Slice 8) may change the picture
+        //   - nested-AppContainer / per-capability composition may change this
         //
-        // For Slice 1 we only assert the runner returns SOMETHING (not a crash).
-        // A proper deny-paths integration test belongs in a later slice and
-        // needs a controlled allow-grant + deny-of-child scenario to exercise.
+        // For now we only assert the runner returns SOMETHING (not a crash).
+        // A proper deny-paths integration test needs a controlled allow-grant +
+        // deny-of-child scenario which the alpha SDK doesn't yet support cleanly.
         var runner = TryBuildRunner();
         if (runner is null) return; // skip — MXC unavailable on this host
 
@@ -121,7 +121,7 @@ public class MxcCommandRunnerIntegrationTests
             TimeoutMs = 30_000,
         });
 
-        // Pipeline returned. Detailed deny-paths assertions deferred to later slices.
+        // Pipeline returned. Detailed deny-paths assertions are out of scope here.
         Assert.True(result.DurationMs > 0, $"Result should have measurable duration: {result.DurationMs}ms");
         Assert.False(result.TimedOut, "Should not have timed out");
     }

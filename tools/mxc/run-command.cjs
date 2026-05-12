@@ -20,8 +20,8 @@
  * Wire response (matches BridgeResponse):
  *   { exitCode, stdout, stderr, timedOut, durationMs, containmentTag }
  *
- * Slice 1 — system.run only. Other capabilities follow the same envelope shape
- * with capabilityCommand set appropriately and structuredResult populated.
+ * Currently handles system.run only. Other capabilities follow the same envelope
+ * shape with capabilityCommand set appropriately and structuredResult populated.
  */
 
 const {
@@ -183,8 +183,9 @@ async function main() {
     config.process.timeout = sdkTimeoutMs;
 
     // CRITICAL: usePty:false — the @microsoft/mxc-sdk default uses node-pty which
-    // conflates stdout/stderr and rounds exit codes through PTY signals. Per
-    // rubber-duck #5 we want LocalCommandRunner-equivalent semantics.
+    // conflates stdout/stderr and rounds exit codes through PTY signals. We want
+    // LocalCommandRunner-equivalent semantics here (separate streams, reliable
+    // exit code).
     const spawnOptions = {
       usePty: false,
       debug: false,

@@ -11,13 +11,6 @@ namespace OpenClaw.Shared.Mxc;
 /// <c>@microsoft/mxc-sdk.spawnSandboxFromConfig({usePty:false})</c> to run the
 /// payload inside a one-shot AppContainer.
 /// </summary>
-/// <remarks>
-/// Slice 1 implementation. Slice 7 adds <c>WorkerSandboxExecutor</c> for
-/// state-aware <c>isolation_session</c>; Slice 8 adds per-capability AppContainer
-/// composition; this class stays in the codebase as the lightest-weight option
-/// for low-frequency calls (e.g. <c>system.run</c>) and the fallback when
-/// <c>isolation_session</c> isn't deployed.
-/// </remarks>
 public sealed class OneShotAppContainerExecutor : ISandboxExecutor
 {
     public string Name => "mxc-oneshot-appc";

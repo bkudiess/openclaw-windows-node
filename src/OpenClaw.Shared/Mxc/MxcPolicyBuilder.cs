@@ -4,18 +4,20 @@ namespace OpenClaw.Shared.Mxc;
 /// Pure function: <see cref="SettingsData"/> + capability name → <see cref="SandboxPolicy"/>.
 /// </summary>
 /// <remarks>
-/// Slice 1 scope is system.run only. Future slices extend this with per-capability
-/// AppContainer cap declarations (Slice 8 — Q-NESTED-APPCONTAINER). The structure
-/// keeps the function signature stable so v2 work is internal-only.
+/// Currently covers system.run only. The signature is stable so adding other
+/// capabilities is an internal extension.
 ///
-/// Policy decisions in Slice 1:
+/// Policy decisions:
 /// <list type="bullet">
-/// <item><c>readonlyPaths</c> — empty for now; <c>run-command.cjs</c> populates it
-/// via <c>getAvailableToolsPolicy()</c> at the Node side. (Future: port to C#.)</item>
-/// <item><c>readwritePaths</c> — single per-call temp directory. <c>run-command.cjs</c>
-/// fills it via <c>getTemporaryFilesPolicy()</c>.</item>
-/// <item><c>deniedPaths</c> — settings directory (protect MCP token, gateway creds,
-/// ElevenLabs key). Plus <c>~/.ssh</c> as a defense-in-depth default.</item>
+/// <item><c>readonlyPaths</c> — populated from user-granted folders (Documents,
+/// Downloads, Desktop, custom). The Node bridge additionally merges PATH-specific
+/// tool directories so spawned shells can find git/node/python/etc.</item>
+/// <item><c>readwritePaths</c> — user-granted read+write folders. The Node bridge
+/// adds a per-invocation scratch directory and rewrites TEMP/TMP/TMPDIR to point
+/// at it, so the user's real %TEMP% stays out of reach.</item>
+/// <item><c>deniedPaths</c> — settings directory (protect MCP token, gateway
+/// credentials, ElevenLabs key), <c>~/.ssh</c>, and the common browser profile
+/// roots (Chrome / Edge / Firefox / Brave). Always blocked regardless of grants.</item>
 /// <item><c>network.allowOutbound</c> — bound by <see cref="SettingsData.SystemRunAllowOutbound"/>.</item>
 /// <item><c>ui</c> — default-deny across the board; shell exec doesn't need windows.</item>
 /// </list>
@@ -23,8 +25,8 @@ namespace OpenClaw.Shared.Mxc;
 public static class MxcPolicyBuilder
 {
     /// <summary>
-    /// Policy schema version targeted by Slice 1. Per the @microsoft/mxc-sdk validator,
-    /// this must be in the supported range (currently MIN 0.4.0-alpha, SUPPORTED 0.5.0-alpha).
+    /// Policy schema version. Per the @microsoft/mxc-sdk validator, this must be
+    /// in the supported range (currently MIN 0.4.0-alpha, SUPPORTED 0.5.0-alpha).
     /// </summary>
     public const string SupportedPolicyVersion = "0.4.0-alpha";
 

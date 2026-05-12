@@ -5,14 +5,12 @@ namespace OpenClaw.Shared.Mxc;
 /// <summary>
 /// Abstraction for executing a capability invocation inside containment.
 /// Mirrors the <see cref="ICommandRunner"/> pattern that already exists for
-/// system.run, broadened to cover any capability shape (system.run today;
-/// location.get / browser.proxy / camera / etc. in later slices).
+/// system.run, broadened to cover any capability shape.
 /// </summary>
 /// <remarks>
 /// Implementations:
 /// <list type="bullet">
-/// <item><see cref="OneShotAppContainerExecutor"/> — Slice 1: per-call AppContainer via Node + mxc-sdk.</item>
-/// <item><c>WorkerSandboxExecutor</c> — Slice 7: long-lived worker over named-pipe JSON-RPC.</item>
+/// <item><see cref="OneShotAppContainerExecutor"/> — per-call AppContainer via Node + mxc-sdk.</item>
 /// <item><c>HostFallbackExecutor</c> — when containment unavailable in BestEffort mode.</item>
 /// </list>
 /// All implementations are expected to throw <see cref="SandboxUnavailableException"/>

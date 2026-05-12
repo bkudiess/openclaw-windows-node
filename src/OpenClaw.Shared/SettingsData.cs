@@ -88,7 +88,7 @@ public class SettingsData
     public bool PreferStructuredCategories { get; set; } = true;
     public List<UserNotificationRule>? UserRules { get; set; }
 
-    // ── MXC sandbox (Slice 1) ──────────────────────────────────────────
+    // ── MXC sandbox ─────────────────────────────────────────────────────
     /// <summary>
     /// Master switch for system.run containment. When <c>true</c> (default),
     /// system.run runs inside an MXC AppContainer; if MXC is unavailable on

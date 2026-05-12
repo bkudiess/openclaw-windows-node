@@ -10,7 +10,7 @@ namespace OpenClaw.Shared.Mxc;
 /// <list type="bullet">
 /// <item><see cref="IsAppContainerAvailable"/> — Windows 11 build &gt;= 26100, UBR &gt;= 7965 (per @microsoft/mxc-sdk README), x64 / arm64.</item>
 /// <item><see cref="IsWxcExecResolvable"/> — wxc-exec.exe found at the expected node_modules path or via override.</item>
-/// <item><see cref="IsIsolationSessionAvailable"/> — requires AppContainer plus IsolationProxy.exe in System32 (Slice 7+).</item>
+/// <item><see cref="IsIsolationSessionAvailable"/> — requires AppContainer plus IsolationProxy.exe in System32.</item>
 /// </list>
 /// </remarks>
 public sealed class MxcAvailability
@@ -116,8 +116,7 @@ public sealed class MxcAvailability
             reasons.Add("tools/mxc/run-command.cjs not found in any expected location.");
 
         // isolation_session additionally requires Feature_IsoBrokerSessionApis on the OS
-        // and IsolationProxy.exe in System32. Slice 1 only checks the file presence;
-        // Slice 7 spike uses `wxc-exec --dry-run` to confirm feature flag is on.
+        // and IsolationProxy.exe in System32. We currently only check file presence.
         var isolationProxyPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.System),
             "IsolationProxy.exe");

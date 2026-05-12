@@ -112,7 +112,7 @@ public class SettingsManager
     public string SkippedUpdateTag { get; set; } = "";
     public string? PreferredGatewayId { get; set; }
 
-    // ── MXC sandbox (Slice 1) ──────────────────────────────────────────
+    // ── MXC sandbox ─────────────────────────────────────────────────────
     /// <summary>Master switch for system.run containment. When true (default), system.run runs sandboxed and is denied if MXC is unavailable. When false, system.run runs on host like before.</summary>
     public bool SystemRunSandboxEnabled { get; set; } = true;
     /// <summary>When sandboxed, allow system.run commands to reach the public internet. Default false.</summary>
@@ -227,7 +227,7 @@ public class SettingsManager
                     if (loaded.UserRules != null)
                         UserRules = loaded.UserRules;
 
-                    // MXC sandbox settings (Slice 1)
+                    // MXC sandbox settings
                     SystemRunSandboxEnabled = loaded.SystemRunSandboxEnabled;
                     SystemRunAllowOutbound = loaded.SystemRunAllowOutbound;
 
@@ -333,7 +333,7 @@ public class SettingsManager
         NotifyChatResponses = NotifyChatResponses,
         PreferStructuredCategories = PreferStructuredCategories,
         UserRules = UserRules,
-        // MXC sandbox settings (Slice 1)
+        // MXC sandbox settings
         SystemRunSandboxEnabled = SystemRunSandboxEnabled,
         SystemRunAllowOutbound = SystemRunAllowOutbound,
         // MXC sandbox settings (Sandbox page)
