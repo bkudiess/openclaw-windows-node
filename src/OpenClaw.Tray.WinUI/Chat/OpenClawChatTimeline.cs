@@ -878,13 +878,18 @@ public class OpenClawChatTimeline : Component<OpenClawChatTimelineProps>
                     : $"{stepPrefix} {kindLabel}";
 
                 var headerRow = Border(
-                    (FlexRow(
+                    Grid(
+                        [GridSize.Auto, GridSize.Auto, GridSize.Auto, GridSize.Star(), GridSize.Auto],
+                        [GridSize.Auto],
                         Caption(chevron).Foreground(TertiaryText)
                             .Set(t => { t.FontSize = 12; })
-                            .VAlign(VerticalAlignment.Center),
+                            .VAlign(VerticalAlignment.Center)
+                            .Grid(row: 0, column: 0),
                         Caption("⚡").Foreground(statusFg)
                             .Set(t => { t.FontSize = 12; })
-                            .VAlign(VerticalAlignment.Center),
+                            .VAlign(VerticalAlignment.Center)
+                            .Margin(6, 0, 0, 0)
+                            .Grid(row: 0, column: 1),
                         Caption(labelText).Foreground(SecondaryText)
                             .Set(t =>
                             {
@@ -892,7 +897,9 @@ public class OpenClawChatTimeline : Component<OpenClawChatTimelineProps>
                                 t.FontSize = 12;
                                 t.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
                             })
-                            .VAlign(VerticalAlignment.Center),
+                            .VAlign(VerticalAlignment.Center)
+                            .Margin(6, 0, 0, 0)
+                            .Grid(row: 0, column: 2),
                         Caption(string.IsNullOrEmpty(summary) ? string.Empty : "· " + summary)
                             .Foreground(TertiaryText)
                             .Set(t =>
@@ -901,7 +908,9 @@ public class OpenClawChatTimeline : Component<OpenClawChatTimelineProps>
                                 t.TextTrimming = TextTrimming.CharacterEllipsis;
                                 t.MaxLines = 1;
                             })
-                            .VAlign(VerticalAlignment.Center).Flex(grow: 1),
+                            .VAlign(VerticalAlignment.Center)
+                            .Margin(6, 0, 12, 0)
+                            .Grid(row: 0, column: 3),
                         Border(
                             Caption(statusText)
                                 .Foreground(new SolidColorBrush(Colors.White))
@@ -912,7 +921,9 @@ public class OpenClawChatTimeline : Component<OpenClawChatTimelineProps>
                          .Padding(8, 0, 8, 0)
                          .Set(b => b.MinHeight = 18)
                          .VAlign(VerticalAlignment.Center)
-                    ) with { ColumnGap = 6 }).Padding(12, 8, 12, 8)
+                         .HAlign(HorizontalAlignment.Right)
+                         .Grid(row: 0, column: 4)
+                    ).HAlign(HorizontalAlignment.Stretch).Padding(12, 8, 12, 8)
                 ).Set(b => b.MinHeight = 22);
 
                 Element body = Empty();

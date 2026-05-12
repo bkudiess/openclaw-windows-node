@@ -394,7 +394,7 @@ public static class ChatExplorationState
 
     // ---- Tool burst (H) ----
 
-    private static ToolBurstStyle _toolBurstStyle = ToolBurstStyle.TaskList;
+    private static ToolBurstStyle _toolBurstStyle = ToolBurstStyle.Plain;
     private static bool _showStepNumbers;
 
     /// <summary>
