@@ -2111,11 +2111,17 @@ On your gateway host (Mac/Linux), run:
   <data name="UsagePage_TextBlock_55.Text" xml:space="preserve">
     <value>Providers</value>
   </data>
-  <data name="Period7DaysButton.Content" xml:space="preserve">
+  <data name="Period7DaysItem.Text" xml:space="preserve">
     <value>7 Days</value>
   </data>
-  <data name="Period30DaysButton.Content" xml:space="preserve">
+  <data name="Period30DaysItem.Text" xml:space="preserve">
     <value>30 Days</value>
+  </data>
+  <data name="UsagePage_ProviderLoading.Text" xml:space="preserve">
+    <value>Loading providers…</value>
+  </data>
+  <data name="UsagePage_NoProviders.Text" xml:space="preserve">
+    <value>No providers configured</value>
   </data>
   <data name="UsagePage_TextBlock_70.Text" xml:space="preserve">
     <value>Provider Breakdown</value>

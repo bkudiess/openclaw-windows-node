@@ -12,6 +12,8 @@ namespace OpenClawTray.Pages;
 public sealed partial class UsagePage : Page
 {
     private HubWindow? _hub;
+    // Default matches the XAML-selected Period7DaysItem (IsSelected="True").
+    private int _currentPeriodDays = 7;
 
     public UsagePage()
     {
@@ -24,13 +26,24 @@ public sealed partial class UsagePage : Page
         ConnectionWarning.Visibility = hub.GatewayClient != null ? Visibility.Collapsed : Visibility.Visible;
         if (hub.GatewayClient != null)
         {
-            // Apply cached data immediately, then request fresh
+            // Apply cached data immediately, then request fresh.
             if (hub.LastUsage != null) UpdateUsage(hub.LastUsage);
-            if (hub.LastUsageCost != null) UpdateUsageCost(hub.LastUsageCost);
+            // Only apply cached cost data when its period matches the current
+            // selection — otherwise the daily list briefly shows e.g. 30-day
+            // data while the selector reads "7 Days".
+            if (hub.LastUsageCost != null && hub.LastUsageCost.Days == _currentPeriodDays)
+            {
+                UpdateUsageCost(hub.LastUsageCost);
+            }
             if (hub.LastUsageStatus != null) UpdateUsageStatus(hub.LastUsageStatus);
             _ = hub.GatewayClient.RequestUsageAsync();
-            _ = hub.GatewayClient.RequestUsageCostAsync(30);
+            _ = hub.GatewayClient.RequestUsageCostAsync(_currentPeriodDays);
             _ = hub.GatewayClient.RequestUsageStatusAsync();
+        }
+        else
+        {
+            // Not connected — nothing to load, hide the loading skeleton.
+            ProviderLoadingPanel.Visibility = Visibility.Collapsed;
         }
     }
 
@@ -39,8 +52,10 @@ public sealed partial class UsagePage : Page
         DispatcherQueue?.TryEnqueue(() =>
         {
             RequestCountText.Text = usage.RequestCount.ToString();
-            TokenCountText.Text = FormatLargeNumber(usage.TotalTokens);
-            TotalCostText.Text = $"${usage.CostUsd:F2}";
+            // Note: TotalCostText and TokenCountText are owned by UpdateUsageCost
+            // (period-scoped), not UpdateUsage (all-time). Writing them from both
+            // sources caused a race where the last response to arrive won — see
+            // Hanselman review #1 (HIGH).
         });
     }
 
@@ -67,23 +82,33 @@ public sealed partial class UsagePage : Page
             ProviderListView.ItemsSource = status.Providers.Select(p => new ProviderRow
             {
                 Name = p.DisplayName,
-                Requests = p.Plan ?? "",
-                Tokens = p.Windows.Count > 0 ? $"{p.Windows[0].UsedPercent:F0}% used" : "",
-                Cost = p.Error ?? "",
+                Plan = p.Plan ?? "",
+                Usage = p.Windows.Count > 0 ? $"{p.Windows[0].UsedPercent:F0}% used" : "",
+                Status = p.Error ?? "",
             }).ToList();
+
+            bool hasProviders = status.Providers.Count > 0;
+            ProviderLoadingPanel.Visibility = Visibility.Collapsed;
+            ProviderListView.Visibility = hasProviders ? Visibility.Visible : Visibility.Collapsed;
+            ProviderEmptyText.Visibility = hasProviders ? Visibility.Collapsed : Visibility.Visible;
         });
     }
 
-    private void OnPeriod7Days(object sender, RoutedEventArgs e)
+    private void OnPeriodSelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {
-        Period7DaysButton.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
-        Period30DaysButton.Style = (Style)Application.Current.Resources["DefaultButtonStyle"];
+        var days = ReferenceEquals(sender.SelectedItem, Period30DaysItem) ? 30 : 7;
+        SelectPeriod(days);
     }
 
-    private void OnPeriod30Days(object sender, RoutedEventArgs e)
+    private void SelectPeriod(int days)
     {
-        Period30DaysButton.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
-        Period7DaysButton.Style = (Style)Application.Current.Resources["DefaultButtonStyle"];
+        if (days == _currentPeriodDays) return;
+        _currentPeriodDays = days;
+
+        if (_hub?.GatewayClient != null)
+        {
+            _ = _hub.GatewayClient.RequestUsageCostAsync(days);
+        }
     }
 
     private static string FormatLargeNumber(long n)
@@ -96,9 +121,9 @@ public sealed partial class UsagePage : Page
     private class ProviderRow
     {
         public string Name { get; set; } = "";
-        public string Requests { get; set; } = "";
-        public string Tokens { get; set; } = "";
-        public string Cost { get; set; } = "";
+        public string Plan { get; set; } = "";
+        public string Usage { get; set; } = "";
+        public string Status { get; set; } = "";
     }
 
     private class DailyRow

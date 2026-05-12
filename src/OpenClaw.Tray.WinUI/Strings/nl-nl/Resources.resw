@@ -2113,11 +2113,17 @@ Voer op uw gateway-host (Mac/Linux) uit:
   <data name="UsagePage_TextBlock_55.Text" xml:space="preserve">
     <value>Aanbieders</value>
   </data>
-  <data name="Period7DaysButton.Content" xml:space="preserve">
+  <data name="Period7DaysItem.Text" xml:space="preserve">
     <value>7 dagen</value>
   </data>
-  <data name="Period30DaysButton.Content" xml:space="preserve">
+  <data name="Period30DaysItem.Text" xml:space="preserve">
     <value>30 dagen</value>
+  </data>
+  <data name="UsagePage_ProviderLoading.Text" xml:space="preserve">
+    <value>Aanbieders laden…</value>
+  </data>
+  <data name="UsagePage_NoProviders.Text" xml:space="preserve">
+    <value>Geen aanbieders geconfigureerd</value>
   </data>
   <data name="UsagePage_TextBlock_70.Text" xml:space="preserve">
     <value>Uitsplitsing per provider</value>
