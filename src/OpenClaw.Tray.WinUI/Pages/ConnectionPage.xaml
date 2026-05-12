@@ -297,6 +297,45 @@
                 </StackPanel>
             </Border>
 
+            <!-- ═══ Section 7: Local Gateway lifecycle (visible only when installed) ═══ -->
+            <!-- Moved from Settings → Local Gateway. Operates on the gateway runtime -->
+            <!-- (today: WSL distro 'OpenClawGateway'; future: Windows-native or other). -->
+            <Border x:Name="LocalGatewayCard"
+                    Visibility="Collapsed"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16"
+                    AutomationProperties.AutomationId="LocalGatewayCard">
+                <StackPanel Spacing="12">
+                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <FontIcon Glyph="&#xE7F8;" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"/>
+                        <TextBlock Text="🖥️ Local gateway on this PC" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                    </StackPanel>
+
+                    <InfoBar x:Name="MsixWarningBar"
+                             Severity="Warning"
+                             IsOpen="False"
+                             IsClosable="False"
+                             Title="MSIX installation detected"
+                             Message="Removing OpenClaw from Windows Settings &#x2192; Apps will NOT clean up the Local Gateway (WSL distro, disk image). Use Remove Local Gateway below FIRST, then uninstall OpenClaw."/>
+
+                    <TextBlock x:Name="GatewayBodyText"
+                               Text="Removes the local gateway runtime, its disk image, autostart entry, and clears gateway credentials. Your MCP token is preserved. Onboarding will reset."
+                               Style="{StaticResource BodyTextBlockStyle}"
+                               TextWrapping="Wrap"/>
+
+                    <Button x:Name="RemoveGatewayButton"
+                            HorizontalAlignment="Right"
+                            Content="Remove Local Gateway"
+                            Click="OnRemoveLocalGateway"
+                            AutomationProperties.AutomationId="RemoveLocalGatewayButton"/>
+
+                    <InfoBar x:Name="UninstallResultBar"
+                             IsOpen="False"
+                             IsClosable="True"/>
+                </StackPanel>
+            </Border>
+
         </StackPanel>
     </ScrollViewer>
 </Page>
