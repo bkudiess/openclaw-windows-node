@@ -491,6 +491,32 @@ public class GatewayNodeInfo
     public List<string> DisabledCommands { get; set; } = new();
     public Dictionary<string, bool> Permissions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    // Identity / hardware (from gateway NodeListNode schema)
+    public string? Version { get; set; }
+    public string? CoreVersion { get; set; }
+    public string? UiVersion { get; set; }
+    public string? ClientId { get; set; }
+    public string? ClientMode { get; set; }
+    public string? DeviceFamily { get; set; }
+    public string? ModelIdentifier { get; set; }
+    public string? RemoteIp { get; set; }
+    public string? PathEnv { get; set; }
+
+    // Timestamps and state
+    public DateTime? ConnectedAt { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+    public string? LastSeenReason { get; set; }
+
+    // True when the node is in the gateway's paired set (regardless of current
+    // connection state). Distinct from IsOnline — a paired node can be offline.
+    public bool IsPaired { get; set; }
+
+    // True when the gateway provided an explicit displayName/name/label.
+    // False when the parser had to fall back to shortId or nodeId. UI surfaces
+    // (e.g. the rename dialog) use this to distinguish "the user gave this
+    // node a name" from "we showed the id because there was nothing better".
+    public bool HasExplicitDisplayName { get; set; }
+
     public string ShortId => NodeId.Length <= 12 ? NodeId : NodeId[..12] + "…";
 
     public string DisplayText
@@ -521,6 +547,26 @@ public class GatewayNodeInfo
 
     private static string FormatAge(DateTime timestampUtc) => ModelFormatting.FormatAge(timestampUtc);
 }
+
+/// <summary>
+/// Result of a <c>node.rename</c> request to the gateway.
+/// </summary>
+/// <param name="Success">True when the gateway accepted the rename and persisted it.</param>
+/// <param name="NodeId">Node id the gateway returned; same as the requested id on success.</param>
+/// <param name="DisplayName">Updated display name as persisted by the gateway.</param>
+/// <param name="ErrorMessage">Gateway-supplied or transport-derived error description; null on success.</param>
+public sealed record NodeRenameResult(
+    bool Success,
+    string? NodeId = null,
+    string? DisplayName = null,
+    string? ErrorMessage = null);
+
+/// <summary>
+/// Result of a <c>node.pair.remove</c> request to the gateway.
+/// </summary>
+/// <param name="Success">True when the gateway accepted the removal.</param>
+/// <param name="ErrorMessage">Gateway-supplied or transport-derived error description; null on success.</param>
+public sealed record NodeForgetResult(bool Success, string? ErrorMessage = null);
 
 public enum GatewayDiagnosticSeverity
 {
@@ -1490,18 +1536,28 @@ public static class GatewayTopologyClassifier
 }
 
 /// <summary>Shared display-formatting helpers used by model classes.</summary>
-internal static class ModelFormatting
+public static class ModelFormatting
 {
     /// <summary>
-    /// Formats a UTC timestamp as a human-readable age string (e.g. "just now", "5m ago", "2h ago", "3d ago").
+    /// Formats a UTC timestamp as a human-readable age string.
+    /// Examples: "just now", "5m ago", "12h ago", "3d ago", "2026-03-12".
+    /// Public so all UI surfaces share one canonical formatter — divergent
+    /// thresholds between callers can otherwise show the same timestamp as
+    /// "1d ago" in one place and "36h ago" in another for the same node.
     /// </summary>
-    internal static string FormatAge(DateTime timestampUtc)
+    public static string FormatAge(DateTime timestampUtc)
     {
         var delta = DateTime.UtcNow - timestampUtc;
+        // Clock skew between gateway host and local machine can produce
+        // timestamps slightly in the future. Treat those as "just now".
+        if (delta < TimeSpan.Zero) return "just now";
         if (delta.TotalSeconds < 60) return "just now";
         if (delta.TotalMinutes < 60) return $"{(int)delta.TotalMinutes}m ago";
         if (delta.TotalHours < 48) return $"{(int)delta.TotalHours}h ago";
-        return $"{(int)delta.TotalDays}d ago";
+        if (delta.TotalDays < 30) return $"{(int)delta.TotalDays}d ago";
+        // For very old timestamps the relative form loses meaning; show
+        // an absolute local date instead.
+        return timestampUtc.ToLocalTime().ToString("yyyy-MM-dd");
     }
 
     /// <summary>

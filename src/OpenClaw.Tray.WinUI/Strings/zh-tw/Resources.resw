@@ -1926,6 +1926,84 @@
   <data name="NodesPage_TextBlock_41.Text" xml:space="preserve">
     <value>🌐 已連線的用戶端</value>
   </data>
+  <data name="NodesPage_Action_Rename" xml:space="preserve">
+    <value>重新命名</value>
+  </data>
+  <data name="NodesPage_Action_Forget" xml:space="preserve">
+    <value>忘記</value>
+  </data>
+  <data name="NodesPage_Action_MoreOptions" xml:space="preserve">
+    <value>更多選項</value>
+  </data>
+  <data name="NodesPage_Label_Version" xml:space="preserve">
+    <value>Version</value>
+  </data>
+  <data name="NodesPage_Label_Hardware" xml:space="preserve">
+    <value>Hardware</value>
+  </data>
+  <data name="NodesPage_Label_Network" xml:space="preserve">
+    <value>網路</value>
+  </data>
+  <data name="NodesPage_Label_Approved" xml:space="preserve">
+    <value>已核准</value>
+  </data>
+  <data name="NodesPage_Label_Connected" xml:space="preserve">
+    <value>已連線</value>
+  </data>
+  <data name="NodesPage_Label_LastSeen" xml:space="preserve">
+    <value>上次看到</value>
+  </data>
+  <data name="NodesPage_Label_Capabilities" xml:space="preserve">
+    <value>功能</value>
+  </data>
+  <data name="NodesPage_Label_Permissions" xml:space="preserve">
+    <value>權限</value>
+  </data>
+  <data name="NodesPage_Label_PathEnv" xml:space="preserve">
+    <value>PATH</value>
+  </data>
+  <data name="NodesPage_Commands_Header" xml:space="preserve">
+    <value>命令 ({0})</value>
+  </data>
+  <data name="NodesPage_Command_DisabledSuffix" xml:space="preserve">
+    <value>（已停用）</value>
+  </data>
+  <data name="NodesPage_Rename_Title" xml:space="preserve">
+    <value>重新命名節點</value>
+  </data>
+  <data name="NodesPage_Rename_Body" xml:space="preserve">
+    <value>為 {0} 選擇新的顯示名稱。</value>
+  </data>
+  <data name="NodesPage_Rename_Placeholder" xml:space="preserve">
+    <value>顯示名稱</value>
+  </data>
+  <data name="NodesPage_Rename_Primary" xml:space="preserve">
+    <value>重新命名</value>
+  </data>
+  <data name="NodesPage_Rename_Error_Empty" xml:space="preserve">
+    <value>顯示名稱不能為空。</value>
+  </data>
+  <data name="NodesPage_Rename_Error_Generic" xml:space="preserve">
+    <value>重新命名失敗。</value>
+  </data>
+  <data name="NodesPage_Forget_Title" xml:space="preserve">
+    <value>忘記節點？</value>
+  </data>
+  <data name="NodesPage_Forget_Body" xml:space="preserve">
+    <value>這將從閘道中刪除下面節點的記錄。節點需要重新配對才能再次連線。</value>
+  </data>
+  <data name="NodesPage_Forget_Warning" xml:space="preserve">
+    <value>針對該節點的作用中操作員和聊天工作階段將立即失去存取權。</value>
+  </data>
+  <data name="NodesPage_Forget_Primary" xml:space="preserve">
+    <value>忘記節點</value>
+  </data>
+  <data name="NodesPage_Forget_Error_Generic" xml:space="preserve">
+    <value>無法忘記節點 — 閘道無法連線或權限遭拒。</value>
+  </data>
+  <data name="NodesPage_Common_Cancel" xml:space="preserve">
+    <value>取消</value>
+  </data>
   <data name="PermissionsPage_TextBlock_8.Text" xml:space="preserve">
     <value>🔐 權限</value>
   </data>

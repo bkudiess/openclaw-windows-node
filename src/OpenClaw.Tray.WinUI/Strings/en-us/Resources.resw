@@ -1925,6 +1925,84 @@ On your gateway host (Mac/Linux), run:
   <data name="NodesPage_TextBlock_41.Text" xml:space="preserve">
     <value>🌐 Connected Clients</value>
   </data>
+  <data name="NodesPage_Action_Rename" xml:space="preserve">
+    <value>Rename</value>
+  </data>
+  <data name="NodesPage_Action_Forget" xml:space="preserve">
+    <value>Forget</value>
+  </data>
+  <data name="NodesPage_Action_MoreOptions" xml:space="preserve">
+    <value>More options</value>
+  </data>
+  <data name="NodesPage_Label_Version" xml:space="preserve">
+    <value>Version</value>
+  </data>
+  <data name="NodesPage_Label_Hardware" xml:space="preserve">
+    <value>Hardware</value>
+  </data>
+  <data name="NodesPage_Label_Network" xml:space="preserve">
+    <value>Network</value>
+  </data>
+  <data name="NodesPage_Label_Approved" xml:space="preserve">
+    <value>Approved</value>
+  </data>
+  <data name="NodesPage_Label_Connected" xml:space="preserve">
+    <value>Connected</value>
+  </data>
+  <data name="NodesPage_Label_LastSeen" xml:space="preserve">
+    <value>Seen</value>
+  </data>
+  <data name="NodesPage_Label_Capabilities" xml:space="preserve">
+    <value>Capabilities</value>
+  </data>
+  <data name="NodesPage_Label_Permissions" xml:space="preserve">
+    <value>Permissions</value>
+  </data>
+  <data name="NodesPage_Label_PathEnv" xml:space="preserve">
+    <value>PATH</value>
+  </data>
+  <data name="NodesPage_Commands_Header" xml:space="preserve">
+    <value>Commands ({0})</value>
+  </data>
+  <data name="NodesPage_Command_DisabledSuffix" xml:space="preserve">
+    <value> (disabled)</value>
+  </data>
+  <data name="NodesPage_Rename_Title" xml:space="preserve">
+    <value>Rename node</value>
+  </data>
+  <data name="NodesPage_Rename_Body" xml:space="preserve">
+    <value>Pick a new display name for {0}.</value>
+  </data>
+  <data name="NodesPage_Rename_Placeholder" xml:space="preserve">
+    <value>Display name</value>
+  </data>
+  <data name="NodesPage_Rename_Primary" xml:space="preserve">
+    <value>Rename</value>
+  </data>
+  <data name="NodesPage_Rename_Error_Empty" xml:space="preserve">
+    <value>Display name cannot be empty.</value>
+  </data>
+  <data name="NodesPage_Rename_Error_Generic" xml:space="preserve">
+    <value>Rename failed.</value>
+  </data>
+  <data name="NodesPage_Forget_Title" xml:space="preserve">
+    <value>Forget node?</value>
+  </data>
+  <data name="NodesPage_Forget_Body" xml:space="preserve">
+    <value>This will remove the gateway's record of the node below. The node will need to re-pair before it can reconnect.</value>
+  </data>
+  <data name="NodesPage_Forget_Warning" xml:space="preserve">
+    <value>Active operator and chat sessions targeting this node will lose access immediately.</value>
+  </data>
+  <data name="NodesPage_Forget_Primary" xml:space="preserve">
+    <value>Forget node</value>
+  </data>
+  <data name="NodesPage_Forget_Error_Generic" xml:space="preserve">
+    <value>Could not forget node — gateway not reachable or permission denied.</value>
+  </data>
+  <data name="NodesPage_Common_Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
   <data name="PermissionsPage_TextBlock_8.Text" xml:space="preserve">
     <value>🔐 Permissions</value>
   </data>

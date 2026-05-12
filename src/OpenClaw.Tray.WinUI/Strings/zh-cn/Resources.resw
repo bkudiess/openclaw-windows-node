@@ -1926,6 +1926,84 @@
   <data name="NodesPage_TextBlock_41.Text" xml:space="preserve">
     <value>🌐 已连接的客户端</value>
   </data>
+  <data name="NodesPage_Action_Rename" xml:space="preserve">
+    <value>重命名</value>
+  </data>
+  <data name="NodesPage_Action_Forget" xml:space="preserve">
+    <value>忘记</value>
+  </data>
+  <data name="NodesPage_Action_MoreOptions" xml:space="preserve">
+    <value>更多选项</value>
+  </data>
+  <data name="NodesPage_Label_Version" xml:space="preserve">
+    <value>Version</value>
+  </data>
+  <data name="NodesPage_Label_Hardware" xml:space="preserve">
+    <value>Hardware</value>
+  </data>
+  <data name="NodesPage_Label_Network" xml:space="preserve">
+    <value>网络</value>
+  </data>
+  <data name="NodesPage_Label_Approved" xml:space="preserve">
+    <value>已批准</value>
+  </data>
+  <data name="NodesPage_Label_Connected" xml:space="preserve">
+    <value>已连接</value>
+  </data>
+  <data name="NodesPage_Label_LastSeen" xml:space="preserve">
+    <value>上次见到</value>
+  </data>
+  <data name="NodesPage_Label_Capabilities" xml:space="preserve">
+    <value>功能</value>
+  </data>
+  <data name="NodesPage_Label_Permissions" xml:space="preserve">
+    <value>权限</value>
+  </data>
+  <data name="NodesPage_Label_PathEnv" xml:space="preserve">
+    <value>PATH</value>
+  </data>
+  <data name="NodesPage_Commands_Header" xml:space="preserve">
+    <value>命令 ({0})</value>
+  </data>
+  <data name="NodesPage_Command_DisabledSuffix" xml:space="preserve">
+    <value>（已禁用）</value>
+  </data>
+  <data name="NodesPage_Rename_Title" xml:space="preserve">
+    <value>重命名节点</value>
+  </data>
+  <data name="NodesPage_Rename_Body" xml:space="preserve">
+    <value>为 {0} 选择新的显示名称。</value>
+  </data>
+  <data name="NodesPage_Rename_Placeholder" xml:space="preserve">
+    <value>显示名称</value>
+  </data>
+  <data name="NodesPage_Rename_Primary" xml:space="preserve">
+    <value>重命名</value>
+  </data>
+  <data name="NodesPage_Rename_Error_Empty" xml:space="preserve">
+    <value>显示名称不能为空。</value>
+  </data>
+  <data name="NodesPage_Rename_Error_Generic" xml:space="preserve">
+    <value>重命名失败。</value>
+  </data>
+  <data name="NodesPage_Forget_Title" xml:space="preserve">
+    <value>忘记节点？</value>
+  </data>
+  <data name="NodesPage_Forget_Body" xml:space="preserve">
+    <value>这将从网关中删除下面节点的记录。节点需要重新配对才能再次连接。</value>
+  </data>
+  <data name="NodesPage_Forget_Warning" xml:space="preserve">
+    <value>针对该节点的活动操作员和聊天会话将立即失去访问权限。</value>
+  </data>
+  <data name="NodesPage_Forget_Primary" xml:space="preserve">
+    <value>忘记节点</value>
+  </data>
+  <data name="NodesPage_Forget_Error_Generic" xml:space="preserve">
+    <value>无法忘记节点 — 网关不可达或权限被拒绝。</value>
+  </data>
+  <data name="NodesPage_Common_Cancel" xml:space="preserve">
+    <value>取消</value>
+  </data>
   <data name="PermissionsPage_TextBlock_8.Text" xml:space="preserve">
     <value>🔐 权限</value>
   </data>

@@ -1383,18 +1383,21 @@ public partial class App : Application
         }
 
         // ── Connected Devices with inline permission toggles ──
-        if (_lastNodes.Length > 0)
+        // Only show currently-connected nodes; offline/stale paired nodes
+        // remain visible on the full Nodes page where they can be renamed
+        // or forgotten.
+        var connectedNodes = _lastNodes.Where(n => n.IsOnline).ToArray();
+        if (connectedNodes.Length > 0)
         {
             menu.AddSeparator();
 
-            var onlineCount = _lastNodes.Count(n => n.IsOnline);
-            var totalCaps = _lastNodes.Sum(n => n.CapabilityCount);
-            var deviceSummaryRight = $"{onlineCount} online · {totalCaps} caps";
+            var totalCaps = connectedNodes.Sum(n => n.CapabilityCount);
+            var deviceSummaryRight = $"{connectedNodes.Length} online · {totalCaps} caps";
             menu.AddCustomElement(BuildSectionHeader("Devices", deviceSummaryRight));
 
             var currentHost = Environment.MachineName;
 
-            foreach (var node in _lastNodes.Take(5))
+            foreach (var node in connectedNodes.Take(5))
             {
                 var card = BuildDeviceCard(node);
                 var flyoutItems = BuildDeviceFlyoutItems(node);
