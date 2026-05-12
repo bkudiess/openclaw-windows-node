@@ -73,24 +73,7 @@
                     </StackPanel>
                 </Expander>
 
-                <!-- Privacy -->
-                <Expander x:Name="PrivacyExpander" IsExpanded="True"
-                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                          AutomationProperties.AutomationId="PrivacyExpander">
-                    <Expander.Header>
-                        <TextBlock x:Uid="SettingsPrivacyHeader" Text="Privacy" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                    </Expander.Header>
-                    <StackPanel Spacing="12" Padding="4">
-                        <TextBlock x:Uid="SettingsPrivacyDescription" Text="Pre-approve capabilities so agents can use them without a permission prompt each time. You'll still see a countdown before recording starts."
-                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                   TextWrapping="Wrap"/>
-                        <ToggleSwitch x:Uid="ScreenRecordingToggle" x:Name="ScreenRecordingToggle" Header="Allow screen recording"
-                                      AutomationProperties.AutomationId="SettingsPageScreenRecording"/>
-                        <ToggleSwitch x:Uid="CameraRecordingToggle" x:Name="CameraRecordingToggle" Header="Allow camera recording"
-                                      AutomationProperties.AutomationId="SettingsPageCameraRecording"/>
-                    </StackPanel>
-                </Expander>
+                <!-- Privacy section moved to Capabilities → Camera/Screen row "Always allow" sub-toggles -->
 
                 <!-- Local Gateway — hidden when no local gateway is installed (gated in code-behind) -->
                 <Expander x:Name="LocalGatewayExpander"

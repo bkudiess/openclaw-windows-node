@@ -45,21 +45,22 @@ public sealed partial class CapabilitiesPage : Page
         if (hub.Settings == null) return;
         var settings = hub.Settings;
 
-        var capabilities = new (string Icon, string Label, bool Value, Action<bool> Setter)[]
+        // Description: optional sub-control rendered below the toggle (e.g., Always-allow checkbox)
+        var capabilities = new (string Icon, string Label, bool Value, Action<bool> Setter, FrameworkElement? Sub)[]
         {
-            ("🔌", "Node Mode", settings.EnableNodeMode, v => settings.EnableNodeMode = v),
-            ("🌐", "Browser Control", settings.NodeBrowserProxyEnabled, v => settings.NodeBrowserProxyEnabled = v),
-            ("📷", "Camera", settings.NodeCameraEnabled, v => settings.NodeCameraEnabled = v),
-            ("🎨", "Canvas", settings.NodeCanvasEnabled, v => settings.NodeCanvasEnabled = v),
-            ("🖥️", "Screen Capture", settings.NodeScreenEnabled, v => settings.NodeScreenEnabled = v),
-            ("📍", "Location", settings.NodeLocationEnabled, v => settings.NodeLocationEnabled = v),
-            ("⌨️", "Run Programs", settings.NodeSystemRunEnabled, v => settings.NodeSystemRunEnabled = v),
-            ("🔊", "Text-to-Speech", settings.NodeTtsEnabled, v => settings.NodeTtsEnabled = v),
-            ("🎤", "Speech-to-Text", settings.NodeSttEnabled, v => settings.NodeSttEnabled = v),
+            ("🔌", "Node Mode",        settings.EnableNodeMode,           v => settings.EnableNodeMode = v,           null),
+            ("🌐", "Browser Control",  settings.NodeBrowserProxyEnabled,  v => settings.NodeBrowserProxyEnabled = v,  null),
+            ("📷", "Camera",           settings.NodeCameraEnabled,        v => settings.NodeCameraEnabled = v,        BuildAlwaysAllowSub("Always allow camera (no per-call prompt)", settings.CameraRecordingConsentGiven, v => settings.CameraRecordingConsentGiven = v, hub)),
+            ("🎨", "Canvas",           settings.NodeCanvasEnabled,        v => settings.NodeCanvasEnabled = v,        null),
+            ("🖥️", "Screen Capture",   settings.NodeScreenEnabled,        v => settings.NodeScreenEnabled = v,        BuildAlwaysAllowSub("Always allow screen recording (no per-call prompt)", settings.ScreenRecordingConsentGiven, v => settings.ScreenRecordingConsentGiven = v, hub)),
+            ("📍", "Location",         settings.NodeLocationEnabled,      v => settings.NodeLocationEnabled = v,      null),
+            ("⌨️", "Run Programs",     settings.NodeSystemRunEnabled,     v => settings.NodeSystemRunEnabled = v,     null),
+            ("🔊", "Text-to-Speech",   settings.NodeTtsEnabled,           v => settings.NodeTtsEnabled = v,           null),
+            ("🎤", "Speech-to-Text",   settings.NodeSttEnabled,           v => settings.NodeSttEnabled = v,           null),
         };
 
         var items = new List<UIElement>();
-        foreach (var (icon, label, value, setter) in capabilities)
+        foreach (var (icon, label, value, setter, sub) in capabilities)
         {
             var toggle = new ToggleSwitch
             {
@@ -67,19 +68,74 @@ public sealed partial class CapabilitiesPage : Page
                 IsOn = value,
                 MinWidth = 200
             };
-            toggle.Toggled += (s, e) =>
+
+            FrameworkElement rowContent;
+            if (sub != null)
             {
-                setter(toggle.IsOn);
-                settings.Save();
-                hub.RaiseSettingsSaved();
-                UpdateSttCard(hub);
-                UpdateTtsCard(hub);
-                UpdateNodeStatus(hub);
-            };
-            items.Add(toggle);
+                // Toggle + sub-control vertically stacked. Sub-control is hidden when the
+                // capability is OFF — there's nothing to "always allow" if the capability
+                // itself isn't running.
+                sub.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+                sub.Margin = new Thickness(48, 4, 0, 4);
+
+                var stack = new StackPanel { Spacing = 0 };
+                stack.Children.Add(toggle);
+                stack.Children.Add(sub);
+                rowContent = stack;
+
+                toggle.Toggled += (s, e) =>
+                {
+                    setter(toggle.IsOn);
+                    sub.Visibility = toggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+                    settings.Save();
+                    hub.RaiseSettingsSaved();
+                    UpdateSttCard(hub);
+                    UpdateTtsCard(hub);
+                    UpdateNodeStatus(hub);
+                };
+            }
+            else
+            {
+                toggle.Toggled += (s, e) =>
+                {
+                    setter(toggle.IsOn);
+                    settings.Save();
+                    hub.RaiseSettingsSaved();
+                    UpdateSttCard(hub);
+                    UpdateTtsCard(hub);
+                    UpdateNodeStatus(hub);
+                };
+                rowContent = toggle;
+            }
+
+            items.Add(rowContent);
         }
 
         CapabilityRepeater.ItemsSource = items;
+    }
+
+    private static CheckBox BuildAlwaysAllowSub(string label, bool value, Action<bool> setter, HubWindow hub)
+    {
+        var cb = new CheckBox
+        {
+            Content = label,
+            IsChecked = value,
+            FontSize = 12
+        };
+        ToolTipService.SetToolTip(cb, "When checked, agents can use this capability without a per-call permission prompt. You'll still see a recording indicator.");
+        cb.Checked += (s, e) =>
+        {
+            setter(true);
+            hub.Settings?.Save();
+            hub.RaiseSettingsSaved();
+        };
+        cb.Unchecked += (s, e) =>
+        {
+            setter(false);
+            hub.Settings?.Save();
+            hub.RaiseSettingsSaved();
+        };
+        return cb;
     }
 
     // ============================================================

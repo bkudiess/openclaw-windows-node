@@ -44,11 +44,7 @@ public sealed partial class SettingsPage : Page
             RegisterDirtyHandlers();
             _initialized = true;
         }
-        else if (_initialized && hub.Settings != null)
-        {
-            ScreenRecordingToggle.IsOn = hub.Settings.ScreenRecordingConsentGiven;
-            CameraRecordingToggle.IsOn = hub.Settings.CameraRecordingConsentGiven;
-        }
+        // No external-state re-bind needed: pre-approve toggles moved to Capabilities → Camera/Screen rows.
     }
 
     private void RegisterDirtyHandlers()
@@ -58,8 +54,6 @@ public sealed partial class SettingsPage : Page
         AutoStartToggle.Toggled += MarkDirty;
         GlobalHotkeyToggle.Toggled += MarkDirty;
         NotificationsToggle.Toggled += MarkDirty;
-        ScreenRecordingToggle.Toggled += MarkDirty;
-        CameraRecordingToggle.Toggled += MarkDirty;
         NotificationSoundComboBox.SelectionChanged += (s, e) => { if (_initialized) _isDirty = true; };
         NotifyHealthCb.Checked += MarkDirty; NotifyHealthCb.Unchecked += MarkDirty;
         NotifyUrgentCb.Checked += MarkDirty; NotifyUrgentCb.Unchecked += MarkDirty;
@@ -74,18 +68,7 @@ public sealed partial class SettingsPage : Page
     private void OnExternalSettingsChanged(object? sender, EventArgs e)
     {
         if (_hub?.Settings == null || _saving || _isDirty) return;
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            ScreenRecordingToggle.IsOn = _hub.Settings.ScreenRecordingConsentGiven;
-            CameraRecordingToggle.IsOn = _hub.Settings.CameraRecordingConsentGiven;
-
-            // Show that the change is already persisted
-            SaveButton.Content = "✓ Saved";
-            var timer = DispatcherQueue.CreateTimer();
-            timer.Interval = TimeSpan.FromSeconds(2);
-            timer.Tick += (t, a) => { SaveButton.Content = "Save"; timer.Stop(); };
-            timer.Start();
-        });
+        // Pre-approve toggles moved to Capabilities — nothing to re-bind here.
     }
 
     private void LoadSettings(SettingsManager settings)
@@ -115,8 +98,7 @@ public sealed partial class SettingsPage : Page
         NotifyStockCb.IsChecked = settings.NotifyStock;
         NotifyInfoCb.IsChecked = settings.NotifyInfo;
 
-        ScreenRecordingToggle.IsOn = settings.ScreenRecordingConsentGiven;
-        CameraRecordingToggle.IsOn = settings.CameraRecordingConsentGiven;
+        // Pre-approve camera/screen toggles moved to Capabilities → row "Always allow".
         LoadGatewaySection(settings);
     }
 
@@ -169,8 +151,7 @@ public sealed partial class SettingsPage : Page
         s.NotifyStock = NotifyStockCb.IsChecked ?? true;
         s.NotifyInfo = NotifyInfoCb.IsChecked ?? true;
 
-        s.ScreenRecordingConsentGiven = ScreenRecordingToggle.IsOn;
-        s.CameraRecordingConsentGiven = CameraRecordingToggle.IsOn;
+        // Pre-approve camera/screen toggles moved to Capabilities — saved from there.
 
         _saving = true;
         s.Save();
