@@ -3,11 +3,11 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using OpenClaw.Shared;
 using OpenClaw.Shared.Capabilities;
+using OpenClawTray.Helpers;
 using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
-using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
 
 namespace OpenClawTray.Pages;
@@ -310,9 +310,7 @@ public sealed partial class CapabilitiesPage : Page
             if (System.IO.File.Exists(tokenPath))
             {
                 var token = System.IO.File.ReadAllText(tokenPath).Trim();
-                var dp = new DataPackage();
-                dp.SetText(token);
-                Clipboard.SetContent(dp);
+                ClipboardHelper.CopyText(token);
                 McpStatusText.Text = "Token copied to clipboard";
             }
             else
@@ -328,9 +326,7 @@ public sealed partial class CapabilitiesPage : Page
 
     private void OnCopyMcpUrl(object sender, RoutedEventArgs e)
     {
-        var dp = new DataPackage();
-        dp.SetText(NodeService.McpServerUrl);
-        Clipboard.SetContent(dp);
+        ClipboardHelper.CopyText(NodeService.McpServerUrl);
         McpStatusText.Text = "URL copied to clipboard";
     }
 }

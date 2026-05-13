@@ -6,13 +6,13 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
 using OpenClaw.Shared;
+using OpenClawTray.Helpers;
 using OpenClawTray.Onboarding.Services;
 using OpenClawTray.Services.Connection;
 using System;
 using System.IO;
 using System.Text;
 using WinUIEx;
-using WinDataTransfer = global::Windows.ApplicationModel.DataTransfer;
 
 namespace OpenClawTray.Windows;
 
@@ -529,9 +529,7 @@ public sealed partial class ConnectionStatusWindow : WindowEx
 
     private void OnCopyTimeline(object sender, RoutedEventArgs e)
     {
-        var dp = new WinDataTransfer.DataPackage();
-        dp.SetText(_plainBuffer.ToString());
-        WinDataTransfer.Clipboard.SetContent(dp);
+        ClipboardHelper.CopyText(_plainBuffer.ToString());
     }
 
     private void OnClearTimeline(object sender, RoutedEventArgs e)
