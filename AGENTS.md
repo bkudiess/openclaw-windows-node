@@ -22,6 +22,7 @@ If a command fails:
 Notes:
 
 - If a build/test is blocked by an environmental lock (for example running executable locking output assemblies), stop/close the locking process and rerun.
+- **First-run gotcha**: `dotnet test --no-restore` silently no-ops in a fresh worktree where the test `bin/` doesn't exist yet (reports "Build succeeded in 0.5s" then exits 0 with no tests run). For first-run validation, either omit `--no-restore` OR run `dotnet build` on the test project first. Subsequent reruns honor `--no-restore` correctly.
 - In linked git worktrees, set `OPENCLAW_REPO_ROOT` to the worktree path before running tests that discover the repository root, for example:
   - `$env:OPENCLAW_REPO_ROOT='D:\github\moltbot-windows-hub.<worktree-name>'`
 - Tray tests must isolate `SettingsManager` from real user settings. Do not use `new SettingsManager()` in tests unless the test intentionally reads `%APPDATA%\OpenClawTray\settings.json`; pass a temp settings directory or set `OPENCLAW_TRAY_DATA_DIR` before the test process starts.
