@@ -93,9 +93,6 @@
             <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_91" Tag="sessions" Content="Sessions">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE8F2;"/></NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem x:Uid="ConversationsNavItem" Tag="conversations" Content="Conversations">
-                <NavigationViewItem.Icon><FontIcon Glyph="&#xE8F2;"/></NavigationViewItem.Icon>
-            </NavigationViewItem>
             <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_94" Tag="agentevents" Content="Agent Events">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE943;"/></NavigationViewItem.Icon>
             </NavigationViewItem>

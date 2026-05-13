@@ -230,7 +230,6 @@ public sealed partial class HubWindow : WindowEx
         DispatcherQueue?.TryEnqueue(() =>
         {
             if (ContentFrame?.Content is SessionsPage sp) sp.UpdateSessions(sessions);
-            else if (ContentFrame?.Content is ConversationsPage convos) convos.UpdateSessions(sessions);
             else if (ContentFrame?.Content is HomePage home) home.UpdateSessions(sessions);
         });
     }
@@ -657,7 +656,6 @@ public sealed partial class HubWindow : WindowEx
             case CapabilitiesPage capabilities: capabilities.Initialize(this); break;
             case SandboxPage sandbox: sandbox.Initialize(this); break;
             case VoiceSettingsPage voice: voice.Initialize(this, VoiceServiceInstance); break;
-            case ConversationsPage convos: convos.Initialize(this); break;
             case ActivityPage activity: activity.Initialize(this); break;
             case AgentEventsPage agentEvents:
                 agentEvents.ClearCentralCache = ClearAgentEvents;
@@ -714,7 +712,7 @@ public sealed partial class HubWindow : WindowEx
         "info" => typeof(AboutPage),
         // Legacy tags
         "general" => typeof(HomePage),
-        "conversations" => typeof(ConversationsPage),
+        "conversations" => typeof(SessionsPage), // legacy redirect
         "sessions" => typeof(SessionsPage),
         "agentevents" => typeof(AgentEventsPage),
         "skills" => typeof(SkillsPage),
