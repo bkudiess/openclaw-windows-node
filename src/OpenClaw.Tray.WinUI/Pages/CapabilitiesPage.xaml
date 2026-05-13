@@ -131,7 +131,8 @@
 
             <!-- ════════ ACTIONS section ════════ -->
             <TextBlock Text="Actions"
-                       Style="{StaticResource SubtitleTextBlockStyle}"`r`n                       Margin="0,16,0,0"/>
+                       Style="{StaticResource SubtitleTextBlockStyle}"
+                       Margin="0,16,0,4"/>
             <TextBlock Text="Things agents can do on this PC. Higher risk because they can change state or reach the network."
                        Style="{StaticResource CaptionTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -501,7 +502,8 @@
 
             <!-- ════════ CAPABILITIES section ════════ -->
             <TextBlock Text="Capabilities"
-                       Style="{StaticResource SubtitleTextBlockStyle}"`r`n                       Margin="0,16,0,0"/>
+                       Style="{StaticResource SubtitleTextBlockStyle}"
+                       Margin="0,16,0,4"/>
             <TextBlock Text="Device-level access — what agents can see, hear, and locate. Each also requires the matching Windows permission."
                        Style="{StaticResource CaptionTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -644,7 +646,8 @@
 
             <!-- ════════ AUDIO OUTPUT section ════════ -->
             <TextBlock Text="Audio output"
-                       Style="{StaticResource SubtitleTextBlockStyle}"`r`n                       Margin="0,16,0,0"/>
+                       Style="{StaticResource SubtitleTextBlockStyle}"
+                       Margin="0,16,0,4"/>
 
             <!-- Text to speech -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
@@ -701,7 +704,8 @@
 
             <!-- ════════ GATEWAY ════════ -->
             <TextBlock Text="From the gateway"
-                       Style="{StaticResource SubtitleTextBlockStyle}"`r`n                       Margin="0,16,0,0"/>
+                       Style="{StaticResource SubtitleTextBlockStyle}"
+                       Margin="0,16,0,4"/>
             <TextBlock Text="Read-only. These are the commands the connected gateway is willing to forward to this PC. Edit them on the gateway side."
                        Style="{StaticResource CaptionTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
