@@ -5,7 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel Padding="36,28" Spacing="14" HorizontalAlignment="Stretch" MaxWidth="980">
+        <StackPanel Padding="24,16" Spacing="12" HorizontalAlignment="Stretch" MaxWidth="980">
 
             <!-- ════ Title ════ -->
             <TextBlock x:Uid="CapabilitiesPage_TextBlock_10" Text="Security" Style="{StaticResource TitleTextBlockStyle}"/>
@@ -13,7 +13,7 @@
                        Text="Choose how protected this PC is, and what connected agents can access."
                        Style="{StaticResource BodyTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                       TextWrapping="Wrap" MaxWidth="680" Margin="0,0,0,4"/>
+                       TextWrapping="Wrap" Margin="0,0,0,8"/>
 
             <!-- ════ Security level (hero) ════ -->
             <Border x:Name="SecurityLevelCard"
@@ -131,8 +131,7 @@
 
             <!-- ════════ ACTIONS section ════════ -->
             <TextBlock Text="Actions"
-                       Style="{StaticResource SubtitleTextBlockStyle}"
-                       Margin="0,12,0,0"/>
+                       Style="{StaticResource SubtitleTextBlockStyle}"`r`n                       Margin="0,16,0,0"/>
             <TextBlock Text="Things agents can do on this PC. Higher risk because they can change state or reach the network."
                        Style="{StaticResource CaptionTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -502,8 +501,7 @@
 
             <!-- ════════ CAPABILITIES section ════════ -->
             <TextBlock Text="Capabilities"
-                       Style="{StaticResource SubtitleTextBlockStyle}"
-                       Margin="0,12,0,0"/>
+                       Style="{StaticResource SubtitleTextBlockStyle}"`r`n                       Margin="0,16,0,0"/>
             <TextBlock Text="Device-level access — what agents can see, hear, and locate. Each also requires the matching Windows permission."
                        Style="{StaticResource CaptionTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -646,8 +644,7 @@
 
             <!-- ════════ AUDIO OUTPUT section ════════ -->
             <TextBlock Text="Audio output"
-                       Style="{StaticResource SubtitleTextBlockStyle}"
-                       Margin="0,12,0,0"/>
+                       Style="{StaticResource SubtitleTextBlockStyle}"`r`n                       Margin="0,16,0,0"/>
 
             <!-- Text to speech -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
@@ -704,8 +701,7 @@
 
             <!-- ════════ GATEWAY ════════ -->
             <TextBlock Text="From the gateway"
-                       Style="{StaticResource SubtitleTextBlockStyle}"
-                       Margin="0,12,0,0"/>
+                       Style="{StaticResource SubtitleTextBlockStyle}"`r`n                       Margin="0,16,0,0"/>
             <TextBlock Text="Read-only. These are the commands the connected gateway is willing to forward to this PC. Edit them on the gateway side."
                        Style="{StaticResource CaptionTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
