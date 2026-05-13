@@ -99,9 +99,9 @@ internal static class SecurityLevelResolver
 
         // 🛡️ Recommended (Balanced) — and Custom for completeness.
         // Run programs on in container; capabilities on but camera/screen ask
-        // each time; folder access biased to read (Downloads gets read+write
-        // since that's where projects/exports usually land); clipboard
-        // read-only so the agent can see context but not overwrite.
+        // each time; folder access read only across the board so the agent
+        // can read context but never write to user folders; clipboard
+        // read-only too. Outbound network off.
         _ => new LevelDefaults(
             NodeSystemRunEnabled: true,
             SystemRunSandboxEnabled: true,
@@ -116,7 +116,7 @@ internal static class SecurityLevelResolver
             CameraRecordingConsentGiven: false,
             EnableMcpServer: false,
             SandboxDocumentsAccess: SandboxFolderAccess.ReadOnly,
-            SandboxDownloadsAccess: SandboxFolderAccess.ReadWrite,
+            SandboxDownloadsAccess: SandboxFolderAccess.ReadOnly,
             SandboxDesktopAccess: SandboxFolderAccess.ReadOnly,
             SandboxClipboard: SandboxClipboardMode.Read,
             SandboxTimeoutMs: 30_000),

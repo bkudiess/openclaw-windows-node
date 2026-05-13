@@ -90,9 +90,10 @@ public sealed class SecurityLevelResolverTests : IDisposable
         // MCP server off (opt in)
         Assert.False(s.EnableMcpServer);
 
-        // Folder access: Documents RO, Downloads RW (where projects land), Desktop RO
+        // Folder access: all three read only on Recommended — agent can read
+        // context but never write to user folders by default.
         Assert.Equal(SandboxFolderAccess.ReadOnly, s.SandboxDocumentsAccess);
-        Assert.Equal(SandboxFolderAccess.ReadWrite, s.SandboxDownloadsAccess);
+        Assert.Equal(SandboxFolderAccess.ReadOnly, s.SandboxDownloadsAccess);
         Assert.Equal(SandboxFolderAccess.ReadOnly, s.SandboxDesktopAccess);
         Assert.Equal(SandboxClipboardMode.Read, s.SandboxClipboard);
 
@@ -265,16 +266,17 @@ public sealed class SecurityLevelResolverTests : IDisposable
     }
 
     [Fact]
-    public void Recommended_DownloadsIsReadWrite_OthersReadOnly()
+    public void Recommended_AllFoldersReadOnly()
     {
         var s = new SettingsManager(_isolatedDir);
         SecurityLevelResolver.ApplyTo(s, SecurityLevel.Recommended);
 
-        // The reasoning: Downloads is where projects/exports/installers land,
-        // so most agent shell work happens there. Documents/Desktop are more
-        // personal — keep them read only by default on the balanced preset.
-        Assert.Equal(SandboxFolderAccess.ReadOnly,  s.SandboxDocumentsAccess);
-        Assert.Equal(SandboxFolderAccess.ReadWrite, s.SandboxDownloadsAccess);
-        Assert.Equal(SandboxFolderAccess.ReadOnly,  s.SandboxDesktopAccess);
+        // Reasoning: on the balanced preset the agent should be able to read
+        // context from the usual user folders, but not silently write or
+        // overwrite anything. Users who want write access flip it per folder
+        // and the level falls to "Custom".
+        Assert.Equal(SandboxFolderAccess.ReadOnly, s.SandboxDocumentsAccess);
+        Assert.Equal(SandboxFolderAccess.ReadOnly, s.SandboxDownloadsAccess);
+        Assert.Equal(SandboxFolderAccess.ReadOnly, s.SandboxDesktopAccess);
     }
 }
