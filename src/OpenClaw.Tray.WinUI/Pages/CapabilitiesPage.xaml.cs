@@ -7,12 +7,15 @@ using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.Storage.Pickers;
 using Windows.System;
+using WinRT.Interop;
 
 namespace OpenClawTray.Pages;
 
@@ -30,12 +33,14 @@ public sealed partial class CapabilitiesPage : Page
     private bool _suppressRunModeRadio;
     private bool _mcpTokenRevealed;
     private List<ExecRuleRow> _execRules = new();
+    public ObservableCollection<CustomFolderRow> CustomFolders { get; } = new();
 
     private const string SavedApiKeySentinel = "••••••••";
 
     public CapabilitiesPage()
     {
         InitializeComponent();
+        CustomFoldersList.ItemsSource = CustomFolders;
     }
 
     public void Initialize(HubWindow hub)
@@ -329,20 +334,93 @@ public sealed partial class CapabilitiesPage : Page
         }
     }
 
-    private void OnManageCustomFolders(object sender, RoutedEventArgs e)
-    {
-        // The custom-folder picker is large enough to deserve its own surface;
-        // jump to the Sandbox page (still exists in the project) for that one
-        // operation. Everything else lives inline.
-        _hub?.NavigateTo("sandbox");
-    }
+    // Custom folder management is fully inline now (above) — no more Sandbox-page detour.
 
     private void UpdateCustomFolderSummary(SettingsManager s)
     {
-        var n = s.SandboxCustomFolders?.Count ?? 0;
-        CustomFolderSummary.Text = n == 0
-            ? "No custom folders granted."
-            : $"{n} custom folder{(n == 1 ? "" : "s")} granted.";
+        CustomFolders.Clear();
+        foreach (var f in s.SandboxCustomFolders ?? new())
+            CustomFolders.Add(new CustomFolderRow(f.Path, f.Access));
+        RefreshCustomFoldersUi();
+    }
+
+    private void RefreshCustomFoldersUi()
+    {
+        CustomFoldersList.Visibility = CustomFolders.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        CustomFoldersEmpty.Visibility = CustomFolders.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async void OnAddCustomFolder(object sender, RoutedEventArgs e)
+    {
+        if (_hub is null || _hub.Settings is not { } s) return;
+        var picker = new FolderPicker
+        {
+            SuggestedStartLocation = PickerLocationId.Desktop
+        };
+        picker.FileTypeFilter.Add("*");
+        var hwnd = WindowNative.GetWindowHandle(_hub);
+        InitializeWithWindow.Initialize(picker, hwnd);
+        var folder = await picker.PickSingleFolderAsync();
+        if (folder is null || string.IsNullOrWhiteSpace(folder.Path)) return;
+        if (CustomFolders.Any(f => string.Equals(f.Path, folder.Path, StringComparison.OrdinalIgnoreCase))) return;
+
+        var row = new CustomFolderRow(folder.Path, SandboxFolderAccess.ReadOnly);
+        row.InitialSelectionFired = true;
+        CustomFolders.Add(row);
+        RefreshCustomFoldersUi();
+        s.SandboxCustomFolders.Add(new SandboxCustomFolder { Path = folder.Path, Access = SandboxFolderAccess.ReadOnly });
+        s.Save();
+        _hub.RaiseSettingsSaved();
+        OnAnyLevelDrivenChanged();
+    }
+
+    private void OnCustomFolderAccessChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading) return;
+        if (sender is not ComboBox combo || combo.DataContext is not CustomFolderRow row) return;
+        if (!row.InitialSelectionFired) { row.InitialSelectionFired = true; return; }
+        if (_hub?.Settings is not { } s) return;
+        var newAccess = row.AccessIndex switch
+        {
+            2 => SandboxFolderAccess.ReadWrite,
+            1 => SandboxFolderAccess.ReadOnly,
+            _ => (SandboxFolderAccess?)null
+        };
+        var existing = s.SandboxCustomFolders.FirstOrDefault(f =>
+            string.Equals(f.Path, row.Path, StringComparison.OrdinalIgnoreCase));
+        if (newAccess is null)
+        {
+            // "Blocked" — remove the grant entirely + remove the row.
+            if (existing != null) s.SandboxCustomFolders.Remove(existing);
+            var rowToRemove = CustomFolders.FirstOrDefault(f =>
+                string.Equals(f.Path, row.Path, StringComparison.OrdinalIgnoreCase));
+            if (rowToRemove != null) CustomFolders.Remove(rowToRemove);
+            RefreshCustomFoldersUi();
+        }
+        else if (existing != null)
+        {
+            existing.Access = newAccess.Value;
+        }
+        else
+        {
+            s.SandboxCustomFolders.Add(new SandboxCustomFolder { Path = row.Path, Access = newAccess.Value });
+        }
+        s.Save();
+        _hub.RaiseSettingsSaved();
+        OnAnyLevelDrivenChanged();
+    }
+
+    private void OnRemoveCustomFolder(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button b || b.Tag is not string path || string.IsNullOrEmpty(path)) return;
+        var row = CustomFolders.FirstOrDefault(f => f.Path == path);
+        if (row != null) CustomFolders.Remove(row);
+        RefreshCustomFoldersUi();
+        if (_hub?.Settings is not { } s) return;
+        s.SandboxCustomFolders.RemoveAll(f => string.Equals(f.Path, path, StringComparison.OrdinalIgnoreCase));
+        s.Save();
+        _hub.RaiseSettingsSaved();
+        OnAnyLevelDrivenChanged();
     }
 
     private void UpdateRunProgramsSummary()
@@ -829,5 +907,28 @@ public sealed partial class CapabilitiesPage : Page
         public string Pattern { get; set; } = "";
         public string Action { get; set; } = "deny";
         public int Index { get; set; }
+    }
+
+    public sealed class CustomFolderRow
+    {
+        public string Path { get; }
+        public int AccessIndex { get; set; }
+        /// <summary>
+        /// Tracks whether the ComboBox's SelectedIndex-binding has already fired
+        /// its initial SelectionChanged event during materialization. Used by
+        /// OnCustomFolderAccessChanged to skip that "fake" change.
+        /// </summary>
+        public bool InitialSelectionFired { get; set; }
+
+        public CustomFolderRow(string path, SandboxFolderAccess access)
+        {
+            Path = path;
+            AccessIndex = access switch
+            {
+                SandboxFolderAccess.ReadWrite => 2,
+                SandboxFolderAccess.ReadOnly => 1,
+                _ => 0
+            };
+        }
     }
 }

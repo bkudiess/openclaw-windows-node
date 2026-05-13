@@ -228,11 +228,51 @@
                                         <ComboBoxItem Content="Read and write" Tag="ReadWrite"/>
                                     </ComboBox>
                                 </Grid>
-                                <TextBlock x:Name="CustomFolderSummary" Margin="0,4,0,0"
+                                <TextBlock Text="Custom folders"
+                                           Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,8,0,0"/>
+                                <TextBlock Text="Grant access to specific folders outside the three above. Each grant can be read-only or read-and-write."
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           TextWrapping="Wrap"/>
+                                <ListView x:Name="CustomFoldersList" SelectionMode="None" MaxHeight="240"
+                                          Visibility="Collapsed">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid ColumnSpacing="8" Padding="2,4">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="170"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding Path}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           VerticalAlignment="Center"
+                                                           ToolTipService.ToolTip="{Binding Path}"/>
+                                                <ComboBox Grid.Column="1"
+                                                          HorizontalAlignment="Stretch"
+                                                          SelectedIndex="{Binding AccessIndex, Mode=TwoWay}"
+                                                          SelectionChanged="OnCustomFolderAccessChanged"
+                                                          Tag="{Binding Path}">
+                                                    <ComboBoxItem Content="Blocked"/>
+                                                    <ComboBoxItem Content="Read only"/>
+                                                    <ComboBoxItem Content="Read and write"/>
+                                                </ComboBox>
+                                                <Button Grid.Column="2" Tag="{Binding Path}"
+                                                        Click="OnRemoveCustomFolder"
+                                                        Padding="6,2" MinWidth="0"
+                                                        ToolTipService.ToolTip="Remove folder">
+                                                    <FontIcon Glyph="&#xE894;" FontSize="12"/>
+                                                </Button>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                                <TextBlock x:Name="CustomFoldersEmpty"
+                                           Text="No custom folders added."
                                            Style="{StaticResource CaptionTextBlockStyle}"
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                <HyperlinkButton Content="Manage custom folders"
-                                                 Click="OnManageCustomFolders" Padding="0"/>
+                                <Button Content="Add folder…" Click="OnAddCustomFolder" HorizontalAlignment="Left"/>
                             </StackPanel>
                         </Expander>
 
