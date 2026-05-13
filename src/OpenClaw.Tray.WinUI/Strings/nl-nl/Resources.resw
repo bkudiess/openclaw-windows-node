@@ -1087,6 +1087,15 @@ Voer op uw gateway-host (Mac/Linux) uit:
   <data name="Onboarding_Finish" xml:space="preserve">
     <value>Voltooien</value>
   </data>
+  <data name="Onboarding_IncompleteSetup_Title" xml:space="preserve">
+    <value>Setup is nog niet voltooid</value>
+  </data>
+  <data name="Onboarding_IncompleteSetup_Body" xml:space="preserve">
+    <value>OpenClaw heeft nog setup nodig voordat de Hub kan worden geopend. Gebruik Terug om naar de wizard of verbindingsstappen te gaan, los de ontbrekende setup op en probeer daarna Voltooien opnieuw.</value>
+  </data>
+  <data name="Onboarding_IncompleteSetup_Close" xml:space="preserve">
+    <value>Oké</value>
+  </data>
   <data name="Onboarding_Welcome_Title" xml:space="preserve">
     <value>Welkom bij OpenClaw</value>
   </data>
@@ -1645,15 +1654,6 @@ Voer op uw gateway-host (Mac/Linux) uit:
   <data name="ChatPage_TextBlock_53.Text" xml:space="preserve">
     <value>Maak verbinding met de gateway om te chatten</value>
   </data>
-  <data name="ChatPage_TextBlock_56.Text" xml:space="preserve">
-    <value>WebView2-chat wordt hier geladen zodra er verbinding is met een gateway.</value>
-  </data>
-  <data name="ChatPage_TextBlock_65.Text" xml:space="preserve">
-    <value>Webchat niet beschikbaar</value>
-  </data>
-  <data name="ChatPage_Button_69.Content" xml:space="preserve">
-    <value>In plaats daarvan openen in browser</value>
-  </data>
   <data name="ConfigPage_TextBlock_17.Text" xml:space="preserve">
     <value>⚙️ Configuratie</value>
   </data>
@@ -1927,6 +1927,84 @@ Voer op uw gateway-host (Mac/Linux) uit:
   <data name="NodesPage_TextBlock_41.Text" xml:space="preserve">
     <value>🌐 Verbonden clients</value>
   </data>
+  <data name="NodesPage_Action_Rename" xml:space="preserve">
+    <value>Hernoemen</value>
+  </data>
+  <data name="NodesPage_Action_Forget" xml:space="preserve">
+    <value>Vergeten</value>
+  </data>
+  <data name="NodesPage_Action_MoreOptions" xml:space="preserve">
+    <value>Meer opties</value>
+  </data>
+  <data name="NodesPage_Label_Version" xml:space="preserve">
+    <value>Version</value>
+  </data>
+  <data name="NodesPage_Label_Hardware" xml:space="preserve">
+    <value>Hardware</value>
+  </data>
+  <data name="NodesPage_Label_Network" xml:space="preserve">
+    <value>Netwerk</value>
+  </data>
+  <data name="NodesPage_Label_Approved" xml:space="preserve">
+    <value>Goedgekeurd</value>
+  </data>
+  <data name="NodesPage_Label_Connected" xml:space="preserve">
+    <value>Verbonden</value>
+  </data>
+  <data name="NodesPage_Label_LastSeen" xml:space="preserve">
+    <value>Gezien</value>
+  </data>
+  <data name="NodesPage_Label_Capabilities" xml:space="preserve">
+    <value>Mogelijkheden</value>
+  </data>
+  <data name="NodesPage_Label_Permissions" xml:space="preserve">
+    <value>Machtigingen</value>
+  </data>
+  <data name="NodesPage_Label_PathEnv" xml:space="preserve">
+    <value>PATH</value>
+  </data>
+  <data name="NodesPage_Commands_Header" xml:space="preserve">
+    <value>Opdrachten ({0})</value>
+  </data>
+  <data name="NodesPage_Command_DisabledSuffix" xml:space="preserve">
+    <value> (uitgeschakeld)</value>
+  </data>
+  <data name="NodesPage_Rename_Title" xml:space="preserve">
+    <value>Knooppunt hernoemen</value>
+  </data>
+  <data name="NodesPage_Rename_Body" xml:space="preserve">
+    <value>Kies een nieuwe weergavenaam voor {0}.</value>
+  </data>
+  <data name="NodesPage_Rename_Placeholder" xml:space="preserve">
+    <value>Weergavenaam</value>
+  </data>
+  <data name="NodesPage_Rename_Primary" xml:space="preserve">
+    <value>Hernoemen</value>
+  </data>
+  <data name="NodesPage_Rename_Error_Empty" xml:space="preserve">
+    <value>Weergavenaam mag niet leeg zijn.</value>
+  </data>
+  <data name="NodesPage_Rename_Error_Generic" xml:space="preserve">
+    <value>Hernoemen mislukt.</value>
+  </data>
+  <data name="NodesPage_Forget_Title" xml:space="preserve">
+    <value>Knooppunt vergeten?</value>
+  </data>
+  <data name="NodesPage_Forget_Body" xml:space="preserve">
+    <value>Dit verwijdert de registratie van het onderstaande knooppunt bij de gateway. Het knooppunt moet opnieuw worden gekoppeld voordat het opnieuw verbinding kan maken.</value>
+  </data>
+  <data name="NodesPage_Forget_Warning" xml:space="preserve">
+    <value>Actieve operator- en chatsessies die op dit knooppunt zijn gericht, verliezen onmiddellijk toegang.</value>
+  </data>
+  <data name="NodesPage_Forget_Primary" xml:space="preserve">
+    <value>Knooppunt vergeten</value>
+  </data>
+  <data name="NodesPage_Forget_Error_Generic" xml:space="preserve">
+    <value>Knooppunt vergeten mislukt — gateway niet bereikbaar of toestemming geweigerd.</value>
+  </data>
+  <data name="NodesPage_Common_Cancel" xml:space="preserve">
+    <value>Annuleren</value>
+  </data>
   <data name="PermissionsPage_TextBlock_8.Text" xml:space="preserve">
     <value>🔐 Machtigingen</value>
   </data>
@@ -2113,11 +2191,17 @@ Voer op uw gateway-host (Mac/Linux) uit:
   <data name="UsagePage_TextBlock_55.Text" xml:space="preserve">
     <value>Aanbieders</value>
   </data>
-  <data name="Period7DaysButton.Content" xml:space="preserve">
+  <data name="Period7DaysItem.Text" xml:space="preserve">
     <value>7 dagen</value>
   </data>
-  <data name="Period30DaysButton.Content" xml:space="preserve">
+  <data name="Period30DaysItem.Text" xml:space="preserve">
     <value>30 dagen</value>
+  </data>
+  <data name="UsagePage_ProviderLoading.Text" xml:space="preserve">
+    <value>Aanbieders laden…</value>
+  </data>
+  <data name="UsagePage_NoProviders.Text" xml:space="preserve">
+    <value>Geen aanbieders geconfigureerd</value>
   </data>
   <data name="UsagePage_TextBlock_70.Text" xml:space="preserve">
     <value>Uitsplitsing per provider</value>
@@ -2136,12 +2220,6 @@ Voer op uw gateway-host (Mac/Linux) uit:
   </data>
   <data name="ChatWindow_TextBlock_60.Text" xml:space="preserve">
     <value>Maak verbinding met de gateway om te chatten</value>
-  </data>
-  <data name="ChatWindow_TextBlock_67.Text" xml:space="preserve">
-    <value>Chat niet beschikbaar</value>
-  </data>
-  <data name="ChatWindow_Button_71.Content" xml:space="preserve">
-    <value>In plaats daarvan openen in browser</value>
   </data>
   <data name="TitleText.Text" xml:space="preserve">
     <value>OpenClaw Windows Companion</value>
@@ -2374,29 +2452,14 @@ Voer op uw gateway-host (Mac/Linux) uit:
   <data name="UsagePage_TextBlock_10.Text" xml:space="preserve">
     <value>📊 Gebruik en kosten</value>
   </data>
-  <data name="ChatWindowHomeToolTip.Content" xml:space="preserve">
-    <value>Start</value>
-  </data>
-  <data name="ChatWindowRefreshToolTip.Content" xml:space="preserve">
-    <value>Vernieuwen</value>
-  </data>
   <data name="ChatWindowOpenInBrowserToolTip.Content" xml:space="preserve">
     <value>Openen in browser</value>
   </data>
   <data name="ChatWindowCloseToolTip.Content" xml:space="preserve">
     <value>Sluiten</value>
   </data>
-  <data name="ChatPageHomeToolTip.Content" xml:space="preserve">
-    <value>Start</value>
-  </data>
-  <data name="ChatPageRefreshToolTip.Content" xml:space="preserve">
-    <value>Vernieuwen</value>
-  </data>
   <data name="ChatPageOpenInBrowserToolTip.Content" xml:space="preserve">
     <value>Openen in browser</value>
-  </data>
-  <data name="ChatPageDeveloperToolsToolTip.Content" xml:space="preserve">
-    <value>Ontwikkelaarstools</value>
   </data>
   <data name="CronPageRemoveJobToolTip.Content" xml:space="preserve">
     <value>Taak verwijderen</value>
@@ -2748,5 +2811,157 @@ Voer op uw gateway-host (Mac/Linux) uit:
   </data>
   <data name="VoiceSettingsPage_PreviewVoiceButtonContent" xml:space="preserve">
     <value>▶ Voorbeeld van stem</value>
+  </data>  <data name="DebugPage_TextBlock_OverridesHeader.Text" xml:space="preserve">
+    <value>Foutopsporingsopties</value>
+  </data>
+  <data name="DebugPage_TextBlock_OverridesCaption.Text" xml:space="preserve">
+    <value>Overschrijf de globale instelling 'Standaard Gateway-chatinterface gebruiken' per chatcontainer. Wordt opnieuw ingesteld wanneer de app opnieuw wordt opgestart.</value>
+  </data>
+  <data name="DebugPage_TextBlock_HubChatLabel.Text" xml:space="preserve">
+    <value>Chat-tabblad van de hub:</value>
+  </data>
+  <data name="DebugPage_TextBlock_TrayChatLabel.Text" xml:space="preserve">
+    <value>Chat-pop-up van het systeemvak:</value>
+  </data>
+  <data name="DebugPage_ChatOverride_NoOverride_Hub.Content" xml:space="preserve">
+    <value>Geen overschrijving</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceLegacy_Hub.Content" xml:space="preserve">
+    <value>Gateway-chatinterface forceren</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceNative_Hub.Content" xml:space="preserve">
+    <value>Companion-chatinterface forceren</value>
+  </data>
+  <data name="DebugPage_ChatOverride_NoOverride_Tray.Content" xml:space="preserve">
+    <value>Geen overschrijving</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceLegacy_Tray.Content" xml:space="preserve">
+    <value>Gateway-chatinterface forceren</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceNative_Tray.Content" xml:space="preserve">
+    <value>Companion-chatinterface forceren</value>
+  </data>
+  <data name="Chat_ZeroState_WelcomeTitle" xml:space="preserve">
+    <value>Welkom bij OpenClaw</value>
+  </data>
+  <data name="Chat_ZeroState_WelcomeSubtitle" xml:space="preserve">
+    <value>Waarmee kan ik je vandaag helpen?</value>
+  </data>
+  <data name="Chat_Status_Done" xml:space="preserve">
+    <value>Voltooid</value>
+  </data>
+  <data name="Chat_Status_Running" xml:space="preserve">
+    <value>Bezig</value>
+  </data>
+  <data name="Chat_Status_Error" xml:space="preserve">
+    <value>Fout</value>
+  </data>
+  <data name="Chat_Timeline_LoadEarlier" xml:space="preserve">
+    <value>Eerdere berichten laden</value>
+  </data>
+  <data name="Chat_Tool_CallLabel" xml:space="preserve">
+    <value>Hulpmiddelaanroep</value>
+  </data>
+  <data name="Chat_Tool_OutputLabel" xml:space="preserve">
+    <value>Hulpmiddeluitvoer</value>
+  </data>
+  <data name="Chat_Tool_ErrorLabel" xml:space="preserve">
+    <value>Hulpmiddelfout</value>
+  </data>
+  <data name="Chat_Tool_InputSection" xml:space="preserve">
+    <value>Hulpmiddelinvoer</value>
+  </data>
+  <data name="Chat_Tool_FooterLabel" xml:space="preserve">
+    <value>Hulpmiddel</value>
+  </data>
+  <data name="Chat_Tool_FooterWithTimeFormat" xml:space="preserve">
+    <value>Hulpmiddel · {0}</value>
+  </data>
+  <data name="Chat_Reasoning_ThinkingHeader" xml:space="preserve">
+    <value>🧠 Denken</value>
+  </data>
+  <data name="Chat_Reasoning_ThinkingEllipsis" xml:space="preserve">
+    <value>🧠 aan het denken…</value>
+  </data>
+  <data name="Chat_Timeline_AssistantThinkingFormat" xml:space="preserve">
+    <value>{0} is aan het denken…</value>
+  </data>
+  <data name="Chat_Composer_Reasoning_Default" xml:space="preserve">
+    <value>Standaard</value>
+  </data>
+  <data name="Chat_Composer_Reasoning_Auto" xml:space="preserve">
+    <value>Automatisch</value>
+  </data>
+  <data name="Chat_Composer_Reasoning_Maximum" xml:space="preserve">
+    <value>Maximaal</value>
+  </data>
+  <data name="Chat_Composer_Placeholder_Connected" xml:space="preserve">
+    <value>Bericht aan assistent (Enter om te verzenden)</value>
+  </data>
+  <data name="Chat_Composer_Placeholder_Connecting" xml:space="preserve">
+    <value>Verbinden…</value>
+  </data>
+  <data name="Chat_Composer_Placeholder_NotConnected" xml:space="preserve">
+    <value>Niet verbonden</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Attach" xml:space="preserve">
+    <value>Bijvoegen</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Voice" xml:space="preserve">
+    <value>Stem</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_More" xml:space="preserve">
+    <value>Meer</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Send" xml:space="preserve">
+    <value>Verzenden</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Stop" xml:space="preserve">
+    <value>Stoppen</value>
+  </data>
+  <data name="Chat_Composer_AssistantWorking" xml:space="preserve">
+    <value>Assistent is bezig…</value>
+  </data>
+  <data name="Chat_Assistant_Action_Copy" xml:space="preserve">
+    <value>Bericht kopiëren</value>
+  </data>
+  <data name="Chat_Assistant_Action_ReadAloud" xml:space="preserve">
+    <value>Hardop voorlezen</value>
+  </data>
+  <data name="Chat_User_Action_Delete" xml:space="preserve">
+    <value>Bericht verwijderen</value>
+  </data>
+  <data name="Chat_TruncationMarkerFormat" xml:space="preserve">
+    <value> … [{0} bytes afgekapt]</value>
+  </data>
+  <data name="Chat_Permission_Allow" xml:space="preserve">
+    <value>Toestaan</value>
+  </data>
+  <data name="Chat_Permission_Deny" xml:space="preserve">
+    <value>Weigeren</value>
+  </data>
+  <data name="Chat_Root_ConnectingToGateway" xml:space="preserve">
+    <value>Verbinden met gateway…</value>
+  </data>
+  <data name="Chat_Root_EmptyState_SelectSession" xml:space="preserve">
+    <value>Selecteer een sessie in de zijbalk om te beginnen met chatten.</value>
+  </data>
+  <data name="Chat_Notification_SendFailed" xml:space="preserve">
+    <value>Verzenden mislukt</value>
+  </data>
+  <data name="Chat_Notification_AbortFailed" xml:space="preserve">
+    <value>Afbreken mislukt</value>
+  </data>
+  <data name="Chat_Notification_LoadHistoryFailed" xml:space="preserve">
+    <value>Geschiedenis laden mislukt</value>
+  </data>
+  <data name="Chat_Notification_AssistantReplied" xml:space="preserve">
+    <value>Assistent heeft geantwoord</value>
+  </data>
+  <data name="Chat_Notification_ConnectionInterrupted" xml:space="preserve">
+    <value>Verbinding verbroken — antwoord onderbroken.</value>
+  </data>
+  <data name="VoiceSettingsPage_TestVoiceButtonText.Text" xml:space="preserve">
+    <value>Spraakinvoer testen</value>
   </data>
 </root>

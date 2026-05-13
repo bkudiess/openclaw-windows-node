@@ -45,10 +45,11 @@ public sealed class OnboardingWindow : WindowEx
     private bool _chatWebViewInitialized;
     private readonly OnboardingState _state;
     private bool _stateDisposed;
-    // Single-fire guard so the X button (Closed) and the Finish button (state.Complete →
-    // OnOnboardingFinished → Close → Closed) don't both dispatch completion. Both paths
-    // route through OnWizardComplete which no-ops after the first call.
+    // Single-fire guard so the X button (Closed) and the Finish button (state.Complete ->
+    // OnOnboardingFinished -> Close -> Closed) don't both dispatch completion. Both paths
+    // route through TryCompleteOnboarding which no-ops after the first call.
     private bool _completionDispatched;
+    private bool _incompleteSetupDialogOpen;
 
     public OnboardingWindow(SettingsManager settings, string? identityDataPath = null)
     {
@@ -446,7 +447,6 @@ public sealed class OnboardingWindow : WindowEx
                             })();
                         ");
 
-                        _ = SendBootstrapMessageAsync();
                     }
                 });
             };
@@ -517,25 +517,6 @@ public sealed class OnboardingWindow : WindowEx
         }
     }
 
-    private bool _bootstrapSent;
-
-    /// <summary>
-    /// Auto-sends the bootstrap kickoff message after the web chat loads.
-    /// Delegates to <see cref="BootstrapMessageInjector"/> so the same gated
-    /// kickoff fires from both the (legacy) onboarding chat overlay and from
-    /// post-wizard HubWindow chat navigation — guarded by
-    /// <see cref="SettingsManager.HasInjectedFirstRunBootstrap"/>.
-    /// </summary>
-    private async Task SendBootstrapMessageAsync()
-    {
-        if (_bootstrapSent || _chatWebView?.CoreWebView2 == null) return;
-        _bootstrapSent = true;
-
-        await BootstrapMessageInjector.InjectAsync(
-            script => _chatWebView.CoreWebView2.ExecuteScriptAsync(script).AsTask(),
-            _settings);
-    }
-
     /// <summary>
     /// Captures the current window content to a PNG file.
     /// Called automatically on page navigation when OPENCLAW_VISUAL_TEST=1.
@@ -582,16 +563,21 @@ public sealed class OnboardingWindow : WindowEx
 
     private void OnOnboardingFinished(object? sender, EventArgs e)
     {
-        OnWizardComplete();
-        Close();
+        if (TryCompleteOnboarding())
+        {
+            Close();
+            return;
+        }
+
+        _ = ShowIncompleteSetupDialogAsync();
     }
 
     private void OnClosed(object sender, WindowEventArgs args)
     {
-        // X button path: also runs OnWizardComplete (idempotent via _completionDispatched)
+        // X button path: also runs TryCompleteOnboarding (idempotent via _completionDispatched)
         // so a user who clicks the title-bar X on the Ready page still gets the chat-window
         // launch when a model has been configured, matching the Finish-button behavior.
-        OnWizardComplete();
+        _ = TryCompleteOnboarding();
 
         if (_stateDisposed) return;
         _stateDisposed = true;
@@ -615,12 +601,19 @@ public sealed class OnboardingWindow : WindowEx
     /// gateway wizard can stop on a later channel step even after credentials/model
     /// setup succeeded, but Finish on Ready still runs this handler.
     /// </summary>
-    private void OnWizardComplete()
+    private bool TryCompleteOnboarding()
     {
-        if (_completionDispatched) return;
-        _completionDispatched = true;
-
+        if (_completionDispatched) return true;
         var finishedFromReady = _state.CurrentRoute == OnboardingRoute.Ready;
+        var dataPath = _identityDataPath ?? SettingsManager.SettingsDirectoryPath;
+        var setupStillRequired = StartupSetupState.RequiresSetup(_settings, dataPath);
+        if (OnboardingCompletionPolicy.Decide(_state.CurrentRoute, setupStillRequired) == OnboardingCompletionOutcome.BlockIncompleteReady)
+        {
+            Logger.Warn("[OnboardingWindow] Finish blocked because setup is still required; keeping onboarding open");
+            return false;
+        }
+
+        _completionDispatched = true;
 
         _settings.Save();
         Completed = true;
@@ -640,16 +633,53 @@ public sealed class OnboardingWindow : WindowEx
 
         OnboardingCompleted?.Invoke(this, EventArgs.Empty);
 
-        var dataPath = _identityDataPath ?? SettingsManager.SettingsDirectoryPath;
-        var setupStillRequired = StartupSetupState.RequiresSetup(_settings, dataPath);
         if (finishedFromReady && !setupStillRequired)
         {
-            Logger.Info("[OnboardingWindow] OnWizardComplete launching HubWindow on chat tab");
+            Logger.Info("[OnboardingWindow] TryCompleteOnboarding launching HubWindow on chat tab");
             ShowHubChatAfterWizardClose();
         }
         else
         {
-            Logger.Info($"[OnboardingWindow] OnWizardComplete skipping chat launch; route={_state.CurrentRoute}, setupStillRequired={setupStillRequired}");
+            Logger.Info($"[OnboardingWindow] TryCompleteOnboarding skipping chat launch; route={_state.CurrentRoute}, setupStillRequired={setupStillRequired}");
+        }
+
+        return true;
+    }
+
+    private async Task ShowIncompleteSetupDialogAsync()
+    {
+        if (_incompleteSetupDialogOpen) return;
+        _incompleteSetupDialogOpen = true;
+        try
+        {
+            if (_rootGrid.XamlRoot is null)
+            {
+                Logger.Warn("[OnboardingWindow] Cannot show incomplete setup dialog; XamlRoot is unavailable");
+                return;
+            }
+
+            var dialog = new ContentDialog
+            {
+                Title = LocalizationHelper.GetString("Onboarding_IncompleteSetup_Title"),
+                Content = new TextBlock
+                {
+                    Text = LocalizationHelper.GetString("Onboarding_IncompleteSetup_Body"),
+                    TextWrapping = TextWrapping.Wrap
+                },
+                CloseButtonText = LocalizationHelper.GetString("Onboarding_IncompleteSetup_Close"),
+                DefaultButton = ContentDialogButton.Close,
+                XamlRoot = _rootGrid.XamlRoot
+            };
+
+            await dialog.ShowAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[OnboardingWindow] Failed to show incomplete setup dialog: {ex.Message}");
+        }
+        finally
+        {
+            _incompleteSetupDialogOpen = false;
         }
     }
 

@@ -3,7 +3,6 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using OpenClaw.Shared;
-using OpenClaw.Shared.Capabilities;
 using OpenClawTray.Dialogs;
 using OpenClawTray.Helpers;
 using OpenClawTray.Services;
@@ -19,6 +18,8 @@ using System.Drawing;
 using System.IO;
 using System.IO.Pipes;
 using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Updatum;
@@ -40,6 +41,7 @@ public partial class App : Application
     private TrayIcon? _trayIcon;
     private GatewayConnectionManager? _connectionManager;
     private GatewayRegistry? _gatewayRegistry;
+    private OpenClawTray.Chat.OpenClawChatCoordinator? _chatCoordinator;
     /// <summary>
     /// Cached reference to the most recently constructed local-setup engine. Used by
     /// <see cref="OnPairingStatusChanged"/> to suppress the "copy pairing command" toast
@@ -58,6 +60,17 @@ public partial class App : Application
     public GatewayRegistry? Registry => _gatewayRegistry;
     public GatewayConnectionManager? ConnectionManager => _connectionManager;
     internal SettingsManager Settings => _settings ?? throw new InvalidOperationException("Settings are not initialized.");
+
+    public OpenClawTray.Chat.OpenClawChatDataProvider? ChatProvider => _chatCoordinator?.Provider;
+
+    /// <summary>
+    /// Raised after the tray-wide settings have been saved (either via the
+    /// SettingsPage Save button or a direct toggle from the tray menu).
+    /// Subscribers can refresh UI that depends on a setting (e.g. switching
+    /// the chat surface between native chat and WebView2).
+    /// </summary>
+    public event EventHandler? SettingsChanged;
+    public event EventHandler? ChatProviderChanged;
 
     /// <summary>
     /// Ensures the managed SSH tunnel is started using the current settings.
@@ -311,6 +324,156 @@ public partial class App : Application
         }
         catch { /* Ignore logging failures */ }
     }
+
+    // -----------------------------------------------------------------------
+    // CLI uninstall path
+    // Invoked when --uninstall is present in argv. Runs headlessly without
+    // creating the tray UI. Attaches to the parent console so stdout/stderr
+    // are visible when invoked from PowerShell or cmd.
+    // -----------------------------------------------------------------------
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AttachConsole(int dwProcessId);
+
+    private const int AttachParentProcess = -1;
+
+    private static async Task RunCliUninstallAsync(string[] args)
+    {
+        // Attach to parent console so output is visible when invoked from
+        // PowerShell or cmd.  Fails silently if no parent console exists.
+        AttachConsole(AttachParentProcess);
+
+        bool dryRun            = args.Contains("--dry-run",            StringComparer.OrdinalIgnoreCase);
+        bool confirmDestructive = args.Contains("--confirm-destructive", StringComparer.OrdinalIgnoreCase);
+
+        // Locate --json-output <path> argument
+        string? jsonOutputPath = null;
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--json-output", StringComparison.OrdinalIgnoreCase))
+            {
+                jsonOutputPath = args[i + 1];
+                break;
+            }
+        }
+
+        if (!confirmDestructive && !dryRun)
+        {
+            Console.Error.WriteLine(
+                "ERROR: --uninstall requires --confirm-destructive (or --dry-run).");
+            Environment.Exit(2);
+            return;
+        }
+
+        var settings = new SettingsManager();
+        var engine   = LocalGatewayUninstall.Build(settings, logger: new AppLogger());
+
+        LocalGatewayUninstallResult result;
+        try
+        {
+            result = await engine.RunAsync(new LocalGatewayUninstallOptions
+            {
+                DryRun             = dryRun,
+                ConfirmDestructive = confirmDestructive
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"ERROR: Uninstall engine threw: {ex.Message}");
+            Environment.Exit(1);
+            return;
+        }
+
+        // Human-readable summary (tokens already redacted inside engine steps)
+        Console.WriteLine("OpenClaw Local Gateway Uninstall");
+        Console.WriteLine($"DryRun:   {dryRun}");
+        Console.WriteLine($"Success:  {result.Success}");
+        Console.WriteLine($"Steps:    {result.Steps.Count} ({result.SkippedSteps.Count} skipped)");
+        Console.WriteLine($"Errors:   {result.Errors.Count}");
+        foreach (var e in result.Errors)
+            Console.Error.WriteLine($"  ERROR: {CliRedact(e)}");
+        Console.WriteLine("Postconditions:");
+        Console.WriteLine($"  WslDistroAbsent:    {result.Postconditions.WslDistroAbsent}");
+        Console.WriteLine($"  AutostartCleared:   {result.Postconditions.AutostartCleared}");
+        Console.WriteLine($"  SetupStateAbsent:   {result.Postconditions.SetupStateAbsent}");
+        Console.WriteLine($"  DeviceTokenCleared: {result.Postconditions.DeviceTokenCleared}");
+        Console.WriteLine($"  McpTokenPreserved:  {result.Postconditions.McpTokenPreserved}");
+        Console.WriteLine($"  KeepalivesAbsent:   {result.Postconditions.KeepalivesAbsent}");
+        Console.WriteLine($"  VhdDirAbsent:       {result.Postconditions.VhdDirAbsent}");
+        Console.WriteLine($"  LocalGatewayRecordsAbsent:      {result.Postconditions.LocalGatewayRecordsAbsent}");
+        Console.WriteLine($"  LocalGatewayIdentityDirsAbsent: {result.Postconditions.LocalGatewayIdentityDirsAbsent}");
+
+        // JSON output — redaction applied to step details and error strings
+        if (jsonOutputPath != null)
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(jsonOutputPath);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+
+                var payload = new
+                {
+                    success = result.Success,
+                    dry_run = dryRun,
+                    steps   = result.Steps.Select(s => new
+                    {
+                        name   = s.Name,
+                        status = s.Status.ToString(),
+                        detail = CliRedact(s.Detail)
+                    }),
+                    errors       = result.Errors.Select(CliRedact),
+                    skipped_steps = result.SkippedSteps,
+                    postconditions = new
+                    {
+                        wsl_distro_absent     = result.Postconditions.WslDistroAbsent,
+                        autostart_cleared     = result.Postconditions.AutostartCleared,
+                        setup_state_absent    = result.Postconditions.SetupStateAbsent,
+                        device_token_cleared  = result.Postconditions.DeviceTokenCleared,
+                        mcp_token_preserved   = result.Postconditions.McpTokenPreserved,
+                        keepalives_absent     = result.Postconditions.KeepalivesAbsent,
+                        vhd_dir_absent        = result.Postconditions.VhdDirAbsent,
+                        local_gateway_records_absent = result.Postconditions.LocalGatewayRecordsAbsent,
+                        local_gateway_identity_dirs_absent = result.Postconditions.LocalGatewayIdentityDirsAbsent
+                    }
+                };
+
+                File.WriteAllText(jsonOutputPath, JsonSerializer.Serialize(
+                    payload, new JsonSerializerOptions { WriteIndented = true }));
+
+                Console.WriteLine($"JSON result: {jsonOutputPath}");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"WARNING: Failed to write JSON output to '{jsonOutputPath}': {ex.Message}");
+            }
+        }
+
+        Environment.Exit(result.Success ? 0 : 1);
+    }
+
+    /// <summary>
+    /// Redacts token/key material from a string before writing it to CLI
+    /// stdout or a JSON output file.  Mirrors the PowerShell Invoke-Redact
+    /// pattern in validate-wsl-gateway-uninstall.ps1.
+    /// </summary>
+    private static string? CliRedact(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return value;
+        // Redact JSON field values for known secret fields.
+        value = System.Text.RegularExpressions.Regex.Replace(
+            value,
+            @"(""(?i:deviceToken|device_token|token|bootstrapToken|bootstrap_token|PrivateKeyBase64|PublicKeyBase64)""\s*:\s*"")[^""]+("")",
+            "$1<redacted>$2");
+        // Redact bare key=value / key: value patterns.
+        value = System.Text.RegularExpressions.Regex.Replace(
+            value,
+            @"(?i)((?:device|bootstrap|gateway|auth|mcp)[_-]?token\s*[:=]\s*)[^\s,""'}{]+",
+            "$1<redacted>");
+        return value;
+    }
     
     private static void CheckPreviousRun()
     {
@@ -372,6 +535,19 @@ public partial class App : Application
         _startupArgs = Environment.GetCommandLineArgs();
         _dispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
 
+        // -----------------------------------------------------------------------
+        // CLI uninstall path — headless; never shows tray or any windows.
+        // Approach: detect in OnLaunched before any UI is created (WinUI3 Main
+        // is auto-generated; earliest interception point is OnLaunched).
+        // Bypasses the single-instance mutex so the Inno uninstaller can invoke
+        // this even while the tray is running.
+        // -----------------------------------------------------------------------
+        if (_startupArgs.Contains("--uninstall", StringComparer.OrdinalIgnoreCase))
+        {
+            await RunCliUninstallAsync(_startupArgs);
+            return; // Environment.Exit called inside; defensive return
+        }
+
         // Check for protocol activation (MSIX packaged apps receive deep links this way)
         string? protocolUri = GetProtocolActivationUri();
 
@@ -382,6 +558,11 @@ public partial class App : Application
         // two test runs against the same data dir would otherwise pick different
         // mutex names — and `Math.Abs(int.MinValue)` overflows. Use a stable
         // SHA-256 prefix instead.
+        // NOTE: The bare "OpenClawTray" mutex name is also referenced by
+        // installer.iss `AppMutex=` for install/uninstall race coordination
+        // (round 2, Scott #5). The suffixed test-isolation variant is
+        // intentionally not covered by AppMutex — production installs only
+        // ever use the unsuffixed name.
         var mutexName = "OpenClawTray";
         if (DataDirOverride is not null)
         {
@@ -410,6 +591,13 @@ public partial class App : Application
         // Initialize settings before update check so skip selections can be remembered.
         _settings = new SettingsManager();
         _previousSettingsSnapshot = _settings.ToSettingsData();
+        _chatCoordinator = new OpenClawTray.Chat.OpenClawChatCoordinator(
+            _settings,
+            () => _nodeService,
+            new AppLogger(),
+            _dispatcherQueue is null
+                ? null
+                : OpenClawTray.Chat.FunctionalChatHostExtensions.AsPost(_dispatcherQueue));
         DiagnosticsJsonlService.Configure(DataPath);
         DiagnosticsJsonlService.Write("app.start", new
         {
@@ -446,6 +634,9 @@ public partial class App : Application
         // propagate through `await ShowOnboardingAsync()` and abort OnLaunched
         // before the tray ever initializes.
         InitializeTrayIcon();
+        // Apply the user's saved default chat preset (if any) before any chat
+        // surface mounts so initial render uses their preferred styling.
+        OpenClawTray.Chat.Explorations.ChatExplorationPresetStore.ApplyDefaultIfPresent();
         ShowSurfaceImprovementsTipIfNeeded();
 
         // First-run check (also supports forced onboarding for testing).
@@ -472,6 +663,24 @@ public partial class App : Application
         var appLogger = new AppLogger();
         var diagnostics = new ConnectionDiagnostics();
         var nodeConnector = new NodeConnector(appLogger, diagnostics);
+        // Bridge: whenever NodeConnector creates a fresh WindowsNodeClient (initial
+        // connect or reconnect), register the node's capabilities on it BEFORE the
+        // outbound "connect" handshake runs. Without this hookup the gateway sees
+        // the node as having no advertised commands and the agent cannot invoke
+        // anything on it. _nodeService may be null at app startup (constructed
+        // lazily); when null we no-op and the gateway will see an empty caps list
+        // until the next reconnect after _nodeService becomes available.
+        nodeConnector.ClientCreated += (_, args) =>
+        {
+            try
+            {
+                _nodeService?.AttachClient(args.Client, args.BearerToken);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[App] NodeConnector.ClientCreated handler failed: {ex.Message}");
+            }
+        };
         // Wrap the SSH tunnel service so the connection manager can start/stop the tunnel
         var tunnelManager = _sshTunnelService != null
             ? new SshTunnelManager(_sshTunnelService, appLogger)
@@ -482,9 +691,22 @@ public partial class App : Application
             nodeConnector: nodeConnector,
             isNodeEnabled: ShouldInitializeNodeService,
             diagnostics: diagnostics,
-            tunnelManager: tunnelManager);
+            tunnelManager: tunnelManager,
+            shouldStartNodeConnection: ShouldInitializeNodeService);
         _connectionManager.OperatorClientChanged += OnOperatorClientChanged;
         _connectionManager.StateChanged += OnManagerStateChanged;
+
+        // Ensure NodeService is constructed BEFORE InitializeGatewayClient triggers a
+        // NodeConnector connect. The NodeConnector.ClientCreated event subscription
+        // above relies on _nodeService being non-null to register capabilities on the
+        // new WindowsNodeClient. If we don't pre-construct here, the first connect
+        // happens with empty caps and the gateway records this node as having no
+        // advertised commands (which leaves the agent unable to invoke anything on it).
+        // The method is idempotent — safe to call here AND later if first-run setup runs.
+        if (ShouldInitializeNodeService() && _settings != null)
+        {
+            EnsureNodeServiceForLocalGatewaySetup(_settings);
+        }
 
         // Initialize connections — always create operator client for UI data,
         // additionally create node service for gateway node mode or local MCP.
@@ -1182,18 +1404,21 @@ public partial class App : Application
         }
 
         // ── Connected Devices with inline permission toggles ──
-        if (_lastNodes.Length > 0)
+        // Only show currently-connected nodes; offline/stale paired nodes
+        // remain visible on the full Nodes page where they can be renamed
+        // or forgotten.
+        var connectedNodes = _lastNodes.Where(n => n.IsOnline).ToArray();
+        if (connectedNodes.Length > 0)
         {
             menu.AddSeparator();
 
-            var onlineCount = _lastNodes.Count(n => n.IsOnline);
-            var totalCaps = _lastNodes.Sum(n => n.CapabilityCount);
-            var deviceSummaryRight = $"{onlineCount} online · {totalCaps} caps";
+            var totalCaps = connectedNodes.Sum(n => n.CapabilityCount);
+            var deviceSummaryRight = $"{connectedNodes.Length} online · {totalCaps} caps";
             menu.AddCustomElement(BuildSectionHeader("Devices", deviceSummaryRight));
 
             var currentHost = Environment.MachineName;
 
-            foreach (var node in _lastNodes.Take(5))
+            foreach (var node in connectedNodes.Take(5))
             {
                 var card = BuildDeviceCard(node);
                 var flyoutItems = BuildDeviceFlyoutItems(node);
@@ -1752,8 +1977,12 @@ public partial class App : Application
         var activeRecord = _gatewayRegistry.GetActive();
         if (activeRecord != null)
         {
-            // Registry has an active gateway — connect directly
-            _ = _connectionManager.ConnectAsync(activeRecord.Id);
+            if (!TryConnectGatewayIfCredentialAvailable(activeRecord, "startup"))
+            {
+                // Still start MCP-only node if enabled — the active record may be stale
+                // and MCP-only mode must work without gateway credentials.
+                TryStartLocalMcpOnlyNode();
+            }
             return;
         }
 
@@ -1761,7 +1990,8 @@ public partial class App : Application
         activeRecord = _gatewayRegistry.GetActive();
         if (activeRecord != null)
         {
-            _ = _connectionManager.ConnectAsync(activeRecord.Id);
+            if (!TryConnectGatewayIfCredentialAvailable(activeRecord, "legacy migration"))
+                TryStartLocalMcpOnlyNode();
             return;
         }
 
@@ -1801,6 +2031,7 @@ public partial class App : Application
             {
                 Id = recordId,
                 Url = gatewayUrl,
+                IsLocal = LocalGatewayUrlClassifier.IsLocalGatewayUrl(gatewayUrl),
                 SshTunnel = _settings.UseSshTunnel
                     ? new SshTunnelConfig(
                         _settings.SshTunnelUser ?? "",
@@ -1834,7 +2065,55 @@ public partial class App : Application
 
         // Delegate to connection manager — it creates the client, fires OperatorClientChanged,
         // and our handler re-wires the 27 event subscriptions
-        _ = _connectionManager.ConnectAsync(migratedRecord.Id);
+        if (!TryConnectGatewayIfCredentialAvailable(migratedRecord, "startup bridge"))
+            TryStartLocalMcpOnlyNode();
+    }
+
+    /// <summary>
+    /// Connects only when the active gateway has a usable operator credential:
+    /// device token, shared gateway token, or bootstrap token.
+    /// </summary>
+    private bool TryConnectGatewayIfCredentialAvailable(GatewayRecord record, string context)
+    {
+        if (_connectionManager == null)
+            return false;
+
+        var credential = ResolveStartupOperatorCredential(record);
+        if (credential == null)
+        {
+            Logger.Info($"Active gateway has no usable credential — skipping {context} connect");
+            return false;
+        }
+
+        var connectionKind = record.LastConnected.HasValue
+            ? "last successful gateway"
+            : "credentialed gateway";
+        Logger.Info($"Connecting to {connectionKind} during {context}: {record.Url} ({credential.Source})");
+        _ = _connectionManager.ConnectAsync(record.Id);
+        return true;
+    }
+
+    private OpenClawTray.Services.Connection.GatewayCredential? ResolveStartupOperatorCredential(GatewayRecord record)
+    {
+        if (_gatewayRegistry == null)
+            return null;
+
+        var resolver = new CredentialResolver(DeviceIdentityFileReader.Instance);
+        var identityDir = _gatewayRegistry.GetIdentityDirectory(record.Id);
+        var credential = resolver.ResolveOperator(record, identityDir);
+        if (credential != null)
+            return credential;
+
+        // Backfill for legacy installs that still have the identity file at the
+        // root settings path while the active registry record points at that URL.
+        var effectiveUrl = _settings?.GetEffectiveGatewayUrl();
+        if (!string.IsNullOrWhiteSpace(effectiveUrl) &&
+            string.Equals(record.Url, effectiveUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            return resolver.ResolveOperator(record, SettingsManager.SettingsDirectoryPath);
+        }
+
+        return null;
     }
 
     private void TryMigrateLegacyGatewaySettings(string gatewayUrl, IOpenClawLogger logger)
@@ -1965,7 +2244,15 @@ public partial class App : Application
             client.AgentsListUpdated += OnAgentsListUpdated;
             client.AgentFilesListUpdated += OnAgentFilesListUpdated;
             client.AgentFileContentUpdated += OnAgentFileContentUpdated;
+
+            _chatCoordinator?.SetOperatorClient(client);
         }
+        else
+        {
+            _chatCoordinator?.SetOperatorClient(null);
+        }
+
+        RaiseChatProviderChanged();
 
         _lastGatewaySelf = null;
 
@@ -1978,6 +2265,11 @@ public partial class App : Application
                 _hubWindow.CurrentStatus = _currentStatus;
             }
         });
+    }
+
+    private void RaiseChatProviderChanged()
+    {
+        ChatProviderChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
@@ -2187,6 +2479,27 @@ public partial class App : Application
     {
         if (_suppressNodeDuringSetup) return false;
         return _settings?.EnableNodeMode == true || _settings?.EnableMcpServer == true;
+    }
+
+    private bool ShouldInitializeNodeService(GatewayRecord activeGateway, string managerIdentityPath)
+    {
+        if (!ShouldInitializeNodeService()) return false;
+
+        if (LocalNodeServiceOwnsIdentityFor(activeGateway))
+        {
+            Logger.Info("[ConnMgr] Suppressing manager-owned NodeConnector because local NodeService owns the active local gateway identity");
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool LocalNodeServiceOwnsIdentityFor(GatewayRecord activeGateway)
+    {
+        if (!activeGateway.IsLocal || _settings == null) return false;
+        if (!StartupSetupState.HasStoredNodeDeviceToken(IdentityDataPath)) return false;
+
+        return EnsureNodeServiceForLocalGatewaySetup(_settings) != null;
     }
 
     private void OnNodeStatusChanged(object? sender, ConnectionStatus status)
@@ -2808,7 +3121,7 @@ public partial class App : Application
             // TTS: read response aloud whenever the toggle is on (any chat surface).
             if (_settings?.VoiceTtsEnabled == true)
             {
-                _ = SpeakResponseAsync(notification.Message);
+                _ = (_chatCoordinator?.SpeakResponseAsync(notification.Message) ?? Task.CompletedTask);
             }
         }
 
@@ -2876,6 +3189,8 @@ public partial class App : Application
         if (notification.IsChat)
         {
             if (_hubWindow != null && !_hubWindow.IsClosed)
+                return false;
+            if (_chatWindow is { IsClosed: false, Visible: true })
                 return false;
             if (_onboardingWindow != null)
                 return false; // Onboarding window has chat overlay
@@ -2949,13 +3264,10 @@ public partial class App : Application
     {
         if (_trayIcon == null) return;
 
-        var status = _currentStatus;
-        if (_currentActivity != null && _currentActivity.Kind != OpenClaw.Shared.ActivityKind.Idle)
-        {
-            status = ConnectionStatus.Connecting; // Use connecting icon for activity
-        }
-
-        var iconPath = IconHelper.GetStatusIconPath(status);
+        // Tray icon is pinned to the app icon so it visually matches the agent
+        // avatar and chat-window title bar. Status is communicated via the
+        // tooltip text below rather than swapping the icon image.
+        var iconPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "openclaw.ico");
         var tooltip = BuildTrayTooltip();
 
         try
@@ -3039,6 +3351,7 @@ public partial class App : Application
             _hubWindow.QuickSendAction = () => ShowQuickSend();
             _hubWindow.OpenSetupAction = () => _ = ShowOnboardingAsync();
             _hubWindow.OpenConnectionStatusAction = ShowConnectionStatusWindow;
+            _hubWindow.OpenVoiceAction = () => ShowVoiceOverlay();
             _hubWindow.ConnectionManager = _connectionManager;
             _hubWindow.GatewayRegistry = _gatewayRegistry;
             _hubWindow.ConnectAction = () =>
@@ -3217,6 +3530,10 @@ public partial class App : Application
             _hubWindow.GatewayClient = _connectionManager?.OperatorClient;
             _hubWindow.CurrentStatus = _currentStatus;
         }
+
+        // Notify ad-hoc listeners (e.g. ChatWindow may be alive but not
+        // owned by the hub) that settings have changed.
+        SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void ShowWebChat()
@@ -3419,9 +3736,23 @@ public partial class App : Application
             try { _onboardingWindow.Activate(); return; } catch { _onboardingWindow = null; }
         }
 
+        // Disconnect existing gateway connection for a clean setup flow.
+        // ActiveId is preserved so it can be restored if setup is cancelled.
+        var restoreGatewayId = _gatewayRegistry?.ActiveGatewayId;
+        var disconnectedForOnboarding = false;
+        if (_connectionManager != null &&
+            _connectionManager.CurrentSnapshot.OverallState is not OverallConnectionState.Idle)
+        {
+            Logger.Info("Disconnecting existing gateway connection for clean setup");
+            await _connectionManager.DisconnectAsync();
+            disconnectedForOnboarding = restoreGatewayId != null;
+        }
+
+        var onboardingCompleted = false;
         _onboardingWindow = new OnboardingWindow(_settings, IdentityDataPath);
         _onboardingWindow.OnboardingCompleted += (s, e) =>
         {
+            onboardingCompleted = true;
             Logger.Info("Onboarding completed");
             _onboardingWindow = null;
 
@@ -3432,8 +3763,18 @@ public partial class App : Application
                 return;
             }
 
-            // Otherwise reinitialize with saved settings
-            _ = _connectionManager?.ReconnectAsync();
+            // Reconnect only if there's an active gateway with credentials —
+            // don't blindly reconnect a pre-setup gateway the user may be replacing.
+            var activeRecord = _gatewayRegistry?.GetActive();
+            if (activeRecord != null && TryConnectGatewayIfCredentialAvailable(activeRecord, "post-onboarding"))
+            {
+                Logger.Info("Reconnecting to active gateway after onboarding");
+            }
+            else
+            {
+                Logger.Info("No previously connected gateway after onboarding — skipping reconnect");
+                TryStartLocalMcpOnlyNode();
+            }
 
             // Keep hub window in sync with new client
             if (_hubWindow != null && !_hubWindow.IsClosed)
@@ -3443,7 +3784,15 @@ public partial class App : Application
                 _hubWindow.CurrentStatus = _currentStatus;
             }
         };
-        _onboardingWindow.Closed += (s, e) => _onboardingWindow = null;
+        _onboardingWindow.Closed += (s, e) =>
+        {
+            _onboardingWindow = null;
+            if (!onboardingCompleted && disconnectedForOnboarding && restoreGatewayId != null)
+            {
+                Logger.Info("Onboarding closed before completion — restoring previous gateway connection");
+                _ = _connectionManager?.ConnectAsync(restoreGatewayId);
+            }
+        };
         _onboardingWindow.Activate();
     }
 
@@ -4078,50 +4427,8 @@ public partial class App : Application
             await voiceService.StopAsync();
     }
 
-    private int _ttsMuteCount;
-
-    private async Task SpeakResponseAsync(string text)
-    {
-        var voiceService = _nodeService?.VoiceService;
-        var ttsService = _nodeService?.TextToSpeech;
-        try
-        {
-            if (voiceService == null || _settings == null || ttsService == null) return;
-
-            // Increment mute counter — multiple concurrent TTS won't unmute prematurely
-            Interlocked.Increment(ref _ttsMuteCount);
-            voiceService.IsMutedForPlayback = true;
-
-            var speakText = text.Length > 500 ? text[..500] + "..." : text;
-
-            // Don't pass VoiceId here. The shared TextToSpeechService picks
-            // the right per-provider voice from settings (TtsPiperVoiceId,
-            // TtsWindowsVoiceId, TtsElevenLabsVoiceId). Cross-provider
-            // voice IDs would otherwise leak across providers.
-            var speakArgs = new OpenClaw.Shared.Capabilities.TtsSpeakArgs
-            {
-                Text = speakText,
-                Provider = _settings.TtsProvider ?? TtsCapability.PiperProvider,
-                Interrupt = true
-            };
-
-            await ttsService.SpeakAsync(speakArgs);
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"TTS response playback failed: {ex.Message}");
-        }
-        finally
-        {
-            // Only unmute when all concurrent TTS operations have finished
-            if (voiceService != null)
-            {
-                await Task.Delay(300);
-                if (Interlocked.Decrement(ref _ttsMuteCount) <= 0)
-                    voiceService.IsMutedForPlayback = false;
-            }
-        }
-    }
+    public Task SpeakChatTextAsync(string text) =>
+        _chatCoordinator?.SpeakChatTextAsync(text) ?? Task.CompletedTask;
 
     private static void SendDeepLinkToRunningInstance(string uri)
     {
@@ -4220,6 +4527,12 @@ public partial class App : Application
         SafeShutdownStep("gateway client", () =>
         {
             _connectionManager?.Dispose();
+        });
+
+        SafeShutdownStep("chat coordinator", () =>
+        {
+            _chatCoordinator?.Dispose();
+            _chatCoordinator = null;
         });
 
         SafeShutdownStep("node service", () =>

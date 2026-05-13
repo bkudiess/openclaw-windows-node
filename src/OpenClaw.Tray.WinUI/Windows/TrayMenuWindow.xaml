@@ -11,8 +11,8 @@
 
     <!-- Acrylic backdrop applied in code-behind via BackdropHelper -->
 
-    <Grid x:Name="RootGrid" Background="{ThemeResource SolidBackgroundFillColorBaseBrush}">
-        <Border Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+    <Grid x:Name="RootGrid" Background="Transparent">
+        <Border Background="Transparent"
                 BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
                 BorderThickness="1"
                 CornerRadius="8">

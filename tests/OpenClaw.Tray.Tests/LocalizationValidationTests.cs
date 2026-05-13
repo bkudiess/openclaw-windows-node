@@ -36,6 +36,14 @@ public class LocalizationValidationTests
         // Sample IDs / brand identifiers — same across locales.
         "VoiceSettingsPage_ElevenLabsVoiceIdBox.PlaceholderText",
         "VoiceSettingsPage_ElevenLabsModelBox.PlaceholderText",
+        // NodesPage detail labels — "Version", "Hardware", and "PATH" are
+        // technical loanwords that read the same in every supported locale
+        // in this app's audience. Translating them adds no clarity and
+        // mixing scripts in a single detail row reads worse than keeping
+        // the English label.
+        "NodesPage_Label_Version",
+        "NodesPage_Label_Hardware",
+        "NodesPage_Label_PathEnv",
     };
 
     private static readonly string[] RequiredRuntimeOnboardingKeys =

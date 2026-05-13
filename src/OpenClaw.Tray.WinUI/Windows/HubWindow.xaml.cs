@@ -47,6 +47,7 @@ public sealed partial class HubWindow : WindowEx
     public Action? ReconnectAction { get; set; }
     public Action? OpenSetupAction { get; set; }
     public Action? OpenConnectionStatusAction { get; set; }
+    public Action? OpenVoiceAction { get; set; }
     public OpenClawTray.Services.Connection.IGatewayConnectionManager? ConnectionManager { get; set; }
     public OpenClawTray.Services.Connection.GatewayRegistry? GatewayRegistry { get; set; }
 
@@ -684,6 +685,7 @@ public sealed partial class HubWindow : WindowEx
                 break;
             case PermissionsPage permissions: permissions.Initialize(this); break;
             case CapabilitiesPage capabilities: capabilities.Initialize(this); break;
+            case SandboxPage sandbox: sandbox.Initialize(this); break;
             case VoiceSettingsPage voice: voice.Initialize(this, VoiceServiceInstance); break;
             case ConversationsPage convos: convos.Initialize(this); break;
             case ActivityPage activity: activity.Initialize(this); break;
@@ -742,6 +744,7 @@ public sealed partial class HubWindow : WindowEx
         "capabilities" => typeof(CapabilitiesPage),
         "voice" => typeof(VoiceSettingsPage),
         "permissions" => typeof(PermissionsPage),
+        "sandbox" => typeof(SandboxPage),
         "activity" => typeof(ActivityPage),
         "settings" => typeof(SettingsPage),
         "debug" => typeof(DebugPage),

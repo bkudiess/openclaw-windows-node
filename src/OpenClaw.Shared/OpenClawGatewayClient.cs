@@ -38,7 +38,7 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
     private GatewayUsageStatusInfo? _usageStatus;
     private GatewayCostUsageInfo? _usageCost;
     private readonly Dictionary<string, string> _pendingRequestMethods = new();
-    private readonly Dictionary<string, TaskCompletionSource<bool>> _pendingChatSendRequests = new();
+    private readonly Dictionary<string, TaskCompletionSource<ChatSendResult>> _pendingChatSendRequests = new();
     private readonly object _pendingRequestLock = new();
     private readonly object _pendingChatSendLock = new();
     private readonly object _sessionsLock = new();
@@ -176,6 +176,14 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
     public event EventHandler<JsonElement>? AgentsListUpdated;
     public event EventHandler<JsonElement>? AgentFilesListUpdated;
     public event EventHandler<JsonElement>? AgentFileContentUpdated;
+    /// <summary>
+    /// Raised when the gateway broadcasts a "chat" event (assistant or user
+    /// message echo). Use this to drive a chat-UI timeline; the existing
+    /// <see cref="NotificationReceived"/> path continues to fire toast
+    /// notifications and is unaffected.
+    /// </summary>
+    public event EventHandler<ChatMessageInfo>? ChatMessageReceived;
+    public event EventHandler<AgentEventInfo>? ChatEventReceived;
 
     /// <summary>Raised when a device token is received from the gateway during hello-ok handshake.</summary>
     public event EventHandler<DeviceTokenReceivedEventArgs>? DeviceTokenReceived;
@@ -251,7 +259,12 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
         }
     }
 
-    public async Task SendChatMessageAsync(string message, string? sessionKey = null)
+    public async Task SendChatMessageAsync(string message, string? sessionKey = null, string? sessionId = null)
+    {
+        _ = await SendChatMessageForRunAsync(message, sessionKey, sessionId).ConfigureAwait(false);
+    }
+
+    public async Task<ChatSendResult> SendChatMessageForRunAsync(string message, string? sessionKey = null, string? sessionId = null)
     {
         if (!IsConnected)
             throw new InvalidOperationException("Gateway connection is not open");
@@ -263,9 +276,15 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
             : sessionKey.Trim();
 
         var requestId = Guid.NewGuid().ToString();
-        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completion = new TaskCompletionSource<ChatSendResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         TrackPendingChatSend(requestId, completion);
 
+        // The gateway's `chat.send` validates strictly on (sessionKey, message,
+        // idempotencyKey). The spec document mentioned `sessionId` and `text`
+        // as Control-UI variants, but the live operator endpoint rejects them
+        // ("unexpected property"). The `sessionId` parameter is therefore only
+        // tracked client-side (used for display correlation) and not forwarded.
+        _ = sessionId; // reserved for future protocol versions
         var req = new
         {
             type = "req",
@@ -288,8 +307,118 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
             throw new TimeoutException("Timed out waiting for chat.send response from gateway");
         }
 
-        await completion.Task;
+        var result = await completion.Task.ConfigureAwait(false);
         _logger.Info($"Sent chat message ({message.Length} chars)");
+        return result;
+    }
+
+    Task IOperatorGatewayClient.SendChatMessageAsync(string message, string? sessionKey) =>
+        SendChatMessageAsync(message, sessionKey);
+
+    Task<ChatSendResult> IOperatorGatewayClient.SendChatMessageForRunAsync(string message, string? sessionKey) =>
+        SendChatMessageForRunAsync(message, sessionKey);
+
+    /// <summary>
+    /// Fetches the conversation transcript for a session. The gateway applies
+    /// display normalization (strips delivery directives, tool-call XML, etc.)
+    /// before returning. Throws on RPC failure or timeout.
+    /// </summary>
+    public async Task<ChatHistoryInfo> RequestChatHistoryAsync(string? sessionKey = null, int timeoutMs = 15000)
+    {
+        var effectiveSessionKey = string.IsNullOrWhiteSpace(sessionKey)
+            ? _mainSessionKey
+            : sessionKey.Trim();
+
+        var payload = await SendWizardRequestAsync(
+            "chat.history",
+            new { sessionKey = effectiveSessionKey },
+            timeoutMs);
+
+        return ParseChatHistory(payload, effectiveSessionKey);
+    }
+
+    /// <summary>
+    /// Aborts an in-flight agent run. Per spec, partial assistant output may
+    /// still be visible after the abort and is persisted into the transcript
+    /// with abort metadata.
+    /// </summary>
+    public async Task SendChatAbortAsync(string runId, int timeoutMs = 5000)
+    {
+        if (string.IsNullOrWhiteSpace(runId))
+            throw new ArgumentException("runId is required", nameof(runId));
+        await SendWizardRequestAsync("chat.abort", new { runId }, timeoutMs);
+    }
+
+    private static ChatHistoryInfo ParseChatHistory(JsonElement payload, string sessionKey)
+    {
+        var info = new ChatHistoryInfo { SessionKey = sessionKey };
+        if (payload.ValueKind != JsonValueKind.Object) return info;
+
+        if (payload.TryGetProperty("sessionId", out var sidProp) && sidProp.ValueKind == JsonValueKind.String)
+            info.SessionId = sidProp.GetString();
+
+        if (!payload.TryGetProperty("messages", out var msgs) || msgs.ValueKind != JsonValueKind.Array)
+            return info;
+
+        var list = new List<ChatMessageInfo>(msgs.GetArrayLength());
+        foreach (var m in msgs.EnumerateArray())
+        {
+            var role = m.TryGetProperty("role", out var r) ? r.GetString() ?? "" : "";
+            // Spec doc lists `ts`, but gateway 2026.4.23 actually returns
+            // `timestamp` on chat.history rows (verified via WS RX trace).
+            // Accept both for forward/back compat.
+            long ts = 0;
+            if (m.TryGetProperty("timestamp", out var tsProp1) && tsProp1.ValueKind == JsonValueKind.Number)
+                ts = tsProp1.GetInt64();
+            else if (m.TryGetProperty("ts", out var tsProp2) && tsProp2.ValueKind == JsonValueKind.Number)
+                ts = tsProp2.GetInt64();
+
+            // content can be a plain string OR an array of {type:"text", text:"..."} blocks
+            string text = ExtractMessageText(m);
+            if (string.IsNullOrEmpty(text)) continue;
+            if (string.IsNullOrEmpty(role)) continue;
+
+            list.Add(new ChatMessageInfo
+            {
+                SessionKey = sessionKey,
+                Role = role,
+                Text = text,
+                State = "final",
+                Ts = ts
+            });
+        }
+        info.Messages = list;
+        return info;
+    }
+
+    private static string ExtractMessageText(JsonElement message)
+    {
+        if (!message.TryGetProperty("content", out var content)) return string.Empty;
+
+        if (content.ValueKind == JsonValueKind.String)
+            return content.GetString() ?? string.Empty;
+
+        if (content.ValueKind == JsonValueKind.Array)
+        {
+            var sb = new StringBuilder();
+            foreach (var item in content.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.String)
+                {
+                    sb.Append(item.GetString());
+                }
+                else if (item.ValueKind == JsonValueKind.Object &&
+                         item.TryGetProperty("type", out var ty) && ty.GetString() == "text" &&
+                         item.TryGetProperty("text", out var tx) && tx.ValueKind == JsonValueKind.String)
+                {
+                    if (sb.Length > 0) sb.Append('\n');
+                    sb.Append(tx.GetString());
+                }
+            }
+            return sb.ToString();
+        }
+
+        return string.Empty;
     }
 
     /// <summary>
@@ -464,7 +593,7 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
         return TrySendTrackedRequestAsync("cron.update", new { id, patch });
     }
 
-    public async Task RequestCronRunsAsync(string? id = null, int limit = 50, int offset = 0)
+    public async Task RequestCronRunsAsync(string? id = null, int limit = 20, int offset = 0)
     {
         // Wire format uses "id" consistently with cron.run / cron.remove
         await SendTrackedRequestAsync("cron.runs", new { id, limit, offset });
@@ -565,6 +694,101 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
     public Task<bool> NodePairRejectAsync(string requestId)
     {
         return TrySendTrackedRequestAsync("node.pair.reject", new { requestId });
+    }
+
+    /// <summary>
+    /// Removes a paired node from the gateway and waits for the gateway's
+    /// application-level response. Returns Success=true only when the
+    /// gateway confirms the removal — Success=false on transport failure,
+    /// missing scope, unknown nodeId, or any server-side rejection. The
+    /// gateway also broadcasts <c>node.pair.resolved</c> with
+    /// <c>decision="removed"</c> after success, which the broadcast handler
+    /// turns into a node.list + node.pair.list refresh.
+    /// </summary>
+    public async Task<NodeForgetResult> NodePairRemoveAsync(string nodeId)
+    {
+        if (string.IsNullOrWhiteSpace(nodeId))
+            return new NodeForgetResult(false, "nodeId required");
+        if (!IsConnected)
+            return new NodeForgetResult(false, "Gateway connection is not open");
+
+        try
+        {
+            // SendWizardRequestAsync awaits the matching ack frame and
+            // throws InvalidOperationException when the gateway responds
+            // with ok=false, so callers see a real failure result on
+            // rejection (missing scope, unknown nodeId) rather than a
+            // false success the moment the WS frame is sent.
+            await SendWizardRequestAsync("node.pair.remove", new { nodeId });
+            return new NodeForgetResult(true);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Gateway business error (e.g. "missing scope: operator.pairing",
+            // "unknown nodeId"). Surface this verbatim so the user sees an
+            // actionable message.
+            _logger.Warn($"node.pair.remove rejected: {ex.Message}");
+            return new NodeForgetResult(false, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            // Transport / timeout / unexpected exception. Don't leak raw
+            // exception text into the UI — return null so the caller uses
+            // its localized fallback string.
+            _logger.Warn($"node.pair.remove failed: {ex.Message}");
+            return new NodeForgetResult(false, ErrorMessage: null);
+        }
+    }
+
+    /// <summary>
+    /// Renames the display name of a paired node. Awaits the gateway's
+    /// response, so callers can rely on <see cref="NodeRenameResult.Success"/>
+    /// before refreshing UI state. The gateway does not broadcast a rename,
+    /// so callers should follow a successful rename with
+    /// <see cref="RequestNodesAsync"/> to pick up the new value.
+    /// </summary>
+    public async Task<NodeRenameResult> NodeRenameAsync(string nodeId, string displayName)
+    {
+        if (string.IsNullOrWhiteSpace(nodeId))
+            return new NodeRenameResult(false, ErrorMessage: "nodeId required");
+        var trimmed = displayName?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(trimmed))
+            return new NodeRenameResult(false, ErrorMessage: "displayName required");
+        if (!IsConnected)
+            return new NodeRenameResult(false, ErrorMessage: "Gateway connection is not open");
+
+        try
+        {
+            var response = await SendWizardRequestAsync(
+                "node.rename",
+                new { nodeId, displayName = trimmed });
+
+            var returnedNodeId = response.ValueKind == JsonValueKind.Object &&
+                                 response.TryGetProperty("nodeId", out var idEl)
+                ? idEl.GetString()
+                : nodeId;
+            var returnedDisplayName = response.ValueKind == JsonValueKind.Object &&
+                                      response.TryGetProperty("displayName", out var nameEl)
+                ? nameEl.GetString() ?? trimmed
+                : trimmed;
+            return new NodeRenameResult(true, returnedNodeId, returnedDisplayName);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Gateway business error (e.g. "missing scope: operator.pairing",
+            // "unknown nodeId"). Surface this verbatim so the user sees an
+            // actionable message.
+            _logger.Warn($"node.rename rejected: {ex.Message}");
+            return new NodeRenameResult(false, ErrorMessage: ex.Message);
+        }
+        catch (Exception ex)
+        {
+            // Transport / timeout / unexpected exception. Don't leak raw
+            // exception text into the UI — return null so the caller uses
+            // its localized fallback string.
+            _logger.Warn($"node.rename failed: {ex.Message}");
+            return new NodeRenameResult(false, ErrorMessage: null);
+        }
     }
 
     public async Task RequestDevicePairListAsync()
@@ -889,7 +1113,7 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
         _pendingWizardResponses.Clear();
     }
 
-    private void TrackPendingChatSend(string requestId, TaskCompletionSource<bool> completion)
+    private void TrackPendingChatSend(string requestId, TaskCompletionSource<ChatSendResult> completion)
     {
         lock (_pendingChatSendLock)
         {
@@ -905,7 +1129,7 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
         }
     }
 
-    private TaskCompletionSource<bool>? TakePendingChatSend(string? requestId)
+    private TaskCompletionSource<ChatSendResult>? TakePendingChatSend(string? requestId)
     {
         if (string.IsNullOrWhiteSpace(requestId))
         {
@@ -978,7 +1202,7 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
                 return;
             }
 
-            pendingChatSend.TrySetResult(true);
+            pendingChatSend.TrySetResult(ParseChatSendResult(root));
             return;
         }
 
@@ -992,9 +1216,12 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
             }
             else if (root.TryGetProperty("payload", out var wizPayload))
             {
-                // Log the payload kind for debugging
-                var wizardPayloadText = TokenSanitizer.Sanitize(wizPayload.ToString());
-                _logger.Info($"Wizard response payload kind={wizPayload.ValueKind}, raw={wizardPayloadText[..Math.Min(200, wizardPayloadText.Length)]}");
+                // HIGH: never log the wizard payload body — even after token
+                // sanitisation it can include prompts, tool args, and chat
+                // content. Log shape only; full payload is available in the
+                // gateway's own server-side logs if engineering needs it.
+                var wizardPayloadLen = wizPayload.ValueKind == JsonValueKind.Undefined ? 0 : wizPayload.GetRawText().Length;
+                _logger.Info($"Wizard response payload kind={wizPayload.ValueKind} len={wizardPayloadLen}");
                 wizardCompletion.TrySetResult(wizPayload.Clone());
             }
             else
@@ -1208,6 +1435,36 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
             default:
                 return false;
         }
+    }
+
+    private static ChatSendResult ParseChatSendResult(JsonElement root)
+    {
+        string? runId = null;
+        string? sessionKey = null;
+        var cached = false;
+
+        if (root.TryGetProperty("payload", out var payload) && payload.ValueKind == JsonValueKind.Object)
+        {
+            if (payload.TryGetProperty("runId", out var runIdProp))
+                runId = runIdProp.GetString();
+            if (payload.TryGetProperty("sessionKey", out var sessionKeyProp))
+                sessionKey = sessionKeyProp.GetString();
+        }
+
+        if (root.TryGetProperty("meta", out var meta) &&
+            meta.ValueKind == JsonValueKind.Object &&
+            meta.TryGetProperty("cached", out var cachedProp) &&
+            cachedProp.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            cached = cachedProp.GetBoolean();
+        }
+
+        return new ChatSendResult
+        {
+            RunId = runId,
+            SessionKey = sessionKey,
+            Cached = cached
+        };
     }
 
     private void HandleRequestError(string? method, JsonElement root)
@@ -1783,8 +2040,13 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
                 break;
             case "node.pair.requested":
             case "node.pair.resolved":
-                // Refresh node pair list when pairing state changes
+                // Refresh node pair list when pairing state changes. Also
+                // refresh node.list because resolved decisions (in particular
+                // "removed") drop the node from the gateway's known set, so
+                // any UI mirroring node.list would otherwise show stale data
+                // until the next poll.
                 _ = RequestNodePairListAsync();
+                _ = RequestNodesAsync();
                 break;
             case "device.pair.requested":
             case "device.pair.resolved":
@@ -1841,6 +2103,16 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
     private void HandleAgentEvent(JsonElement root)
     {
         if (!root.TryGetProperty("payload", out var payload)) return;
+
+        // HIGH: never log raw agent event JSON — it can carry prompts,
+        // tool args/outputs, and URLs. Log shape only (type + length).
+        try
+        {
+            var rawLen = root.GetRawText().Length;
+            var streamHint = payload.TryGetProperty("stream", out var sh) ? sh.GetString() ?? "" : "";
+            _logger.Debug($"Agent event received: stream={streamHint} len={rawLen}");
+        }
+        catch { }
 
         // sessionKey is inside payload, not root
         var sessionKey = "unknown";
@@ -1968,7 +2240,10 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
             Label = label
         };
 
-        _logger.Info($"Tool: {toolName} ({phase}) — {label}");
+        // HIGH: the activity Label may include user-provided values
+        // (commands, queries, file paths, URLs from tool args). Log only
+        // the tool name + phase — the label is for UI consumption.
+        _logger.Info($"Tool: {toolName} ({phase})");
         ActivityChanged?.Invoke(this, activity);
 
         // Update tracked session
@@ -1980,34 +2255,49 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
 
     private void HandleChatEvent(JsonElement root)
     {
+        // HIGH 4: never log chat content. Log shape only — the raw payload
+        // can include user prompts, assistant text, tool output, and even
+        // bearer tokens routed through the gateway in some flows.
         var rawText = root.GetRawText();
-        _logger.Debug($"Chat event received: {rawText[..Math.Min(200, rawText.Length)]}");
+        _logger.Debug($"Chat event received: len={rawText.Length}");
         
         if (!root.TryGetProperty("payload", out var payload)) return;
+        EmitRawChatEvent(payload);
+
+        // Extract sessionKey for the timeline-driving event.
+        var sessionKey = "main";
+        if (payload.TryGetProperty("sessionKey", out var skProp))
+            sessionKey = skProp.GetString() ?? "main";
+
+        // Best-effort usage extraction — gateway emits this only on terminal
+        // (state="final") events in practice; we still read it defensively
+        // from common locations so any reasonable shape lights up the chat
+        // footer pills.
+        var (inTok, outTok, respTok, ctxPct) = ExtractChatUsage(payload);
 
         // Try new format: payload.message.role + payload.message.content[].text
         if (payload.TryGetProperty("message", out var message))
         {
-            if (message.TryGetProperty("role", out var role) && role.GetString() == "assistant")
+            var role = message.TryGetProperty("role", out var roleProp) ? roleProp.GetString() ?? "" : "";
+            var state = payload.TryGetProperty("state", out var stateProp) ? stateProp.GetString() : null;
+
+            // Usage block may also live on the inner ``message`` object.
+            if (inTok is null && outTok is null && respTok is null && ctxPct is null)
+                (inTok, outTok, respTok, ctxPct) = ExtractChatUsage(message);
+
+            if (message.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array)
             {
-                // Extract text from content array
-                if (message.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array)
+                var text = ExtractMessageText(message);
+                if (string.IsNullOrEmpty(text)) return;
+
+                EmitChatMessageReceived(sessionKey, role, text, state, inTok, outTok, respTok, ctxPct);
+
+                if (role == "assistant" && string.Equals(state, "final", StringComparison.OrdinalIgnoreCase))
                 {
-                    foreach (var item in content.EnumerateArray())
-                    {
-                        if (item.TryGetProperty("type", out var type) && type.GetString() == "text" &&
-                            item.TryGetProperty("text", out var textProp))
-                        {
-                            var text = textProp.GetString() ?? "";
-                            if (!string.IsNullOrEmpty(text) && 
-                                payload.TryGetProperty("state", out var state) && 
-                                state.GetString() == "final")
-                            {
-                                _logger.Info($"Assistant response: {text[..Math.Min(100, text.Length)]}...");
-                                EmitChatNotification(text);
-                            }
-                        }
-                    }
+                    // HIGH 4: log shape only — content previously
+                    // surfaced in the operator log.
+                    _logger.Info($"Assistant response: role={role} state={state} len={text.Length}");
+                    EmitChatNotification(text);
                 }
             }
         }
@@ -2016,13 +2306,125 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
         else if (payload.TryGetProperty("text", out var textProp))
         {
             var text = textProp.GetString() ?? "";
-            if (payload.TryGetProperty("role", out var role) &&
-                role.GetString() == "assistant" &&
-                !string.IsNullOrEmpty(text))
+            var role = payload.TryGetProperty("role", out var roleProp) ? roleProp.GetString() ?? "" : "";
+            var state = payload.TryGetProperty("state", out var stateProp) ? stateProp.GetString() : null;
+
+            if (!string.IsNullOrEmpty(text))
             {
-                _logger.Info($"Assistant response (legacy): {text[..Math.Min(100, text.Length)]}");
-                EmitChatNotification(text);
+                EmitChatMessageReceived(sessionKey, role, text, state, inTok, outTok, respTok, ctxPct);
+
+                if (role == "assistant")
+                {
+                    // HIGH 4: log shape only.
+                    _logger.Info($"Assistant response (legacy): role={role} state={state} len={text.Length}");
+                    EmitChatNotification(text);
+                }
             }
+        }
+    }
+
+    /// <summary>
+    /// Defensive extraction of a usage / token block from a chat event
+    /// payload. Walks several known shapes: <c>usage.{input,output,total,
+    /// inputTokens,outputTokens,totalTokens,promptTokens,completionTokens}</c>
+    /// plus a few alternate top-level keys (<c>tokens</c>, <c>contextPercent</c>,
+    /// <c>contextUsage</c>). Returns nulls when nothing matches; callers
+    /// surface those as omitted footer pills.
+    /// </summary>
+    private static (int? input, int? output, int? response, int? contextPct)
+        ExtractChatUsage(JsonElement node)
+    {
+        if (node.ValueKind != JsonValueKind.Object) return (null, null, null, null);
+
+        int? input = null, output = null, response = null, ctx = null;
+
+        static int? ReadInt(JsonElement e, string key)
+        {
+            if (!e.TryGetProperty(key, out var v)) return null;
+            return v.ValueKind switch
+            {
+                JsonValueKind.Number when v.TryGetInt32(out var i) => i,
+                JsonValueKind.Number => (int)v.GetDouble(),
+                _ => null
+            };
+        }
+
+        // Walk usage / tokens nested objects.
+        foreach (var key in new[] { "usage", "tokens", "tokenUsage" })
+        {
+            if (!node.TryGetProperty(key, out var u) || u.ValueKind != JsonValueKind.Object)
+                continue;
+            input ??= ReadInt(u, "input") ?? ReadInt(u, "inputTokens") ?? ReadInt(u, "promptTokens");
+            output ??= ReadInt(u, "output") ?? ReadInt(u, "outputTokens") ?? ReadInt(u, "completionTokens");
+            response ??= ReadInt(u, "total") ?? ReadInt(u, "totalTokens") ?? ReadInt(u, "response") ?? ReadInt(u, "responseTokens");
+            ctx ??= ReadInt(u, "contextPercent") ?? ReadInt(u, "context") ?? ReadInt(u, "ctxPercent");
+        }
+
+        // Top-level fallbacks.
+        input ??= ReadInt(node, "inputTokens") ?? ReadInt(node, "promptTokens");
+        output ??= ReadInt(node, "outputTokens") ?? ReadInt(node, "completionTokens");
+        response ??= ReadInt(node, "totalTokens") ?? ReadInt(node, "responseTokens");
+        ctx ??= ReadInt(node, "contextPercent") ?? ReadInt(node, "ctxPercent");
+
+        // Synthesize total from input+output when only the parts are known.
+        if (response is null && input is int inN && output is int outN)
+            response = inN + outN;
+
+        return (input, output, response, ctx);
+    }
+
+    private void EmitChatMessageReceived(string sessionKey, string role, string text, string? state,
+        int? inputTokens = null, int? outputTokens = null, int? responseTokens = null, int? contextPct = null)
+    {
+        try
+        {
+            ChatMessageReceived?.Invoke(this, new ChatMessageInfo
+            {
+                SessionKey = sessionKey,
+                Role = role,
+                Text = text,
+                State = state,
+                InputTokens = inputTokens,
+                OutputTokens = outputTokens,
+                ResponseTokens = responseTokens,
+                ContextPercent = contextPct
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"ChatMessageReceived handler threw: {ex.Message}");
+        }
+    }
+
+    private void EmitRawChatEvent(JsonElement payload)
+    {
+        try
+        {
+            var stream = "chat";
+            if (payload.TryGetProperty("message", out var message) &&
+                message.TryGetProperty("role", out var roleProp))
+            {
+                stream = roleProp.GetString() ?? stream;
+            }
+            else if (payload.TryGetProperty("role", out var legacyRoleProp))
+            {
+                stream = legacyRoleProp.GetString() ?? stream;
+            }
+
+            var evt = new AgentEventInfo
+            {
+                RunId = payload.TryGetProperty("runId", out var rid) ? rid.GetString() ?? "" : "",
+                Seq = payload.TryGetProperty("seq", out var seqProp) && seqProp.ValueKind == JsonValueKind.Number ? seqProp.GetInt32() : 0,
+                Stream = stream,
+                Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                Data = payload.Clone(),
+                SessionKey = payload.TryGetProperty("sessionKey", out var sk) ? sk.GetString() : null
+            };
+            ChatEventReceived?.Invoke(this, evt);
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"Failed to emit chat event: {ex.Message}");
         }
     }
 
@@ -2330,40 +2732,73 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
                     "unknown");
                 var connected = GetOptionalBool(nodeElement, "connected");
                 var online = GetOptionalBool(nodeElement, "online");
+                var paired = GetOptionalBool(nodeElement, "paired");
                 var capabilities = GetStringArray(nodeElement, "caps");
                 if (capabilities.Length == 0)
                     capabilities = GetStringArray(nodeElement, "capabilities");
                 var commands = GetStringArray(nodeElement, "declaredCommands");
                 if (commands.Length == 0)
                     commands = GetStringArray(nodeElement, "commands");
+                var disabledCommands = GetStringArray(nodeElement, "disabledCommands");
                 var permissions = GetBoolDictionary(nodeElement, "permissions");
+
+                var clientMode = GetString(nodeElement, "clientMode");
+
+                // Distinguish "user gave this node a name" from "we fell back
+                // to the id". The rename dialog uses this so it can prefill
+                // empty when the node has no explicit name (rather than
+                // pre-seeding the textbox with the id, which would otherwise
+                // get persisted as the new display name on Enter).
+                var explicitName = FirstNonEmpty(
+                    GetString(nodeElement, "displayName"),
+                    GetString(nodeElement, "name"),
+                    GetString(nodeElement, "label"));
 
                 buffer[count++] = new GatewayNodeInfo
                 {
                     NodeId = nodeId!,
-                    DisplayName = FirstNonEmpty(
-                        GetString(nodeElement, "displayName"),
-                        GetString(nodeElement, "name"),
-                        GetString(nodeElement, "label"),
-                        GetString(nodeElement, "shortId"),
-                        nodeId)!,
+                    DisplayName = !string.IsNullOrWhiteSpace(explicitName)
+                        ? explicitName!
+                        : FirstNonEmpty(GetString(nodeElement, "shortId"), nodeId)!,
+                    HasExplicitDisplayName = !string.IsNullOrWhiteSpace(explicitName),
                     Mode = FirstNonEmpty(
                         GetString(nodeElement, "mode"),
-                        GetString(nodeElement, "clientMode"),
+                        clientMode,
                         "node")!,
                     Status = status!,
                     Platform = FirstNonEmpty(
                         GetString(nodeElement, "platform"),
                         GetString(nodeElement, "os")),
-                    LastSeen = ParseUnixTimestampMs(nodeElement, "lastSeenAt") ??
+                    // Gateway NodeListNode wire schema uses *Ms suffix; older
+                    // fallbacks kept for compatibility with mocks/tests.
+                    // ConnectedAt is parsed independently below — do NOT fall
+                    // back to it here, otherwise the UI shows the same value
+                    // twice as both "Connected Xm ago" and "Seen Xm ago".
+                    LastSeen = ParseUnixTimestampMs(nodeElement, "lastSeenAtMs") ??
+                               ParseUnixTimestampMs(nodeElement, "lastSeenAt") ??
                                ParseUnixTimestampMs(nodeElement, "lastSeen") ??
-                               ParseUnixTimestampMs(nodeElement, "updatedAt") ??
-                               ParseUnixTimestampMs(nodeElement, "connectedAt"),
+                               ParseUnixTimestampMs(nodeElement, "updatedAt"),
+                    ConnectedAt = ParseUnixTimestampMs(nodeElement, "connectedAtMs") ??
+                                  ParseUnixTimestampMs(nodeElement, "connectedAt"),
+                    ApprovedAt = ParseUnixTimestampMs(nodeElement, "approvedAtMs") ??
+                                 ParseUnixTimestampMs(nodeElement, "approvedAt"),
+                    LastSeenReason = GetString(nodeElement, "lastSeenReason"),
                     Capabilities = capabilities.ToList(),
                     Commands = commands.ToList(),
+                    DisabledCommands = disabledCommands.ToList(),
                     Permissions = permissions,
                     CapabilityCount = capabilities.Length,
                     CommandCount = commands.Length,
+                    Version = GetString(nodeElement, "version"),
+                    CoreVersion = GetString(nodeElement, "coreVersion"),
+                    UiVersion = GetString(nodeElement, "uiVersion"),
+                    ClientId = GetString(nodeElement, "clientId"),
+                    ClientMode = clientMode,
+                    DeviceFamily = GetString(nodeElement, "deviceFamily"),
+                    ModelIdentifier = GetString(nodeElement, "modelIdentifier"),
+                    RemoteIp = GetString(nodeElement, "remoteIp"),
+                    PathEnv = GetString(nodeElement, "pathEnv"),
+                    IsPaired = paired ?? false,
                     IsOnline = online ?? connected ?? status is "ok" or "online" or "connected" or "ready" or "active"
                 };
             }
