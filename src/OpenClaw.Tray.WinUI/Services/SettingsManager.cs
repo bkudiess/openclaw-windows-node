@@ -93,10 +93,15 @@ public class SettingsManager
     public bool ScreenRecordingConsentGiven { get; set; } = false;
     public bool CameraRecordingConsentGiven { get; set; } = false;
     /// <summary>
-    /// User's chosen base security level. Drives defaults for the
-    /// capability/sandbox/MCP settings via SecurityLevelResolver.
+    /// User's currently-effective security level. Flips to Custom on drift.
     /// </summary>
     public SecurityLevel SecurityLevel { get; set; } = SecurityLevel.Recommended;
+
+    /// <summary>
+    /// The preset the user actually chose — stable across per-setting drift.
+    /// Used by drift counter and "Reset to base level".
+    /// </summary>
+    public SecurityLevel SecurityBaseLevel { get; set; } = SecurityLevel.Recommended;
     public bool NodeLocationEnabled { get; set; } = true;
     public bool NodeBrowserProxyEnabled { get; set; } = true;
     public bool NodeSttEnabled { get; set; } = false;
@@ -140,6 +145,11 @@ public class SettingsManager
     public bool SystemRunAllowOutbound { get; set; } = false;
 
     // ── MXC sandbox: additional knobs (Sandbox page) ─────────────────
+    // Defaults are the conservative null/None values. The Recommended
+    // preset is written explicitly to settings.json on first launch by
+    // SettingsManager.ApplyFirstLaunchDefaultsIfNeeded() so the round-trip
+    // is symmetric (LockedDown's null folder access values stay null on
+    // reload, and Recommended's ReadOnly values are persisted explicitly).
     public SandboxClipboardMode SandboxClipboard { get; set; } = SandboxClipboardMode.None;
     public SandboxFolderAccess? SandboxDocumentsAccess { get; set; }
     public SandboxFolderAccess? SandboxDownloadsAccess { get; set; }
@@ -159,7 +169,20 @@ public class SettingsManager
 
         _settingsDirectory = settingsDirectory;
         _settingsFilePath = Path.Combine(settingsDirectory, "settings.json");
+        var isFirstLaunch = !File.Exists(_settingsFilePath);
         Load();
+
+        if (isFirstLaunch)
+        {
+            // First-launch migration: persist the Recommended preset's concrete
+            // values to settings.json so reloads round-trip cleanly and the
+            // drift counter starts at 0. Raw SettingsData defaults are the
+            // conservative null/None/off values (see comments there) — without
+            // this step a fresh install with SecurityLevel = Recommended would
+            // immediately report several settings as "differ from Recommended".
+            SecurityLevelResolver.ApplyTo(this, SecurityLevel.Recommended);
+            Save();
+        }
     }
 
     private static string GetDefaultSettingsDirectory()
@@ -212,6 +235,14 @@ public class SettingsManager
                     ScreenRecordingConsentGiven = loaded.ScreenRecordingConsentGiven;
                     CameraRecordingConsentGiven = loaded.CameraRecordingConsentGiven;
                     SecurityLevel = loaded.SecurityLevel;
+                    // SecurityBaseLevel was added in the privacy-IA redesign. Older
+                    // settings files don't have it (null when deserialized); fall
+                    // back to SecurityLevel if the user wasn't drifting, otherwise
+                    // Recommended.
+                    SecurityBaseLevel = loaded.SecurityBaseLevel
+                        ?? (loaded.SecurityLevel == SecurityLevel.Custom
+                            ? SecurityLevel.Recommended
+                            : loaded.SecurityLevel);
                     NodeLocationEnabled = loaded.NodeLocationEnabled;
                     NodeBrowserProxyEnabled = loaded.NodeBrowserProxyEnabled;
                     NodeSttEnabled = loaded.NodeSttEnabled;
@@ -335,6 +366,7 @@ public class SettingsManager
         ScreenRecordingConsentGiven = ScreenRecordingConsentGiven,
         CameraRecordingConsentGiven = CameraRecordingConsentGiven,
         SecurityLevel = SecurityLevel,
+        SecurityBaseLevel = SecurityBaseLevel,
         NodeLocationEnabled = NodeLocationEnabled,
         NodeBrowserProxyEnabled = NodeBrowserProxyEnabled,
         NodeSttEnabled = NodeSttEnabled,

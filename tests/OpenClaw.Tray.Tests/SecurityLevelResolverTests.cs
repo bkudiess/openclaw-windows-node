@@ -63,6 +63,9 @@ public sealed class SecurityLevelResolverTests : IDisposable
         Assert.Null(s.SandboxDesktopAccess);
         Assert.Equal(SandboxClipboardMode.None, s.SandboxClipboard);
 
+        // Timeout pinned at the conservative default
+        Assert.Equal(30_000, s.SandboxTimeoutMs);
+
         Assert.Equal(SecurityLevel.LockedDown, s.SecurityLevel);
     }
 
@@ -97,6 +100,9 @@ public sealed class SecurityLevelResolverTests : IDisposable
         Assert.Equal(SandboxFolderAccess.ReadOnly, s.SandboxDesktopAccess);
         Assert.Equal(SandboxClipboardMode.Read, s.SandboxClipboard);
 
+        // Same conservative timeout as Locked down
+        Assert.Equal(30_000, s.SandboxTimeoutMs);
+
         Assert.Equal(SecurityLevel.Recommended, s.SecurityLevel);
     }
 
@@ -127,6 +133,9 @@ public sealed class SecurityLevelResolverTests : IDisposable
         Assert.Equal(SandboxFolderAccess.ReadWrite, s.SandboxDownloadsAccess);
         Assert.Equal(SandboxFolderAccess.ReadWrite, s.SandboxDesktopAccess);
         Assert.Equal(SandboxClipboardMode.Both, s.SandboxClipboard);
+
+        // Trusted gives a longer per-command budget
+        Assert.Equal(60_000, s.SandboxTimeoutMs);
 
         Assert.Equal(SecurityLevel.Trusted, s.SecurityLevel);
     }
@@ -201,7 +210,66 @@ public sealed class SecurityLevelResolverTests : IDisposable
 
         var reloaded = new SettingsManager(_isolatedDir);
         Assert.Equal(SecurityLevel.LockedDown, reloaded.SecurityLevel);
+        Assert.Equal(SecurityLevel.LockedDown, reloaded.SecurityBaseLevel);
         Assert.False(reloaded.NodeSystemRunEnabled);
+    }
+
+    [Fact]
+    public void ApplyTo_WritesBothEffectiveAndBaseLevel()
+    {
+        // ApplyTo is the "user picked a preset" entry point — both SecurityLevel
+        // (effective) and SecurityBaseLevel (anchor) should match the picked level.
+        var s = new SettingsManager(_isolatedDir);
+        SecurityLevelResolver.ApplyTo(s, SecurityLevel.LockedDown);
+        Assert.Equal(SecurityLevel.LockedDown, s.SecurityLevel);
+        Assert.Equal(SecurityLevel.LockedDown, s.SecurityBaseLevel);
+
+        SecurityLevelResolver.ApplyTo(s, SecurityLevel.Trusted);
+        Assert.Equal(SecurityLevel.Trusted, s.SecurityLevel);
+        Assert.Equal(SecurityLevel.Trusted, s.SecurityBaseLevel);
+    }
+
+    [Fact]
+    public void DriftCount_UsesSecurityBaseLevel_NotEffectiveLevel()
+    {
+        // After a user picks Locked down and toggles one thing, the page sets
+        // SecurityLevel=Custom but leaves SecurityBaseLevel=LockedDown.
+        // DriftCount must measure against the base, not "fall back to Recommended".
+        var s = new SettingsManager(_isolatedDir);
+        SecurityLevelResolver.ApplyTo(s, SecurityLevel.LockedDown);
+        Assert.Equal(0, SecurityLevelResolver.DriftCount(s));
+
+        // Simulate the user toggling Camera ON (LockedDown defaults Camera OFF).
+        s.NodeCameraEnabled = true;
+        // Simulate what the page does on drift:
+        s.SecurityLevel = SecurityLevel.Custom;
+
+        // The base is still LockedDown, so Camera=on is 1 unit of drift.
+        Assert.Equal(1, SecurityLevelResolver.DriftCount(s));
+        Assert.Equal(SecurityLevel.LockedDown, s.SecurityBaseLevel);
+
+        // If DriftCount had wrongly used the effective level (Custom →
+        // Recommended fallback), Camera=on would NOT count as drift since
+        // Recommended also has Camera on. The fact we got 1 here proves
+        // the base-level path is being taken.
+    }
+
+    [Fact]
+    public void Custom_PreservesBaseLevel_AcrossSave()
+    {
+        // After drift, the saved file should remember which preset the user
+        // picked so a fresh process (or page navigation) keeps the anchor.
+        var s = new SettingsManager(_isolatedDir);
+        SecurityLevelResolver.ApplyTo(s, SecurityLevel.LockedDown);
+        s.NodeCameraEnabled = true;
+        s.SecurityLevel = SecurityLevel.Custom;
+        s.Save();
+
+        var reloaded = new SettingsManager(_isolatedDir);
+        Assert.Equal(SecurityLevel.Custom, reloaded.SecurityLevel);
+        Assert.Equal(SecurityLevel.LockedDown, reloaded.SecurityBaseLevel);
+        // Drift still computed against LockedDown, not Recommended.
+        Assert.Equal(1, SecurityLevelResolver.DriftCount(reloaded));
     }
 
     [Fact]

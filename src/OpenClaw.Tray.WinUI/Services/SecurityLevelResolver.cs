@@ -126,6 +126,12 @@ internal static class SecurityLevelResolver
     /// Applies the level's defaults to <paramref name="settings"/> in-memory.
     /// Does NOT save — caller decides when to persist. Custom folders are
     /// intentionally preserved across switches.
+    ///
+    /// Writes BOTH <see cref="SettingsManager.SecurityLevel"/> AND
+    /// <see cref="SettingsManager.SecurityBaseLevel"/> so the user's intent
+    /// (the preset they picked) is the same as the effective level until
+    /// they drift. Per-setting toggle handlers later flip SecurityLevel to
+    /// Custom on drift while keeping SecurityBaseLevel anchored.
     /// </summary>
     public static void ApplyTo(SettingsManager settings, SecurityLevel level)
     {
@@ -149,18 +155,23 @@ internal static class SecurityLevelResolver
         settings.SandboxClipboard            = d.SandboxClipboard;
         settings.SandboxTimeoutMs            = d.SandboxTimeoutMs;
         settings.SecurityLevel               = level;
+        settings.SecurityBaseLevel           = level;
     }
 
     /// <summary>
     /// Counts how many of the level-driven settings differ from the
-    /// canonical defaults of the user's stored base level. Returns 0 when
-    /// settings match the base level exactly.
+    /// canonical defaults of the user's stored <see cref="SettingsManager.SecurityBaseLevel"/>.
+    /// Returns 0 when settings match the base level exactly.
     /// </summary>
     public static int DriftCount(SettingsManager settings)
     {
-        var baseLevel = settings.SecurityLevel == SecurityLevel.Custom
+        // SecurityBaseLevel is the user's chosen preset — stays anchored even
+        // when SecurityLevel flips to Custom. Defensive guard: if a corrupted
+        // settings file deserialized to Custom here somehow, fall back to
+        // Recommended (matches the SettingsManager.Load() migration path).
+        var baseLevel = settings.SecurityBaseLevel == SecurityLevel.Custom
             ? SecurityLevel.Recommended
-            : settings.SecurityLevel;
+            : settings.SecurityBaseLevel;
         var d = DefaultsFor(baseLevel);
         var n = 0;
         if (settings.NodeSystemRunEnabled        != d.NodeSystemRunEnabled)        n++;

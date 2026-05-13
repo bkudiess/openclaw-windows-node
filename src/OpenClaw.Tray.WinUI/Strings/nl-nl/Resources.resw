@@ -1607,7 +1607,7 @@ Voer op uw gateway-host (Mac/Linux) uit:
     <value>Vernieuwen</value>
   </data>
   <data name="CapabilitiesPage_TextBlock_10.Text" xml:space="preserve">
-    <value>🖥️ Deze computer</value>
+    <value>Privacy en beveiliging</value>
   </data>
   <data name="CapabilitiesPage_TextBlock_15.Text" xml:space="preserve">
     <value>Apparaatmogelijkheden die via de gateway aan agents worden aangeboden. Schakel in wat deze computer mag doen.</value>
@@ -2270,7 +2270,7 @@ Voer op uw gateway-host (Mac/Linux) uit:
     <value>Deze computer</value>
   </data>
   <data name="HubWindow_NavigationViewItem_130.Content" xml:space="preserve">
-    <value>Mogelijkheden</value>
+    <value>Privacy en beveiliging</value>
   </data>
   <data name="HubWindow_NavigationViewItem_133.Content" xml:space="preserve">
     <value>Instellingen</value>

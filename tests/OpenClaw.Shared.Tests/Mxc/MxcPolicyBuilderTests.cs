@@ -9,6 +9,10 @@ public class MxcPolicyBuilderTests
     [Fact]
     public void ForSystemRun_DefaultSettings_DefaultDenyAcrossTheBoard()
     {
+        // Raw SettingsData defaults are the conservative deny-everywhere
+        // values. The Recommended preset is applied at the SettingsManager
+        // layer on first launch (not here in SettingsData) so the JSON
+        // round-trip stays symmetric for users on Locked Down.
         var settings = new SettingsData(); // all defaults
         var policy = MxcPolicyBuilder.ForSystemRun(settings, "C:\\settings");
 

@@ -1606,7 +1606,7 @@
     <value>重新整理</value>
   </data>
   <data name="CapabilitiesPage_TextBlock_10.Text" xml:space="preserve">
-    <value>🖥️ 這部電腦</value>
+    <value>隱私權與安全性</value>
   </data>
   <data name="CapabilitiesPage_TextBlock_15.Text" xml:space="preserve">
     <value>透過閘道提供給代理程式的裝置功能。切換這部電腦可以執行的動作。</value>
@@ -2269,7 +2269,7 @@
     <value>這部電腦</value>
   </data>
   <data name="HubWindow_NavigationViewItem_130.Content" xml:space="preserve">
-    <value>功能</value>
+    <value>隱私權與安全性</value>
   </data>
   <data name="HubWindow_NavigationViewItem_133.Content" xml:space="preserve">
     <value>設定</value>

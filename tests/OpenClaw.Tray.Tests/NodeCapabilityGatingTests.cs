@@ -58,9 +58,13 @@ public sealed class NodeCapabilityGatingTests : IDisposable
     [Fact]
     public void DefaultSettings_PrivacySensitiveCapabilities_AreDisabled()
     {
+        // TTS is opt-in (lets agents speak through your speakers — output)
+        // but STT now defaults on to match the Recommended preset (input, but
+        // local-only Whisper transcription so audio never leaves this PC).
+        // The OS-level microphone permission still gates actual capture.
         var s = NewSettings();
         Assert.False(NodeCapabilityGating.ShouldRegisterTts(s));
-        Assert.False(NodeCapabilityGating.ShouldRegisterStt(s));
+        Assert.True(NodeCapabilityGating.ShouldRegisterStt(s));
     }
 
     [Fact]
@@ -86,14 +90,18 @@ public sealed class NodeCapabilityGatingTests : IDisposable
     }
 
     [Fact]
-    public void Stt_OnlyAdvertisedWhenExplicitlyEnabled()
+    public void Stt_RespectsExplicitToggle()
     {
+        // STT defaults on (Recommended preset), but flipping the toggle off
+        // must immediately stop advertising the capability — and back on
+        // must re-advertise. This pins the gate's responsiveness to the
+        // setting rather than the boot-time default.
         var s = NewSettings();
-        Assert.False(NodeCapabilityGating.ShouldRegisterStt(s));
-        s.NodeSttEnabled = true;
         Assert.True(NodeCapabilityGating.ShouldRegisterStt(s));
         s.NodeSttEnabled = false;
         Assert.False(NodeCapabilityGating.ShouldRegisterStt(s));
+        s.NodeSttEnabled = true;
+        Assert.True(NodeCapabilityGating.ShouldRegisterStt(s));
     }
 
     [Fact]

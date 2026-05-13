@@ -47,11 +47,26 @@ public class SettingsData
     public bool ScreenRecordingConsentGiven { get; set; } = false;
     public bool CameraRecordingConsentGiven { get; set; } = false;
     /// <summary>
-    /// User's chosen base security level. Drives defaults for the
-    /// capability/sandbox/MCP settings via SecurityLevelResolver.
-    /// "Custom" reflects manual drift from any base level.
+    /// User's currently-effective security level. Set to one of the three
+    /// preset values when settings match that preset exactly; flipped to
+    /// <see cref="SecurityLevel.Custom"/> when the user drifts. Custom is
+    /// a derived display state — the user's intent (the preset they picked)
+    /// lives in <see cref="SecurityBaseLevel"/>.
     /// </summary>
     public SecurityLevel SecurityLevel { get; set; } = SecurityLevel.Recommended;
+
+    /// <summary>
+    /// The preset the user actually chose. Stays put when individual settings
+    /// drift; only changes when the user picks a new preset. Used by the drift
+    /// counter ("3 settings differ from <base>") and the "Reset to base level"
+    /// action so a user who picked Locked Down and then toggled one thing
+    /// gets restored to Locked Down — not Recommended.
+    ///
+    /// Nullable so the deserializer can distinguish "missing field" (pre-IA
+    /// settings file) from "explicitly Recommended". The Load() path migrates
+    /// null to SecurityLevel (or Recommended when SecurityLevel is Custom).
+    /// </summary>
+    public SecurityLevel? SecurityBaseLevel { get; set; }
     public bool NodeLocationEnabled { get; set; } = true;
     public bool NodeBrowserProxyEnabled { get; set; } = true;
     public bool NodeSttEnabled { get; set; } = false;
@@ -126,15 +141,20 @@ public class SettingsData
     public bool SystemRunAllowOutbound { get; set; } = false;
 
     /// <summary>
-    /// Clipboard access policy inside the sandbox. Default <c>None</c> — the
-    /// sandboxed payload cannot see or change the user's clipboard.
+    /// Clipboard access policy inside the sandbox. Default <c>None</c>; the
+    /// user's chosen preset (Recommended on fresh install) writes the actual
+    /// value via SecurityLevelResolver.ApplyTo when SettingsManager applies
+    /// it on first launch.
     /// </summary>
     public SandboxClipboardMode SandboxClipboard { get; set; } = SandboxClipboardMode.None;
 
     /// <summary>
-    /// Per-folder access grants. Each well-known user folder can be
-    /// individually opened to the sandbox in read-only or read-write mode.
-    /// Default for all: <c>null</c> (blocked).
+    /// <summary>
+    /// Per-folder access grants. Default <c>null</c> (blocked). User's chosen
+    /// preset writes concrete values via SecurityLevelResolver.ApplyTo. Kept
+    /// nullable so the JSON round-trip is symmetric — applying LockedDown
+    /// writes null which the serializer omits and the deserializer restores
+    /// to null on load.
     /// </summary>
     public SandboxFolderAccess? SandboxDocumentsAccess { get; set; }
     public SandboxFolderAccess? SandboxDownloadsAccess { get; set; }

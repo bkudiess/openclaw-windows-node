@@ -1606,7 +1606,7 @@
     <value>刷新</value>
   </data>
   <data name="CapabilitiesPage_TextBlock_10.Text" xml:space="preserve">
-    <value>🖥️ 此计算机</value>
+    <value>隐私和安全</value>
   </data>
   <data name="CapabilitiesPage_TextBlock_15.Text" xml:space="preserve">
     <value>通过网关提供给代理的设备功能。切换此计算机可以执行的操作。</value>
@@ -2269,7 +2269,7 @@
     <value>此计算机</value>
   </data>
   <data name="HubWindow_NavigationViewItem_130.Content" xml:space="preserve">
-    <value>功能</value>
+    <value>隐私和安全</value>
   </data>
   <data name="HubWindow_NavigationViewItem_133.Content" xml:space="preserve">
     <value>设置</value>

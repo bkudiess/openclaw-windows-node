@@ -1606,7 +1606,7 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
     <value>Actualiser</value>
   </data>
   <data name="CapabilitiesPage_TextBlock_10.Text" xml:space="preserve">
-    <value>🖥️ Cet ordinateur</value>
+    <value>Confidentialité et sécurité</value>
   </data>
   <data name="CapabilitiesPage_TextBlock_15.Text" xml:space="preserve">
     <value>Fonctionnalités de l’appareil fournies aux agents via la passerelle. Activez ce que cet ordinateur peut faire.</value>
@@ -2269,7 +2269,7 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
     <value>Cet ordinateur</value>
   </data>
   <data name="HubWindow_NavigationViewItem_130.Content" xml:space="preserve">
-    <value>Fonctionnalités</value>
+    <value>Confidentialité et sécurité</value>
   </data>
   <data name="HubWindow_NavigationViewItem_133.Content" xml:space="preserve">
     <value>Paramètres</value>

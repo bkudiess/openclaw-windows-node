@@ -50,7 +50,8 @@ public static class SettingsChangeClassifier
             return SettingsChangeImpact.NodeReconnectRequired;
 
         // Node capability toggles → capability reload
-        if (prev.NodeCanvasEnabled != next.NodeCanvasEnabled ||
+        if (prev.NodeSystemRunEnabled != next.NodeSystemRunEnabled ||
+            prev.NodeCanvasEnabled != next.NodeCanvasEnabled ||
             prev.NodeScreenEnabled != next.NodeScreenEnabled ||
             prev.NodeCameraEnabled != next.NodeCameraEnabled ||
             prev.NodeLocationEnabled != next.NodeLocationEnabled ||

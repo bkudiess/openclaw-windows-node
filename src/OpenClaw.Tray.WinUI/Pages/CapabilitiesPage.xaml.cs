@@ -31,6 +31,7 @@ public sealed partial class CapabilitiesPage : Page
     private HubWindow? _hub;
     private bool _loading;
     private bool _mcpTokenRevealed;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _mcpRevealTimer;
     private List<ExecRuleRow> _execRules = new();
     public ObservableCollection<CustomFolderRow> CustomFolders { get; } = new();
 
@@ -124,7 +125,10 @@ public sealed partial class CapabilitiesPage : Page
     {
         if (_hub?.Settings is not { } s) return;
         var drift = SecurityLevelResolver.DriftCount(s);
-        var baseLevel = s.SecurityLevel == SecurityLevel.Custom ? SecurityLevel.Recommended : s.SecurityLevel;
+        // The user's anchored preset — survives per-setting drift.
+        var baseLevel = s.SecurityBaseLevel == SecurityLevel.Custom
+            ? SecurityLevel.Recommended
+            : s.SecurityBaseLevel;
 
         // Drift hint below the buttons (the only place we mention "Custom" now —
         // the hero card was removed because the blue accent border on the active
@@ -183,7 +187,11 @@ public sealed partial class CapabilitiesPage : Page
     private void OnResetLevelClick(object sender, RoutedEventArgs e)
     {
         if (_hub?.Settings is not { } s) return;
-        var baseLevel = s.SecurityLevel == SecurityLevel.Custom ? SecurityLevel.Recommended : s.SecurityLevel;
+        // Restore the user's actually-chosen preset (preserved across drift),
+        // not whatever SecurityLevel currently is (which could be Custom).
+        var baseLevel = s.SecurityBaseLevel == SecurityLevel.Custom
+            ? SecurityLevel.Recommended
+            : s.SecurityBaseLevel;
         ApplyLevel(baseLevel);
     }
 
@@ -200,8 +208,9 @@ public sealed partial class CapabilitiesPage : Page
     {
         if (_loading || _hub?.Settings is not { } s) return;
         var drift = SecurityLevelResolver.DriftCount(s);
-        var baseLevel = s.SecurityLevel == SecurityLevel.Custom ? SecurityLevel.Recommended : s.SecurityLevel;
-        s.SecurityLevel = drift > 0 ? SecurityLevel.Custom : baseLevel;
+        // SecurityLevel reflects the effective state; SecurityBaseLevel stays
+        // anchored to the preset the user picked. We only mutate SecurityLevel.
+        s.SecurityLevel = drift > 0 ? SecurityLevel.Custom : s.SecurityBaseLevel;
         UpdateLevelPicker();
     }
 
@@ -356,6 +365,7 @@ public sealed partial class CapabilitiesPage : Page
         s.SandboxTimeoutMs = secs * 1000;
         s.Save();
         _hub.RaiseSettingsSaved();
+        OnAnyLevelDrivenChanged();
     }
 
     private void OnMaxOutputChanged(object sender, SelectionChangedEventArgs e)
@@ -645,6 +655,7 @@ public sealed partial class CapabilitiesPage : Page
         if (_loading || _hub?.Settings is not { } s) return;
         s.NodeBrowserProxyEnabled = BrowserToggle.IsOn;
         s.Save(); _hub.RaiseSettingsSaved();
+        OnAnyLevelDrivenChanged();
     }
 
     private void OnCanvasToggled(object sender, RoutedEventArgs e)
@@ -652,6 +663,7 @@ public sealed partial class CapabilitiesPage : Page
         if (_loading || _hub?.Settings is not { } s) return;
         s.NodeCanvasEnabled = CanvasToggle.IsOn;
         s.Save(); _hub.RaiseSettingsSaved();
+        OnAnyLevelDrivenChanged();
     }
 
     // ─── MCP ──────────────────────────────────────────────────────────
@@ -725,31 +737,58 @@ public sealed partial class CapabilitiesPage : Page
     private void OnRevealMcpToken(object sender, RoutedEventArgs e)
     {
         var token = ReadMcpToken();
-        if (string.IsNullOrEmpty(token)) { McpTokenText.Text = "(no token — start MCP server first)"; return; }
+        if (string.IsNullOrEmpty(token))
+        {
+            McpTokenText.Text = "(no token — start MCP server first)";
+            return;
+        }
         if (_mcpTokenRevealed)
         {
-            McpTokenText.Text = "•••••••••••••";
-            _mcpTokenRevealed = false;
-            if (sender is Button b1) b1.Content = "Reveal";
+            HideMcpToken();
             return;
         }
         McpTokenText.Text = token;
         _mcpTokenRevealed = true;
-        if (sender is Button b2) b2.Content = "Hide";
-        // Auto-hide after 10s
-        var t = DispatcherQueue.CreateTimer();
-        t.Interval = TimeSpan.FromSeconds(10);
-        t.Tick += (_, _) =>
+        // RedEye glyph (revealed) → ChromeBackToWindow look-alike for "hide".
+        // We swap the FontIcon's glyph rather than the Button.Content because
+        // the Content is a FontIcon — replacing it with a string would erase
+        // the icon. E72E (View off) is the inverse of E7B3 (RedEye).
+        if (RevealTokenIcon is { } icon) icon.Glyph = "\uE72E";
+        ToolTipService.SetToolTip(RevealTokenButton, "Hide token");
+
+        // Auto-hide after 10s. Cancel any prior timer so back-to-back reveals
+        // get a fresh full window (without this, the older timer would still
+        // fire and prematurely hide the just-revealed token).
+        _mcpRevealTimer?.Stop();
+        _mcpRevealTimer = DispatcherQueue.CreateTimer();
+        _mcpRevealTimer.Interval = TimeSpan.FromSeconds(10);
+        _mcpRevealTimer.Tick += (t, _) =>
         {
-            if (_mcpTokenRevealed)
-            {
-                McpTokenText.Text = "•••••••••••••";
-                _mcpTokenRevealed = false;
-                if (sender is Button btn) btn.Content = "Reveal";
-            }
             t.Stop();
+            if (_mcpTokenRevealed) HideMcpToken();
         };
-        t.Start();
+        _mcpRevealTimer.Start();
+    }
+
+    private void HideMcpToken()
+    {
+        McpTokenText.Text = "•••••••••••••";
+        _mcpTokenRevealed = false;
+        if (RevealTokenIcon is { } icon) icon.Glyph = "\uE7B3";
+        ToolTipService.SetToolTip(RevealTokenButton, "Show token for 10 seconds");
+        _mcpRevealTimer?.Stop();
+        _mcpRevealTimer = null;
+    }
+
+    private void OnPageUnloaded(object sender, RoutedEventArgs e)
+    {
+        // Belt-and-suspenders cleanup: if user navigates away while the token
+        // is revealed, ensure the timer is cancelled and the token is masked
+        // (a new page instance would re-mask on Initialize anyway, but this
+        // releases the DispatcherQueueTimer reference promptly).
+        if (_mcpTokenRevealed) HideMcpToken();
+        _mcpRevealTimer?.Stop();
+        _mcpRevealTimer = null;
     }
 
     private void OnCopyMcpToken(object sender, RoutedEventArgs e)
@@ -770,6 +809,7 @@ public sealed partial class CapabilitiesPage : Page
         s.NodeCameraEnabled = CameraToggle.IsOn;
         SetPanelEnabled(CameraDetailPanel, CameraToggle.IsOn);
         s.Save(); _hub.RaiseSettingsSaved();
+        OnAnyLevelDrivenChanged();
     }
 
     private async void OnCameraAlwaysAllowChanged(object sender, RoutedEventArgs e)
@@ -808,6 +848,7 @@ public sealed partial class CapabilitiesPage : Page
         s.NodeScreenEnabled = ScreenToggle.IsOn;
         SetPanelEnabled(ScreenDetailPanel, ScreenToggle.IsOn);
         s.Save(); _hub.RaiseSettingsSaved();
+        OnAnyLevelDrivenChanged();
     }
 
     private async void OnScreenAlwaysAllowChanged(object sender, RoutedEventArgs e)
@@ -847,6 +888,7 @@ public sealed partial class CapabilitiesPage : Page
         SetPanelEnabled(SttDetailPanel, SttToggle.IsOn);
         s.Save(); _hub.RaiseSettingsSaved();
         UpdateSttEngineHint();
+        OnAnyLevelDrivenChanged();
     }
 
     private void UpdateSttEngineHint()
@@ -868,6 +910,7 @@ public sealed partial class CapabilitiesPage : Page
         s.NodeLocationEnabled = LocationToggle.IsOn;
         SetPanelEnabled(LocationDetailPanel, LocationToggle.IsOn);
         s.Save(); _hub.RaiseSettingsSaved();
+        OnAnyLevelDrivenChanged();
     }
 
     private void OnOpenWindowsLocation(object sender, RoutedEventArgs e)
