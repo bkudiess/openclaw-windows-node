@@ -21,8 +21,7 @@ public sealed partial class NodesPage : Page
     // Page-wide guard for ContentDialog reentrancy. WinUI 3 only permits one
     // ContentDialog per XamlRoot at a time, so a per-node guard is not enough
     // (Rename on node A and Forget on node B in quick succession would
-    // otherwise throw inside the second ShowAsync). Match the convention used
-    // by SandboxPage's _confirmDialogOpen field.
+    // otherwise throw inside the second ShowAsync).
     private bool _dialogOpen;
 
     public NodesPage()

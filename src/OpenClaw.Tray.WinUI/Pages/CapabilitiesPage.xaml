@@ -133,8 +133,6 @@
                 </StackPanel>
             </Border>
 
-            <!-- Node mode moved to Connection page (it's a connectivity concern, not a security level). -->
-
             <!-- ════════ ACTIONS section ════════ -->
             <TextBlock Text="Actions"
                        Style="{StaticResource SubtitleTextBlockStyle}"
@@ -768,8 +766,6 @@
                 </StackPanel>
             </Border>
 
-            <!-- Text to speech moved to the Voice & Audio page. -->
-
             <!-- ════════ GATEWAY section ════════ -->
             <TextBlock Text="From the gateway"
                        Style="{StaticResource SubtitleTextBlockStyle}"
@@ -793,8 +789,6 @@
                     </ItemsRepeater>
                 </StackPanel>
             </Border>
-
-            <!-- Node status moved to Settings page -->
 
         </StackPanel>
     </ScrollViewer>

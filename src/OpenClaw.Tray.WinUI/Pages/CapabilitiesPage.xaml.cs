@@ -21,10 +21,16 @@ namespace OpenClawTray.Pages;
 
 /// <summary>
 /// Single inline surface for every privacy/security/capability control on this PC.
-/// Replaces the previous Capabilities + Sandbox + Permissions + Voice cards. The
-/// Sandbox and Permissions pages still exist in the project for backward compat
-/// (no nav entries) but are not the source of truth — this page binds directly
-/// to SettingsManager and exec-policy.json.
+/// The 3-tier preset chooser at the top (Locked down / Recommended / Unprotected)
+/// drives sane defaults; everything below lets the user override individual
+/// settings, which flips <see cref="SettingsManager.SecurityLevel"/> to Custom
+/// while keeping <see cref="SettingsManager.SecurityBaseLevel"/> anchored on
+/// the chosen preset.
+///
+/// Replaces the previous Capabilities + Sandbox + Permissions pages (all three
+/// physically deleted — deep links to "sandbox" and "permissions" tags are
+/// aliased to this page in <c>HubWindow.TagToPageType</c>). TTS lives on the
+/// Voice &amp; Audio page; Node mode + Node status moved to Settings.
 /// </summary>
 public sealed partial class CapabilitiesPage : Page
 {
@@ -55,9 +61,7 @@ public sealed partial class CapabilitiesPage : Page
         _loading = true;
         try
         {
-            // Master node toggle moved to Connection page
-
-            // Run Programs
+            // Run programs
             RunProgramsToggle.IsOn = s.NodeSystemRunEnabled;
             SelectAccessTag(DocsAccessCombo, s.SandboxDocumentsAccess);
             SelectAccessTag(DownloadsAccessCombo, s.SandboxDownloadsAccess);
@@ -91,7 +95,7 @@ public sealed partial class CapabilitiesPage : Page
             SetPanelEnabled(McpDetailPanel, s.EnableMcpServer);
             UpdateMcpEndpoint();
 
-            // Sensors
+            // Capabilities (camera / screen / microphone / location)
             CameraToggle.IsOn = s.NodeCameraEnabled;
             SetPanelEnabled(CameraDetailPanel, s.NodeCameraEnabled);
             CameraAlwaysAllowCb.IsChecked = s.CameraRecordingConsentGiven;
@@ -106,7 +110,8 @@ public sealed partial class CapabilitiesPage : Page
             LocationToggle.IsOn = s.NodeLocationEnabled;
             SetPanelEnabled(LocationDetailPanel, s.NodeLocationEnabled);
 
-            // TTS lives on the Voice & Audio page now — settings still round-trip there.
+            // TTS settings still round-trip through SettingsManager; the UI
+            // for picking provider/voice lives on the Voice & Audio page now.
 
             // Gateway allowlist (read-only)
             UpdateGatewayAllowlist();
@@ -130,9 +135,9 @@ public sealed partial class CapabilitiesPage : Page
             ? SecurityLevel.Recommended
             : s.SecurityBaseLevel;
 
-        // Drift hint below the buttons (the only place we mention "Custom" now —
-        // the hero card was removed because the blue accent border on the active
-        // button already shows which level is selected).
+        // The drift hint below the buttons is the only place we mention
+        // "Custom" — the active button's blue accent border already signals
+        // which level is selected.
         DriftPanel.Visibility = drift > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (drift > 0)
             DriftText.Text = $"{drift} setting{(drift == 1 ? "" : "s")} differ from {LevelLabel(baseLevel)}.";
@@ -270,8 +275,7 @@ public sealed partial class CapabilitiesPage : Page
         DirectSelectedOverlay.Visibility = inContainer ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    private void UpdateRunProgramsRadios(SettingsManager s) => RefreshRunProgramsState(s);
-
+    // ─── Run programs: container vs direct ───────────────────────────────
     private void OnRunInContainerClick(object sender, RoutedEventArgs e)
     {
         if (_loading || _hub?.Settings is not { } s) return;
@@ -380,7 +384,7 @@ public sealed partial class CapabilitiesPage : Page
         }
     }
 
-    // Custom folder management is fully inline now (above) — no more Sandbox-page detour.
+    // ─── Custom folders (inline list with FolderPicker) ──────────────────
 
     private void UpdateCustomFolderSummary(SettingsManager s)
     {
