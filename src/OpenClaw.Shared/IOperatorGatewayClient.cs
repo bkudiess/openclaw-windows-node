@@ -87,6 +87,8 @@ public interface IOperatorGatewayClient
     Task RequestNodePairListAsync();
     Task<bool> NodePairApproveAsync(string requestId);
     Task<bool> NodePairRejectAsync(string requestId);
+    Task<NodeForgetResult> NodePairRemoveAsync(string nodeId);
+    Task<NodeRenameResult> NodeRenameAsync(string nodeId, string displayName);
     Task RequestDevicePairListAsync();
     Task<bool> DevicePairApproveAsync(string requestId);
     Task<bool> DevicePairRejectAsync(string requestId);
