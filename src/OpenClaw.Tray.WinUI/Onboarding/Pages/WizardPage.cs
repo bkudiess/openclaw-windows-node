@@ -81,6 +81,10 @@ public sealed class WizardPage : Component<OnboardingState>
                     var errMsg = payload.TryGetProperty("error", out var ep) ? ep.ToString() : "";
                     if (string.IsNullOrWhiteSpace(errMsg))
                         errMsg = LocalizationHelper.GetString("Onboarding_Wizard_StepError");
+                    else
+                        errMsg = TokenSanitizer.Sanitize(errMsg);
+                    if (errMsg == "Onboarding_Wizard_StepError")
+                        errMsg = "An error occurred processing this step";
                     setErrorMsg(errMsg);
                     setWizardState("error");
                     SaveState("error", errMsg);
