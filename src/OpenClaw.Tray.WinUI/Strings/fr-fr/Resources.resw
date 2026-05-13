@@ -1086,6 +1086,15 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
   <data name="Onboarding_Finish" xml:space="preserve">
     <value>Terminer</value>
   </data>
+  <data name="Onboarding_IncompleteSetup_Title" xml:space="preserve">
+    <value>La configuration n’est pas terminée</value>
+  </data>
+  <data name="Onboarding_IncompleteSetup_Body" xml:space="preserve">
+    <value>OpenClaw a encore besoin d’être configuré avant de pouvoir ouvrir le Hub. Utilisez Retour pour revenir à l’assistant ou aux étapes de connexion, corrigez la configuration manquante, puis réessayez Terminer.</value>
+  </data>
+  <data name="Onboarding_IncompleteSetup_Close" xml:space="preserve">
+    <value>D'accord</value>
+  </data>
   <data name="Onboarding_Welcome_Title" xml:space="preserve">
     <value>Bienvenue dans OpenClaw</value>
   </data>
