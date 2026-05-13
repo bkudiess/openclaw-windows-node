@@ -149,7 +149,7 @@ public sealed partial class CapabilitiesPage : Page
         HeroTitle.Text = heroTitle;
         HeroSubtext.Text = heroSubtext;
 
-        // Custom badge only shows when there's drift (no redundant "Recommended" pill alongside the title)
+        // Custom badge only when drift > 0
         if (drift > 0)
         {
             LevelBadge.Visibility = Visibility.Visible;
@@ -163,6 +163,18 @@ public sealed partial class CapabilitiesPage : Page
         DriftPanel.Visibility = drift > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (drift > 0)
             DriftText.Text = $"{drift} setting{(drift == 1 ? "" : "s")} differ from {LevelLabel(baseLevel)}.";
+
+        // Highlight the currently-selected preset card (Sandbox-style accent border).
+        // When drifted, no preset is highlighted — the user is in Custom territory.
+        var accent = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["AccentFillColorDefaultBrush"];
+        var clear = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"];
+        LockedDownButton.BorderBrush  = (drift == 0 && baseLevel == SecurityLevel.LockedDown)  ? accent : clear;
+        RecommendedButton.BorderBrush = (drift == 0 && baseLevel == SecurityLevel.Recommended) ? accent : clear;
+        TrustedButton.BorderBrush     = (drift == 0 && baseLevel == SecurityLevel.Trusted)     ? accent : clear;
+        var t = drift == 0 ? new Thickness(2) : new Thickness(1);
+        LockedDownButton.BorderThickness  = (drift == 0 && baseLevel == SecurityLevel.LockedDown)  ? t : new Thickness(1);
+        RecommendedButton.BorderThickness = (drift == 0 && baseLevel == SecurityLevel.Recommended) ? t : new Thickness(1);
+        TrustedButton.BorderThickness     = (drift == 0 && baseLevel == SecurityLevel.Trusted)     ? t : new Thickness(1);
     }
 
     private static string LevelLabel(SecurityLevel l) => l switch

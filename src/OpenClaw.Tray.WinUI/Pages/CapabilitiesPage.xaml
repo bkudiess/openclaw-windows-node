@@ -51,7 +51,7 @@
                         </Border>
                     </Grid>
 
-                    <!-- Preset buttons — Sandbox-style: bigger, single-line title with inline emoji-ish icon -->
+                    <!-- Preset buttons — Sandbox-style with colored emoji + selected-state accent border -->
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -63,11 +63,12 @@
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                                 VerticalAlignment="Stretch" VerticalContentAlignment="Top"
                                 Padding="20,18" MinHeight="130" CornerRadius="8"
+                                BorderThickness="1"
                                 Click="OnLevelLockedDownClick"
                                 AutomationProperties.AutomationId="LockedDownButton">
                             <StackPanel Spacing="8">
                                 <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                                    <FontIcon Glyph="&#xE72E;" FontSize="18" VerticalAlignment="Center"/>
+                                    <TextBlock Text="🔒" FontSize="18" VerticalAlignment="Center"/>
                                     <TextBlock Text="Locked down" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                 </StackPanel>
                                 <TextBlock Text="No programs. No internet. Camera and screen ask before each use."
@@ -80,11 +81,12 @@
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                                 VerticalAlignment="Stretch" VerticalContentAlignment="Top"
                                 Padding="20,18" MinHeight="130" CornerRadius="8"
+                                BorderThickness="1"
                                 Click="OnLevelRecommendedClick"
                                 AutomationProperties.AutomationId="RecommendedButton">
                             <StackPanel Spacing="8">
                                 <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                                    <FontIcon Glyph="&#xE73E;" FontSize="18" VerticalAlignment="Center"/>
+                                    <TextBlock Text="⚖️" FontSize="18" VerticalAlignment="Center"/>
                                     <TextBlock Text="Recommended" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                 </StackPanel>
                                 <TextBlock Text="Programs run in a container. Camera and screen ask first. No internet from programs."
@@ -97,11 +99,12 @@
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                                 VerticalAlignment="Stretch" VerticalContentAlignment="Top"
                                 Padding="20,18" MinHeight="130" CornerRadius="8"
+                                BorderThickness="1"
                                 Click="OnLevelTrustedClick"
                                 AutomationProperties.AutomationId="TrustedButton">
                             <StackPanel Spacing="8">
                                 <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                                    <FontIcon Glyph="&#xE930;" FontSize="18" VerticalAlignment="Center"/>
+                                    <TextBlock Text="🔓" FontSize="18" VerticalAlignment="Center"/>
                                     <TextBlock Text="Trusted (developer)" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                 </StackPanel>
                                 <TextBlock Text="Programs run directly. Camera and screen pre-approved. Internet allowed."
