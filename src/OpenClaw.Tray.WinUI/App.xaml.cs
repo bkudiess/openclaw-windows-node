@@ -4031,140 +4031,45 @@ public partial class App : Application
         }
     }
 
-    private void CopySupportContext()
+    private void CopyDiagnostic(string label, Func<GatewayCommandCenterState, string> format)
     {
         try
         {
-            var package = new DataPackage();
-            package.SetText(CommandCenterTextHelper.BuildSupportContext(BuildCommandCenterState()));
-            Clipboard.SetContent(package);
-            Logger.Info("Copied support context from deep link");
+            CopyTextToClipboard(format(BuildCommandCenterState()));
+            Logger.Info($"Copied {label} from deep link");
         }
         catch (Exception ex)
         {
-            Logger.Warn($"Failed to copy support context from deep link: {ex.Message}");
+            Logger.Warn($"Failed to copy {label} from deep link: {ex.Message}");
         }
     }
 
-    private void CopyDebugBundle()
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(CommandCenterTextHelper.BuildDebugBundle(BuildCommandCenterState()));
-            Clipboard.SetContent(package);
-            Logger.Info("Copied debug bundle from deep link");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"Failed to copy debug bundle from deep link: {ex.Message}");
-        }
-    }
+    private void CopySupportContext() =>
+        CopyDiagnostic("support context", CommandCenterTextHelper.BuildSupportContext);
 
-    private void CopyBrowserSetupGuidance()
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(CommandCenterTextHelper.BuildBrowserSetupGuidance(BuildCommandCenterState()));
-            Clipboard.SetContent(package);
-            Logger.Info("Copied browser setup guidance from deep link");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"Failed to copy browser setup guidance from deep link: {ex.Message}");
-        }
-    }
+    private void CopyDebugBundle() =>
+        CopyDiagnostic("debug bundle", CommandCenterTextHelper.BuildDebugBundle);
 
-    private void CopyPortDiagnostics()
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(CommandCenterTextHelper.BuildPortDiagnosticsSummary(BuildCommandCenterState().PortDiagnostics));
-            Clipboard.SetContent(package);
-            Logger.Info("Copied port diagnostics from deep link");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"Failed to copy port diagnostics from deep link: {ex.Message}");
-        }
-    }
+    private void CopyBrowserSetupGuidance() =>
+        CopyDiagnostic("browser setup guidance", CommandCenterTextHelper.BuildBrowserSetupGuidance);
 
-    private void CopyCapabilityDiagnostics()
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(CommandCenterTextHelper.BuildCapabilityDiagnosticsSummary(BuildCommandCenterState()));
-            Clipboard.SetContent(package);
-            Logger.Info("Copied capability diagnostics from deep link");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"Failed to copy capability diagnostics from deep link: {ex.Message}");
-        }
-    }
+    private void CopyPortDiagnostics() =>
+        CopyDiagnostic("port diagnostics", s => CommandCenterTextHelper.BuildPortDiagnosticsSummary(s.PortDiagnostics));
 
-    private void CopyNodeInventory()
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(CommandCenterTextHelper.BuildNodeInventorySummary(BuildCommandCenterState().Nodes));
-            Clipboard.SetContent(package);
-            Logger.Info("Copied node inventory from deep link");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"Failed to copy node inventory from deep link: {ex.Message}");
-        }
-    }
+    private void CopyCapabilityDiagnostics() =>
+        CopyDiagnostic("capability diagnostics", CommandCenterTextHelper.BuildCapabilityDiagnosticsSummary);
 
-    private void CopyChannelSummary()
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(CommandCenterTextHelper.BuildChannelSummaryText(BuildCommandCenterState().Channels));
-            Clipboard.SetContent(package);
-            Logger.Info("Copied channel summary from deep link");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"Failed to copy channel summary from deep link: {ex.Message}");
-        }
-    }
+    private void CopyNodeInventory() =>
+        CopyDiagnostic("node inventory", s => CommandCenterTextHelper.BuildNodeInventorySummary(s.Nodes));
 
-    private void CopyActivitySummary()
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(CommandCenterTextHelper.BuildActivitySummary(BuildCommandCenterState().RecentActivity));
-            Clipboard.SetContent(package);
-            Logger.Info("Copied activity summary from deep link");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"Failed to copy activity summary from deep link: {ex.Message}");
-        }
-    }
+    private void CopyChannelSummary() =>
+        CopyDiagnostic("channel summary", s => CommandCenterTextHelper.BuildChannelSummaryText(s.Channels));
 
-    private void CopyExtensibilitySummary()
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(CommandCenterTextHelper.BuildExtensibilitySummary(BuildCommandCenterState().Channels));
-            Clipboard.SetContent(package);
-            Logger.Info("Copied extensibility summary from deep link");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"Failed to copy extensibility summary from deep link: {ex.Message}");
-        }
-    }
+    private void CopyActivitySummary() =>
+        CopyDiagnostic("activity summary", s => CommandCenterTextHelper.BuildActivitySummary(s.RecentActivity));
+
+    private void CopyExtensibilitySummary() =>
+        CopyDiagnostic("extensibility summary", s => CommandCenterTextHelper.BuildExtensibilitySummary(s.Channels));
 
     private void OnGlobalHotkeyPressed(object? sender, EventArgs e)
     {
