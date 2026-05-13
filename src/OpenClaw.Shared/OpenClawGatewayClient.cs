@@ -693,6 +693,101 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
         return TrySendTrackedRequestAsync("node.pair.reject", new { requestId });
     }
 
+    /// <summary>
+    /// Removes a paired node from the gateway and waits for the gateway's
+    /// application-level response. Returns Success=true only when the
+    /// gateway confirms the removal — Success=false on transport failure,
+    /// missing scope, unknown nodeId, or any server-side rejection. The
+    /// gateway also broadcasts <c>node.pair.resolved</c> with
+    /// <c>decision="removed"</c> after success, which the broadcast handler
+    /// turns into a node.list + node.pair.list refresh.
+    /// </summary>
+    public async Task<NodeForgetResult> NodePairRemoveAsync(string nodeId)
+    {
+        if (string.IsNullOrWhiteSpace(nodeId))
+            return new NodeForgetResult(false, "nodeId required");
+        if (!IsConnected)
+            return new NodeForgetResult(false, "Gateway connection is not open");
+
+        try
+        {
+            // SendWizardRequestAsync awaits the matching ack frame and
+            // throws InvalidOperationException when the gateway responds
+            // with ok=false, so callers see a real failure result on
+            // rejection (missing scope, unknown nodeId) rather than a
+            // false success the moment the WS frame is sent.
+            await SendWizardRequestAsync("node.pair.remove", new { nodeId });
+            return new NodeForgetResult(true);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Gateway business error (e.g. "missing scope: operator.pairing",
+            // "unknown nodeId"). Surface this verbatim so the user sees an
+            // actionable message.
+            _logger.Warn($"node.pair.remove rejected: {ex.Message}");
+            return new NodeForgetResult(false, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            // Transport / timeout / unexpected exception. Don't leak raw
+            // exception text into the UI — return null so the caller uses
+            // its localized fallback string.
+            _logger.Warn($"node.pair.remove failed: {ex.Message}");
+            return new NodeForgetResult(false, ErrorMessage: null);
+        }
+    }
+
+    /// <summary>
+    /// Renames the display name of a paired node. Awaits the gateway's
+    /// response, so callers can rely on <see cref="NodeRenameResult.Success"/>
+    /// before refreshing UI state. The gateway does not broadcast a rename,
+    /// so callers should follow a successful rename with
+    /// <see cref="RequestNodesAsync"/> to pick up the new value.
+    /// </summary>
+    public async Task<NodeRenameResult> NodeRenameAsync(string nodeId, string displayName)
+    {
+        if (string.IsNullOrWhiteSpace(nodeId))
+            return new NodeRenameResult(false, ErrorMessage: "nodeId required");
+        var trimmed = displayName?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(trimmed))
+            return new NodeRenameResult(false, ErrorMessage: "displayName required");
+        if (!IsConnected)
+            return new NodeRenameResult(false, ErrorMessage: "Gateway connection is not open");
+
+        try
+        {
+            var response = await SendWizardRequestAsync(
+                "node.rename",
+                new { nodeId, displayName = trimmed });
+
+            var returnedNodeId = response.ValueKind == JsonValueKind.Object &&
+                                 response.TryGetProperty("nodeId", out var idEl)
+                ? idEl.GetString()
+                : nodeId;
+            var returnedDisplayName = response.ValueKind == JsonValueKind.Object &&
+                                      response.TryGetProperty("displayName", out var nameEl)
+                ? nameEl.GetString() ?? trimmed
+                : trimmed;
+            return new NodeRenameResult(true, returnedNodeId, returnedDisplayName);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Gateway business error (e.g. "missing scope: operator.pairing",
+            // "unknown nodeId"). Surface this verbatim so the user sees an
+            // actionable message.
+            _logger.Warn($"node.rename rejected: {ex.Message}");
+            return new NodeRenameResult(false, ErrorMessage: ex.Message);
+        }
+        catch (Exception ex)
+        {
+            // Transport / timeout / unexpected exception. Don't leak raw
+            // exception text into the UI — return null so the caller uses
+            // its localized fallback string.
+            _logger.Warn($"node.rename failed: {ex.Message}");
+            return new NodeRenameResult(false, ErrorMessage: null);
+        }
+    }
+
     public async Task RequestDevicePairListAsync()
     {
         if (_devicePairListUnsupported) return;
@@ -1940,8 +2035,13 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
                 break;
             case "node.pair.requested":
             case "node.pair.resolved":
-                // Refresh node pair list when pairing state changes
+                // Refresh node pair list when pairing state changes. Also
+                // refresh node.list because resolved decisions (in particular
+                // "removed") drop the node from the gateway's known set, so
+                // any UI mirroring node.list would otherwise show stale data
+                // until the next poll.
                 _ = RequestNodePairListAsync();
+                _ = RequestNodesAsync();
                 break;
             case "device.pair.requested":
             case "device.pair.resolved":
@@ -2627,40 +2727,73 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
                     "unknown");
                 var connected = GetOptionalBool(nodeElement, "connected");
                 var online = GetOptionalBool(nodeElement, "online");
+                var paired = GetOptionalBool(nodeElement, "paired");
                 var capabilities = GetStringArray(nodeElement, "caps");
                 if (capabilities.Length == 0)
                     capabilities = GetStringArray(nodeElement, "capabilities");
                 var commands = GetStringArray(nodeElement, "declaredCommands");
                 if (commands.Length == 0)
                     commands = GetStringArray(nodeElement, "commands");
+                var disabledCommands = GetStringArray(nodeElement, "disabledCommands");
                 var permissions = GetBoolDictionary(nodeElement, "permissions");
+
+                var clientMode = GetString(nodeElement, "clientMode");
+
+                // Distinguish "user gave this node a name" from "we fell back
+                // to the id". The rename dialog uses this so it can prefill
+                // empty when the node has no explicit name (rather than
+                // pre-seeding the textbox with the id, which would otherwise
+                // get persisted as the new display name on Enter).
+                var explicitName = FirstNonEmpty(
+                    GetString(nodeElement, "displayName"),
+                    GetString(nodeElement, "name"),
+                    GetString(nodeElement, "label"));
 
                 buffer[count++] = new GatewayNodeInfo
                 {
                     NodeId = nodeId!,
-                    DisplayName = FirstNonEmpty(
-                        GetString(nodeElement, "displayName"),
-                        GetString(nodeElement, "name"),
-                        GetString(nodeElement, "label"),
-                        GetString(nodeElement, "shortId"),
-                        nodeId)!,
+                    DisplayName = !string.IsNullOrWhiteSpace(explicitName)
+                        ? explicitName!
+                        : FirstNonEmpty(GetString(nodeElement, "shortId"), nodeId)!,
+                    HasExplicitDisplayName = !string.IsNullOrWhiteSpace(explicitName),
                     Mode = FirstNonEmpty(
                         GetString(nodeElement, "mode"),
-                        GetString(nodeElement, "clientMode"),
+                        clientMode,
                         "node")!,
                     Status = status!,
                     Platform = FirstNonEmpty(
                         GetString(nodeElement, "platform"),
                         GetString(nodeElement, "os")),
-                    LastSeen = ParseUnixTimestampMs(nodeElement, "lastSeenAt") ??
+                    // Gateway NodeListNode wire schema uses *Ms suffix; older
+                    // fallbacks kept for compatibility with mocks/tests.
+                    // ConnectedAt is parsed independently below — do NOT fall
+                    // back to it here, otherwise the UI shows the same value
+                    // twice as both "Connected Xm ago" and "Seen Xm ago".
+                    LastSeen = ParseUnixTimestampMs(nodeElement, "lastSeenAtMs") ??
+                               ParseUnixTimestampMs(nodeElement, "lastSeenAt") ??
                                ParseUnixTimestampMs(nodeElement, "lastSeen") ??
-                               ParseUnixTimestampMs(nodeElement, "updatedAt") ??
-                               ParseUnixTimestampMs(nodeElement, "connectedAt"),
+                               ParseUnixTimestampMs(nodeElement, "updatedAt"),
+                    ConnectedAt = ParseUnixTimestampMs(nodeElement, "connectedAtMs") ??
+                                  ParseUnixTimestampMs(nodeElement, "connectedAt"),
+                    ApprovedAt = ParseUnixTimestampMs(nodeElement, "approvedAtMs") ??
+                                 ParseUnixTimestampMs(nodeElement, "approvedAt"),
+                    LastSeenReason = GetString(nodeElement, "lastSeenReason"),
                     Capabilities = capabilities.ToList(),
                     Commands = commands.ToList(),
+                    DisabledCommands = disabledCommands.ToList(),
                     Permissions = permissions,
                     CapabilityCount = capabilities.Length,
                     CommandCount = commands.Length,
+                    Version = GetString(nodeElement, "version"),
+                    CoreVersion = GetString(nodeElement, "coreVersion"),
+                    UiVersion = GetString(nodeElement, "uiVersion"),
+                    ClientId = GetString(nodeElement, "clientId"),
+                    ClientMode = clientMode,
+                    DeviceFamily = GetString(nodeElement, "deviceFamily"),
+                    ModelIdentifier = GetString(nodeElement, "modelIdentifier"),
+                    RemoteIp = GetString(nodeElement, "remoteIp"),
+                    PathEnv = GetString(nodeElement, "pathEnv"),
+                    IsPaired = paired ?? false,
                     IsOnline = online ?? connected ?? status is "ok" or "online" or "connected" or "ready" or "active"
                 };
             }

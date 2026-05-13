@@ -1918,6 +1918,84 @@ Voer op uw gateway-host (Mac/Linux) uit:
   <data name="NodesPage_TextBlock_41.Text" xml:space="preserve">
     <value>🌐 Verbonden clients</value>
   </data>
+  <data name="NodesPage_Action_Rename" xml:space="preserve">
+    <value>Hernoemen</value>
+  </data>
+  <data name="NodesPage_Action_Forget" xml:space="preserve">
+    <value>Vergeten</value>
+  </data>
+  <data name="NodesPage_Action_MoreOptions" xml:space="preserve">
+    <value>Meer opties</value>
+  </data>
+  <data name="NodesPage_Label_Version" xml:space="preserve">
+    <value>Version</value>
+  </data>
+  <data name="NodesPage_Label_Hardware" xml:space="preserve">
+    <value>Hardware</value>
+  </data>
+  <data name="NodesPage_Label_Network" xml:space="preserve">
+    <value>Netwerk</value>
+  </data>
+  <data name="NodesPage_Label_Approved" xml:space="preserve">
+    <value>Goedgekeurd</value>
+  </data>
+  <data name="NodesPage_Label_Connected" xml:space="preserve">
+    <value>Verbonden</value>
+  </data>
+  <data name="NodesPage_Label_LastSeen" xml:space="preserve">
+    <value>Gezien</value>
+  </data>
+  <data name="NodesPage_Label_Capabilities" xml:space="preserve">
+    <value>Mogelijkheden</value>
+  </data>
+  <data name="NodesPage_Label_Permissions" xml:space="preserve">
+    <value>Machtigingen</value>
+  </data>
+  <data name="NodesPage_Label_PathEnv" xml:space="preserve">
+    <value>PATH</value>
+  </data>
+  <data name="NodesPage_Commands_Header" xml:space="preserve">
+    <value>Opdrachten ({0})</value>
+  </data>
+  <data name="NodesPage_Command_DisabledSuffix" xml:space="preserve">
+    <value> (uitgeschakeld)</value>
+  </data>
+  <data name="NodesPage_Rename_Title" xml:space="preserve">
+    <value>Knooppunt hernoemen</value>
+  </data>
+  <data name="NodesPage_Rename_Body" xml:space="preserve">
+    <value>Kies een nieuwe weergavenaam voor {0}.</value>
+  </data>
+  <data name="NodesPage_Rename_Placeholder" xml:space="preserve">
+    <value>Weergavenaam</value>
+  </data>
+  <data name="NodesPage_Rename_Primary" xml:space="preserve">
+    <value>Hernoemen</value>
+  </data>
+  <data name="NodesPage_Rename_Error_Empty" xml:space="preserve">
+    <value>Weergavenaam mag niet leeg zijn.</value>
+  </data>
+  <data name="NodesPage_Rename_Error_Generic" xml:space="preserve">
+    <value>Hernoemen mislukt.</value>
+  </data>
+  <data name="NodesPage_Forget_Title" xml:space="preserve">
+    <value>Knooppunt vergeten?</value>
+  </data>
+  <data name="NodesPage_Forget_Body" xml:space="preserve">
+    <value>Dit verwijdert de registratie van het onderstaande knooppunt bij de gateway. Het knooppunt moet opnieuw worden gekoppeld voordat het opnieuw verbinding kan maken.</value>
+  </data>
+  <data name="NodesPage_Forget_Warning" xml:space="preserve">
+    <value>Actieve operator- en chatsessies die op dit knooppunt zijn gericht, verliezen onmiddellijk toegang.</value>
+  </data>
+  <data name="NodesPage_Forget_Primary" xml:space="preserve">
+    <value>Knooppunt vergeten</value>
+  </data>
+  <data name="NodesPage_Forget_Error_Generic" xml:space="preserve">
+    <value>Knooppunt vergeten mislukt — gateway niet bereikbaar of toestemming geweigerd.</value>
+  </data>
+  <data name="NodesPage_Common_Cancel" xml:space="preserve">
+    <value>Annuleren</value>
+  </data>
   <data name="PermissionsPage_TextBlock_8.Text" xml:space="preserve">
     <value>🔐 Machtigingen</value>
   </data>

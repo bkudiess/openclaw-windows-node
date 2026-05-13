@@ -1917,6 +1917,84 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
   <data name="NodesPage_TextBlock_41.Text" xml:space="preserve">
     <value>🌐 Clients connectés</value>
   </data>
+  <data name="NodesPage_Action_Rename" xml:space="preserve">
+    <value>Renommer</value>
+  </data>
+  <data name="NodesPage_Action_Forget" xml:space="preserve">
+    <value>Oublier</value>
+  </data>
+  <data name="NodesPage_Action_MoreOptions" xml:space="preserve">
+    <value>Plus d'options</value>
+  </data>
+  <data name="NodesPage_Label_Version" xml:space="preserve">
+    <value>Version</value>
+  </data>
+  <data name="NodesPage_Label_Hardware" xml:space="preserve">
+    <value>Hardware</value>
+  </data>
+  <data name="NodesPage_Label_Network" xml:space="preserve">
+    <value>Réseau</value>
+  </data>
+  <data name="NodesPage_Label_Approved" xml:space="preserve">
+    <value>Approuvé</value>
+  </data>
+  <data name="NodesPage_Label_Connected" xml:space="preserve">
+    <value>Connecté</value>
+  </data>
+  <data name="NodesPage_Label_LastSeen" xml:space="preserve">
+    <value>Vu</value>
+  </data>
+  <data name="NodesPage_Label_Capabilities" xml:space="preserve">
+    <value>Capacités</value>
+  </data>
+  <data name="NodesPage_Label_Permissions" xml:space="preserve">
+    <value>Autorisations</value>
+  </data>
+  <data name="NodesPage_Label_PathEnv" xml:space="preserve">
+    <value>PATH</value>
+  </data>
+  <data name="NodesPage_Commands_Header" xml:space="preserve">
+    <value>Commandes ({0})</value>
+  </data>
+  <data name="NodesPage_Command_DisabledSuffix" xml:space="preserve">
+    <value> (désactivée)</value>
+  </data>
+  <data name="NodesPage_Rename_Title" xml:space="preserve">
+    <value>Renommer le nœud</value>
+  </data>
+  <data name="NodesPage_Rename_Body" xml:space="preserve">
+    <value>Choisissez un nouveau nom d'affichage pour {0}.</value>
+  </data>
+  <data name="NodesPage_Rename_Placeholder" xml:space="preserve">
+    <value>Nom d'affichage</value>
+  </data>
+  <data name="NodesPage_Rename_Primary" xml:space="preserve">
+    <value>Renommer</value>
+  </data>
+  <data name="NodesPage_Rename_Error_Empty" xml:space="preserve">
+    <value>Le nom d'affichage ne peut pas être vide.</value>
+  </data>
+  <data name="NodesPage_Rename_Error_Generic" xml:space="preserve">
+    <value>Échec du renommage.</value>
+  </data>
+  <data name="NodesPage_Forget_Title" xml:space="preserve">
+    <value>Oublier le nœud ?</value>
+  </data>
+  <data name="NodesPage_Forget_Body" xml:space="preserve">
+    <value>Cela supprimera l'enregistrement du nœud ci-dessous dans la passerelle. Le nœud devra se réappairer pour pouvoir se reconnecter.</value>
+  </data>
+  <data name="NodesPage_Forget_Warning" xml:space="preserve">
+    <value>Les sessions opérateur et de chat actives qui ciblent ce nœud perdront l'accès immédiatement.</value>
+  </data>
+  <data name="NodesPage_Forget_Primary" xml:space="preserve">
+    <value>Oublier le nœud</value>
+  </data>
+  <data name="NodesPage_Forget_Error_Generic" xml:space="preserve">
+    <value>Impossible d'oublier le nœud — passerelle inaccessible ou autorisation refusée.</value>
+  </data>
+  <data name="NodesPage_Common_Cancel" xml:space="preserve">
+    <value>Annuler</value>
+  </data>
   <data name="PermissionsPage_TextBlock_8.Text" xml:space="preserve">
     <value>🔐 Autorisations</value>
   </data>
