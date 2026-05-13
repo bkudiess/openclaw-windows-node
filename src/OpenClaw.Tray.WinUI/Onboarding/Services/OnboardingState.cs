@@ -14,6 +14,25 @@ public sealed class OnboardingState : IDisposable
     public event EventHandler? PageChanged;
 
     /// <summary>
+    /// Raised when the user explicitly dismisses the wizard without completing it
+    /// (e.g., clicks "Keep my setup" on the SetupWarning page when existing config
+    /// is present). <see cref="OnboardingWindow"/> handles this by closing the
+    /// window without firing <see cref="Finished"/> or running the "complete
+    /// onboarding" pipeline — existing settings and gateway connection are preserved.
+    /// </summary>
+    public event EventHandler? Dismissed;
+
+    /// <summary>
+    /// Raises <see cref="Dismissed"/>. Called by pages that offer a "keep my existing
+    /// setup and exit the wizard" option.
+    /// </summary>
+    public void Dismiss()
+    {
+        OpenClawTray.Services.Logger.Info("[OnboardingState] Dismiss invoked (user chose to keep existing setup)");
+        Dismissed?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
     /// The currently displayed route. Updated by OnboardingApp on navigation.
     /// </summary>
     public OnboardingRoute CurrentRoute { get; set; } = OnboardingRoute.SetupWarning;

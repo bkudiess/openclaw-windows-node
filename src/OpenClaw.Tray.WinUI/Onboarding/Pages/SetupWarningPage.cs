@@ -68,7 +68,12 @@ public sealed class SetupWarningPage : Component<OnboardingState>
 
         void CancelReplace()
         {
+            // "Keep my setup" — the user has existing configuration and wants to
+            // keep it. Dismiss the wizard entirely rather than just hiding the
+            // warning section (which previously left the user one nav-bar Next
+            // click away from entering setup anyway — Scott Hanselman repro).
             setConfirmingReplace(false);
+            Props.Dismiss();
         }
 
         void ChooseAdvanced()

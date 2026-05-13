@@ -324,6 +324,45 @@ public class OnboardingStateTests
 
     #endregion
 
+    #region Dismiss
+
+    [Fact]
+    public void Dismiss_FiresDismissedEvent()
+    {
+        var state = CreateState();
+        var fired = false;
+        state.Dismissed += (_, _) => fired = true;
+
+        state.Dismiss();
+
+        Assert.True(fired);
+    }
+
+    [Fact]
+    public void Dismiss_DoesNotFireFinishedEvent()
+    {
+        // "Keep my setup" must NOT route through the completion pipeline —
+        // OnboardingWindow relies on Finished being unraised so it skips
+        // TryCompleteOnboarding and leaves prior settings/connection untouched.
+        var state = CreateState();
+        var finished = false;
+        state.Finished += (_, _) => finished = true;
+
+        state.Dismiss();
+
+        Assert.False(finished);
+    }
+
+    [Fact]
+    public void Dismiss_DoesNotThrow_WithoutHandler()
+    {
+        var state = CreateState();
+        var ex = Record.Exception(() => state.Dismiss());
+        Assert.Null(ex);
+    }
+
+    #endregion
+
     #region NotifyRouteChanged
 
     [Fact]
