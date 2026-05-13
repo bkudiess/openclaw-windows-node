@@ -133,7 +133,7 @@ public sealed partial class CapabilitiesPage : Page
                 "Unprotected",
                 "Programs run with your full Windows access. Camera and screen never ask. The local MCP server is on. Use only if you trust every connected agent."),
             _ => (
-                "\uE73E",
+                "\uE83D",
                 "Recommended",
                 "Programs run in a container with limited access. Camera and screen ask before each use."),
         };

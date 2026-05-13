@@ -86,7 +86,7 @@
                                 AutomationProperties.AutomationId="RecommendedButton">
                             <StackPanel Spacing="8">
                                 <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                                    <TextBlock Text="⚖️" FontSize="18" VerticalAlignment="Center"/>
+                                    <TextBlock Text="🛡️" FontSize="18" VerticalAlignment="Center"/>
                                     <TextBlock Text="Recommended" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                 </StackPanel>
                                 <TextBlock Text="Programs run in a container. Camera and screen ask first. No internet from programs."
