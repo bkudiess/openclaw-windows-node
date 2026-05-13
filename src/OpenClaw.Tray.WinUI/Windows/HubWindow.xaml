@@ -132,8 +132,8 @@
             <NavigationViewItemSeparator/>
 
             <NavigationViewItemHeader x:Uid="HubWindow_NavigationViewItemHeader_129" Content="This Computer"/>
-            <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_130" Tag="capabilities" Content="Capabilities">
-                <NavigationViewItem.Icon><FontIcon Glyph="&#xE964;"/></NavigationViewItem.Icon>
+            <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_130" Tag="capabilities" Content="Security">
+                <NavigationViewItem.Icon><FontIcon Glyph="&#xE72E;"/></NavigationViewItem.Icon>
             </NavigationViewItem>
             <NavigationViewItem Tag="voice" Content="Voice &amp; Audio">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE720;"/></NavigationViewItem.Icon>

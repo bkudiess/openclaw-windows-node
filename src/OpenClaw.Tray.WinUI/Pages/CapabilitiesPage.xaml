@@ -8,7 +8,7 @@
         <StackPanel Padding="36,28" Spacing="14" HorizontalAlignment="Stretch" MaxWidth="980">
 
             <!-- ════ Title ════ -->
-            <TextBlock x:Uid="CapabilitiesPage_TextBlock_10" Text="This PC" Style="{StaticResource TitleTextBlockStyle}"/>
+            <TextBlock x:Uid="CapabilitiesPage_TextBlock_10" Text="Security" Style="{StaticResource TitleTextBlockStyle}"/>
             <TextBlock x:Name="HostnameText"
                        Style="{StaticResource SubtitleTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
@@ -461,11 +461,11 @@
                 </StackPanel>
             </Border>
 
-            <!-- ════════ SENSORS section ════════ -->
-            <TextBlock Text="Sensors"
+            <!-- ════════ CAPABILITIES section ════════ -->
+            <TextBlock Text="Capabilities"
                        Style="{StaticResource SubtitleTextBlockStyle}"
                        Margin="0,12,0,0"/>
-            <TextBlock Text="Things agents can perceive. Each also requires the matching Windows permission."
+            <TextBlock Text="Device-level access — what agents can see, hear, and locate. Each also requires the matching Windows permission."
                        Style="{StaticResource CaptionTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                        TextWrapping="Wrap"/>
