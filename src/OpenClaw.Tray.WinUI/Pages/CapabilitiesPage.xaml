@@ -134,20 +134,10 @@
 
             <!-- Node mode moved to Connection page (it's a connectivity concern, not a security level). -->
 
-            <!-- ════════ FINE-TUNE — everything below is what the Quick setup chooser writes for you ════════ -->
-            <StackPanel Spacing="2" Margin="0,8,0,4">
-                <TextBlock Text="Fine-tune"
-                           Style="{StaticResource SubtitleTextBlockStyle}"/>
-                <TextBlock Text="Adjust any of the individual permissions below. Changes here are tracked as drift above."
-                           Style="{StaticResource CaptionTextBlockStyle}"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                           TextWrapping="Wrap"/>
-            </StackPanel>
-
-            <!-- ──── Actions sub-section ──── -->
+            <!-- ════════ ACTIONS section ════════ -->
             <TextBlock Text="Actions"
-                       Style="{StaticResource BodyStrongTextBlockStyle}"
-                       Margin="0,8,0,0"/>
+                       Style="{StaticResource SubtitleTextBlockStyle}"
+                       Margin="0,16,0,0"/>
             <TextBlock Text="Things agents can do on this PC. Higher risk because they can change state or reach the network."
                        Style="{StaticResource CaptionTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -614,9 +604,9 @@
                 </StackPanel>
             </Border>
 
-            <!-- ──── Capabilities sub-section ──── -->
+            <!-- ════════ CAPABILITIES section ════════ -->
             <TextBlock Text="Capabilities"
-                       Style="{StaticResource BodyStrongTextBlockStyle}"
+                       Style="{StaticResource SubtitleTextBlockStyle}"
                        Margin="0,16,0,0"/>
             <TextBlock Text="Device-level access — what agents can see, hear, and locate. Each also requires the matching Windows permission."
                        Style="{StaticResource CaptionTextBlockStyle}"
@@ -760,9 +750,9 @@
 
             <!-- Text to speech moved to the Voice & Audio page. -->
 
-            <!-- ──── From the gateway sub-section ──── -->
+            <!-- ════════ GATEWAY section ════════ -->
             <TextBlock Text="From the gateway"
-                       Style="{StaticResource BodyStrongTextBlockStyle}"
+                       Style="{StaticResource SubtitleTextBlockStyle}"
                        Margin="0,16,0,0"/>
             <TextBlock Text="Read-only. These are the commands the connected gateway is willing to forward to this PC. Edit them on the gateway side."
                        Style="{StaticResource CaptionTextBlockStyle}"
