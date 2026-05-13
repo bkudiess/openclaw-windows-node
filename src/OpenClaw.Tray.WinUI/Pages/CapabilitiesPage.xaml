@@ -9,118 +9,107 @@
 
             <!-- ════ Title ════ -->
             <TextBlock x:Uid="CapabilitiesPage_TextBlock_10" Text="Security" Style="{StaticResource TitleTextBlockStyle}"/>
-            <TextBlock x:Name="HostnameText"
-                       Style="{StaticResource SubtitleTextBlockStyle}"
-                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
             <TextBlock x:Uid="CapabilitiesPage_TextBlock_15"
-                       Text="An agent connected through your gateway can use the capabilities below. Choose how protected this PC should be and what each agent can access."
+                       Text="Choose how protected this PC is, and what connected agents can access."
                        Style="{StaticResource BodyTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                        TextWrapping="Wrap" MaxWidth="680" Margin="0,0,0,4"/>
 
-            <!-- ════ Hero status + Security level (Sandbox-style hero) ════ -->
+            <!-- ════ Security level (hero) ════ -->
             <Border x:Name="SecurityLevelCard"
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="20"
+                    BorderThickness="1" CornerRadius="8" Padding="16"
                     AutomationProperties.AutomationId="SecurityLevelCard">
-                <StackPanel Spacing="16">
-                    <!-- Hero row: big icon · big title · subtext · status pill -->
-                    <Grid ColumnSpacing="16">
+                <StackPanel Spacing="14">
+                    <!-- Header row: icon · level + subtext · drift badge (only when drift > 0) -->
+                    <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="28"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <FontIcon Grid.Column="0" x:Name="HeroIcon"
-                                  Glyph="&#xE73E;" FontSize="32"
+                                  Glyph="&#xE73E;" FontSize="20"
                                   Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                  VerticalAlignment="Center"/>
+                                  VerticalAlignment="Center" HorizontalAlignment="Center"/>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                             <TextBlock x:Name="HeroTitle" Text="Recommended"
-                                       Style="{StaticResource TitleTextBlockStyle}"/>
+                                       Style="{StaticResource BodyStrongTextBlockStyle}"/>
                             <TextBlock x:Name="HeroSubtext"
-                                       Text="Programs run inside a Windows container. Camera and screen require approval. MCP server is off."
-                                       Style="{StaticResource BodyTextBlockStyle}"
+                                       Text="Programs run in a container with limited access. Camera and screen ask before each use."
+                                       Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        TextWrapping="Wrap"/>
                         </StackPanel>
                         <Border x:Name="LevelBadge" Grid.Column="2"
-                                CornerRadius="12" Padding="12,4"
-                                Background="{ThemeResource AccentFillColorTertiaryBrush}"
-                                VerticalAlignment="Center">
-                            <TextBlock x:Name="LevelBadgeText" Text="Recommended" FontSize="12"
-                                       Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"/>
+                                CornerRadius="10" Padding="10,2"
+                                Background="{ThemeResource SystemFillColorCautionBackgroundBrush}"
+                                VerticalAlignment="Center"
+                                Visibility="Collapsed">
+                            <TextBlock x:Name="LevelBadgeText" Text="Custom" FontSize="11"/>
                         </Border>
                     </Grid>
 
-                    <!-- Preset buttons (Sandbox-style — bigger, with icon + title + description) -->
-                    <StackPanel Spacing="6">
-                        <TextBlock Text="Choose a security level"
-                                   Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                        <TextBlock Text="Sets safe defaults for everything below. You can override anything afterward — changes show as 'Custom'."
-                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                   TextWrapping="Wrap"/>
-                        <Grid ColumnSpacing="12" Margin="0,4,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
+                    <!-- Preset buttons (Sandbox-style — large, prominent) -->
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
 
-                            <Button x:Name="LockedDownButton" Grid.Column="0"
-                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                                    VerticalAlignment="Stretch" VerticalContentAlignment="Top"
-                                    Padding="20,16" MinHeight="130" CornerRadius="8"
-                                    Click="OnLevelLockedDownClick"
-                                    AutomationProperties.AutomationId="LockedDownButton">
-                                <StackPanel Spacing="8">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <FontIcon Glyph="&#xE72E;" FontSize="18"/>
-                                        <TextBlock Text="Locked down" FontSize="16" FontWeight="SemiBold"/>
-                                    </StackPanel>
-                                    <TextBlock Text="No programs. No network. No camera or screen without asking."
-                                               TextWrapping="Wrap" FontSize="13"
-                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        <Button x:Name="LockedDownButton" Grid.Column="0"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                VerticalAlignment="Stretch" VerticalContentAlignment="Top"
+                                Padding="16,12" MinHeight="120" CornerRadius="8"
+                                Click="OnLevelLockedDownClick"
+                                AutomationProperties.AutomationId="LockedDownButton">
+                            <StackPanel Spacing="6">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE72E;" FontSize="16"/>
+                                    <TextBlock Text="Locked down" FontSize="14" FontWeight="SemiBold"/>
                                 </StackPanel>
-                            </Button>
+                                <TextBlock Text="No programs. No internet. Camera and screen ask before each use."
+                                           TextWrapping="Wrap" FontSize="12"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                            </StackPanel>
+                        </Button>
 
-                            <Button x:Name="RecommendedButton" Grid.Column="1"
-                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                                    VerticalAlignment="Stretch" VerticalContentAlignment="Top"
-                                    Padding="20,16" MinHeight="130" CornerRadius="8"
-                                    Click="OnLevelRecommendedClick"
-                                    AutomationProperties.AutomationId="RecommendedButton">
-                                <StackPanel Spacing="8">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <FontIcon Glyph="&#xE73E;" FontSize="18"/>
-                                        <TextBlock Text="Recommended" FontSize="16" FontWeight="SemiBold"/>
-                                    </StackPanel>
-                                    <TextBlock Text="Programs run in a container. Camera and screen ask first. Internet is blocked from program code."
-                                               TextWrapping="Wrap" FontSize="13"
-                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        <Button x:Name="RecommendedButton" Grid.Column="1"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                VerticalAlignment="Stretch" VerticalContentAlignment="Top"
+                                Padding="16,12" MinHeight="120" CornerRadius="8"
+                                Click="OnLevelRecommendedClick"
+                                AutomationProperties.AutomationId="RecommendedButton">
+                            <StackPanel Spacing="6">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE73E;" FontSize="16"/>
+                                    <TextBlock Text="Recommended" FontSize="14" FontWeight="SemiBold"/>
                                 </StackPanel>
-                            </Button>
+                                <TextBlock Text="Programs run in a container. Camera and screen ask first. No internet from programs."
+                                           TextWrapping="Wrap" FontSize="12"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                            </StackPanel>
+                        </Button>
 
-                            <Button x:Name="TrustedButton" Grid.Column="2"
-                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                                    VerticalAlignment="Stretch" VerticalContentAlignment="Top"
-                                    Padding="20,16" MinHeight="130" CornerRadius="8"
-                                    Click="OnLevelTrustedClick"
-                                    AutomationProperties.AutomationId="TrustedButton">
-                                <StackPanel Spacing="8">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <FontIcon Glyph="&#xE930;" FontSize="18"/>
-                                        <TextBlock Text="Trusted (developer)" FontSize="16" FontWeight="SemiBold"/>
-                                    </StackPanel>
-                                    <TextBlock Text="Programs run directly. Camera and screen pre-approved. Internet allowed. Requires confirmation."
-                                               TextWrapping="Wrap" FontSize="13"
-                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        <Button x:Name="TrustedButton" Grid.Column="2"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                VerticalAlignment="Stretch" VerticalContentAlignment="Top"
+                                Padding="16,12" MinHeight="120" CornerRadius="8"
+                                Click="OnLevelTrustedClick"
+                                AutomationProperties.AutomationId="TrustedButton">
+                            <StackPanel Spacing="6">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE930;" FontSize="16"/>
+                                    <TextBlock Text="Trusted (developer)" FontSize="14" FontWeight="SemiBold"/>
                                 </StackPanel>
-                            </Button>
-                        </Grid>
-                    </StackPanel>
+                                <TextBlock Text="Programs run directly. Camera and screen pre-approved. Internet allowed."
+                                           TextWrapping="Wrap" FontSize="12"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                            </StackPanel>
+                        </Button>
+                    </Grid>
 
                     <StackPanel x:Name="DriftPanel" Orientation="Horizontal" Spacing="8" Visibility="Collapsed">
                         <FontIcon Glyph="&#xE946;" FontSize="14"
@@ -154,11 +143,11 @@
                 <StackPanel Spacing="14">
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="28"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <FontIcon Grid.Column="0" Glyph="&#xE756;" FontSize="20"
+                        <FontIcon Grid.Column="0" HorizontalAlignment="Center" Glyph="&#xE756;" FontSize="20"
                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                   VerticalAlignment="Center"/>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
@@ -404,11 +393,11 @@
                     BorderThickness="1" CornerRadius="8" Padding="16">
                 <Grid ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="28"/>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <FontIcon Grid.Column="0" Glyph="&#xE774;" FontSize="20"
+                    <FontIcon Grid.Column="0" HorizontalAlignment="Center" Glyph="&#xE774;" FontSize="20"
                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                               VerticalAlignment="Center"/>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
@@ -429,11 +418,11 @@
                     BorderThickness="1" CornerRadius="8" Padding="16">
                 <Grid ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="28"/>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <FontIcon Grid.Column="0" Glyph="&#xE737;" FontSize="20"
+                    <FontIcon Grid.Column="0" HorizontalAlignment="Center" Glyph="&#xE737;" FontSize="20"
                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                               VerticalAlignment="Center"/>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
@@ -455,11 +444,11 @@
                 <StackPanel Spacing="10">
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="28"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <FontIcon Grid.Column="0" Glyph="&#xE968;" FontSize="20"
+                        <FontIcon Grid.Column="0" HorizontalAlignment="Center" Glyph="&#xE968;" FontSize="20"
                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                   VerticalAlignment="Center"/>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
@@ -524,11 +513,11 @@
                 <StackPanel Spacing="10">
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="28"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <FontIcon Grid.Column="0" Glyph="&#xE722;" FontSize="20"
+                        <FontIcon Grid.Column="0" HorizontalAlignment="Center" Glyph="&#xE722;" FontSize="20"
                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                   VerticalAlignment="Center"/>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
@@ -541,7 +530,7 @@
                         <ToggleSwitch x:Name="CameraToggle" Grid.Column="2" VerticalAlignment="Center"
                                       OnContent="" OffContent="" Toggled="OnCameraToggled"/>
                     </Grid>
-                    <StackPanel x:Name="CameraDetailPanel" Spacing="6" Visibility="Collapsed" Margin="32,0,0,0">
+                    <StackPanel x:Name="CameraDetailPanel" Spacing="6" Visibility="Collapsed" Margin="40,0,0,0">
                         <CheckBox x:Name="CameraAlwaysAllowCb" Content="Always allow — don't ask before each use"
                                   Checked="OnCameraAlwaysAllowChanged" Unchecked="OnCameraAlwaysAllowChanged"/>
                         <HyperlinkButton Content="Open Windows camera settings"
@@ -557,11 +546,11 @@
                 <StackPanel Spacing="10">
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="28"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <FontIcon Grid.Column="0" Glyph="&#xE7F4;" FontSize="20"
+                        <FontIcon Grid.Column="0" HorizontalAlignment="Center" Glyph="&#xE7F4;" FontSize="20"
                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                   VerticalAlignment="Center"/>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
@@ -574,7 +563,7 @@
                         <ToggleSwitch x:Name="ScreenToggle" Grid.Column="2" VerticalAlignment="Center"
                                       OnContent="" OffContent="" Toggled="OnScreenToggled"/>
                     </Grid>
-                    <StackPanel x:Name="ScreenDetailPanel" Spacing="6" Visibility="Collapsed" Margin="32,0,0,0">
+                    <StackPanel x:Name="ScreenDetailPanel" Spacing="6" Visibility="Collapsed" Margin="40,0,0,0">
                         <CheckBox x:Name="ScreenAlwaysAllowCb" Content="Always allow — don't ask before each recording"
                                   Checked="OnScreenAlwaysAllowChanged" Unchecked="OnScreenAlwaysAllowChanged"/>
                         <HyperlinkButton Content="Open Windows screen recording settings"
@@ -590,11 +579,11 @@
                 <StackPanel Spacing="10">
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="28"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <FontIcon Grid.Column="0" Glyph="&#xE720;" FontSize="20"
+                        <FontIcon Grid.Column="0" HorizontalAlignment="Center" Glyph="&#xE720;" FontSize="20"
                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                   VerticalAlignment="Center"/>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
@@ -608,7 +597,7 @@
                         <ToggleSwitch x:Name="SttToggle" Grid.Column="2" VerticalAlignment="Center"
                                       OnContent="" OffContent="" Toggled="OnSttToggled"/>
                     </Grid>
-                    <StackPanel x:Name="SttDetailPanel" Spacing="6" Visibility="Collapsed" Margin="32,0,0,0">
+                    <StackPanel x:Name="SttDetailPanel" Spacing="6" Visibility="Collapsed" Margin="40,0,0,0">
                         <TextBlock x:Name="SttEngineHint"
                                    Style="{StaticResource CaptionTextBlockStyle}"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
@@ -628,11 +617,11 @@
                 <StackPanel Spacing="10">
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="28"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <FontIcon Grid.Column="0" Glyph="&#xE81D;" FontSize="20"
+                        <FontIcon Grid.Column="0" HorizontalAlignment="Center" Glyph="&#xE81D;" FontSize="20"
                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                   VerticalAlignment="Center"/>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
@@ -645,7 +634,7 @@
                         <ToggleSwitch x:Name="LocationToggle" Grid.Column="2" VerticalAlignment="Center"
                                       OnContent="" OffContent="" Toggled="OnLocationToggled"/>
                     </Grid>
-                    <StackPanel x:Name="LocationDetailPanel" Spacing="6" Visibility="Collapsed" Margin="32,0,0,0">
+                    <StackPanel x:Name="LocationDetailPanel" Spacing="6" Visibility="Collapsed" Margin="40,0,0,0">
                         <HyperlinkButton Content="Open Windows location settings"
                                          Click="OnOpenWindowsLocation" Padding="0"/>
                     </StackPanel>
@@ -664,11 +653,11 @@
                 <StackPanel Spacing="10">
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="28"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <FontIcon Grid.Column="0" Glyph="&#xE767;" FontSize="20"
+                        <FontIcon Grid.Column="0" HorizontalAlignment="Center" Glyph="&#xE767;" FontSize="20"
                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                   VerticalAlignment="Center"/>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
@@ -682,7 +671,7 @@
                         <ToggleSwitch x:Name="TtsToggle" Grid.Column="2" VerticalAlignment="Center"
                                       OnContent="" OffContent="" Toggled="OnTtsToggled"/>
                     </Grid>
-                    <StackPanel x:Name="TtsDetailPanel" Spacing="8" Visibility="Collapsed" Margin="32,0,0,0">
+                    <StackPanel x:Name="TtsDetailPanel" Spacing="8" Visibility="Collapsed" Margin="40,0,0,0">
                         <ComboBox x:Name="TtsProviderCombo" x:Uid="CapabilitiesPage_TtsProviderComboBox" Header="Provider"
                                   SelectionChanged="OnTtsProviderChanged">
                             <ComboBoxItem x:Uid="CapabilitiesPage_TtsProviderPiper" Content="Piper — local, recommended" Tag="piper"/>

@@ -41,7 +41,6 @@ public sealed partial class CapabilitiesPage : Page
     public void Initialize(HubWindow hub)
     {
         _hub = hub;
-        HostnameText.Text = Environment.MachineName;
         LoadAllFromSettings();
     }
 
@@ -131,31 +130,36 @@ public sealed partial class CapabilitiesPage : Page
         var drift = SecurityLevelResolver.DriftCount(s);
         var baseLevel = s.SecurityLevel == SecurityLevel.Custom ? SecurityLevel.Recommended : s.SecurityLevel;
 
-        // Badge text (compact)
-        var badge = drift > 0
-            ? $"{LevelLabel(baseLevel)} + {drift} change{(drift == 1 ? "" : "s")}"
-            : LevelLabel(baseLevel);
-        LevelBadgeText.Text = badge;
-
-        // Hero status (Sandbox-style: big icon + title + subtext)
+        // Hero (Sandbox-style): icon + title + descriptive sentence
         var (heroGlyph, heroTitle, heroSubtext) = baseLevel switch
         {
             SecurityLevel.LockedDown => (
                 "\uE72E",
-                drift > 0 ? $"Locked down · {drift} change{(drift == 1 ? "" : "s")}" : "Locked down",
-                "Programs cannot run. Camera and screen ask before each use. Internet from program code is blocked."),
+                "Locked down",
+                "Programs can't run. Camera and screen ask before each use. No internet from program code."),
             SecurityLevel.Trusted => (
                 "\uE930",
-                drift > 0 ? $"Trusted · {drift} change{(drift == 1 ? "" : "s")}" : "Trusted (developer)",
+                "Trusted (developer)",
                 "Programs run directly with your full Windows access. Camera and screen are pre-approved. The local MCP server is on."),
             _ => (
                 "\uE73E",
-                drift > 0 ? $"Recommended · {drift} change{(drift == 1 ? "" : "s")}" : "Recommended",
-                "Programs run inside a Windows container with limited access. Camera and screen ask before each use."),
+                "Recommended",
+                "Programs run in a container with limited access. Camera and screen ask before each use."),
         };
         HeroIcon.Glyph = heroGlyph;
         HeroTitle.Text = heroTitle;
         HeroSubtext.Text = heroSubtext;
+
+        // Custom badge only shows when there's drift (no redundant "Recommended" pill alongside the title)
+        if (drift > 0)
+        {
+            LevelBadge.Visibility = Visibility.Visible;
+            LevelBadgeText.Text = $"Custom · {drift} change{(drift == 1 ? "" : "s")}";
+        }
+        else
+        {
+            LevelBadge.Visibility = Visibility.Collapsed;
+        }
 
         DriftPanel.Visibility = drift > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (drift > 0)
