@@ -5,41 +5,50 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel Padding="24" Spacing="16" HorizontalAlignment="Stretch" MaxWidth="980">
+        <StackPanel Padding="36,28" Spacing="14" HorizontalAlignment="Stretch" MaxWidth="980">
 
-            <!-- ════════════════════════════════════════════════════════════ -->
-            <!-- Title -->
-            <!-- ════════════════════════════════════════════════════════════ -->
-            <TextBlock x:Uid="CapabilitiesPage_TextBlock_10" Text="🖥️ This Computer" Style="{StaticResource TitleTextBlockStyle}"/>
+            <!-- ════ Title ════ -->
+            <TextBlock x:Uid="CapabilitiesPage_TextBlock_10" Text="This PC" Style="{StaticResource TitleTextBlockStyle}"/>
             <TextBlock x:Name="HostnameText"
                        Style="{StaticResource SubtitleTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-            <TextBlock Text="An agent connected through a gateway can use the capabilities below. Pick how safe you want this PC to be and what each agent can touch."
-                       Style="{StaticResource CaptionTextBlockStyle}"
+            <TextBlock x:Uid="CapabilitiesPage_TextBlock_15"
+                       Text="An agent connected through your gateway can use the capabilities below. Choose how protected this PC should be and what each agent can access."
+                       Style="{StaticResource BodyTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                       TextWrapping="Wrap" MaxWidth="640" Margin="0,0,0,8"/>
+                       TextWrapping="Wrap" MaxWidth="680" Margin="0,0,0,4"/>
 
-            <!-- ════════════════════════════════════════════════════════════ -->
-            <!-- Security Level (one-click profile) -->
-            <!-- ════════════════════════════════════════════════════════════ -->
+            <!-- ════ Security level ════ -->
             <Border x:Name="SecurityLevelCard"
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="16"
                     AutomationProperties.AutomationId="SecurityLevelCard">
                 <StackPanel Spacing="12">
-                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                        <FontIcon Glyph="&#xE72E;" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"/>
-                        <TextBlock Text="🛡️ Security level" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                        <Border x:Name="LevelBadge" CornerRadius="10" Padding="8,1"
-                                Background="{ThemeResource AccentFillColorTertiaryBrush}">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Grid.Column="0" Glyph="&#xE72E;" FontSize="20"
+                                  Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                  VerticalAlignment="Center"/>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                            <TextBlock Text="Security level" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                            <TextBlock Text="Choose how protected this PC is. Pick a profile to set safe defaults below, then override anything you like."
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <Border x:Name="LevelBadge" Grid.Column="2"
+                                CornerRadius="10" Padding="10,2"
+                                Background="{ThemeResource AccentFillColorTertiaryBrush}"
+                                VerticalAlignment="Center">
                             <TextBlock x:Name="LevelBadgeText" Text="Recommended" FontSize="11"
                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"/>
                         </Border>
-                    </StackPanel>
-                    <TextBlock Text="One click to set safe defaults for everything below. Override anything per-capability."
-                               Style="{StaticResource CaptionTextBlockStyle}"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    </Grid>
 
                     <Grid ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
@@ -50,11 +59,14 @@
 
                         <Button x:Name="LockedDownButton" Grid.Column="0"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                                Padding="12,10" Click="OnLevelLockedDownClick"
+                                Padding="14,12" Click="OnLevelLockedDownClick"
                                 AutomationProperties.AutomationId="LockedDownButton">
-                            <StackPanel Spacing="2">
-                                <TextBlock Text="🔒 Locked Down" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                                <TextBlock Text="Programs blocked. Ask before camera or screen."
+                            <StackPanel Spacing="4">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE72E;" FontSize="14" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Locked down" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                                </StackPanel>
+                                <TextBlock Text="Blocks program execution. Asks before camera and screen."
                                            Style="{StaticResource CaptionTextBlockStyle}"
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                            TextWrapping="Wrap"/>
@@ -63,11 +75,14 @@
 
                         <Button x:Name="RecommendedButton" Grid.Column="1"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                                Padding="12,10" Click="OnLevelRecommendedClick"
+                                Padding="14,12" Click="OnLevelRecommendedClick"
                                 AutomationProperties.AutomationId="RecommendedButton">
-                            <StackPanel Spacing="2">
-                                <TextBlock Text="⚖️ Recommended" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                                <TextBlock Text="Safe defaults. Programs run in a container."
+                            <StackPanel Spacing="4">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE73E;" FontSize="14" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Recommended" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                                </StackPanel>
+                                <TextBlock Text="Safe defaults. Programs run inside a container."
                                            Style="{StaticResource CaptionTextBlockStyle}"
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                            TextWrapping="Wrap"/>
@@ -76,11 +91,14 @@
 
                         <Button x:Name="TrustedButton" Grid.Column="2"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                                Padding="12,10" Click="OnLevelTrustedClick"
+                                Padding="14,12" Click="OnLevelTrustedClick"
                                 AutomationProperties.AutomationId="TrustedButton">
-                            <StackPanel Spacing="2">
-                                <TextBlock Text="🌐 Trusted (developer)" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                                <TextBlock Text="Programs run directly. Cam/screen pre-approved. Confirmation required."
+                            <StackPanel Spacing="4">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE930;" FontSize="14" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Trusted (developer)" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                                </StackPanel>
+                                <TextBlock Text="Programs run directly. Camera and screen pre-approved. Requires confirmation."
                                            Style="{StaticResource CaptionTextBlockStyle}"
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                            TextWrapping="Wrap"/>
@@ -89,7 +107,9 @@
                     </Grid>
 
                     <StackPanel x:Name="DriftPanel" Orientation="Horizontal" Spacing="8" Visibility="Collapsed">
-                        <FontIcon Glyph="&#xE946;" FontSize="14" Foreground="{ThemeResource SystemFillColorCautionBrush}" VerticalAlignment="Center"/>
+                        <FontIcon Glyph="&#xE946;" FontSize="14"
+                                  Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                  VerticalAlignment="Center"/>
                         <TextBlock x:Name="DriftText" VerticalAlignment="Center"
                                    Style="{StaticResource CaptionTextBlockStyle}"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
@@ -99,9 +119,7 @@
                 </StackPanel>
             </Border>
 
-            <!-- ════════════════════════════════════════════════════════════ -->
-            <!-- Master node toggle (kept compact — high-level enable) -->
-            <!-- ════════════════════════════════════════════════════════════ -->
+            <!-- ════ Node mode (master switch) ════ -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="16">
@@ -111,10 +129,12 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" Text="🔌" FontSize="22" VerticalAlignment="Center"/>
+                    <FontIcon Grid.Column="0" Glyph="&#xE839;" FontSize="20"
+                              Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                              VerticalAlignment="Center"/>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                        <TextBlock Text="Node Mode" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                        <TextBlock Text="Master switch — connects this PC to a gateway and exposes the capabilities below."
+                        <TextBlock Text="Node mode" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                        <TextBlock Text="Master switch. When on, this PC connects to a gateway and exposes the capabilities below."
                                    Style="{StaticResource CaptionTextBlockStyle}"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                    TextWrapping="Wrap"/>
@@ -125,32 +145,34 @@
                 </Grid>
             </Border>
 
-            <!-- ════════════════════════════════════════════════════════════ -->
-            <!-- Section header: ACT -->
-            <!-- ════════════════════════════════════════════════════════════ -->
-            <TextBlock Text="What agents can DO" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,8,0,0"/>
-            <TextBlock Text="Higher-risk capabilities — let agents take action on this PC."
+            <!-- ════════ ACTIONS section ════════ -->
+            <TextBlock Text="Actions"
+                       Style="{StaticResource SubtitleTextBlockStyle}"
+                       Margin="0,12,0,0"/>
+            <TextBlock Text="Things agents can do on this PC. Higher risk because they can change state or reach the network."
                        Style="{StaticResource CaptionTextBlockStyle}"
-                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                       TextWrapping="Wrap"/>
 
-            <!-- ⌨️ Run Programs — full inline detail (highest risk) -->
+            <!-- Run programs — comprehensive inline detail -->
             <Border x:Name="RunProgramsCard"
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="16">
-                <StackPanel Spacing="12">
-                    <!-- Header -->
+                <StackPanel Spacing="14">
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="⌨️" FontSize="22" VerticalAlignment="Center"/>
+                        <FontIcon Grid.Column="0" Glyph="&#xE756;" FontSize="20"
+                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                  VerticalAlignment="Center"/>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                            <TextBlock Text="Run Programs" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                            <TextBlock Text="Run programs" Style="{StaticResource BodyStrongTextBlockStyle}"/>
                             <TextBlock x:Name="RunProgramsSummary"
-                                       Text="Shell commands and scripts run by agents."
+                                       Text="Lets agents run shell commands, scripts, and programs on this PC."
                                        Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        TextWrapping="Wrap"/>
@@ -160,32 +182,30 @@
                                       AutomationProperties.AutomationId="RunProgramsToggle"/>
                     </Grid>
 
-                    <!-- MXC unavailable warning -->
                     <InfoBar x:Name="MxcUnavailableBar" IsOpen="False" IsClosable="False"
                              Severity="Warning"
                              Title="Container unavailable"
-                             Message="Container-based execution isn't supported on this machine. Switch to 'Direct, as you' below to allow commands to run (riskier), or fix the container setup first."/>
+                             Message="Container-based execution isn't supported on this PC. Switch to 'Direct' below to allow commands to run (less safe), or update Windows to add container support."/>
 
-                    <!-- Sub-controls only when the capability is ON -->
-                    <StackPanel x:Name="RunProgramsDetail" Spacing="14" Visibility="Collapsed">
+                    <StackPanel x:Name="RunProgramsDetail" Spacing="16" Visibility="Collapsed">
 
-                        <!-- HOW: container vs direct -->
+                        <!-- How -->
                         <StackPanel Spacing="6">
-                            <TextBlock Text="🏃 How programs run" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                            <TextBlock Text="How programs run" Style="{StaticResource BodyStrongTextBlockStyle}"/>
                             <RadioButton x:Name="RunInContainerRadio"
                                          GroupName="RunMode"
-                                         Content="In container (recommended) — programs run inside a Windows AppContainer with only the access you grant below"
+                                         Content="In a container (recommended) — programs run with only the access you grant below"
                                          Checked="OnRunInContainerChecked"/>
                             <RadioButton x:Name="RunDirectRadio"
                                          GroupName="RunMode"
-                                         Content="Direct, as you — programs have your full Windows access (no isolation). Requires confirmation."
+                                         Content="Direct — programs have your full Windows access. Requires confirmation."
                                          Checked="OnRunDirectChecked"/>
                         </StackPanel>
 
-                        <!-- WHAT (files) -->
+                        <!-- Files -->
                         <StackPanel Spacing="6" x:Name="FileAccessPanel">
-                            <TextBlock Text="📁 Files agents can reach (in container)" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <TextBlock Text="By default agents only see a temporary workspace folder. Grant access to user folders below."
+                            <TextBlock Text="Files (when in a container)" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                            <TextBlock Text="By default, agents only see a temporary workspace folder. Grant access to your user folders below."
                                        Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        TextWrapping="Wrap"/>
@@ -203,64 +223,64 @@
                                 <ComboBox Grid.Row="0" Grid.Column="1" x:Name="DocsAccessCombo"
                                           HorizontalAlignment="Stretch"
                                           SelectionChanged="OnDocsAccessChanged">
-                                    <ComboBoxItem Content="🚫 Blocked" Tag="None"/>
-                                    <ComboBoxItem Content="🔒 Read only" Tag="ReadOnly"/>
-                                    <ComboBoxItem Content="✏️ Read &amp; write" Tag="ReadWrite"/>
+                                    <ComboBoxItem Content="Blocked" Tag="None"/>
+                                    <ComboBoxItem Content="Read only" Tag="ReadOnly"/>
+                                    <ComboBoxItem Content="Read and write" Tag="ReadWrite"/>
                                 </ComboBox>
                                 <TextBlock Grid.Row="1" Grid.Column="0" Text="Downloads" VerticalAlignment="Center"/>
                                 <ComboBox Grid.Row="1" Grid.Column="1" x:Name="DownloadsAccessCombo"
                                           HorizontalAlignment="Stretch"
                                           SelectionChanged="OnDownloadsAccessChanged">
-                                    <ComboBoxItem Content="🚫 Blocked" Tag="None"/>
-                                    <ComboBoxItem Content="🔒 Read only" Tag="ReadOnly"/>
-                                    <ComboBoxItem Content="✏️ Read &amp; write" Tag="ReadWrite"/>
+                                    <ComboBoxItem Content="Blocked" Tag="None"/>
+                                    <ComboBoxItem Content="Read only" Tag="ReadOnly"/>
+                                    <ComboBoxItem Content="Read and write" Tag="ReadWrite"/>
                                 </ComboBox>
                                 <TextBlock Grid.Row="2" Grid.Column="0" Text="Desktop" VerticalAlignment="Center"/>
                                 <ComboBox Grid.Row="2" Grid.Column="1" x:Name="DesktopAccessCombo"
                                           HorizontalAlignment="Stretch"
                                           SelectionChanged="OnDesktopAccessChanged">
-                                    <ComboBoxItem Content="🚫 Blocked" Tag="None"/>
-                                    <ComboBoxItem Content="🔒 Read only" Tag="ReadOnly"/>
-                                    <ComboBoxItem Content="✏️ Read &amp; write" Tag="ReadWrite"/>
+                                    <ComboBoxItem Content="Blocked" Tag="None"/>
+                                    <ComboBoxItem Content="Read only" Tag="ReadOnly"/>
+                                    <ComboBoxItem Content="Read and write" Tag="ReadWrite"/>
                                 </ComboBox>
                             </Grid>
                             <TextBlock x:Name="CustomFolderSummary" Margin="0,4,0,0"
                                        Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                            <HyperlinkButton Content="Manage custom folders…"
+                            <HyperlinkButton Content="Manage custom folders"
                                              Click="OnManageCustomFolders" Padding="0"/>
                         </StackPanel>
 
-                        <!-- WHAT (network) -->
+                        <!-- Network -->
                         <StackPanel Spacing="6" x:Name="NetworkPanel">
-                            <TextBlock Text="📡 Network from program code" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                            <TextBlock Text="Network access" Style="{StaticResource BodyStrongTextBlockStyle}"/>
                             <ToggleSwitch x:Name="NetworkToggle"
-                                          Header="Allow internet"
+                                          Header="Allow internet from program code"
                                           OffContent="Off — programs can't reach the internet"
-                                          OnContent="On — programs can connect to public internet endpoints"
+                                          OnContent="On — programs can reach public internet endpoints"
                                           Toggled="OnNetworkToggled"/>
-                            <TextBlock Text="If file or clipboard read access is enabled, programs with internet can exfiltrate that data."
-                                       FontSize="11" TextWrapping="Wrap"
+                            <TextBlock Text="When file or clipboard read access is on, programs that reach the internet could send that data outside this PC."
+                                       Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                         </StackPanel>
 
-                        <!-- WHAT (clipboard) -->
+                        <!-- Clipboard -->
                         <StackPanel Spacing="6" x:Name="ClipboardPanel">
-                            <TextBlock Text="📋 Clipboard" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <TextBlock Text="Clipboard often contains passwords and private text."
-                                       FontSize="11" TextWrapping="Wrap"
+                            <TextBlock Text="Clipboard access" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                            <TextBlock Text="Your clipboard often contains passwords, tokens, and private text."
+                                       Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                            <RadioButton x:Name="ClipNoneRadio" Content="🚫 None (default)" GroupName="Clipboard" Checked="OnClipboardChanged" Tag="None"/>
-                            <RadioButton x:Name="ClipReadRadio" Content="👁 Read — agent can see what you copied" GroupName="Clipboard" Checked="OnClipboardChanged" Tag="Read"/>
-                            <RadioButton x:Name="ClipWriteRadio" Content="✍ Write — agent can replace your clipboard" GroupName="Clipboard" Checked="OnClipboardChanged" Tag="Write"/>
-                            <RadioButton x:Name="ClipBothRadio" Content="🔁 Read &amp; Write" GroupName="Clipboard" Checked="OnClipboardChanged" Tag="Both"/>
+                            <RadioButton x:Name="ClipNoneRadio" Content="None (recommended)" GroupName="Clipboard" Checked="OnClipboardChanged" Tag="None"/>
+                            <RadioButton x:Name="ClipReadRadio" Content="Read only — agent can see what you copied" GroupName="Clipboard" Checked="OnClipboardChanged" Tag="Read"/>
+                            <RadioButton x:Name="ClipWriteRadio" Content="Write only — agent can replace your clipboard" GroupName="Clipboard" Checked="OnClipboardChanged" Tag="Write"/>
+                            <RadioButton x:Name="ClipBothRadio" Content="Read and write" GroupName="Clipboard" Checked="OnClipboardChanged" Tag="Both"/>
                         </StackPanel>
 
-                        <!-- HOW (limits) -->
+                        <!-- Limits -->
                         <StackPanel Spacing="6" x:Name="LimitsPanel">
-                            <TextBlock Text="⏱ Limits" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                            <TextBlock Text="Resource limits" Style="{StaticResource BodyStrongTextBlockStyle}"/>
                             <StackPanel Spacing="2">
-                                <TextBlock x:Name="TimeoutLabel" Text="Command timeout: 30 sec"/>
+                                <TextBlock x:Name="TimeoutLabel" Text="Command timeout: 30 seconds"/>
                                 <Slider x:Name="TimeoutSlider" Minimum="5" Maximum="300" StepFrequency="5"
                                         Value="30" SmallChange="5" LargeChange="15"
                                         ValueChanged="OnTimeoutChanged"/>
@@ -269,28 +289,27 @@
                                 <TextBlock Text="Maximum captured output"/>
                                 <ComboBox x:Name="MaxOutputCombo" HorizontalAlignment="Stretch"
                                           SelectionChanged="OnMaxOutputChanged">
-                                    <ComboBoxItem Content="1 MiB" Tag="1048576"/>
-                                    <ComboBoxItem Content="4 MiB (default)" Tag="4194304"/>
-                                    <ComboBoxItem Content="16 MiB" Tag="16777216"/>
-                                    <ComboBoxItem Content="64 MiB" Tag="67108864"/>
+                                    <ComboBoxItem Content="1 MB" Tag="1048576"/>
+                                    <ComboBoxItem Content="4 MB (default)" Tag="4194304"/>
+                                    <ComboBoxItem Content="16 MB" Tag="16777216"/>
+                                    <ComboBoxItem Content="64 MB" Tag="67108864"/>
                                 </ComboBox>
                             </StackPanel>
                         </StackPanel>
 
-                        <!-- WHEN (exec policy) -->
+                        <!-- Approval rules -->
                         <StackPanel Spacing="6" x:Name="ExecPolicyPanel">
-                            <TextBlock Text="✋ Ask before running" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <TextBlock Text="Default action for commands that don't match any rule below:"
-                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                       TextWrapping="Wrap"/>
-                            <ComboBox x:Name="ExecDefaultActionCombo" Width="200"
+                            <TextBlock Text="Approval rules" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                            <TextBlock Text="What happens when an agent tries to run a command that doesn't match any rule below:"
+                                       Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                            <ComboBox x:Name="ExecDefaultActionCombo" Width="240"
                                       SelectionChanged="OnExecDefaultActionChanged">
-                                <ComboBoxItem Content="🚫 Deny — block unknown commands" Tag="deny"/>
-                                <ComboBoxItem Content="✅ Allow — run unknown commands" Tag="allow"/>
-                                <ComboBoxItem Content="❓ Ask — prompt for unknown commands" Tag="ask"/>
+                                <ComboBoxItem Content="Deny — block unknown commands" Tag="deny"/>
+                                <ComboBoxItem Content="Allow — run unknown commands" Tag="allow"/>
+                                <ComboBoxItem Content="Ask — prompt for each unknown command" Tag="ask"/>
                             </ComboBox>
-                            <TextBlock Text="Rules (evaluated top-to-bottom; first match wins):"
+                            <TextBlock Text="Rules (evaluated top to bottom; first match wins):"
                                        Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        Margin="0,4,0,0"/>
@@ -300,7 +319,7 @@
                                         <Grid Padding="8,6" ColumnSpacing="8">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="80"/>
+                                                <ColumnDefinition Width="90"/>
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Grid.Column="0" Text="{Binding Pattern}" FontFamily="Consolas" VerticalAlignment="Center"/>
@@ -308,15 +327,18 @@
                                                     Background="{Binding ActionBrush}">
                                                 <TextBlock Text="{Binding Action}" FontSize="11" FontWeight="SemiBold" Foreground="White"/>
                                             </Border>
-                                            <Button Grid.Column="2" Content="✕" Click="OnRemoveExecRule" Tag="{Binding Index}"
-                                                    Padding="4,2" MinWidth="0" Background="Transparent"/>
+                                            <Button Grid.Column="2" Click="OnRemoveExecRule" Tag="{Binding Index}"
+                                                    Padding="4,2" MinWidth="0" Background="Transparent"
+                                                    ToolTipService.ToolTip="Remove rule">
+                                                <FontIcon Glyph="&#xE894;" FontSize="12"/>
+                                            </Button>
                                         </Grid>
                                     </DataTemplate>
                                 </ListView.ItemTemplate>
                             </ListView>
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <TextBox x:Name="NewExecRulePattern" PlaceholderText="Command pattern (e.g. echo *)" Width="280"/>
-                                <ComboBox x:Name="NewExecRuleAction" Width="100" SelectedIndex="0">
+                                <TextBox x:Name="NewExecRulePattern" PlaceholderText="Command pattern (for example: echo *)" Width="320"/>
+                                <ComboBox x:Name="NewExecRuleAction" Width="110" SelectedIndex="0">
                                     <ComboBoxItem Content="allow"/>
                                     <ComboBoxItem Content="deny"/>
                                 </ComboBox>
@@ -329,7 +351,7 @@
                 </StackPanel>
             </Border>
 
-            <!-- 🌐 Browser Control -->
+            <!-- Browser control -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="16">
@@ -339,10 +361,12 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" Text="🌐" FontSize="22" VerticalAlignment="Center"/>
+                    <FontIcon Grid.Column="0" Glyph="&#xE774;" FontSize="20"
+                              Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                              VerticalAlignment="Center"/>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                        <TextBlock Text="Browser Control" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                        <TextBlock Text="Lets agents drive a browser tab (open URLs, fill forms, click) via the gateway browser proxy."
+                        <TextBlock Text="Browser control" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                        <TextBlock Text="Lets agents open URLs, fill forms, and click links in a browser tab on this PC."
                                    Style="{StaticResource CaptionTextBlockStyle}"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                    TextWrapping="Wrap"/>
@@ -352,7 +376,7 @@
                 </Grid>
             </Border>
 
-            <!-- 🎨 Canvas -->
+            <!-- Canvas -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="16">
@@ -362,10 +386,12 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" Text="🎨" FontSize="22" VerticalAlignment="Center"/>
+                    <FontIcon Grid.Column="0" Glyph="&#xE737;" FontSize="20"
+                              Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                              VerticalAlignment="Center"/>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                         <TextBlock Text="Canvas" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                        <TextBlock Text="Lets agents render rich content (HTML, A2UI) into a window on your PC."
+                        <TextBlock Text="Lets agents show formatted content (text, HTML, A2UI) in a small overlay on this PC."
                                    Style="{StaticResource CaptionTextBlockStyle}"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                    TextWrapping="Wrap"/>
@@ -375,7 +401,7 @@
                 </Grid>
             </Border>
 
-            <!-- ⚙️ Local MCP Server -->
+            <!-- Local MCP server -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="16">
@@ -386,10 +412,12 @@
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="⚙️" FontSize="22" VerticalAlignment="Center"/>
+                        <FontIcon Grid.Column="0" Glyph="&#xE968;" FontSize="20"
+                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                  VerticalAlignment="Center"/>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                            <TextBlock Text="Local MCP Server" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <TextBlock Text="Exposes capabilities over local HTTP for CLI tools (Claude Desktop, Cursor, etc.). Token-gated."
+                            <TextBlock Text="Local MCP server" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                            <TextBlock Text="Exposes this PC's capabilities to local tools (Claude Desktop, Cursor, and similar) over a token-protected HTTP endpoint."
                                        Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        TextWrapping="Wrap"/>
@@ -404,7 +432,7 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="Endpoint:" VerticalAlignment="Center"
+                            <TextBlock Grid.Column="0" Text="Endpoint" VerticalAlignment="Center"
                                        Style="{StaticResource CaptionTextBlockStyle}"/>
                             <TextBlock Grid.Column="1" x:Name="McpEndpointText" IsTextSelectionEnabled="True"
                                        VerticalAlignment="Center" FontFamily="Consolas"
@@ -418,7 +446,7 @@
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="Token:" VerticalAlignment="Center"
+                            <TextBlock Grid.Column="0" Text="Token" VerticalAlignment="Center"
                                        Style="{StaticResource CaptionTextBlockStyle}"/>
                             <TextBlock Grid.Column="1" x:Name="McpTokenText" Text="•••••••••••••"
                                        VerticalAlignment="Center" FontFamily="Consolas"
@@ -433,16 +461,16 @@
                 </StackPanel>
             </Border>
 
-            <!-- ════════════════════════════════════════════════════════════ -->
-            <!-- Section header: SENSE -->
-            <!-- ════════════════════════════════════════════════════════════ -->
-            <TextBlock Text="What agents can SENSE" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,8,0,0"/>
-            <TextBlock Text="Sensor capabilities — what agents can perceive about your environment. Each also requires the matching Windows permission."
+            <!-- ════════ SENSORS section ════════ -->
+            <TextBlock Text="Sensors"
+                       Style="{StaticResource SubtitleTextBlockStyle}"
+                       Margin="0,12,0,0"/>
+            <TextBlock Text="Things agents can perceive. Each also requires the matching Windows permission."
                        Style="{StaticResource CaptionTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                        TextWrapping="Wrap"/>
 
-            <!-- 📷 Camera -->
+            <!-- Camera -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="16">
@@ -453,10 +481,12 @@
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="📷" FontSize="22" VerticalAlignment="Center"/>
+                        <FontIcon Grid.Column="0" Glyph="&#xE722;" FontSize="20"
+                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                  VerticalAlignment="Center"/>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                             <TextBlock Text="Camera" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <TextBlock Text="Lets agents capture single shots or short clips from your webcam."
+                            <TextBlock Text="Lets agents capture photos and short clips from your webcam."
                                        Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        TextWrapping="Wrap"/>
@@ -464,16 +494,16 @@
                         <ToggleSwitch x:Name="CameraToggle" Grid.Column="2" VerticalAlignment="Center"
                                       OnContent="" OffContent="" Toggled="OnCameraToggled"/>
                     </Grid>
-                    <StackPanel x:Name="CameraDetailPanel" Spacing="6" Visibility="Collapsed" Margin="34,0,0,0">
-                        <CheckBox x:Name="CameraAlwaysAllowCb" Content="Always allow camera (no per-call prompt)"
+                    <StackPanel x:Name="CameraDetailPanel" Spacing="6" Visibility="Collapsed" Margin="32,0,0,0">
+                        <CheckBox x:Name="CameraAlwaysAllowCb" Content="Always allow — don't ask before each use"
                                   Checked="OnCameraAlwaysAllowChanged" Unchecked="OnCameraAlwaysAllowChanged"/>
-                        <HyperlinkButton Content="🪟 Open Windows camera permission settings"
+                        <HyperlinkButton Content="Open Windows camera settings"
                                          Click="OnOpenWindowsCamera" Padding="0"/>
                     </StackPanel>
                 </StackPanel>
             </Border>
 
-            <!-- 🖥️ Screen Capture -->
+            <!-- Screen capture -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="16">
@@ -484,9 +514,11 @@
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="🖥️" FontSize="22" VerticalAlignment="Center"/>
+                        <FontIcon Grid.Column="0" Glyph="&#xE7F4;" FontSize="20"
+                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                  VerticalAlignment="Center"/>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                            <TextBlock Text="Screen Capture" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                            <TextBlock Text="Screen capture" Style="{StaticResource BodyStrongTextBlockStyle}"/>
                             <TextBlock Text="Lets agents take screenshots and record video of your screen."
                                        Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -495,16 +527,16 @@
                         <ToggleSwitch x:Name="ScreenToggle" Grid.Column="2" VerticalAlignment="Center"
                                       OnContent="" OffContent="" Toggled="OnScreenToggled"/>
                     </Grid>
-                    <StackPanel x:Name="ScreenDetailPanel" Spacing="6" Visibility="Collapsed" Margin="34,0,0,0">
-                        <CheckBox x:Name="ScreenAlwaysAllowCb" Content="Always allow screen recording (no per-call prompt)"
+                    <StackPanel x:Name="ScreenDetailPanel" Spacing="6" Visibility="Collapsed" Margin="32,0,0,0">
+                        <CheckBox x:Name="ScreenAlwaysAllowCb" Content="Always allow — don't ask before each recording"
                                   Checked="OnScreenAlwaysAllowChanged" Unchecked="OnScreenAlwaysAllowChanged"/>
-                        <HyperlinkButton Content="🪟 Open Windows screen recording settings"
+                        <HyperlinkButton Content="Open Windows screen recording settings"
                                          Click="OnOpenWindowsScreen" Padding="0"/>
                     </StackPanel>
                 </StackPanel>
             </Border>
 
-            <!-- 🎤 Microphone / STT -->
+            <!-- Microphone -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="16">
@@ -515,10 +547,13 @@
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="🎤" FontSize="22" VerticalAlignment="Center"/>
+                        <FontIcon Grid.Column="0" Glyph="&#xE720;" FontSize="20"
+                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                  VerticalAlignment="Center"/>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                            <TextBlock x:Uid="CapabilitiesPage_SttCardHeader" Text="Microphone (Speech-to-Text)" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <TextBlock x:Uid="CapabilitiesPage_SttCardDescription" Text="Recognizes microphone audio locally on this PC using Whisper. The model downloads once on first use."
+                            <TextBlock x:Uid="CapabilitiesPage_SttCardHeader" Text="Microphone" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                            <TextBlock x:Uid="CapabilitiesPage_SttCardDescription"
+                                       Text="Transcribes microphone audio to text locally on this PC. The speech model downloads once on first use; audio doesn't leave this PC."
                                        Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        TextWrapping="Wrap"/>
@@ -526,19 +561,20 @@
                         <ToggleSwitch x:Name="SttToggle" Grid.Column="2" VerticalAlignment="Center"
                                       OnContent="" OffContent="" Toggled="OnSttToggled"/>
                     </Grid>
-                    <StackPanel x:Name="SttDetailPanel" Spacing="8" Visibility="Collapsed" Margin="34,0,0,0">
+                    <StackPanel x:Name="SttDetailPanel" Spacing="6" Visibility="Collapsed" Margin="32,0,0,0">
                         <TextBlock x:Name="SttEngineHint"
                                    Style="{StaticResource CaptionTextBlockStyle}"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
-                        <HyperlinkButton x:Uid="CapabilitiesPage_SttMoreSettingsLink" Content="More voice settings…"
+                        <HyperlinkButton x:Uid="CapabilitiesPage_SttMoreSettingsLink"
+                                         Content="More voice settings"
                                          Click="OnSttMoreSettingsClick" Padding="0"/>
-                        <HyperlinkButton Content="🪟 Open Windows microphone permission settings"
+                        <HyperlinkButton Content="Open Windows microphone settings"
                                          Click="OnOpenWindowsMic" Padding="0"/>
                     </StackPanel>
                 </StackPanel>
             </Border>
 
-            <!-- 📍 Location -->
+            <!-- Location -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="16">
@@ -549,10 +585,12 @@
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="📍" FontSize="22" VerticalAlignment="Center"/>
+                        <FontIcon Grid.Column="0" Glyph="&#xE81D;" FontSize="20"
+                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                  VerticalAlignment="Center"/>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                             <TextBlock Text="Location" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <TextBlock Text="Lets agents read your approximate Windows location."
+                            <TextBlock Text="Lets agents read your approximate location from Windows."
                                        Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        TextWrapping="Wrap"/>
@@ -560,19 +598,19 @@
                         <ToggleSwitch x:Name="LocationToggle" Grid.Column="2" VerticalAlignment="Center"
                                       OnContent="" OffContent="" Toggled="OnLocationToggled"/>
                     </Grid>
-                    <StackPanel x:Name="LocationDetailPanel" Spacing="6" Visibility="Collapsed" Margin="34,0,0,0">
-                        <HyperlinkButton Content="🪟 Open Windows location permission settings"
+                    <StackPanel x:Name="LocationDetailPanel" Spacing="6" Visibility="Collapsed" Margin="32,0,0,0">
+                        <HyperlinkButton Content="Open Windows location settings"
                                          Click="OnOpenWindowsLocation" Padding="0"/>
                     </StackPanel>
                 </StackPanel>
             </Border>
 
-            <!-- ════════════════════════════════════════════════════════════ -->
-            <!-- Section header: VOICE -->
-            <!-- ════════════════════════════════════════════════════════════ -->
-            <TextBlock Text="What agents can SAY" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,8,0,0"/>
+            <!-- ════════ AUDIO OUTPUT section ════════ -->
+            <TextBlock Text="Audio output"
+                       Style="{StaticResource SubtitleTextBlockStyle}"
+                       Margin="0,12,0,0"/>
 
-            <!-- 🔊 Text-to-Speech -->
+            <!-- Text to speech -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="16">
@@ -583,10 +621,13 @@
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="🔊" FontSize="22" VerticalAlignment="Center"/>
+                        <FontIcon Grid.Column="0" Glyph="&#xE767;" FontSize="20"
+                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                  VerticalAlignment="Center"/>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                            <TextBlock x:Uid="CapabilitiesPage_TtsCardHeader" Text="Text-to-Speech" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <TextBlock x:Uid="CapabilitiesPage_TtsCardDescription" Text="Lets agents speak through your speakers. Pick a provider below."
+                            <TextBlock x:Uid="CapabilitiesPage_TtsCardHeader" Text="Text to speech" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                            <TextBlock x:Uid="CapabilitiesPage_TtsCardDescription"
+                                       Text="Lets agents speak through your speakers. Choose a provider below."
                                        Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        TextWrapping="Wrap"/>
@@ -594,12 +635,12 @@
                         <ToggleSwitch x:Name="TtsToggle" Grid.Column="2" VerticalAlignment="Center"
                                       OnContent="" OffContent="" Toggled="OnTtsToggled"/>
                     </Grid>
-                    <StackPanel x:Name="TtsDetailPanel" Spacing="8" Visibility="Collapsed" Margin="34,0,0,0">
+                    <StackPanel x:Name="TtsDetailPanel" Spacing="8" Visibility="Collapsed" Margin="32,0,0,0">
                         <ComboBox x:Name="TtsProviderCombo" x:Uid="CapabilitiesPage_TtsProviderComboBox" Header="Provider"
                                   SelectionChanged="OnTtsProviderChanged">
-                            <ComboBoxItem x:Uid="CapabilitiesPage_TtsProviderPiper" Content="Piper (local ML, recommended)" Tag="piper"/>
-                            <ComboBoxItem x:Uid="CapabilitiesPage_TtsProviderWindows" Content="Windows built-in speech" Tag="windows"/>
-                            <ComboBoxItem x:Uid="CapabilitiesPage_TtsProviderElevenLabs" Content="ElevenLabs" Tag="elevenlabs"/>
+                            <ComboBoxItem x:Uid="CapabilitiesPage_TtsProviderPiper" Content="Piper — local, recommended" Tag="piper"/>
+                            <ComboBoxItem x:Uid="CapabilitiesPage_TtsProviderWindows" Content="Windows — built-in speech" Tag="windows"/>
+                            <ComboBoxItem x:Uid="CapabilitiesPage_TtsProviderElevenLabs" Content="ElevenLabs — cloud" Tag="elevenlabs"/>
                         </ComboBox>
                         <StackPanel x:Name="TtsElevenLabsPanel" Spacing="6" Visibility="Collapsed">
                             <PasswordBox x:Name="TtsElevenLabsKey" x:Uid="CapabilitiesPage_TtsElevenLabsApiKey" Header="ElevenLabs API key"
@@ -609,7 +650,8 @@
                             <TextBox x:Name="TtsElevenLabsModelBox" x:Uid="CapabilitiesPage_TtsElevenLabsModel" Header="Model"
                                      PlaceholderText="eleven_multilingual_v2"
                                      LostFocus="OnTtsElevenLabsCommitted"/>
-                            <TextBlock x:Uid="CapabilitiesPage_TtsElevenLabsHelp" Text="API key is encrypted at rest with Windows DPAPI."
+                            <TextBlock x:Uid="CapabilitiesPage_TtsElevenLabsHelp"
+                                       Text="The API key is encrypted at rest with Windows DPAPI."
                                        Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        TextWrapping="Wrap"/>
@@ -621,12 +663,11 @@
                 </StackPanel>
             </Border>
 
-            <!-- ════════════════════════════════════════════════════════════ -->
-            <!-- Section header: GATEWAY -->
-            <!-- ════════════════════════════════════════════════════════════ -->
-            <TextBlock Text="🔌 What the gateway is willing to send"
-                       Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,8,0,0"/>
-            <TextBlock Text="Read-only. Commands listed here are the ones the connected gateway is configured to forward to this PC. Edit on the gateway side."
+            <!-- ════════ GATEWAY ════════ -->
+            <TextBlock Text="From the gateway"
+                       Style="{StaticResource SubtitleTextBlockStyle}"
+                       Margin="0,12,0,0"/>
+            <TextBlock Text="Read-only. These are the commands the connected gateway is willing to forward to this PC. Edit them on the gateway side."
                        Style="{StaticResource CaptionTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                        TextWrapping="Wrap"/>
@@ -635,7 +676,7 @@
                     BorderThickness="1" CornerRadius="8" Padding="16">
                 <StackPanel Spacing="8">
                     <TextBlock x:Name="GatewayAllowlistEmpty"
-                               Text="No allowlist data available. Connect to a gateway first."
+                               Text="No allowed commands available. Connect to a gateway first."
                                Style="{StaticResource CaptionTextBlockStyle}"
                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
                     <ItemsRepeater x:Name="GatewayAllowlistRepeater">
@@ -646,18 +687,16 @@
                 </StackPanel>
             </Border>
 
-            <!-- ════════════════════════════════════════════════════════════ -->
-            <!-- Node status footer -->
-            <!-- ════════════════════════════════════════════════════════════ -->
+            <!-- Node status -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,12,0,0">
                 <StackPanel Spacing="6">
-                    <TextBlock Text="Node Status" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                    <TextBlock Text="Node status" Style="{StaticResource BodyStrongTextBlockStyle}"/>
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <Ellipse x:Name="NodeStatusDot" Width="10" Height="10"
                                  VerticalAlignment="Center" Fill="Gray"/>
-                        <TextBlock x:Name="NodeStatusText" Text="Node mode disabled" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="NodeStatusText" Text="Node mode is off" VerticalAlignment="Center"/>
                     </StackPanel>
                     <TextBlock x:Name="NodeDetailsText"
                                Style="{StaticResource CaptionTextBlockStyle}"
