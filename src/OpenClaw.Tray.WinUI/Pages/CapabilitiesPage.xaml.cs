@@ -128,15 +128,11 @@ public sealed partial class CapabilitiesPage : Page
         if (drift > 0)
             DriftText.Text = $"{drift} setting{(drift == 1 ? "" : "s")} differ from {LevelLabel(baseLevel)}.";
 
-        // Selected-state accent border on the active button.
-        var accent = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["AccentFillColorDefaultBrush"];
-        var clear = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"];
-        LockedDownButton.BorderBrush  = (drift == 0 && baseLevel == SecurityLevel.LockedDown)  ? accent : clear;
-        RecommendedButton.BorderBrush = (drift == 0 && baseLevel == SecurityLevel.Recommended) ? accent : clear;
-        TrustedButton.BorderBrush     = (drift == 0 && baseLevel == SecurityLevel.Trusted)     ? accent : clear;
-        LockedDownButton.BorderThickness  = (drift == 0 && baseLevel == SecurityLevel.LockedDown)  ? new Thickness(2) : new Thickness(1);
-        RecommendedButton.BorderThickness = (drift == 0 && baseLevel == SecurityLevel.Recommended) ? new Thickness(2) : new Thickness(1);
-        TrustedButton.BorderThickness     = (drift == 0 && baseLevel == SecurityLevel.Trusted)     ? new Thickness(2) : new Thickness(1);
+        // Selection indicator is an overlay Border above each button so the Button's
+        // default Fluent hover/pressed visual states don't override it.
+        LockedDownSelectedOverlay.Visibility  = (drift == 0 && baseLevel == SecurityLevel.LockedDown)  ? Visibility.Visible : Visibility.Collapsed;
+        RecommendedSelectedOverlay.Visibility = (drift == 0 && baseLevel == SecurityLevel.Recommended) ? Visibility.Visible : Visibility.Collapsed;
+        TrustedSelectedOverlay.Visibility     = (drift == 0 && baseLevel == SecurityLevel.Trusted)     ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private static string LevelLabel(SecurityLevel l) => l switch

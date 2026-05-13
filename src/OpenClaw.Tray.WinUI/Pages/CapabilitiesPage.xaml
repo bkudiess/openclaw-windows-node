@@ -20,6 +20,8 @@
                  drift (when the user has customized away from a preset) shows below. -->
 
             <!-- ════ Preset buttons — standalone, not wrapped in a parent card ════ -->
+            <!-- Selection indicator is an overlay Border above each button so the Button's
+                 default Fluent hover/pressed visual states don't override the accent. -->
             <Grid ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -27,59 +29,80 @@
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <Button x:Name="LockedDownButton" Grid.Column="0"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                        VerticalAlignment="Stretch" VerticalContentAlignment="Top"
-                        Padding="20,18" MinHeight="130" CornerRadius="8"
-                        BorderThickness="1"
-                        Click="OnLevelLockedDownClick"
-                        AutomationProperties.AutomationId="LockedDownButton">
-                    <StackPanel Spacing="8">
-                        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                            <TextBlock Text="🔒" FontSize="18" VerticalAlignment="Center"/>
-                            <TextBlock Text="Locked down" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <Grid Grid.Column="0">
+                    <Button x:Name="LockedDownButton"
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                            VerticalAlignment="Stretch" VerticalContentAlignment="Top"
+                            Padding="20,18" MinHeight="130" CornerRadius="8"
+                            Click="OnLevelLockedDownClick"
+                            AutomationProperties.AutomationId="LockedDownButton">
+                        <StackPanel Spacing="8">
+                            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                <TextBlock Text="🔒" FontSize="18" VerticalAlignment="Center"/>
+                                <TextBlock Text="Locked down" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <TextBlock Text="No programs. No internet. Camera and screen ask before each use."
+                                       TextWrapping="Wrap" FontSize="13"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                         </StackPanel>
-                        <TextBlock Text="No programs. No internet. Camera and screen ask before each use."
-                                   TextWrapping="Wrap" FontSize="13"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                    </StackPanel>
-                </Button>
+                    </Button>
+                    <Border x:Name="LockedDownSelectedOverlay"
+                            CornerRadius="8"
+                            BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                            BorderThickness="2"
+                            IsHitTestVisible="False"
+                            Visibility="Collapsed"/>
+                </Grid>
 
-                <Button x:Name="RecommendedButton" Grid.Column="1"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                        VerticalAlignment="Stretch" VerticalContentAlignment="Top"
-                        Padding="20,18" MinHeight="130" CornerRadius="8"
-                        BorderThickness="1"
-                        Click="OnLevelRecommendedClick"
-                        AutomationProperties.AutomationId="RecommendedButton">
-                    <StackPanel Spacing="8">
-                        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                            <TextBlock Text="🛡️" FontSize="18" VerticalAlignment="Center"/>
-                            <TextBlock Text="Recommended" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <Grid Grid.Column="1">
+                    <Button x:Name="RecommendedButton"
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                            VerticalAlignment="Stretch" VerticalContentAlignment="Top"
+                            Padding="20,18" MinHeight="130" CornerRadius="8"
+                            Click="OnLevelRecommendedClick"
+                            AutomationProperties.AutomationId="RecommendedButton">
+                        <StackPanel Spacing="8">
+                            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                <TextBlock Text="🛡️" FontSize="18" VerticalAlignment="Center"/>
+                                <TextBlock Text="Recommended" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <TextBlock Text="Programs run in a container. Camera and screen ask first. No internet from programs."
+                                       TextWrapping="Wrap" FontSize="13"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                         </StackPanel>
-                        <TextBlock Text="Programs run in a container. Camera and screen ask first. No internet from programs."
-                                   TextWrapping="Wrap" FontSize="13"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                    </StackPanel>
-                </Button>
+                    </Button>
+                    <Border x:Name="RecommendedSelectedOverlay"
+                            CornerRadius="8"
+                            BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                            BorderThickness="2"
+                            IsHitTestVisible="False"
+                            Visibility="Collapsed"/>
+                </Grid>
 
-                <Button x:Name="TrustedButton" Grid.Column="2"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                        VerticalAlignment="Stretch" VerticalContentAlignment="Top"
-                        Padding="20,18" MinHeight="130" CornerRadius="8"
-                        BorderThickness="1"
-                        Click="OnLevelTrustedClick"
-                        AutomationProperties.AutomationId="TrustedButton">
-                    <StackPanel Spacing="8">
-                        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                            <TextBlock Text="⚠️" FontSize="18" VerticalAlignment="Center"/>
-                            <TextBlock Text="Unprotected" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <Grid Grid.Column="2">
+                    <Button x:Name="TrustedButton"
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                            VerticalAlignment="Stretch" VerticalContentAlignment="Top"
+                            Padding="20,18" MinHeight="130" CornerRadius="8"
+                            Click="OnLevelTrustedClick"
+                            AutomationProperties.AutomationId="TrustedButton">
+                        <StackPanel Spacing="8">
+                            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                <TextBlock Text="⚠️" FontSize="18" VerticalAlignment="Center"/>
+                                <TextBlock Text="Unprotected" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <TextBlock Text="Programs run with your full Windows access. Camera and screen never ask. Use only if you trust every connected agent."
+                                       TextWrapping="Wrap" FontSize="13"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                         </StackPanel>
-                        <TextBlock Text="Programs run with your full Windows access. Camera and screen never ask. Use only if you trust every connected agent."
-                                   TextWrapping="Wrap" FontSize="13"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                    </StackPanel>
-                </Button>
+                    </Button>
+                    <Border x:Name="TrustedSelectedOverlay"
+                            CornerRadius="8"
+                            BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                            BorderThickness="2"
+                            IsHitTestVisible="False"
+                            Visibility="Collapsed"/>
+                </Grid>
             </Grid>
 
             <!-- Drift indicator — only when settings differ from the active level -->
