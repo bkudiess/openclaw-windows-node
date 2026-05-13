@@ -1,26 +1,36 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using OpenClaw.Shared;
 using OpenClaw.Shared.Capabilities;
 using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Text.Json;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
 
 namespace OpenClawTray.Pages;
 
+/// <summary>
+/// Single inline surface for every privacy/security/capability control on this PC.
+/// Replaces the previous Capabilities + Sandbox + Permissions + Voice cards. The
+/// Sandbox and Permissions pages still exist in the project for backward compat
+/// (no nav entries) but are not the source of truth — this page binds directly
+/// to SettingsManager and exec-policy.json.
+/// </summary>
 public sealed partial class CapabilitiesPage : Page
 {
     private HubWindow? _hub;
-    private bool _suppressMcpToggle;
-    private bool _suppressTtsProviderChange;
+    private bool _loading;
+    private bool _suppressRunModeRadio;
+    private bool _mcpTokenRevealed;
+    private List<ExecRuleRow> _execRules = new();
 
-    // Sentinel rendered into the API key PasswordBox so the user can see
-    // that a key is already saved without us ever surfacing the plaintext.
-    // Saving the form treats this exact value as "keep current key".
     private const string SavedApiKeySentinel = "••••••••";
 
     public CapabilitiesPage()
@@ -32,86 +42,133 @@ public sealed partial class CapabilitiesPage : Page
     {
         _hub = hub;
         HostnameText.Text = Environment.MachineName;
-
-        BuildCapabilityToggles(hub);
-        UpdateMcpStatus(hub);
-        UpdateSttCard(hub);
-        UpdateTtsCard(hub);
-        UpdateNodeStatus(hub);
-        UpdateLevelPicker(hub);
+        LoadAllFromSettings();
     }
 
-    // ============================================================
-    // Security Level picker
-    // ============================================================
-
-    private void UpdateLevelPicker(HubWindow hub)
+    private void LoadAllFromSettings()
     {
-        if (hub.Settings == null) return;
-        var settings = hub.Settings;
-        var drift = SecurityLevelResolver.DriftCount(settings);
-        var baseLevel = settings.SecurityLevel == SecurityLevel.Custom
-            ? SecurityLevel.Recommended
-            : settings.SecurityLevel;
-
-        var (label, brush) = (settings.SecurityLevel, drift) switch
+        if (_hub?.Settings is not { } s) return;
+        _loading = true;
+        try
         {
-            (_, > 0)                          => ($"{LevelLabel(baseLevel)} + {drift} change{(drift == 1 ? "" : "s")}", "SystemFillColorCautionBackgroundBrush"),
-            (SecurityLevel.LockedDown, _)     => ("Locked Down",  "AccentFillColorTertiaryBrush"),
-            (SecurityLevel.Trusted, _)        => ("Trusted",      "AccentFillColorTertiaryBrush"),
-            _                                 => ("Recommended",  "AccentFillColorTertiaryBrush"),
-        };
+            // Master node toggle
+            NodeModeToggle.IsOn = s.EnableNodeMode;
+
+            // Run Programs
+            RunProgramsToggle.IsOn = s.NodeSystemRunEnabled;
+            RunProgramsDetail.Visibility = s.NodeSystemRunEnabled ? Visibility.Visible : Visibility.Collapsed;
+            UpdateRunProgramsRadios(s);
+            SelectAccessTag(DocsAccessCombo, s.SandboxDocumentsAccess);
+            SelectAccessTag(DownloadsAccessCombo, s.SandboxDownloadsAccess);
+            SelectAccessTag(DesktopAccessCombo, s.SandboxDesktopAccess);
+            UpdateCustomFolderSummary(s);
+            NetworkToggle.IsOn = s.SystemRunAllowOutbound;
+            (s.SandboxClipboard switch
+            {
+                SandboxClipboardMode.Read => ClipReadRadio,
+                SandboxClipboardMode.Write => ClipWriteRadio,
+                SandboxClipboardMode.Both => ClipBothRadio,
+                _ => ClipNoneRadio
+            }).IsChecked = true;
+            var secs = Math.Clamp(s.SandboxTimeoutMs / 1000, 5, 300);
+            TimeoutSlider.Value = secs;
+            TimeoutLabel.Text = $"Command timeout: {secs} sec";
+            SelectMaxOutputTag(s.SandboxMaxOutputBytes);
+
+            // Exec policy
+            LoadExecPolicy();
+
+            // Browser / Canvas
+            BrowserToggle.IsOn = s.NodeBrowserProxyEnabled;
+            CanvasToggle.IsOn = s.NodeCanvasEnabled;
+
+            // MCP
+            McpToggle.IsOn = s.EnableMcpServer;
+            McpDetailPanel.Visibility = s.EnableMcpServer ? Visibility.Visible : Visibility.Collapsed;
+            UpdateMcpEndpoint();
+
+            // Sensors
+            CameraToggle.IsOn = s.NodeCameraEnabled;
+            CameraDetailPanel.Visibility = s.NodeCameraEnabled ? Visibility.Visible : Visibility.Collapsed;
+            CameraAlwaysAllowCb.IsChecked = s.CameraRecordingConsentGiven;
+
+            ScreenToggle.IsOn = s.NodeScreenEnabled;
+            ScreenDetailPanel.Visibility = s.NodeScreenEnabled ? Visibility.Visible : Visibility.Collapsed;
+            ScreenAlwaysAllowCb.IsChecked = s.ScreenRecordingConsentGiven;
+
+            SttToggle.IsOn = s.NodeSttEnabled;
+            SttDetailPanel.Visibility = s.NodeSttEnabled ? Visibility.Visible : Visibility.Collapsed;
+
+            LocationToggle.IsOn = s.NodeLocationEnabled;
+            LocationDetailPanel.Visibility = s.NodeLocationEnabled ? Visibility.Visible : Visibility.Collapsed;
+
+            // TTS
+            TtsToggle.IsOn = s.NodeTtsEnabled;
+            TtsDetailPanel.Visibility = s.NodeTtsEnabled ? Visibility.Visible : Visibility.Collapsed;
+            SelectTtsProvider(s.TtsProvider);
+            UpdateTtsProviderPanels(s.TtsProvider);
+            // Show sentinel for stored API key so user knows one is saved.
+            TtsElevenLabsKey.Password = string.IsNullOrEmpty(s.TtsElevenLabsApiKey) ? "" : SavedApiKeySentinel;
+            TtsElevenLabsVoice.Text = s.TtsElevenLabsVoiceId ?? "";
+            TtsElevenLabsModelBox.Text = s.TtsElevenLabsModel ?? "";
+
+            // Gateway allowlist (read-only)
+            UpdateGatewayAllowlist();
+        }
+        finally
+        {
+            _loading = false;
+        }
+        UpdateRunProgramsSummary();
+        UpdateLevelPicker();
+        UpdateNodeStatus();
+    }
+
+    // ─── Security Level ───────────────────────────────────────────────
+
+    private void UpdateLevelPicker()
+    {
+        if (_hub?.Settings is not { } s) return;
+        var drift = SecurityLevelResolver.DriftCount(s);
+        var baseLevel = s.SecurityLevel == SecurityLevel.Custom ? SecurityLevel.Recommended : s.SecurityLevel;
+
+        var label = drift > 0
+            ? $"{LevelLabel(baseLevel)} + {drift} change{(drift == 1 ? "" : "s")}"
+            : LevelLabel(baseLevel);
         LevelBadgeText.Text = label;
-        if (Application.Current.Resources[brush] is Microsoft.UI.Xaml.Media.Brush b)
-            LevelBadge.Background = b;
 
         DriftPanel.Visibility = drift > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (drift > 0)
-        {
-            DriftText.Text = $"{drift} setting{(drift == 1 ? "" : "s")} differ{(drift == 1 ? "s" : "")} from {LevelLabel(baseLevel)}.";
-        }
+            DriftText.Text = $"{drift} setting{(drift == 1 ? "" : "s")} differ from {LevelLabel(baseLevel)}.";
     }
 
     private static string LevelLabel(SecurityLevel l) => l switch
     {
         SecurityLevel.LockedDown => "Locked Down",
         SecurityLevel.Trusted    => "Trusted",
-        _                        => "Recommended",
+        _                        => "Recommended"
     };
 
-    private void OnLevelLockedDownClick(object sender, RoutedEventArgs e)
-        => ApplyLevel(SecurityLevel.LockedDown, requireConfirm: false);
-
-    private void OnLevelRecommendedClick(object sender, RoutedEventArgs e)
-        => ApplyLevel(SecurityLevel.Recommended, requireConfirm: false);
+    private void OnLevelLockedDownClick(object sender, RoutedEventArgs e) => ApplyLevel(SecurityLevel.LockedDown);
+    private void OnLevelRecommendedClick(object sender, RoutedEventArgs e) => ApplyLevel(SecurityLevel.Recommended);
 
     private async void OnLevelTrustedClick(object sender, RoutedEventArgs e)
     {
-        // Trusted is dangerous as a one-click choice — confirm what the
-        // user is about to opt into so it's never accidental.
         var content = new StackPanel { Spacing = 8 };
+        content.Children.Add(new TextBlock { Text = "Switching to Trusted (developer) will:", TextWrapping = TextWrapping.Wrap });
         content.Children.Add(new TextBlock
         {
-            Text = "Switching to Trusted (developer) will:",
-            TextWrapping = TextWrapping.Wrap
-        });
-        content.Children.Add(new TextBlock
-        {
-            Text = "• Run programs directly on this PC, with no container isolation\n" +
-                   "• Pre-approve camera and screen capture (no per-call prompt)\n" +
-                   "• Allow outbound internet access from agent code\n" +
+            Text = "• Run programs directly on this PC with no container isolation\n" +
+                   "• Pre-approve camera and screen capture\n" +
+                   "• Allow outbound internet from agent code\n" +
                    "• Enable the local MCP server",
-            TextWrapping = TextWrapping.Wrap,
-            Opacity = 0.8
+            TextWrapping = TextWrapping.Wrap, Opacity = 0.8
         });
         content.Children.Add(new TextBlock
         {
-            Text = "Use this only if you trust every agent that connects to your gateway. You can switch back at any time.",
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 4, 0, 0),
-            Opacity = 0.7
+            Text = "Only use this if you trust every agent that connects.",
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0), Opacity = 0.7
         });
-
         var dialog = new ContentDialog
         {
             Title = "Switch to Trusted?",
@@ -121,420 +178,735 @@ public sealed partial class CapabilitiesPage : Page
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = XamlRoot
         };
-        var result = await dialog.ShowAsync();
-        if (result == ContentDialogResult.Primary)
-            ApplyLevel(SecurityLevel.Trusted, requireConfirm: false);
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+            ApplyLevel(SecurityLevel.Trusted);
     }
 
     private void OnResetLevelClick(object sender, RoutedEventArgs e)
     {
-        if (_hub?.Settings == null) return;
-        var baseLevel = _hub.Settings.SecurityLevel == SecurityLevel.Custom
-            ? SecurityLevel.Recommended
-            : _hub.Settings.SecurityLevel;
-        ApplyLevel(baseLevel, requireConfirm: false);
+        if (_hub?.Settings is not { } s) return;
+        var baseLevel = s.SecurityLevel == SecurityLevel.Custom ? SecurityLevel.Recommended : s.SecurityLevel;
+        ApplyLevel(baseLevel);
     }
 
-    private void ApplyLevel(SecurityLevel level, bool requireConfirm)
+    private void ApplyLevel(SecurityLevel level)
     {
-        if (_hub?.Settings == null) return;
-        SecurityLevelResolver.ApplyTo(_hub.Settings, level);
-        _hub.Settings.Save();
+        if (_hub?.Settings is not { } s) return;
+        SecurityLevelResolver.ApplyTo(s, level);
+        s.Save();
         _hub.RaiseSettingsSaved();
-        // Rebuild toggles so per-row IsOn reflects the newly applied defaults
-        BuildCapabilityToggles(_hub);
-        UpdateMcpStatus(_hub);
-        UpdateSttCard(_hub);
-        UpdateTtsCard(_hub);
-        UpdateNodeStatus(_hub);
-        UpdateLevelPicker(_hub);
+        LoadAllFromSettings();
     }
 
-    /// <summary>
-    /// Called by per-row toggles after they mutate level-driven settings,
-    /// so the level badge can flip to "+ N changes" or back to base.
-    /// </summary>
-    private void OnLevelDrivenSettingChanged()
+    private void OnAnyLevelDrivenChanged()
     {
-        if (_hub?.Settings == null) return;
-        var drift = SecurityLevelResolver.DriftCount(_hub.Settings);
-        // Promote stored level to Custom only when the user has actually drifted;
-        // demote back to base level when drift returns to zero.
-        var baseLevel = _hub.Settings.SecurityLevel == SecurityLevel.Custom
-            ? SecurityLevel.Recommended
-            : _hub.Settings.SecurityLevel;
-        _hub.Settings.SecurityLevel = drift > 0 ? SecurityLevel.Custom : baseLevel;
-        UpdateLevelPicker(_hub);
+        if (_loading || _hub?.Settings is not { } s) return;
+        var drift = SecurityLevelResolver.DriftCount(s);
+        var baseLevel = s.SecurityLevel == SecurityLevel.Custom ? SecurityLevel.Recommended : s.SecurityLevel;
+        s.SecurityLevel = drift > 0 ? SecurityLevel.Custom : baseLevel;
+        UpdateLevelPicker();
     }
 
-    // ============================================================
-    // Advanced settings deep-links
-    // ============================================================
+    // ─── Node Mode ────────────────────────────────────────────────────
 
-    private void OnOpenSandbox(object sender, RoutedEventArgs e)
-        => _hub?.NavigateTo("sandbox");
-
-    private void OnOpenPermissions(object sender, RoutedEventArgs e)
-        => _hub?.NavigateTo("permissions");
-
-    private void OnOpenWindowsPrivacy(object sender, RoutedEventArgs e)
+    private void OnNodeModeToggled(object sender, RoutedEventArgs e)
     {
-        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ms-settings:privacy") { UseShellExecute = true }); }
+        if (_loading || _hub?.Settings is not { } s) return;
+        s.EnableNodeMode = NodeModeToggle.IsOn;
+        s.Save();
+        _hub.RaiseSettingsSaved();
+        UpdateNodeStatus();
+    }
+
+    // ─── Run Programs ─────────────────────────────────────────────────
+
+    private void OnRunProgramsToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading || _hub?.Settings is not { } s) return;
+        s.NodeSystemRunEnabled = RunProgramsToggle.IsOn;
+        RunProgramsDetail.Visibility = RunProgramsToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        s.Save();
+        _hub.RaiseSettingsSaved();
+        OnAnyLevelDrivenChanged();
+        UpdateRunProgramsSummary();
+    }
+
+    private void UpdateRunProgramsRadios(SettingsManager s)
+    {
+        _suppressRunModeRadio = true;
+        try
+        {
+            RunInContainerRadio.IsChecked = s.SystemRunSandboxEnabled;
+            RunDirectRadio.IsChecked = !s.SystemRunSandboxEnabled;
+        }
+        finally { _suppressRunModeRadio = false; }
+    }
+
+    private void OnRunInContainerChecked(object sender, RoutedEventArgs e)
+    {
+        if (_loading || _suppressRunModeRadio || _hub?.Settings is not { } s) return;
+        s.SystemRunSandboxEnabled = true;
+        s.Save();
+        _hub.RaiseSettingsSaved();
+        OnAnyLevelDrivenChanged();
+        UpdateRunProgramsSummary();
+    }
+
+    private async void OnRunDirectChecked(object sender, RoutedEventArgs e)
+    {
+        if (_loading || _suppressRunModeRadio || _hub?.Settings is not { } s) return;
+        // Risk-increasing transition — confirm.
+        var dialog = new ContentDialog
+        {
+            Title = "Run programs directly?",
+            Content = "Without the container, programs started by agents will run as you and can read/write any of your files, " +
+                      "access your network, and use any device. Are you sure?",
+            PrimaryButtonText = "Yes, run directly",
+            CloseButtonText = "Cancel (keep container)",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = XamlRoot
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            UpdateRunProgramsRadios(s);
+            return;
+        }
+        s.SystemRunSandboxEnabled = false;
+        s.Save();
+        _hub.RaiseSettingsSaved();
+        OnAnyLevelDrivenChanged();
+        UpdateRunProgramsSummary();
+    }
+
+    private void OnDocsAccessChanged(object sender, SelectionChangedEventArgs e)
+        => SetFolderAccess(s => s.SandboxDocumentsAccess = ParseAccessTag(DocsAccessCombo));
+    private void OnDownloadsAccessChanged(object sender, SelectionChangedEventArgs e)
+        => SetFolderAccess(s => s.SandboxDownloadsAccess = ParseAccessTag(DownloadsAccessCombo));
+    private void OnDesktopAccessChanged(object sender, SelectionChangedEventArgs e)
+        => SetFolderAccess(s => s.SandboxDesktopAccess = ParseAccessTag(DesktopAccessCombo));
+
+    private void SetFolderAccess(Action<SettingsManager> mutate)
+    {
+        if (_loading || _hub?.Settings is not { } s) return;
+        mutate(s);
+        s.Save();
+        _hub.RaiseSettingsSaved();
+        OnAnyLevelDrivenChanged();
+        UpdateRunProgramsSummary();
+    }
+
+    private void OnNetworkToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading || _hub?.Settings is not { } s) return;
+        s.SystemRunAllowOutbound = NetworkToggle.IsOn;
+        s.Save();
+        _hub.RaiseSettingsSaved();
+        OnAnyLevelDrivenChanged();
+        UpdateRunProgramsSummary();
+    }
+
+    private void OnClipboardChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loading || _hub?.Settings is not { } s) return;
+        if (sender is RadioButton rb && rb.IsChecked == true)
+        {
+            s.SandboxClipboard = (rb.Tag?.ToString()) switch
+            {
+                "Read" => SandboxClipboardMode.Read,
+                "Write" => SandboxClipboardMode.Write,
+                "Both" => SandboxClipboardMode.Both,
+                _ => SandboxClipboardMode.None
+            };
+            s.Save();
+            _hub.RaiseSettingsSaved();
+            OnAnyLevelDrivenChanged();
+        }
+    }
+
+    private void OnTimeoutChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (_loading || _hub?.Settings is not { } s) return;
+        var secs = (int)Math.Round(TimeoutSlider.Value);
+        TimeoutLabel.Text = $"Command timeout: {secs} sec";
+        s.SandboxTimeoutMs = secs * 1000;
+        s.Save();
+        _hub.RaiseSettingsSaved();
+    }
+
+    private void OnMaxOutputChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || _hub?.Settings is not { } s) return;
+        if (MaxOutputCombo.SelectedItem is ComboBoxItem item &&
+            long.TryParse(item.Tag?.ToString(), out var bytes))
+        {
+            s.SandboxMaxOutputBytes = bytes;
+            s.Save();
+            _hub.RaiseSettingsSaved();
+        }
+    }
+
+    private void OnManageCustomFolders(object sender, RoutedEventArgs e)
+    {
+        // The custom-folder picker is large enough to deserve its own surface;
+        // jump to the Sandbox page (still exists in the project) for that one
+        // operation. Everything else lives inline.
+        _hub?.NavigateTo("sandbox");
+    }
+
+    private void UpdateCustomFolderSummary(SettingsManager s)
+    {
+        var n = s.SandboxCustomFolders?.Count ?? 0;
+        CustomFolderSummary.Text = n == 0
+            ? "No custom folders granted."
+            : $"{n} custom folder{(n == 1 ? "" : "s")} granted.";
+    }
+
+    private void UpdateRunProgramsSummary()
+    {
+        if (_hub?.Settings is not { } s)
+            return;
+        var parts = new List<string>();
+        if (!s.NodeSystemRunEnabled) { RunProgramsSummary.Text = "Off — agents cannot run programs."; return; }
+        parts.Add(s.SystemRunSandboxEnabled ? "📦 In container" : "⚠️ Direct (no container)");
+        parts.Add(s.SystemRunAllowOutbound ? "Internet on" : "Internet blocked");
+        parts.Add($"Files: {FmtAccess(s.SandboxDocumentsAccess)} docs · {FmtAccess(s.SandboxDownloadsAccess)} downloads · {FmtAccess(s.SandboxDesktopAccess)} desktop");
+        RunProgramsSummary.Text = string.Join("  ·  ", parts);
+    }
+
+    private static string FmtAccess(SandboxFolderAccess? a) => a switch
+    {
+        SandboxFolderAccess.ReadOnly => "Read",
+        SandboxFolderAccess.ReadWrite => "RW",
+        _ => "None"
+    };
+
+    private static void SelectAccessTag(ComboBox combo, SandboxFolderAccess? access)
+    {
+        var target = access switch
+        {
+            SandboxFolderAccess.ReadOnly => "ReadOnly",
+            SandboxFolderAccess.ReadWrite => "ReadWrite",
+            _ => "None"
+        };
+        for (int i = 0; i < combo.Items.Count; i++)
+        {
+            if (combo.Items[i] is ComboBoxItem item && (string)item.Tag == target)
+            { combo.SelectedIndex = i; return; }
+        }
+        combo.SelectedIndex = 0;
+    }
+
+    private static SandboxFolderAccess? ParseAccessTag(ComboBox combo)
+    {
+        if (combo.SelectedItem is not ComboBoxItem item) return null;
+        return (string)item.Tag switch
+        {
+            "ReadOnly" => SandboxFolderAccess.ReadOnly,
+            "ReadWrite" => SandboxFolderAccess.ReadWrite,
+            _ => null
+        };
+    }
+
+    private void SelectMaxOutputTag(long bytes)
+    {
+        for (int i = 0; i < MaxOutputCombo.Items.Count; i++)
+        {
+            if (MaxOutputCombo.Items[i] is ComboBoxItem item &&
+                long.TryParse(item.Tag?.ToString(), out var v) && v == bytes)
+            { MaxOutputCombo.SelectedIndex = i; return; }
+        }
+        MaxOutputCombo.SelectedIndex = 1; // default 4 MiB
+    }
+
+    // ─── Exec policy (lives in exec-policy.json) ──────────────────────
+
+    private void LoadExecPolicy()
+    {
+        try
+        {
+            var path = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "OpenClawTray", "exec-policy.json");
+            string? defaultAction = "deny";
+            _execRules.Clear();
+            if (File.Exists(path))
+            {
+                var json = File.ReadAllText(path);
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+                if (root.TryGetProperty("defaultAction", out var da))
+                    defaultAction = da.GetString() ?? "deny";
+                if (root.TryGetProperty("rules", out var rules) && rules.ValueKind == JsonValueKind.Array)
+                {
+                    int idx = 0;
+                    foreach (var r in rules.EnumerateArray())
+                    {
+                        _execRules.Add(new ExecRuleRow
+                        {
+                            Pattern = r.TryGetProperty("pattern", out var p) ? p.GetString() ?? "" :
+                                      r.TryGetProperty("Pattern", out var p2) ? p2.GetString() ?? "" : "",
+                            Action = r.TryGetProperty("action", out var a) ? a.GetString() ?? "deny" : "deny",
+                            Index = idx++
+                        });
+                    }
+                }
+            }
+            for (int i = 0; i < ExecDefaultActionCombo.Items.Count; i++)
+            {
+                if (ExecDefaultActionCombo.Items[i] is ComboBoxItem item && (string)item.Tag == defaultAction)
+                { ExecDefaultActionCombo.SelectedIndex = i; break; }
+            }
+            if (ExecDefaultActionCombo.SelectedIndex < 0) ExecDefaultActionCombo.SelectedIndex = 0;
+            RefreshExecRulesList();
+        }
+        catch
+        {
+            ExecDefaultActionCombo.SelectedIndex = 0;
+        }
+    }
+
+    private void RefreshExecRulesList()
+    {
+        for (int i = 0; i < _execRules.Count; i++) _execRules[i].Index = i;
+        ExecRulesList.ItemsSource = null;
+        ExecRulesList.ItemsSource = _execRules.Select(r => new
+        {
+            r.Pattern,
+            r.Action,
+            r.Index,
+            ActionBrush = new SolidColorBrush(r.Action == "allow"
+                ? global::Windows.UI.Color.FromArgb(255, 34, 139, 34)
+                : global::Windows.UI.Color.FromArgb(255, 220, 53, 69))
+        }).ToList();
+    }
+
+    private void OnExecDefaultActionChanged(object sender, SelectionChangedEventArgs e) { /* no-op until save */ }
+
+    private void OnAddExecRule(object sender, RoutedEventArgs e)
+    {
+        var pattern = NewExecRulePattern.Text.Trim();
+        if (string.IsNullOrEmpty(pattern)) return;
+        var action = (NewExecRuleAction.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "deny";
+        _execRules.Add(new ExecRuleRow { Pattern = pattern, Action = action });
+        NewExecRulePattern.Text = "";
+        RefreshExecRulesList();
+    }
+
+    private void OnRemoveExecRule(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button b && b.Tag is int idx && idx < _execRules.Count)
+        {
+            _execRules.RemoveAt(idx);
+            RefreshExecRulesList();
+        }
+    }
+
+    private void OnSaveExecPolicy(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var path = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "OpenClawTray", "exec-policy.json");
+            var defaultAction = (ExecDefaultActionCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "deny";
+            var policy = new
+            {
+                defaultAction,
+                rules = _execRules.Select(r => new { r.Pattern, action = r.Action }).ToArray()
+            };
+            var json = JsonSerializer.Serialize(policy, new JsonSerializerOptions { WriteIndented = true });
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, json);
+            if (sender is Button btn)
+            {
+                btn.Content = "✓ Saved";
+                var timer = DispatcherQueue.CreateTimer();
+                timer.Interval = TimeSpan.FromSeconds(2);
+                timer.Tick += (t, a) => { btn.Content = "Save rules"; timer.Stop(); };
+                timer.Start();
+            }
+        }
         catch { }
     }
 
-    private void BuildCapabilityToggles(HubWindow hub)
+    // ─── Browser / Canvas ─────────────────────────────────────────────
+
+    private void OnBrowserToggled(object sender, RoutedEventArgs e)
     {
-        if (hub.Settings == null) return;
-        var settings = hub.Settings;
+        if (_loading || _hub?.Settings is not { } s) return;
+        s.NodeBrowserProxyEnabled = BrowserToggle.IsOn;
+        s.Save(); _hub.RaiseSettingsSaved();
+    }
 
-        // Captions: tiny hint rendered under the toggle. Used to surface
-        // OS permission status for camera/screen/mic so users see the
-        // dependency without opening another page. Run Programs gets an
-        // honest hint about container status.
-        var capabilities = new (string Icon, string Label, bool Value, Action<bool> Setter, FrameworkElement? Sub, string? Caption)[]
-        {
-            ("🔌", "Node Mode",        settings.EnableNodeMode,           v => settings.EnableNodeMode = v,           null, null),
-            ("🌐", "Browser Control",  settings.NodeBrowserProxyEnabled,  v => settings.NodeBrowserProxyEnabled = v,  null, null),
-            ("📷", "Camera",           settings.NodeCameraEnabled,        v => settings.NodeCameraEnabled = v,        BuildAlwaysAllowSub(this, "Always allow camera (no per-call prompt)", settings.CameraRecordingConsentGiven, v => settings.CameraRecordingConsentGiven = v, hub), "🪟 Also requires Windows camera permission · check Windows Privacy settings"),
-            ("🎨", "Canvas",           settings.NodeCanvasEnabled,        v => settings.NodeCanvasEnabled = v,        null, null),
-            ("🖥️", "Screen Capture",   settings.NodeScreenEnabled,        v => settings.NodeScreenEnabled = v,        BuildAlwaysAllowSub(this, "Always allow screen recording (no per-call prompt)", settings.ScreenRecordingConsentGiven, v => settings.ScreenRecordingConsentGiven = v, hub), "🪟 Available · Windows screen capture is system-wide"),
-            ("📍", "Location",         settings.NodeLocationEnabled,      v => settings.NodeLocationEnabled = v,      null, "🪟 Also requires Windows location permission"),
-            ("⌨️", "Run Programs",     settings.NodeSystemRunEnabled,     v => settings.NodeSystemRunEnabled = v,     null, settings.SystemRunSandboxEnabled ? "📦 Runs in a Windows AppContainer · advanced sandbox options below" : "⚠️ Runs directly as you (no container) · advanced options below"),
-            ("🔊", "Text-to-Speech",   settings.NodeTtsEnabled,           v => settings.NodeTtsEnabled = v,           null, null),
-            ("🎤", "Speech-to-Text",   settings.NodeSttEnabled,           v => settings.NodeSttEnabled = v,           null, "🪟 Also requires Windows microphone permission"),
-        };
+    private void OnCanvasToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading || _hub?.Settings is not { } s) return;
+        s.NodeCanvasEnabled = CanvasToggle.IsOn;
+        s.Save(); _hub.RaiseSettingsSaved();
+    }
 
-        var items = new List<UIElement>();
-        foreach (var (icon, label, value, setter, sub, caption) in capabilities)
+    // ─── MCP ──────────────────────────────────────────────────────────
+
+    private async void OnMcpToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading || _hub?.Settings is not { } s) return;
+        if (McpToggle.IsOn && !s.EnableMcpServer)
         {
-            var toggle = new ToggleSwitch
+            // Risk-increasing — confirm first.
+            var dialog = new ContentDialog
             {
-                Header = $"{icon}  {label}",
-                IsOn = value,
-                MinWidth = 200
+                Title = "Start the local MCP server?",
+                Content = "The MCP server lets local CLI tools (e.g., Claude Desktop, Cursor) use this PC's capabilities " +
+                          "through a token-gated HTTP endpoint on localhost. Anyone with the token can use it.",
+                PrimaryButtonText = "Start MCP server",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Close,
+                XamlRoot = XamlRoot
             };
-
-            var stack = new StackPanel { Spacing = 0 };
-            stack.Children.Add(toggle);
-
-            TextBlock? captionBlock = null;
-            if (caption != null)
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
             {
-                captionBlock = new TextBlock
-                {
-                    Text = caption,
-                    FontSize = 11,
-                    Margin = new Thickness(48, 0, 0, 4),
-                    TextWrapping = TextWrapping.Wrap,
-                    Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-                    Visibility = value ? Visibility.Visible : Visibility.Collapsed
-                };
-                stack.Children.Add(captionBlock);
-            }
-
-            if (sub != null)
-            {
-                sub.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
-                sub.Margin = new Thickness(48, 4, 0, 4);
-                stack.Children.Add(sub);
-            }
-
-            toggle.Toggled += (s, e) =>
-            {
-                setter(toggle.IsOn);
-                if (captionBlock != null) captionBlock.Visibility = toggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
-                if (sub != null) sub.Visibility = toggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
-                settings.Save();
-                hub.RaiseSettingsSaved();
-                UpdateSttCard(hub);
-                UpdateTtsCard(hub);
-                UpdateNodeStatus(hub);
-                OnLevelDrivenSettingChanged();
-            };
-
-            items.Add(stack);
-        }
-
-        CapabilityRepeater.ItemsSource = items;
-    }
-
-    private static CheckBox BuildAlwaysAllowSub(CapabilitiesPage page, string label, bool value, Action<bool> setter, HubWindow hub)
-    {
-        var cb = new CheckBox
-        {
-            Content = label,
-            IsChecked = value,
-            FontSize = 12
-        };
-        ToolTipService.SetToolTip(cb, "When checked, agents can use this capability without a per-call permission prompt. You'll still see a recording indicator.");
-        cb.Checked += (s, e) =>
-        {
-            setter(true);
-            hub.Settings?.Save();
-            hub.RaiseSettingsSaved();
-            page.OnLevelDrivenSettingChanged();
-        };
-        cb.Unchecked += (s, e) =>
-        {
-            setter(false);
-            hub.Settings?.Save();
-            hub.RaiseSettingsSaved();
-            page.OnLevelDrivenSettingChanged();
-        };
-        return cb;
-    }
-
-    // ============================================================
-    // Speech-to-Text settings card
-    // ============================================================
-
-    private void UpdateSttCard(HubWindow hub)
-    {
-        var enabled = hub.Settings?.NodeSttEnabled == true;
-        SttCard.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
-        if (!enabled || hub.Settings == null) return;
-
-        UpdateSttEngineHint(hub);
-    }
-
-    private void UpdateSttEngineHint(HubWindow hub)
-    {
-        // Whisper is the only engine. Surface model-readiness so the user
-        // knows what (if anything) needs to happen before stt.* will work.
-        //
-        // Check the file directly via WhisperModelManager rather than going
-        // through hub.VoiceServiceInstance — that instance is only created
-        // by NodeService.RegisterCapabilities() at Connect time, so a user
-        // who toggled STT on but hasn't reconnected yet would see a stale
-        // "not downloaded" message even with the file on disk.
-        var modelName = hub.Settings?.SttModelName ?? "base";
-        var modelManager = new OpenClaw.Shared.Audio.WhisperModelManager(
-            SettingsManager.SettingsDirectoryPath, new AppLogger());
-        var modelDownloaded = modelManager.IsModelDownloaded(modelName);
-        var modelDownloading = hub.VoiceServiceInstance?.IsWhisperDownloadingModel ?? false;
-
-        if (modelDownloaded)
-        {
-            SttEngineHint.Text = "Whisper model is ready. Speech-to-text runs fully on this PC; no audio leaves the device.";
-        }
-        else if (modelDownloading)
-        {
-            SttEngineHint.Text = "Whisper model is downloading. Speech-to-text will be available once it's ready.";
-        }
-        else
-        {
-            SttEngineHint.Text = "Whisper model is not downloaded. Open More voice settings… to download it before using speech-to-text.";
-        }
-    }
-
-    private void OnSttMoreSettingsClick(object sender, RoutedEventArgs e)
-    {
-        // Navigate the Hub to the dedicated voice settings page.
-        _hub?.NavigateTo("voice");
-    }
-
-    // ============================================================
-    // Text-to-Speech settings card
-    // ============================================================
-
-    private void UpdateTtsCard(HubWindow hub)
-    {
-        var enabled = hub.Settings?.NodeTtsEnabled == true;
-        TtsCard.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
-        if (!enabled || hub.Settings == null) return;
-
-        var settings = hub.Settings;
-
-        _suppressTtsProviderChange = true;
-        // ComboBox order: 0=Piper, 1=Windows, 2=ElevenLabs.
-        TtsProviderComboBox.SelectedIndex = settings.TtsProvider switch
-        {
-            var p when string.Equals(p, TtsCapability.ElevenLabsProvider, StringComparison.OrdinalIgnoreCase) => 2,
-            var p when string.Equals(p, TtsCapability.WindowsProvider, StringComparison.OrdinalIgnoreCase)    => 1,
-            _ => 0  // default to Piper for unknown / null / whitespace
-        };
-        _suppressTtsProviderChange = false;
-
-        // PasswordBox shows a masked sentinel when we already have a saved
-        // key, so the user can tell something is set without us ever
-        // putting plaintext on screen.
-        TtsElevenLabsApiKeyBox.Password =
-            string.IsNullOrEmpty(settings.TtsElevenLabsApiKey) ? "" : SavedApiKeySentinel;
-        TtsElevenLabsVoiceIdBox.Text = settings.TtsElevenLabsVoiceId;
-        TtsElevenLabsModelBox.Text = settings.TtsElevenLabsModel;
-
-        UpdateTtsElevenLabsPanelVisibility();
-        TtsStatusText.Text = "";
-    }
-
-    private void UpdateTtsElevenLabsPanelVisibility()
-    {
-        var isEleven = (TtsProviderComboBox.SelectedItem is ComboBoxItem item)
-            && string.Equals(item.Tag as string, TtsCapability.ElevenLabsProvider, StringComparison.OrdinalIgnoreCase);
-        TtsElevenLabsPanel.Visibility = isEleven ? Visibility.Visible : Visibility.Collapsed;
-    }
-
-    private void OnTtsProviderSelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_suppressTtsProviderChange) return;
-        if (_hub?.Settings == null) return;
-
-        var newProvider = (TtsProviderComboBox.SelectedItem is ComboBoxItem item && item.Tag is string tag)
-            ? tag
-            : TtsCapability.WindowsProvider;
-
-        if (!string.Equals(_hub.Settings.TtsProvider, newProvider, StringComparison.OrdinalIgnoreCase))
-        {
-            _hub.Settings.TtsProvider = newProvider;
-            _hub.Settings.Save();
-            _hub.RaiseSettingsSaved();
-            TtsStatusText.Text = $"Default provider: {newProvider}";
-        }
-
-        UpdateTtsElevenLabsPanelVisibility();
-    }
-
-    private void OnTtsElevenLabsCommitted(object sender, RoutedEventArgs e)
-    {
-        if (_hub?.Settings == null) return;
-        var settings = _hub.Settings;
-
-        var changed = false;
-
-        // Treat the sentinel as "keep existing"; only overwrite when the
-        // user has typed a real key.
-        var typedKey = TtsElevenLabsApiKeyBox.Password ?? "";
-        if (!string.Equals(typedKey, SavedApiKeySentinel, StringComparison.Ordinal))
-        {
-            var trimmedKey = typedKey.Trim();
-            if (!string.Equals(settings.TtsElevenLabsApiKey, trimmedKey, StringComparison.Ordinal))
-            {
-                settings.TtsElevenLabsApiKey = trimmedKey;
-                changed = true;
+                _loading = true;
+                try { McpToggle.IsOn = false; } finally { _loading = false; }
+                return;
             }
         }
-
-        var voiceId = TtsElevenLabsVoiceIdBox.Text?.Trim() ?? "";
-        if (!string.Equals(settings.TtsElevenLabsVoiceId, voiceId, StringComparison.Ordinal))
-        {
-            settings.TtsElevenLabsVoiceId = voiceId;
-            changed = true;
-        }
-
-        var model = TtsElevenLabsModelBox.Text?.Trim() ?? "";
-        if (!string.Equals(settings.TtsElevenLabsModel, model, StringComparison.Ordinal))
-        {
-            settings.TtsElevenLabsModel = model;
-            changed = true;
-        }
-
-        if (changed)
-        {
-            settings.Save();
-            _hub.RaiseSettingsSaved();
-            // Re-render the API key field so the sentinel tracks the newly
-            // saved state instead of leaving the typed key visible.
-            TtsElevenLabsApiKeyBox.Password =
-                string.IsNullOrEmpty(settings.TtsElevenLabsApiKey) ? "" : SavedApiKeySentinel;
-            TtsStatusText.Text = "ElevenLabs settings saved.";
-        }
+        s.EnableMcpServer = McpToggle.IsOn;
+        McpDetailPanel.Visibility = McpToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        s.Save(); _hub.RaiseSettingsSaved();
+        OnAnyLevelDrivenChanged();
+        UpdateMcpEndpoint();
     }
 
-    private void UpdateNodeStatus(HubWindow hub)
+    private void UpdateMcpEndpoint()
     {
-        var nodeEnabled = hub.Settings?.EnableNodeMode ?? false;
-        var isConnected = hub.CurrentStatus == ConnectionStatus.Connected;
-
-        if (!nodeEnabled)
-        {
-            NodeStatusDot.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Gray);
-            NodeStatusText.Text = "Node mode disabled";
-            NodeDetailsText.Text = "Enable Node Mode to provide device capabilities to agents.";
-        }
-        else if (isConnected)
-        {
-            NodeStatusDot.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.LimeGreen);
-            NodeStatusText.Text = "Node active";
-
-            var caps = new List<string>();
-            if (hub.Settings?.NodeBrowserProxyEnabled == true) caps.Add("browser");
-            if (hub.Settings?.NodeCameraEnabled == true) caps.Add("camera");
-            if (hub.Settings?.NodeCanvasEnabled == true) caps.Add("canvas");
-            if (hub.Settings?.NodeScreenEnabled == true) caps.Add("screen");
-            if (hub.Settings?.NodeLocationEnabled == true) caps.Add("location");
-            if (hub.Settings?.NodeTtsEnabled == true) caps.Add("tts");
-            if (hub.Settings?.NodeSttEnabled == true) caps.Add("stt");
-            NodeDetailsText.Text = caps.Count > 0
-                ? $"Providing {caps.Count} capabilities: {string.Join(", ", caps)}"
-                : "No capabilities enabled.";
-        }
-        else
-        {
-            NodeStatusDot.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Orange);
-            NodeStatusText.Text = "Node mode enabled, not connected";
-            NodeDetailsText.Text = "Connect to a gateway to start providing device capabilities.";
-        }
-    }
-
-    private void UpdateMcpStatus(HubWindow hub)
-    {
-        var settings = hub.Settings;
-        if (settings == null) return;
-
-        _suppressMcpToggle = true;
-        McpToggle.IsOn = settings.EnableMcpServer;
-        _suppressMcpToggle = false;
-        McpDetailsPanel.Visibility = settings.EnableMcpServer ? Visibility.Visible : Visibility.Collapsed;
         McpEndpointText.Text = NodeService.McpServerUrl;
-
-        if (settings.EnableMcpServer)
+        if (_hub?.Settings?.EnableMcpServer == true)
         {
             var tokenPath = NodeService.McpTokenPath;
-            var tokenExists = System.IO.File.Exists(tokenPath);
+            var tokenExists = File.Exists(tokenPath);
             McpStatusText.Text = tokenExists ? "Server enabled — token ready" : "Server enabled — token will be created on next start";
+        }
+        else
+        {
+            McpStatusText.Text = "";
         }
     }
 
-    private void OnMcpToggled(object sender, RoutedEventArgs e)
-    {
-        if (_suppressMcpToggle) return;
-        if (_hub?.Settings == null) return;
-        _hub.Settings.EnableMcpServer = McpToggle.IsOn;
-        _hub.Settings.Save();
-        _hub.RaiseSettingsSaved();
-        UpdateMcpStatus(_hub);
-    }
-
-    private void OnCopyMcpToken(object sender, RoutedEventArgs e)
+    private static string? ReadMcpToken()
     {
         try
         {
             var tokenPath = NodeService.McpTokenPath;
-            if (System.IO.File.Exists(tokenPath))
-            {
-                var token = System.IO.File.ReadAllText(tokenPath).Trim();
-                var dp = new DataPackage();
-                dp.SetText(token);
-                Clipboard.SetContent(dp);
-                McpStatusText.Text = "Token copied to clipboard";
-            }
-            else
-            {
-                McpStatusText.Text = "Token file not found — start the MCP server first";
-            }
+            if (File.Exists(tokenPath))
+                return File.ReadAllText(tokenPath).Trim();
         }
-        catch (Exception ex)
-        {
-            McpStatusText.Text = $"Failed to read token: {ex.Message}";
-        }
+        catch { }
+        return null;
     }
 
     private void OnCopyMcpUrl(object sender, RoutedEventArgs e)
     {
+        if (string.IsNullOrEmpty(McpEndpointText.Text)) return;
         var dp = new DataPackage();
-        dp.SetText(NodeService.McpServerUrl);
+        dp.SetText(McpEndpointText.Text);
         Clipboard.SetContent(dp);
         McpStatusText.Text = "URL copied to clipboard";
+    }
+
+    private void OnRevealMcpToken(object sender, RoutedEventArgs e)
+    {
+        var token = ReadMcpToken();
+        if (string.IsNullOrEmpty(token)) { McpTokenText.Text = "(no token — start MCP server first)"; return; }
+        if (_mcpTokenRevealed)
+        {
+            McpTokenText.Text = "•••••••••••••";
+            _mcpTokenRevealed = false;
+            if (sender is Button b1) b1.Content = "Reveal";
+            return;
+        }
+        McpTokenText.Text = token;
+        _mcpTokenRevealed = true;
+        if (sender is Button b2) b2.Content = "Hide";
+        // Auto-hide after 10s
+        var t = DispatcherQueue.CreateTimer();
+        t.Interval = TimeSpan.FromSeconds(10);
+        t.Tick += (_, _) =>
+        {
+            if (_mcpTokenRevealed)
+            {
+                McpTokenText.Text = "•••••••••••••";
+                _mcpTokenRevealed = false;
+                if (sender is Button btn) btn.Content = "Reveal";
+            }
+            t.Stop();
+        };
+        t.Start();
+    }
+
+    private void OnCopyMcpToken(object sender, RoutedEventArgs e)
+    {
+        var token = ReadMcpToken();
+        if (string.IsNullOrEmpty(token)) { McpStatusText.Text = "Token file not found — start the MCP server first"; return; }
+        var dp = new DataPackage();
+        dp.SetText(token);
+        Clipboard.SetContent(dp);
+        McpStatusText.Text = "Token copied to clipboard";
+    }
+
+    // ─── Camera / Screen / Mic / Location ─────────────────────────────
+
+    private void OnCameraToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading || _hub?.Settings is not { } s) return;
+        s.NodeCameraEnabled = CameraToggle.IsOn;
+        CameraDetailPanel.Visibility = CameraToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        s.Save(); _hub.RaiseSettingsSaved();
+    }
+
+    private async void OnCameraAlwaysAllowChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loading || _hub?.Settings is not { } s) return;
+        var want = CameraAlwaysAllowCb.IsChecked == true;
+        if (want && !s.CameraRecordingConsentGiven)
+        {
+            var dialog = new ContentDialog
+            {
+                Title = "Always allow camera?",
+                Content = "Agents will be able to take camera photos and clips at any time without a prompt. You can revoke this later.",
+                PrimaryButtonText = "Always allow",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Close,
+                XamlRoot = XamlRoot
+            };
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            {
+                _loading = true;
+                try { CameraAlwaysAllowCb.IsChecked = false; } finally { _loading = false; }
+                return;
+            }
+        }
+        s.CameraRecordingConsentGiven = want;
+        s.Save(); _hub.RaiseSettingsSaved();
+        OnAnyLevelDrivenChanged();
+    }
+
+    private void OnOpenWindowsCamera(object sender, RoutedEventArgs e)
+        => OpenWindowsSettings("ms-settings:privacy-webcam");
+
+    private void OnScreenToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading || _hub?.Settings is not { } s) return;
+        s.NodeScreenEnabled = ScreenToggle.IsOn;
+        ScreenDetailPanel.Visibility = ScreenToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        s.Save(); _hub.RaiseSettingsSaved();
+    }
+
+    private async void OnScreenAlwaysAllowChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loading || _hub?.Settings is not { } s) return;
+        var want = ScreenAlwaysAllowCb.IsChecked == true;
+        if (want && !s.ScreenRecordingConsentGiven)
+        {
+            var dialog = new ContentDialog
+            {
+                Title = "Always allow screen recording?",
+                Content = "Agents will be able to capture screenshots and record video of your screen at any time without a prompt.",
+                PrimaryButtonText = "Always allow",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Close,
+                XamlRoot = XamlRoot
+            };
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            {
+                _loading = true;
+                try { ScreenAlwaysAllowCb.IsChecked = false; } finally { _loading = false; }
+                return;
+            }
+        }
+        s.ScreenRecordingConsentGiven = want;
+        s.Save(); _hub.RaiseSettingsSaved();
+        OnAnyLevelDrivenChanged();
+    }
+
+    private void OnOpenWindowsScreen(object sender, RoutedEventArgs e)
+        => OpenWindowsSettings("ms-settings:privacy-broadfilesystemaccess");
+
+    private void OnSttToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading || _hub?.Settings is not { } s) return;
+        s.NodeSttEnabled = SttToggle.IsOn;
+        SttDetailPanel.Visibility = SttToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        s.Save(); _hub.RaiseSettingsSaved();
+        UpdateSttEngineHint();
+    }
+
+    private void UpdateSttEngineHint()
+    {
+        SttEngineHint.Text = SttToggle.IsOn
+            ? "Using Whisper (local). Model downloads once on first transcription."
+            : "";
+    }
+
+    private void OnSttMoreSettingsClick(object sender, RoutedEventArgs e)
+        => _hub?.NavigateTo("voice");
+
+    private void OnOpenWindowsMic(object sender, RoutedEventArgs e)
+        => OpenWindowsSettings("ms-settings:privacy-microphone");
+
+    private void OnLocationToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading || _hub?.Settings is not { } s) return;
+        s.NodeLocationEnabled = LocationToggle.IsOn;
+        LocationDetailPanel.Visibility = LocationToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        s.Save(); _hub.RaiseSettingsSaved();
+    }
+
+    private void OnOpenWindowsLocation(object sender, RoutedEventArgs e)
+        => OpenWindowsSettings("ms-settings:privacy-location");
+
+    private static void OpenWindowsSettings(string uri)
+    {
+        try { Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true }); } catch { }
+    }
+
+    // ─── TTS ──────────────────────────────────────────────────────────
+
+    private void OnTtsToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading || _hub?.Settings is not { } s) return;
+        s.NodeTtsEnabled = TtsToggle.IsOn;
+        TtsDetailPanel.Visibility = TtsToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        s.Save(); _hub.RaiseSettingsSaved();
+    }
+
+    private void SelectTtsProvider(string provider)
+    {
+        for (int i = 0; i < TtsProviderCombo.Items.Count; i++)
+        {
+            if (TtsProviderCombo.Items[i] is ComboBoxItem item && (string)item.Tag == provider)
+            { TtsProviderCombo.SelectedIndex = i; return; }
+        }
+        TtsProviderCombo.SelectedIndex = 0;
+    }
+
+    private void OnTtsProviderChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || _hub?.Settings is not { } s) return;
+        if (TtsProviderCombo.SelectedItem is ComboBoxItem item && item.Tag is string tag)
+        {
+            s.TtsProvider = tag;
+            s.Save(); _hub.RaiseSettingsSaved();
+            UpdateTtsProviderPanels(tag);
+        }
+    }
+
+    private void UpdateTtsProviderPanels(string provider)
+    {
+        TtsElevenLabsPanel.Visibility = provider == TtsCapability.ElevenLabsProvider ? Visibility.Visible : Visibility.Collapsed;
+        TtsStatusText.Text = provider switch
+        {
+            TtsCapability.PiperProvider => "Piper voice runs locally on this PC.",
+            TtsCapability.WindowsProvider => "Uses the Windows built-in speech engine.",
+            TtsCapability.ElevenLabsProvider => "ElevenLabs requires an API key. Audio is generated in the cloud.",
+            _ => ""
+        };
+    }
+
+    private void OnTtsElevenLabsCommitted(object sender, RoutedEventArgs e)
+    {
+        if (_loading || _hub?.Settings is not { } s) return;
+        // Only update the API key if the user typed something new — preserve
+        // the saved value when sentinel is shown.
+        var typed = TtsElevenLabsKey.Password;
+        if (!string.IsNullOrEmpty(typed) && typed != SavedApiKeySentinel)
+        {
+            s.TtsElevenLabsApiKey = typed;
+            TtsElevenLabsKey.Password = SavedApiKeySentinel;
+        }
+        s.TtsElevenLabsVoiceId = string.IsNullOrWhiteSpace(TtsElevenLabsVoice.Text) ? null : TtsElevenLabsVoice.Text;
+        s.TtsElevenLabsModel = string.IsNullOrWhiteSpace(TtsElevenLabsModelBox.Text) ? null : TtsElevenLabsModelBox.Text;
+        s.Save(); _hub.RaiseSettingsSaved();
+    }
+
+    // ─── Gateway allowlist (read-only echo) ───────────────────────────
+
+    private void UpdateGatewayAllowlist()
+    {
+        var config = _hub?.LastConfig;
+        if (!config.HasValue)
+        {
+            GatewayAllowlistEmpty.Visibility = Visibility.Visible;
+            GatewayAllowlistRepeater.ItemsSource = null;
+            return;
+        }
+        try
+        {
+            var cmds = new List<string>();
+            var cfg = config.Value;
+            if (cfg.TryGetProperty("gateway", out var gw) &&
+                gw.TryGetProperty("nodes", out var nodes) &&
+                nodes.TryGetProperty("allowCommands", out var ac) &&
+                ac.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in ac.EnumerateArray())
+                {
+                    var v = item.GetString();
+                    if (!string.IsNullOrWhiteSpace(v)) cmds.Add(v);
+                }
+            }
+            if (cmds.Count == 0)
+            {
+                GatewayAllowlistEmpty.Text = "No allowed commands configured in gateway.";
+                GatewayAllowlistEmpty.Visibility = Visibility.Visible;
+                GatewayAllowlistRepeater.ItemsSource = null;
+                return;
+            }
+            GatewayAllowlistEmpty.Visibility = Visibility.Collapsed;
+            GatewayAllowlistRepeater.ItemsSource = cmds.Select(c => new Border
+            {
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(8, 4, 8, 4),
+                Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 0, 120, 212)),
+                Margin = new Thickness(0, 0, 4, 4),
+                Child = new TextBlock
+                {
+                    Text = c,
+                    FontSize = 12,
+                    FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
+                    Foreground = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 255, 255, 255))
+                }
+            }).ToList();
+        }
+        catch
+        {
+            GatewayAllowlistEmpty.Text = "Failed to parse allowlist from gateway config.";
+            GatewayAllowlistEmpty.Visibility = Visibility.Visible;
+        }
+    }
+
+    // ─── Node status ──────────────────────────────────────────────────
+
+    private void UpdateNodeStatus()
+    {
+        if (_hub?.Settings is not { } s) return;
+        if (!s.EnableNodeMode)
+        {
+            NodeStatusDot.Fill = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 128, 128, 128));
+            NodeStatusText.Text = "Node mode disabled";
+            NodeDetailsText.Text = "Turn on Node Mode above to expose capabilities to a gateway.";
+            return;
+        }
+        NodeStatusDot.Fill = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 76, 175, 80));
+        NodeStatusText.Text = "Node mode enabled";
+        NodeDetailsText.Text = $"Capabilities exposed to the connected gateway. Hostname: {Environment.MachineName}.";
+    }
+
+    // ─── Types ────────────────────────────────────────────────────────
+
+    private class ExecRuleRow
+    {
+        public string Pattern { get; set; } = "";
+        public string Action { get; set; } = "deny";
+        public int Index { get; set; }
     }
 }
