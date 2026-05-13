@@ -18,7 +18,12 @@ namespace OpenClawTray.Pages;
 public sealed partial class NodesPage : Page
 {
     private HubWindow? _hub;
-    private readonly HashSet<string> _nodesWithDialogOpen = new(StringComparer.Ordinal);
+    // Page-wide guard for ContentDialog reentrancy. WinUI 3 only permits one
+    // ContentDialog per XamlRoot at a time, so a per-node guard is not enough
+    // (Rename on node A and Forget on node B in quick succession would
+    // otherwise throw inside the second ShowAsync). Match the convention used
+    // by SandboxPage's _confirmDialogOpen field.
+    private bool _dialogOpen;
 
     public NodesPage()
     {
@@ -520,7 +525,8 @@ public sealed partial class NodesPage : Page
     private async Task OnRenameClickedAsync(GatewayNodeInfo node)
     {
         if (_hub?.GatewayClient is not { } client) return;
-        if (!_nodesWithDialogOpen.Add(node.NodeId)) return;
+        if (_dialogOpen) return;
+        _dialogOpen = true;
         try
         {
             var input = new TextBox
@@ -535,7 +541,13 @@ public sealed partial class NodesPage : Page
                 SelectionStart = 0,
                 PlaceholderText = LocalizationHelper.GetString("NodesPage_Rename_Placeholder"),
             };
-            input.SelectAll();
+            // Focus + select-all only after the TextBox is actually attached
+            // to the visual tree; calling these before Loaded is a no-op.
+            input.Loaded += (_, _) =>
+            {
+                input.Focus(FocusState.Programmatic);
+                input.SelectAll();
+            };
 
             var errorBlock = new TextBlock
             {
@@ -615,14 +627,15 @@ public sealed partial class NodesPage : Page
         }
         finally
         {
-            _nodesWithDialogOpen.Remove(node.NodeId);
+            _dialogOpen = false;
         }
     }
 
     private async Task OnForgetClickedAsync(GatewayNodeInfo node)
     {
         if (_hub?.GatewayClient is not { } client) return;
-        if (!_nodesWithDialogOpen.Add(node.NodeId)) return;
+        if (_dialogOpen) return;
+        _dialogOpen = true;
         try
         {
             var body = new StackPanel { Spacing = 8 };
@@ -673,11 +686,12 @@ public sealed partial class NodesPage : Page
                 PrimaryButtonText = LocalizationHelper.GetString("NodesPage_Forget_Primary"),
                 CloseButtonText = LocalizationHelper.GetString("NodesPage_Common_Cancel"),
                 // Cancel is the default so pressing Enter does NOT confirm a
-                // destructive action.
+                // destructive action. Leaving the primary button at its
+                // default style (no accent fill) keeps the destructive label
+                // visually muted — Cancel remains the recommended action.
                 DefaultButton = ContentDialogButton.Close,
                 XamlRoot = this.XamlRoot,
             };
-            dialog.PrimaryButtonStyle = (Style?)Application.Current.Resources["AccentButtonStyle"];
 
             // Use the deferral pattern so we can keep the dialog open and
             // surface an inline error when NodePairRemoveAsync reports
@@ -719,7 +733,7 @@ public sealed partial class NodesPage : Page
         }
         finally
         {
-            _nodesWithDialogOpen.Remove(node.NodeId);
+            _dialogOpen = false;
         }
     }
 

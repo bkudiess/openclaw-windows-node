@@ -597,10 +597,21 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
             await SendWizardRequestAsync("node.pair.remove", new { nodeId });
             return new NodeForgetResult(true);
         }
+        catch (InvalidOperationException ex)
+        {
+            // Gateway business error (e.g. "missing scope: operator.pairing",
+            // "unknown nodeId"). Surface this verbatim so the user sees an
+            // actionable message.
+            _logger.Warn($"node.pair.remove rejected: {ex.Message}");
+            return new NodeForgetResult(false, ex.Message);
+        }
         catch (Exception ex)
         {
+            // Transport / timeout / unexpected exception. Don't leak raw
+            // exception text into the UI — return null so the caller uses
+            // its localized fallback string.
             _logger.Warn($"node.pair.remove failed: {ex.Message}");
-            return new NodeForgetResult(false, ex.Message);
+            return new NodeForgetResult(false, ErrorMessage: null);
         }
     }
 
@@ -637,10 +648,21 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
                 : trimmed;
             return new NodeRenameResult(true, returnedNodeId, returnedDisplayName);
         }
+        catch (InvalidOperationException ex)
+        {
+            // Gateway business error (e.g. "missing scope: operator.pairing",
+            // "unknown nodeId"). Surface this verbatim so the user sees an
+            // actionable message.
+            _logger.Warn($"node.rename rejected: {ex.Message}");
+            return new NodeRenameResult(false, ErrorMessage: ex.Message);
+        }
         catch (Exception ex)
         {
+            // Transport / timeout / unexpected exception. Don't leak raw
+            // exception text into the UI — return null so the caller uses
+            // its localized fallback string.
             _logger.Warn($"node.rename failed: {ex.Message}");
-            return new NodeRenameResult(false, ErrorMessage: ex.Message);
+            return new NodeRenameResult(false, ErrorMessage: null);
         }
     }
 
