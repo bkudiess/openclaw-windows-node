@@ -51,7 +51,7 @@
                         </Border>
                     </Grid>
 
-                    <!-- Preset buttons (Sandbox-style — large, prominent) -->
+                    <!-- Preset buttons — Sandbox-style: bigger, single-line title with inline emoji-ish icon -->
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -62,16 +62,16 @@
                         <Button x:Name="LockedDownButton" Grid.Column="0"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                                 VerticalAlignment="Stretch" VerticalContentAlignment="Top"
-                                Padding="16,12" MinHeight="120" CornerRadius="8"
+                                Padding="20,18" MinHeight="130" CornerRadius="8"
                                 Click="OnLevelLockedDownClick"
                                 AutomationProperties.AutomationId="LockedDownButton">
-                            <StackPanel Spacing="6">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon Glyph="&#xE72E;" FontSize="16"/>
-                                    <TextBlock Text="Locked down" FontSize="14" FontWeight="SemiBold"/>
+                            <StackPanel Spacing="8">
+                                <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE72E;" FontSize="18" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Locked down" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                 </StackPanel>
                                 <TextBlock Text="No programs. No internet. Camera and screen ask before each use."
-                                           TextWrapping="Wrap" FontSize="12"
+                                           TextWrapping="Wrap" FontSize="13"
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                             </StackPanel>
                         </Button>
@@ -79,16 +79,16 @@
                         <Button x:Name="RecommendedButton" Grid.Column="1"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                                 VerticalAlignment="Stretch" VerticalContentAlignment="Top"
-                                Padding="16,12" MinHeight="120" CornerRadius="8"
+                                Padding="20,18" MinHeight="130" CornerRadius="8"
                                 Click="OnLevelRecommendedClick"
                                 AutomationProperties.AutomationId="RecommendedButton">
-                            <StackPanel Spacing="6">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon Glyph="&#xE73E;" FontSize="16"/>
-                                    <TextBlock Text="Recommended" FontSize="14" FontWeight="SemiBold"/>
+                            <StackPanel Spacing="8">
+                                <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE73E;" FontSize="18" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Recommended" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                 </StackPanel>
                                 <TextBlock Text="Programs run in a container. Camera and screen ask first. No internet from programs."
-                                           TextWrapping="Wrap" FontSize="12"
+                                           TextWrapping="Wrap" FontSize="13"
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                             </StackPanel>
                         </Button>
@@ -96,16 +96,16 @@
                         <Button x:Name="TrustedButton" Grid.Column="2"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                                 VerticalAlignment="Stretch" VerticalContentAlignment="Top"
-                                Padding="16,12" MinHeight="120" CornerRadius="8"
+                                Padding="20,18" MinHeight="130" CornerRadius="8"
                                 Click="OnLevelTrustedClick"
                                 AutomationProperties.AutomationId="TrustedButton">
-                            <StackPanel Spacing="6">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon Glyph="&#xE930;" FontSize="16"/>
-                                    <TextBlock Text="Trusted (developer)" FontSize="14" FontWeight="SemiBold"/>
+                            <StackPanel Spacing="8">
+                                <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE930;" FontSize="18" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Trusted (developer)" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                 </StackPanel>
                                 <TextBlock Text="Programs run directly. Camera and screen pre-approved. Internet allowed."
-                                           TextWrapping="Wrap" FontSize="12"
+                                           TextWrapping="Wrap" FontSize="13"
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                             </StackPanel>
                         </Button>
@@ -159,7 +159,7 @@
                                        TextWrapping="Wrap"/>
                         </StackPanel>
                         <ToggleSwitch x:Name="RunProgramsToggle" Grid.Column="2" VerticalAlignment="Center"
-                                      OnContent="" OffContent="" Toggled="OnRunProgramsToggled"
+                                      OnContent="" OffContent="" MinWidth="0" Toggled="OnRunProgramsToggled"
                                       AutomationProperties.AutomationId="RunProgramsToggle"/>
                     </Grid>
 
@@ -408,7 +408,7 @@
                                    TextWrapping="Wrap"/>
                     </StackPanel>
                     <ToggleSwitch x:Name="BrowserToggle" Grid.Column="2" VerticalAlignment="Center"
-                                  OnContent="" OffContent="" Toggled="OnBrowserToggled"/>
+                                  OnContent="" OffContent="" MinWidth="0" Toggled="OnBrowserToggled"/>
                 </Grid>
             </Border>
 
@@ -433,7 +433,7 @@
                                    TextWrapping="Wrap"/>
                     </StackPanel>
                     <ToggleSwitch x:Name="CanvasToggle" Grid.Column="2" VerticalAlignment="Center"
-                                  OnContent="" OffContent="" Toggled="OnCanvasToggled"/>
+                                  OnContent="" OffContent="" MinWidth="0" Toggled="OnCanvasToggled"/>
                 </Grid>
             </Border>
 
@@ -459,7 +459,7 @@
                                        TextWrapping="Wrap"/>
                         </StackPanel>
                         <ToggleSwitch x:Name="McpToggle" Grid.Column="2" VerticalAlignment="Center"
-                                      OnContent="" OffContent="" Toggled="OnMcpToggled"/>
+                                      OnContent="" OffContent="" MinWidth="0" Toggled="OnMcpToggled"/>
                     </Grid>
                     <StackPanel x:Name="McpDetailPanel" Spacing="8" Visibility="Collapsed">
                         <Grid ColumnSpacing="8">
@@ -528,7 +528,7 @@
                                        TextWrapping="Wrap"/>
                         </StackPanel>
                         <ToggleSwitch x:Name="CameraToggle" Grid.Column="2" VerticalAlignment="Center"
-                                      OnContent="" OffContent="" Toggled="OnCameraToggled"/>
+                                      OnContent="" OffContent="" MinWidth="0" Toggled="OnCameraToggled"/>
                     </Grid>
                     <StackPanel x:Name="CameraDetailPanel" Spacing="6" Visibility="Collapsed" Margin="40,0,0,0">
                         <CheckBox x:Name="CameraAlwaysAllowCb" Content="Always allow — don't ask before each use"
@@ -561,7 +561,7 @@
                                        TextWrapping="Wrap"/>
                         </StackPanel>
                         <ToggleSwitch x:Name="ScreenToggle" Grid.Column="2" VerticalAlignment="Center"
-                                      OnContent="" OffContent="" Toggled="OnScreenToggled"/>
+                                      OnContent="" OffContent="" MinWidth="0" Toggled="OnScreenToggled"/>
                     </Grid>
                     <StackPanel x:Name="ScreenDetailPanel" Spacing="6" Visibility="Collapsed" Margin="40,0,0,0">
                         <CheckBox x:Name="ScreenAlwaysAllowCb" Content="Always allow — don't ask before each recording"
@@ -595,7 +595,7 @@
                                        TextWrapping="Wrap"/>
                         </StackPanel>
                         <ToggleSwitch x:Name="SttToggle" Grid.Column="2" VerticalAlignment="Center"
-                                      OnContent="" OffContent="" Toggled="OnSttToggled"/>
+                                      OnContent="" OffContent="" MinWidth="0" Toggled="OnSttToggled"/>
                     </Grid>
                     <StackPanel x:Name="SttDetailPanel" Spacing="6" Visibility="Collapsed" Margin="40,0,0,0">
                         <TextBlock x:Name="SttEngineHint"
@@ -632,7 +632,7 @@
                                        TextWrapping="Wrap"/>
                         </StackPanel>
                         <ToggleSwitch x:Name="LocationToggle" Grid.Column="2" VerticalAlignment="Center"
-                                      OnContent="" OffContent="" Toggled="OnLocationToggled"/>
+                                      OnContent="" OffContent="" MinWidth="0" Toggled="OnLocationToggled"/>
                     </Grid>
                     <StackPanel x:Name="LocationDetailPanel" Spacing="6" Visibility="Collapsed" Margin="40,0,0,0">
                         <HyperlinkButton Content="Open Windows location settings"
@@ -669,7 +669,7 @@
                                        TextWrapping="Wrap"/>
                         </StackPanel>
                         <ToggleSwitch x:Name="TtsToggle" Grid.Column="2" VerticalAlignment="Center"
-                                      OnContent="" OffContent="" Toggled="OnTtsToggled"/>
+                                      OnContent="" OffContent="" MinWidth="0" Toggled="OnTtsToggled"/>
                     </Grid>
                     <StackPanel x:Name="TtsDetailPanel" Spacing="8" Visibility="Collapsed" Margin="40,0,0,0">
                         <ComboBox x:Name="TtsProviderCombo" x:Uid="CapabilitiesPage_TtsProviderComboBox" Header="Provider"

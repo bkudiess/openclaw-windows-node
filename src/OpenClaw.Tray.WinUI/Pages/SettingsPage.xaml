@@ -41,7 +41,7 @@
                                            TextWrapping="Wrap"/>
                             </StackPanel>
                             <ToggleSwitch x:Name="NodeModeToggle" Grid.Column="2" VerticalAlignment="Center"
-                                          OnContent="" OffContent="" Toggled="OnNodeModeToggled"
+                                          MinWidth="0" OnContent="" OffContent="" Toggled="OnNodeModeToggled"
                                           AutomationProperties.AutomationId="NodeModeToggle"/>
                         </Grid>
                         <StackPanel Orientation="Horizontal" Spacing="8" Margin="40,4,0,0">
