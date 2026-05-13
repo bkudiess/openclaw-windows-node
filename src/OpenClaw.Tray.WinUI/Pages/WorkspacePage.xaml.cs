@@ -15,6 +15,7 @@ public sealed partial class WorkspacePage : Page
     private bool _tabsPopulated;
 
     private string AgentId => _hub?.CurrentAgentId ?? "main";
+    public string CurrentAgentId => AgentId;
 
     public WorkspacePage()
     {
@@ -24,14 +25,17 @@ public sealed partial class WorkspacePage : Page
     public void Initialize(HubWindow hub)
     {
         _hub = hub;
-        // If HubWindow has cached file list data, it will replay via UpdateAgentFilesList after Initialize.
-        // Only request fresh data if no cache exists.
-        if (hub.GatewayClient != null && hub.CurrentStatus == ConnectionStatus.Connected && !hub.LastAgentFilesList.HasValue)
+        // If HubWindow has cached file list data for this agent, it will replay after Initialize.
+        // Only request fresh data when no matching cache exists.
+        var hasMatchingCache = hub.LastAgentFilesList.HasValue &&
+            string.Equals(hub.LastAgentFilesListAgentId, AgentId, StringComparison.OrdinalIgnoreCase);
+        if (hub.GatewayClient != null && hub.CurrentStatus == ConnectionStatus.Connected && !hasMatchingCache)
         {
             FallbackInfoBar.IsOpen = false;
             LoadingRing.IsActive = true;
             LoadingPanel.Visibility = Visibility.Visible;
             ClearTabs();
+            hub.RecordAgentFilesListRequest(AgentId);
             _ = hub.GatewayClient.RequestAgentFilesListAsync(AgentId);
         }
         else if (hub.GatewayClient == null || hub.CurrentStatus != ConnectionStatus.Connected)
@@ -181,6 +185,7 @@ public sealed partial class WorkspacePage : Page
             LoadingPanel.Visibility = Visibility.Visible;
             FallbackInfoBar.IsOpen = false;
             ClearTabs();
+            _hub.RecordAgentFilesListRequest(AgentId);
             _ = _hub.GatewayClient.RequestAgentFilesListAsync(AgentId);
         }
     }

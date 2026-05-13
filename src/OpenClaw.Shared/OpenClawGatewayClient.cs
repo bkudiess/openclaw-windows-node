@@ -68,6 +68,7 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
     private bool _pairingRequiredAwaitingApproval;
     private string? _pairingRequiredRequestId;
     private bool _authFailed;
+    private string? _lastSkillsStatusAgentId;
     private readonly bool _tokenIsBootstrapToken;
     private readonly bool _bootstrapPairAsNode;
 
@@ -473,8 +474,10 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
 
     public async Task RequestSkillsStatusAsync(string? agentId = null)
     {
-        if (!string.IsNullOrEmpty(agentId))
-            await SendTrackedRequestAsync("skills.status", new { agentId });
+        _lastSkillsStatusAgentId = string.IsNullOrWhiteSpace(agentId) ? null : agentId;
+
+        if (_lastSkillsStatusAgentId is not null)
+            await SendTrackedRequestAsync("skills.status", new { agentId = _lastSkillsStatusAgentId });
         else
             await SendTrackedRequestAsync("skills.status");
     }
@@ -1164,8 +1167,8 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
                 return true;
             case "skills.install":
             case "skills.update":
-                // Re-fetch skills status so the UI reflects the change
-                _ = RequestSkillsStatusAsync();
+                // Re-fetch the same skills scope so filtered views do not jump back to all agents.
+                _ = RequestSkillsStatusAsync(_lastSkillsStatusAgentId);
                 return true;
             case "config.get":
                 ConfigUpdated?.Invoke(this, payload.Clone());

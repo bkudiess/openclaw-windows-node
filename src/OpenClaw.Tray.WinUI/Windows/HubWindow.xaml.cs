@@ -72,6 +72,8 @@ public sealed partial class HubWindow : WindowEx
     public System.Text.Json.JsonElement? LastSkillsData { get; private set; }
     public string? LastSkillsAgentId { get; private set; }
     public System.Text.Json.JsonElement? LastAgentFilesList { get; private set; }
+    public string? LastAgentFilesListAgentId { get; private set; }
+    private string? _pendingAgentFilesListAgentId;
 
     // Event for settings saved (App.xaml.cs subscribes)
     public event EventHandler? SettingsSaved;
@@ -444,16 +446,28 @@ public sealed partial class HubWindow : WindowEx
         return ids;
     }
 
+    public void RecordAgentFilesListRequest(string agentId)
+    {
+        _pendingAgentFilesListAgentId = string.IsNullOrWhiteSpace(agentId) ? "main" : agentId;
+    }
+
     public void UpdateAgentFilesList(System.Text.Json.JsonElement data)
     {
         try
         {
             var snapshot = data.Clone();
+            var responseAgentId = _pendingAgentFilesListAgentId ?? _currentAgentId;
+            _pendingAgentFilesListAgentId = null;
+            LastAgentFilesListAgentId = responseAgentId;
             LastAgentFilesList = snapshot;
             DispatcherQueue?.TryEnqueue(() =>
             {
                 if (IsClosed) return;
-                if (ContentFrame?.Content is WorkspacePage wp) wp.UpdateAgentFilesList(snapshot);
+                if (ContentFrame?.Content is WorkspacePage wp &&
+                    string.Equals(wp.CurrentAgentId, responseAgentId, StringComparison.OrdinalIgnoreCase))
+                {
+                    wp.UpdateAgentFilesList(snapshot);
+                }
             });
         }
         catch { }
@@ -688,7 +702,11 @@ public sealed partial class HubWindow : WindowEx
                 break;
             case WorkspacePage workspace:
                 workspace.Initialize(this);
-                if (LastAgentFilesList.HasValue) workspace.UpdateAgentFilesList(LastAgentFilesList.Value);
+                if (LastAgentFilesList.HasValue &&
+                    string.Equals(LastAgentFilesListAgentId, workspace.CurrentAgentId, StringComparison.OrdinalIgnoreCase))
+                {
+                    workspace.UpdateAgentFilesList(LastAgentFilesList.Value);
+                }
                 break;
             case BindingsPage bindings:
                 bindings.Initialize(this);
