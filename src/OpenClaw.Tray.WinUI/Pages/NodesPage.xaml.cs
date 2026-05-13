@@ -10,7 +10,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using WinDataTransfer = global::Windows.ApplicationModel.DataTransfer;
 using WinColor = global::Windows.UI.Color;
 
 namespace OpenClawTray.Pages;
@@ -741,9 +740,7 @@ public sealed partial class NodesPage : Page
     {
         if (sender is Button btn && btn.Tag is string deviceId)
         {
-            var dataPackage = new WinDataTransfer.DataPackage();
-            dataPackage.SetText(deviceId);
-            WinDataTransfer.Clipboard.SetContent(dataPackage);
+            ClipboardHelper.CopyText(deviceId);
             btn.Content = "✓";
             var timer = DispatcherQueue.CreateTimer();
             timer.Interval = TimeSpan.FromSeconds(2);

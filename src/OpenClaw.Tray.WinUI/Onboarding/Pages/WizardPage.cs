@@ -588,9 +588,7 @@ public sealed class WizardPage : Component<OnboardingState>
                         {
                             try
                             {
-                                var dp = new global::Windows.ApplicationModel.DataTransfer.DataPackage();
-                                dp.SetText(code);
-                                global::Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dp);
+                                ClipboardHelper.CopyText(code);
                             }
                             catch { }
                         }).VAlign(VerticalAlignment.Center)

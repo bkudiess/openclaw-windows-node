@@ -23,7 +23,6 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Updatum;
-using Windows.ApplicationModel.DataTransfer;
 using WinUIEx;
 
 namespace OpenClawTray;
@@ -1052,9 +1051,7 @@ public partial class App : Application
         
         try
         {
-            var dataPackage = new global::Windows.ApplicationModel.DataTransfer.DataPackage();
-            dataPackage.SetText(_nodeService.FullDeviceId);
-            global::Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
+            CopyTextToClipboard(_nodeService.FullDeviceId);
             
             // Show toast confirming copy
             ShowToast(new ToastContentBuilder()
@@ -1081,9 +1078,7 @@ public partial class App : Application
             });
             var summary = string.Join(Environment.NewLine, lines);
 
-            var dataPackage = new global::Windows.ApplicationModel.DataTransfer.DataPackage();
-            dataPackage.SetText(summary);
-            global::Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
+            CopyTextToClipboard(summary);
 
             ShowToast(new ToastContentBuilder()
                 .AddText(LocalizationHelper.GetString("Toast_NodeSummaryCopied"))
@@ -4394,9 +4389,7 @@ public partial class App : Application
 
     public static void CopyTextToClipboard(string text)
     {
-        var dataPackage = new global::Windows.ApplicationModel.DataTransfer.DataPackage();
-        dataPackage.SetText(text);
-        global::Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
+        ClipboardHelper.CopyText(text);
     }
 
     #endregion
