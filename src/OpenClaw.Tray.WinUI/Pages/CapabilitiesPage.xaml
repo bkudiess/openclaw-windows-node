@@ -15,117 +15,115 @@
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                        TextWrapping="Wrap" Margin="0,0,0,8"/>
 
-            <!-- ════ Security level (hero) ════ -->
+            <!-- ════ Hero status — slim card showing current security state ════ -->
             <Border x:Name="SecurityLevelCard"
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="16"
                     AutomationProperties.AutomationId="SecurityLevelCard">
-                <StackPanel Spacing="14">
-                    <!-- Header row: icon · level + subtext · drift badge (only when drift > 0) -->
-                    <Grid ColumnSpacing="12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="28"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Grid.Column="0" x:Name="HeroIcon"
-                                  Glyph="&#xE73E;" FontSize="20"
-                                  Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                  VerticalAlignment="Center" HorizontalAlignment="Center"/>
-                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                            <TextBlock x:Name="HeroTitle" Text="Recommended"
-                                       Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <TextBlock x:Name="HeroSubtext"
-                                       Text="Programs run in a container with limited access. Camera and screen ask before each use."
-                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                       TextWrapping="Wrap"/>
-                        </StackPanel>
-                        <Border x:Name="LevelBadge" Grid.Column="2"
-                                CornerRadius="10" Padding="10,2"
-                                Background="{ThemeResource SystemFillColorCautionBackgroundBrush}"
-                                VerticalAlignment="Center"
-                                Visibility="Collapsed">
-                            <TextBlock x:Name="LevelBadgeText" Text="Custom" FontSize="11"/>
-                        </Border>
-                    </Grid>
-
-                    <!-- Preset buttons — Sandbox-style with colored emoji + selected-state accent border -->
-                    <Grid ColumnSpacing="12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-
-                        <Button x:Name="LockedDownButton" Grid.Column="0"
-                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                                VerticalAlignment="Stretch" VerticalContentAlignment="Top"
-                                Padding="20,18" MinHeight="130" CornerRadius="8"
-                                BorderThickness="1"
-                                Click="OnLevelLockedDownClick"
-                                AutomationProperties.AutomationId="LockedDownButton">
-                            <StackPanel Spacing="8">
-                                <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                                    <TextBlock Text="🔒" FontSize="18" VerticalAlignment="Center"/>
-                                    <TextBlock Text="Locked down" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                </StackPanel>
-                                <TextBlock Text="No programs. No internet. Camera and screen ask before each use."
-                                           TextWrapping="Wrap" FontSize="13"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                            </StackPanel>
-                        </Button>
-
-                        <Button x:Name="RecommendedButton" Grid.Column="1"
-                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                                VerticalAlignment="Stretch" VerticalContentAlignment="Top"
-                                Padding="20,18" MinHeight="130" CornerRadius="8"
-                                BorderThickness="1"
-                                Click="OnLevelRecommendedClick"
-                                AutomationProperties.AutomationId="RecommendedButton">
-                            <StackPanel Spacing="8">
-                                <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                                    <TextBlock Text="🛡️" FontSize="18" VerticalAlignment="Center"/>
-                                    <TextBlock Text="Recommended" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                </StackPanel>
-                                <TextBlock Text="Programs run in a container. Camera and screen ask first. No internet from programs."
-                                           TextWrapping="Wrap" FontSize="13"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                            </StackPanel>
-                        </Button>
-
-                        <Button x:Name="TrustedButton" Grid.Column="2"
-                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                                VerticalAlignment="Stretch" VerticalContentAlignment="Top"
-                                Padding="20,18" MinHeight="130" CornerRadius="8"
-                                BorderThickness="1"
-                                Click="OnLevelTrustedClick"
-                                AutomationProperties.AutomationId="TrustedButton">
-                            <StackPanel Spacing="8">
-                                <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                                    <TextBlock Text="⚠️" FontSize="18" VerticalAlignment="Center"/>
-                                    <TextBlock Text="Unprotected" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                </StackPanel>
-                                <TextBlock Text="Programs run with your full Windows access. Camera and screen never ask. Use only if you trust every connected agent."
-                                           TextWrapping="Wrap" FontSize="13"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                            </StackPanel>
-                        </Button>
-                    </Grid>
-
-                    <StackPanel x:Name="DriftPanel" Orientation="Horizontal" Spacing="8" Visibility="Collapsed">
-                        <FontIcon Glyph="&#xE946;" FontSize="14"
-                                  Foreground="{ThemeResource SystemFillColorCautionBrush}"
-                                  VerticalAlignment="Center"/>
-                        <TextBlock x:Name="DriftText" VerticalAlignment="Center"
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="28"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <FontIcon Grid.Column="0" x:Name="HeroIcon"
+                              Glyph="&#xE83D;" FontSize="20"
+                              Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                              VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock x:Name="HeroTitle" Text="Recommended"
+                                   Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                        <TextBlock x:Name="HeroSubtext"
+                                   Text="Programs run in a container with limited access. Camera and screen ask before each use."
                                    Style="{StaticResource CaptionTextBlockStyle}"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                        <HyperlinkButton x:Name="ResetLevelButton" Content="Reset to base level"
-                                         Click="OnResetLevelClick" Padding="0"/>
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   TextWrapping="Wrap"/>
                     </StackPanel>
-                </StackPanel>
+                    <Border x:Name="LevelBadge" Grid.Column="2"
+                            CornerRadius="10" Padding="10,2"
+                            Background="{ThemeResource SystemFillColorCautionBackgroundBrush}"
+                            VerticalAlignment="Center"
+                            Visibility="Collapsed">
+                        <TextBlock x:Name="LevelBadgeText" Text="Custom" FontSize="11"/>
+                    </Border>
+                </Grid>
             </Border>
+
+            <!-- ════ Preset buttons — standalone, not wrapped in a parent card ════ -->
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <Button x:Name="LockedDownButton" Grid.Column="0"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                        VerticalAlignment="Stretch" VerticalContentAlignment="Top"
+                        Padding="20,18" MinHeight="130" CornerRadius="8"
+                        BorderThickness="1"
+                        Click="OnLevelLockedDownClick"
+                        AutomationProperties.AutomationId="LockedDownButton">
+                    <StackPanel Spacing="8">
+                        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                            <TextBlock Text="🔒" FontSize="18" VerticalAlignment="Center"/>
+                            <TextBlock Text="Locked down" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <TextBlock Text="No programs. No internet. Camera and screen ask before each use."
+                                   TextWrapping="Wrap" FontSize="13"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    </StackPanel>
+                </Button>
+
+                <Button x:Name="RecommendedButton" Grid.Column="1"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                        VerticalAlignment="Stretch" VerticalContentAlignment="Top"
+                        Padding="20,18" MinHeight="130" CornerRadius="8"
+                        BorderThickness="1"
+                        Click="OnLevelRecommendedClick"
+                        AutomationProperties.AutomationId="RecommendedButton">
+                    <StackPanel Spacing="8">
+                        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                            <TextBlock Text="🛡️" FontSize="18" VerticalAlignment="Center"/>
+                            <TextBlock Text="Recommended" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <TextBlock Text="Programs run in a container. Camera and screen ask first. No internet from programs."
+                                   TextWrapping="Wrap" FontSize="13"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    </StackPanel>
+                </Button>
+
+                <Button x:Name="TrustedButton" Grid.Column="2"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                        VerticalAlignment="Stretch" VerticalContentAlignment="Top"
+                        Padding="20,18" MinHeight="130" CornerRadius="8"
+                        BorderThickness="1"
+                        Click="OnLevelTrustedClick"
+                        AutomationProperties.AutomationId="TrustedButton">
+                    <StackPanel Spacing="8">
+                        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                            <TextBlock Text="⚠️" FontSize="18" VerticalAlignment="Center"/>
+                            <TextBlock Text="Unprotected" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <TextBlock Text="Programs run with your full Windows access. Camera and screen never ask. Use only if you trust every connected agent."
+                                   TextWrapping="Wrap" FontSize="13"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    </StackPanel>
+                </Button>
+            </Grid>
+
+            <!-- Drift indicator — only when settings differ from the active level -->
+            <StackPanel x:Name="DriftPanel" Orientation="Horizontal" Spacing="8" Visibility="Collapsed">
+                <FontIcon Glyph="&#xE946;" FontSize="14"
+                          Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                          VerticalAlignment="Center"/>
+                <TextBlock x:Name="DriftText" VerticalAlignment="Center"
+                           Style="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                <HyperlinkButton x:Name="ResetLevelButton" Content="Reset to base level"
+                                 Click="OnResetLevelClick" Padding="0"/>
+            </StackPanel>
 
             <!-- Node mode moved to Connection page (it's a connectivity concern, not a security level). -->
 
