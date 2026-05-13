@@ -595,6 +595,11 @@ public sealed class OnboardingWindow : WindowEx
         }
         catch (Exception ex)
         {
+            // If Close() fails the window is still alive. Reset the guard so a
+            // subsequent X-button or normal Finish path is NOT permanently
+            // suppressed (otherwise TryCompleteOnboarding becomes unreachable
+            // for the lifetime of this window).
+            _dismissedWithoutCompletion = false;
             Logger.Warn($"[OnboardingWindow] Close after dismiss threw: {ex.Message}");
         }
     }

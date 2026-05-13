@@ -72,7 +72,9 @@ public sealed class SetupWarningPage : Component<OnboardingState>
             // keep it. Dismiss the wizard entirely rather than just hiding the
             // warning section (which previously left the user one nav-bar Next
             // click away from entering setup anyway — Scott Hanselman repro).
-            setConfirmingReplace(false);
+            // We deliberately do NOT call setConfirmingReplace(false) here: the
+            // window is about to close, and the redundant state change would
+            // briefly re-render the "Set up locally" button before teardown.
             Props.Dismiss();
         }
 

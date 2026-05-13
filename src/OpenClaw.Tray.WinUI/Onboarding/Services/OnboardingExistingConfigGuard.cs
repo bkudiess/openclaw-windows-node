@@ -13,7 +13,13 @@ namespace OpenClawTray.Onboarding.Services;
 /// </summary>
 public sealed class OnboardingExistingConfigGuard
 {
-    private const string DefaultGatewayUrl = "ws://localhost:18789";
+    /// <summary>
+    /// Default loopback gateway URL. Single source of truth — also referenced by
+    /// <c>StartupSetupState.HasNonDefaultGatewayUrl</c>. If you change this, the
+    /// invariant test <c>StartupSetupStateTests.DefaultGatewayUrl_MatchesGuardConstant</c>
+    /// will catch drift.
+    /// </summary>
+    public const string DefaultGatewayUrl = "ws://localhost:18789";
     private readonly SettingsManager _settings;
     private readonly string _identityDataPath;
     private readonly string _setupStatePath;
