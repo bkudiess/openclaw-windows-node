@@ -61,7 +61,12 @@ public sealed class OpenClawComposer : Component<OpenClawComposerProps>
 
     public override Element Render()
     {
-        var inputState = UseState("", threadSafe: true);
+        // UseRef for input text — avoids full-tree re-render on every keypress.
+        // A separate hasTextState tracks the empty↔non-empty transition so the
+        // send button accent styling updates correctly (at most 2 re-renders
+        // per compose cycle instead of one per keypress).
+        var inputRef = UseRef("");
+        var hasTextState = UseState(false);
 
         // Subscribe to ChatExplorationState so toggles re-render the composer.
         // Inline because UseState/UseEffect are protected on Component (can't
@@ -81,12 +86,18 @@ public sealed class OpenClawComposer : Component<OpenClawComposerProps>
         var sendButtonSize       = ChatVisualResolver.SendButtonSize();
         var composerLayout       = ChatExplorationState.ComposerLayout;
 
+        // Version bump triggers a re-render on send so the cleared ref value
+        // is pushed to the TextBox control.
+        var sendVersion = UseState(0);
+
         var sendAction = () =>
         {
-            var msg = inputState.Value?.Trim();
+            var msg = inputRef.Current?.Trim();
             if (string.IsNullOrEmpty(msg)) return;
             Props.OnSend(msg);
-            inputState.Set("");
+            inputRef.Current = "";
+            hasTextState.Set(false);
+            sendVersion.Set(sendVersion.Value + 1);
         };
         var sendActionRef = UseRef<Action>(sendAction);
         sendActionRef.Current = sendAction;
@@ -157,7 +168,11 @@ public sealed class OpenClawComposer : Component<OpenClawComposerProps>
         };
 
         // ── Row 2: multi-line composer textbox ─────────────────────────
-        var textbox = TextField(inputState.Value, v => inputState.Set(v))
+        var textbox = TextField(inputRef.Current, v =>
+            {
+                inputRef.Current = v;
+                hasTextState.Set(!string.IsNullOrWhiteSpace(v));
+            })
             .Set(tb =>
             {
                 tb.PlaceholderText = placeholder;
@@ -248,7 +263,7 @@ public sealed class OpenClawComposer : Component<OpenClawComposerProps>
             // Default state (empty input): no accent fill — subtle/transparent
             // so the composer reads as neutral. Once the user types, switch to
             // the user-bubble accent so Send becomes the primary action.
-            var hasText = !string.IsNullOrWhiteSpace(inputState.Value);
+            var hasText = hasTextState.Value;
             var glyphBrush = hasText
                 ? (Brush)new SolidColorBrush(Colors.White)
                 : (Brush)Microsoft.UI.Xaml.Application.Current.Resources["TextFillColorSecondaryBrush"];

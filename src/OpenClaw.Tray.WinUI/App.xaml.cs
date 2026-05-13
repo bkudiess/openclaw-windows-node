@@ -3187,6 +3187,8 @@ public partial class App : Application
         {
             if (_hubWindow != null && !_hubWindow.IsClosed)
                 return false;
+            if (_chatWindow is { IsClosed: false, Visible: true })
+                return false;
             if (_onboardingWindow != null)
                 return false; // Onboarding window has chat overlay
         }

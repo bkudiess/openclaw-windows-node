@@ -83,12 +83,25 @@ public class OpenClawChatTimeline : Component<OpenClawChatTimelineProps>
             .Set(t =>
             {
                 t.TextWrapping = TextWrapping.Wrap;
-                t.IsTextSelectionEnabled = true;
                 ApplySafeMarkdownInlines(t, text);
             });
 
+    // Cache parsed markdown text per TextBlock to avoid re-clearing and
+    // rebuilding Inlines on every re-render when message content is stable.
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<TextBlock, string>
+        s_markdownCache = new();
+
     private static void ApplySafeMarkdownInlines(TextBlock textBlock, string? text)
     {
+        // Skip re-parsing only when text is unchanged AND inlines are still
+        // present. ConfigureTextBlock sets control.Text="" which clears
+        // Inlines, so we must re-apply even if the source text matches.
+        if (textBlock.Inlines.Count > 0
+            && s_markdownCache.TryGetValue(textBlock, out var cached)
+            && cached == text)
+            return;
+        s_markdownCache.AddOrUpdate(textBlock, text ?? "");
+
         textBlock.Inlines.Clear();
 
         foreach (var segment in ChatMarkdownSanitizer.SanitizeAndSplitStrongEmphasis(text))
@@ -192,7 +205,6 @@ public class OpenClawChatTimeline : Component<OpenClawChatTimelineProps>
         // Live values from ChatExplorationState (groups C/D/F).
         var bubbleRadius     = ChatVisualResolver.BubbleCornerRadius();
         var bubblePadding    = ChatVisualResolver.BubbleInnerPadding();
-        var bubbleMaxWidth   = ChatVisualResolver.BubbleMaxWidth();
         var bubbleSideMargin = ChatVisualResolver.BubbleSideMargin();
         var showAsstBubbles  = ChatVisualResolver.ShowAssistantBubbles();
         var showToolCalls    = ChatVisualResolver.ShowToolCalls();
@@ -700,7 +712,6 @@ public class OpenClawChatTimeline : Component<OpenClawChatTimelineProps>
                     .Set(t =>
                     {
                         t.TextWrapping = TextWrapping.Wrap;
-                        t.IsTextSelectionEnabled = true;
                         t.FontSize = 14;
                         t.Foreground = userBubbleFg;
                     })
@@ -708,7 +719,6 @@ public class OpenClawChatTimeline : Component<OpenClawChatTimelineProps>
              .Set(b =>
              {
                  b.CornerRadius = bubbleRadius;
-                b.MaxWidth = bubbleMaxWidth;
                  b.Padding = bubblePadding;
                  b.VerticalAlignment = VerticalAlignment.Center;
              });
@@ -723,10 +733,12 @@ public class OpenClawChatTimeline : Component<OpenClawChatTimelineProps>
                    ? AvatarBox("🧑", userAvatarBg, userBubbleBdr, userAvatarFg).VAlign(VerticalAlignment.Center)
                    : Border(Empty()).Size(36, 36));
 
-            var bubbleRow = (FlexRow(
-                bubble,
-                rightSlot
-            ) with { ColumnGap = bubbleSideMargin }).HAlign(HorizontalAlignment.Right);
+            var bubbleRow = Grid(
+                [GridSize.Star(), GridSize.Auto],
+                [GridSize.Auto],
+                bubble.HAlign(HorizontalAlignment.Right).Grid(row: 0, column: 0),
+                rightSlot.Grid(row: 0, column: 1).Margin(bubbleSideMargin, 0, 0, 0)
+            ).HAlign(HorizontalAlignment.Stretch);
 
             Element footer = Empty();
             if (endsBurst && showTimestamps)
@@ -776,14 +788,15 @@ public class OpenClawChatTimeline : Component<OpenClawChatTimelineProps>
              .Set(b =>
              {
                  b.CornerRadius = bubbleRadius;
-                 b.MaxWidth = bubbleMaxWidth;
                  b.Padding = bubblePadding;
              });
 
-            var bubbleRow = (FlexRow(
-                leftSlot,
-                card
-            ) with { ColumnGap = bubbleSideMargin }).HAlign(HorizontalAlignment.Left);
+            var bubbleRow = Grid(
+                [GridSize.Auto, GridSize.Star()],
+                [GridSize.Auto],
+                leftSlot.Grid(row: 0, column: 0).Margin(0, 0, bubbleSideMargin, 0),
+                card.HAlign(HorizontalAlignment.Left).Grid(row: 0, column: 1)
+            ).HAlign(HorizontalAlignment.Stretch);
 
             Element footer = Empty();
             if (endsBurst && showTimestamps)
@@ -1341,7 +1354,7 @@ public class OpenClawChatTimeline : Component<OpenClawChatTimelineProps>
                 ).Background(toolCardBgBrush)
                  .WithBorder(toolCardBorderBrush, 1)
                  .CornerRadius(8)
-                 .Set(b => { b.MaxWidth = bubbleMaxWidth; b.HorizontalAlignment = HorizontalAlignment.Left; });
+                 .Set(b => { b.HorizontalAlignment = HorizontalAlignment.Left; });
 
                 // Wrap with the assistant avatar slot so the burst visually
                 // anchors to the agent that produced it (and lines up with the
@@ -1354,10 +1367,12 @@ public class OpenClawChatTimeline : Component<OpenClawChatTimelineProps>
                         ? AssistantAvatar().VAlign(VerticalAlignment.Top)
                         : Border(Empty()).Size(36, 36));
 
-                var burstRow = (FlexRow(
-                    leftSlot,
-                    listCard
-                ) with { ColumnGap = bubbleSideMargin }).HAlign(HorizontalAlignment.Left);
+                var burstRow = Grid(
+                    [GridSize.Auto, GridSize.Star()],
+                    [GridSize.Auto],
+                    leftSlot.Grid(row: 0, column: 0).Margin(0, 0, bubbleSideMargin, 0),
+                    listCard.HAlign(HorizontalAlignment.Left).Grid(row: 0, column: 1)
+                ).HAlign(HorizontalAlignment.Stretch);
 
                 // When avatar is present, drop the left margin to 0 so the
                 // avatar fills the indent slot. Otherwise keep the original 36.
@@ -1403,7 +1418,6 @@ public class OpenClawChatTimeline : Component<OpenClawChatTimelineProps>
                                 {
                                     t.FontSize = 12;
                                     t.TextWrapping = TextWrapping.Wrap;
-                                    t.IsTextSelectionEnabled = true;
                                     t.FontFamily = new FontFamily("Cascadia Code, Cascadia Mono, Consolas");
                                 })
                                 .Foreground(TertiaryText)

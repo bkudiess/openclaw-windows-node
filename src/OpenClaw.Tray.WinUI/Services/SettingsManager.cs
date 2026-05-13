@@ -76,8 +76,8 @@ public class SettingsManager
     /// Default false (native).
     /// </summary>
     public bool UseLegacyWebChat { get; set; } = false;
-    
-    // Node mode (gateway WebSocket connection — separate from MCP)
+
+    // Node mode(gateway WebSocket connection — separate from MCP)
     public bool EnableNodeMode { get; set; } = false;
     public bool NodeCanvasEnabled { get; set; } = true;
     public bool NodeScreenEnabled { get; set; } = true;
