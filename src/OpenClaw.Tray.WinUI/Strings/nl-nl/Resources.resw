@@ -1087,6 +1087,15 @@ Voer op uw gateway-host (Mac/Linux) uit:
   <data name="Onboarding_Finish" xml:space="preserve">
     <value>Voltooien</value>
   </data>
+  <data name="Onboarding_IncompleteSetup_Title" xml:space="preserve">
+    <value>Setup is nog niet voltooid</value>
+  </data>
+  <data name="Onboarding_IncompleteSetup_Body" xml:space="preserve">
+    <value>OpenClaw heeft nog setup nodig voordat de Hub kan worden geopend. Gebruik Terug om naar de wizard of verbindingsstappen te gaan, los de ontbrekende setup op en probeer daarna Voltooien opnieuw.</value>
+  </data>
+  <data name="Onboarding_IncompleteSetup_Close" xml:space="preserve">
+    <value>Oké</value>
+  </data>
   <data name="Onboarding_Welcome_Title" xml:space="preserve">
     <value>Welkom bij OpenClaw</value>
   </data>

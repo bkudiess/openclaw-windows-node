@@ -51,6 +51,7 @@
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\A2UI\Protocol\A2UIProtocol.cs" Link="A2UI\Protocol\A2UIProtocol.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\A2UI\Rendering\SecretRedactor.cs" Link="A2UI\Rendering\SecretRedactor.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Onboarding\Services\OnboardingState.cs" Link="Imported\OnboardingState.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Onboarding\Services\OnboardingCompletionPolicy.cs" Link="Imported\OnboardingCompletionPolicy.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Onboarding\Services\OnboardingExistingConfigGuard.cs" Link="Imported\OnboardingExistingConfigGuard.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Onboarding\Services\LocalSetupProgressPolicy.cs" Link="Imported\LocalSetupProgressPolicy.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Onboarding\Services\LocalSetupProgressStageMap.cs" Link="Imported\LocalSetupProgressStageMap.cs" />
