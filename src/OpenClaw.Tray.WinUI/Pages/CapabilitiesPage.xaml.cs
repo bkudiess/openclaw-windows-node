@@ -121,52 +121,22 @@ public sealed partial class CapabilitiesPage : Page
         var drift = SecurityLevelResolver.DriftCount(s);
         var baseLevel = s.SecurityLevel == SecurityLevel.Custom ? SecurityLevel.Recommended : s.SecurityLevel;
 
-        // Hero (Sandbox-style): icon + title + descriptive sentence
-        var (heroGlyph, heroTitle, heroSubtext) = baseLevel switch
-        {
-            SecurityLevel.LockedDown => (
-                "\uE72E",
-                "Locked down",
-                "Programs can't run. Camera and screen ask before each use. No internet from program code."),
-            SecurityLevel.Trusted => (
-                "\uE7BA",
-                "Unprotected",
-                "Programs run with your full Windows access. Camera and screen never ask. The local MCP server is on. Use only if you trust every connected agent."),
-            _ => (
-                "\uE83D",
-                "Recommended",
-                "Programs run in a container with limited access. Camera and screen ask before each use."),
-        };
-        HeroIcon.Glyph = heroGlyph;
-        HeroTitle.Text = heroTitle;
-        HeroSubtext.Text = heroSubtext;
-
-        // Custom badge only when drift > 0
-        if (drift > 0)
-        {
-            LevelBadge.Visibility = Visibility.Visible;
-            LevelBadgeText.Text = $"Custom · {drift} change{(drift == 1 ? "" : "s")}";
-        }
-        else
-        {
-            LevelBadge.Visibility = Visibility.Collapsed;
-        }
-
+        // Drift hint below the buttons (the only place we mention "Custom" now —
+        // the hero card was removed because the blue accent border on the active
+        // button already shows which level is selected).
         DriftPanel.Visibility = drift > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (drift > 0)
             DriftText.Text = $"{drift} setting{(drift == 1 ? "" : "s")} differ from {LevelLabel(baseLevel)}.";
 
-        // Highlight the currently-selected preset card (Sandbox-style accent border).
-        // When drifted, no preset is highlighted — the user is in Custom territory.
+        // Selected-state accent border on the active button.
         var accent = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["AccentFillColorDefaultBrush"];
         var clear = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"];
         LockedDownButton.BorderBrush  = (drift == 0 && baseLevel == SecurityLevel.LockedDown)  ? accent : clear;
         RecommendedButton.BorderBrush = (drift == 0 && baseLevel == SecurityLevel.Recommended) ? accent : clear;
         TrustedButton.BorderBrush     = (drift == 0 && baseLevel == SecurityLevel.Trusted)     ? accent : clear;
-        var t = drift == 0 ? new Thickness(2) : new Thickness(1);
-        LockedDownButton.BorderThickness  = (drift == 0 && baseLevel == SecurityLevel.LockedDown)  ? t : new Thickness(1);
-        RecommendedButton.BorderThickness = (drift == 0 && baseLevel == SecurityLevel.Recommended) ? t : new Thickness(1);
-        TrustedButton.BorderThickness     = (drift == 0 && baseLevel == SecurityLevel.Trusted)     ? t : new Thickness(1);
+        LockedDownButton.BorderThickness  = (drift == 0 && baseLevel == SecurityLevel.LockedDown)  ? new Thickness(2) : new Thickness(1);
+        RecommendedButton.BorderThickness = (drift == 0 && baseLevel == SecurityLevel.Recommended) ? new Thickness(2) : new Thickness(1);
+        TrustedButton.BorderThickness     = (drift == 0 && baseLevel == SecurityLevel.Trusted)     ? new Thickness(2) : new Thickness(1);
     }
 
     private static string LevelLabel(SecurityLevel l) => l switch

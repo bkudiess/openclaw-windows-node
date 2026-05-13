@@ -15,40 +15,9 @@
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                        TextWrapping="Wrap" Margin="0,0,0,8"/>
 
-            <!-- ════ Hero status — slim card showing current security state ════ -->
-            <Border x:Name="SecurityLevelCard"
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="16"
-                    AutomationProperties.AutomationId="SecurityLevelCard">
-                <Grid ColumnSpacing="12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="28"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <FontIcon Grid.Column="0" x:Name="HeroIcon"
-                              Glyph="&#xE83D;" FontSize="20"
-                              Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                              VerticalAlignment="Center" HorizontalAlignment="Center"/>
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                        <TextBlock x:Name="HeroTitle" Text="Recommended"
-                                   Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                        <TextBlock x:Name="HeroSubtext"
-                                   Text="Programs run in a container with limited access. Camera and screen ask before each use."
-                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                   TextWrapping="Wrap"/>
-                    </StackPanel>
-                    <Border x:Name="LevelBadge" Grid.Column="2"
-                            CornerRadius="10" Padding="10,2"
-                            Background="{ThemeResource SystemFillColorCautionBackgroundBrush}"
-                            VerticalAlignment="Center"
-                            Visibility="Collapsed">
-                        <TextBlock x:Name="LevelBadgeText" Text="Custom" FontSize="11"/>
-                    </Border>
-                </Grid>
-            </Border>
+            <!-- Security level — preset buttons stand on their own.
+                 The selected level is shown by the blue accent border on the active button;
+                 drift (when the user has customized away from a preset) shows below. -->
 
             <!-- ════ Preset buttons — standalone, not wrapped in a parent card ════ -->
             <Grid ColumnSpacing="12">
