@@ -1005,7 +1005,14 @@ internal sealed class UiRenderer(Action requestRender)
 
     private TextBlock ConfigureTextBlock(TextBlock control, TextBlockElement element)
     {
-        control.Text = element.Text;
+        // Skip Text assignment when element text is empty and the control
+        // has Inlines (populated by a setter, e.g. SafeMarkdownText).
+        // Setting Text on a TextBlock with Inlines clears them.
+        if (!(string.IsNullOrEmpty(element.Text) && control.Inlines.Count > 0))
+        {
+            if (control.Text != element.Text)
+                control.Text = element.Text;
+        }
         ApplyModifiers(control, element);
         ApplySetters(control, element);
         return control;
@@ -1202,8 +1209,9 @@ internal sealed class UiRenderer(Action requestRender)
     {
         var child = element.Child is null ? null : RenderElement(element.Child, path + ".child", effects);
         if (child is not null)
-            RemoveFromParent(child);
-        control.Child = child;
+            SetChild(control, child);
+        else
+            control.Child = null;
         ApplyModifiers(control, element);
         ApplySetters(control, element);
         return control;
@@ -1236,12 +1244,8 @@ internal sealed class UiRenderer(Action requestRender)
     private Border ConfigureGrid(Border wrapper, GridElement element, string path, List<Action> effects)
     {
         var grid = GetOrCreate<WinGrid>(path + ".grid");
-        grid.ColumnDefinitions.Clear();
-        foreach (var col in element.Columns)
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = ParseGridLength(col) });
-        grid.RowDefinitions.Clear();
-        foreach (var row in element.Rows)
-            grid.RowDefinitions.Add(new RowDefinition { Height = ParseGridLength(row) });
+        SyncGridDefinitions(grid.ColumnDefinitions, element.Columns, s => new ColumnDefinition { Width = ParseGridLength(s) }, cd => cd.Width);
+        SyncGridDefinitions(grid.RowDefinitions, element.Rows, s => new RowDefinition { Height = ParseGridLength(s) }, rd => rd.Height);
         SyncChildren(grid, element.Children, path, effects);
         SetChild(wrapper, grid);
         ApplyModifiers(wrapper, element);
@@ -1249,12 +1253,53 @@ internal sealed class UiRenderer(Action requestRender)
         return wrapper;
     }
 
+    /// <summary>
+    /// Updates grid column/row definitions only when they actually differ,
+    /// avoiding unnecessary layout invalidation that causes cursor/background
+    /// flickering on re-render.
+    /// </summary>
+    private static void SyncGridDefinitions<TDef>(
+        IList<TDef> existing,
+        IReadOnlyList<string> desired,
+        Func<string, TDef> create,
+        Func<TDef, GridLength> getLength)
+    {
+        if (existing.Count == desired.Count)
+        {
+            var match = true;
+            for (var i = 0; i < desired.Count; i++)
+            {
+                var want = ParseGridLength(desired[i]);
+                var have = getLength(existing[i]);
+                if (want.GridUnitType != have.GridUnitType || Math.Abs(want.Value - have.Value) > double.Epsilon)
+                {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) return;
+        }
+
+        existing.Clear();
+        foreach (var d in desired)
+            existing.Add(create(d));
+    }
+
     private ScrollViewer ConfigureScrollView(ScrollViewer control, ScrollViewElement element, string path, List<Action> effects)
     {
         var child = element.Child is null ? null : RenderElement(element.Child, path + ".content", effects);
         if (child is not null)
-            RemoveFromParent(child);
-        control.Content = child;
+        {
+            if (!ReferenceEquals(control.Content, child))
+            {
+                RemoveFromParent(child);
+                control.Content = child;
+            }
+        }
+        else
+        {
+            control.Content = null;
+        }
         control.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
         control.HorizontalScrollMode = element.Modifiers.HorizontalScrollMode ?? ScrollMode.Auto;
         ApplyModifiers(control, element);
@@ -1266,9 +1311,18 @@ internal sealed class UiRenderer(Action requestRender)
     {
         var child = element.Child is null ? null : RenderElement(element.Child, path + ".content", effects);
         if (child is not null)
-            RemoveFromParent(child);
+        {
+            if (!ReferenceEquals(control.Content, child))
+            {
+                RemoveFromParent(child);
+                control.Content = child;
+            }
+        }
+        else
+        {
+            control.Content = null;
+        }
         control.Header = element.Header;
-        control.Content = child;
         control.IsExpanded = element.IsExpanded;
         ApplyModifiers(control, element);
         ApplySetters(control, element);
