@@ -568,38 +568,57 @@
                         <ToggleSwitch x:Name="McpToggle" Grid.Column="2" VerticalAlignment="Center"
                                       OnContent="" OffContent="" MinWidth="0" Toggled="OnMcpToggled"/>
                     </Grid>
-                    <StackPanel x:Name="McpDetailPanel" Spacing="8">
-                        <Grid ColumnSpacing="8">
+                    <StackPanel x:Name="McpDetailPanel" Spacing="10" Margin="40,8,0,0">
+                        <!-- Single grid keeps Endpoint and Token rows column-aligned.
+                             4 columns: label / value / action1 / action2. The Endpoint
+                             row's Copy button sits in column 3 (rightmost), leaving
+                             column 2 empty so it aligns with the Token's Copy button. -->
+                        <Grid ColumnSpacing="8" RowSpacing="8">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="Endpoint" VerticalAlignment="Center"
-                                       Style="{StaticResource CaptionTextBlockStyle}"/>
-                            <TextBlock Grid.Column="1" x:Name="McpEndpointText" IsTextSelectionEnabled="True"
-                                       VerticalAlignment="Center" FontFamily="Consolas"
-                                       Style="{StaticResource CaptionTextBlockStyle}"/>
-                            <Button Grid.Column="2" Content="Copy URL" Click="OnCopyMcpUrl"/>
-                        </Grid>
-                        <Grid ColumnSpacing="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="70"/>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="Token" VerticalAlignment="Center"
-                                       Style="{StaticResource CaptionTextBlockStyle}"/>
-                            <TextBlock Grid.Column="1" x:Name="McpTokenText" Text="•••••••••••••"
-                                       VerticalAlignment="Center" FontFamily="Consolas"
-                                       Style="{StaticResource CaptionTextBlockStyle}"/>
-                            <Button Grid.Column="2" Content="Reveal" Click="OnRevealMcpToken"/>
-                            <Button Grid.Column="3" Content="Copy" Click="OnCopyMcpToken"/>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- Endpoint row -->
+                            <TextBlock Grid.Row="0" Grid.Column="0"
+                                       Text="Endpoint" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="0" Grid.Column="1" x:Name="McpEndpointText"
+                                     IsReadOnly="True" FontFamily="Consolas"/>
+                            <Button Grid.Row="0" Grid.Column="3" Click="OnCopyMcpUrl"
+                                    MinWidth="40"
+                                    ToolTipService.ToolTip="Copy URL">
+                                <FontIcon Glyph="&#xE8C8;" FontSize="14"/>
+                            </Button>
+
+                            <!-- Token row -->
+                            <TextBlock Grid.Row="1" Grid.Column="0"
+                                       Text="Token" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="1" Grid.Column="1" x:Name="McpTokenText"
+                                     Text="•••••••••••••"
+                                     IsReadOnly="True" FontFamily="Consolas"/>
+                            <Button Grid.Row="1" Grid.Column="2" x:Name="RevealTokenButton"
+                                    Click="OnRevealMcpToken"
+                                    MinWidth="40"
+                                    ToolTipService.ToolTip="Show token for 10 seconds">
+                                <FontIcon x:Name="RevealTokenIcon" Glyph="&#xE7B3;" FontSize="14"/>
+                            </Button>
+                            <Button Grid.Row="1" Grid.Column="3" Click="OnCopyMcpToken"
+                                    MinWidth="40"
+                                    ToolTipService.ToolTip="Copy token">
+                                <FontIcon Glyph="&#xE8C8;" FontSize="14"/>
+                            </Button>
                         </Grid>
+
                         <TextBlock x:Name="McpStatusText"
                                    Style="{StaticResource CaptionTextBlockStyle}"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   TextWrapping="Wrap"/>
                     </StackPanel>
                 </StackPanel>
             </Border>
