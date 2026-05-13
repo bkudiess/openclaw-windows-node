@@ -37,12 +37,32 @@ public sealed class SecurityLevelResolverTests : IDisposable
         var s = new SettingsManager(_isolatedDir);
         SecurityLevelResolver.ApplyTo(s, SecurityLevel.LockedDown);
 
+        // Run programs & sandbox
         Assert.False(s.NodeSystemRunEnabled);
         Assert.True(s.SystemRunSandboxEnabled);
         Assert.False(s.SystemRunAllowOutbound);
+
+        // Every capability off — nothing is exposed remotely
+        Assert.False(s.NodeCameraEnabled);
+        Assert.False(s.NodeScreenEnabled);
+        Assert.False(s.NodeSttEnabled);
+        Assert.False(s.NodeLocationEnabled);
+        Assert.False(s.NodeBrowserProxyEnabled);
+        Assert.False(s.NodeCanvasEnabled);
+
+        // "Always allow" consent flags off
         Assert.False(s.ScreenRecordingConsentGiven);
         Assert.False(s.CameraRecordingConsentGiven);
+
+        // MCP off
         Assert.False(s.EnableMcpServer);
+
+        // Folder access all blocked
+        Assert.Null(s.SandboxDocumentsAccess);
+        Assert.Null(s.SandboxDownloadsAccess);
+        Assert.Null(s.SandboxDesktopAccess);
+        Assert.Equal(SandboxClipboardMode.None, s.SandboxClipboard);
+
         Assert.Equal(SecurityLevel.LockedDown, s.SecurityLevel);
     }
 
@@ -52,12 +72,30 @@ public sealed class SecurityLevelResolverTests : IDisposable
         var s = new SettingsManager(_isolatedDir);
         SecurityLevelResolver.ApplyTo(s, SecurityLevel.Recommended);
 
+        // Run programs in container, no outbound
         Assert.True(s.NodeSystemRunEnabled);
         Assert.True(s.SystemRunSandboxEnabled);
         Assert.False(s.SystemRunAllowOutbound);
+
+        // Capabilities on (camera/screen ask each time)
+        Assert.True(s.NodeCameraEnabled);
+        Assert.True(s.NodeScreenEnabled);
+        Assert.True(s.NodeSttEnabled);
+        Assert.True(s.NodeLocationEnabled);
+        Assert.True(s.NodeBrowserProxyEnabled);
+        Assert.True(s.NodeCanvasEnabled);
         Assert.False(s.ScreenRecordingConsentGiven);
         Assert.False(s.CameraRecordingConsentGiven);
+
+        // MCP server off (opt in)
         Assert.False(s.EnableMcpServer);
+
+        // Folder access: Documents RO, Downloads RW (where projects land), Desktop RO
+        Assert.Equal(SandboxFolderAccess.ReadOnly, s.SandboxDocumentsAccess);
+        Assert.Equal(SandboxFolderAccess.ReadWrite, s.SandboxDownloadsAccess);
+        Assert.Equal(SandboxFolderAccess.ReadOnly, s.SandboxDesktopAccess);
+        Assert.Equal(SandboxClipboardMode.Read, s.SandboxClipboard);
+
         Assert.Equal(SecurityLevel.Recommended, s.SecurityLevel);
     }
 
@@ -67,12 +105,28 @@ public sealed class SecurityLevelResolverTests : IDisposable
         var s = new SettingsManager(_isolatedDir);
         SecurityLevelResolver.ApplyTo(s, SecurityLevel.Trusted);
 
+        // Run programs directly with outbound
         Assert.True(s.NodeSystemRunEnabled);
         Assert.False(s.SystemRunSandboxEnabled);
         Assert.True(s.SystemRunAllowOutbound);
+
+        // Everything on, pre-approved
+        Assert.True(s.NodeCameraEnabled);
+        Assert.True(s.NodeScreenEnabled);
+        Assert.True(s.NodeSttEnabled);
+        Assert.True(s.NodeLocationEnabled);
+        Assert.True(s.NodeBrowserProxyEnabled);
+        Assert.True(s.NodeCanvasEnabled);
         Assert.True(s.ScreenRecordingConsentGiven);
         Assert.True(s.CameraRecordingConsentGiven);
         Assert.True(s.EnableMcpServer);
+
+        // Folder access: full read+write
+        Assert.Equal(SandboxFolderAccess.ReadWrite, s.SandboxDocumentsAccess);
+        Assert.Equal(SandboxFolderAccess.ReadWrite, s.SandboxDownloadsAccess);
+        Assert.Equal(SandboxFolderAccess.ReadWrite, s.SandboxDesktopAccess);
+        Assert.Equal(SandboxClipboardMode.Both, s.SandboxClipboard);
+
         Assert.Equal(SecurityLevel.Trusted, s.SecurityLevel);
     }
 
@@ -147,5 +201,80 @@ public sealed class SecurityLevelResolverTests : IDisposable
         var reloaded = new SettingsManager(_isolatedDir);
         Assert.Equal(SecurityLevel.LockedDown, reloaded.SecurityLevel);
         Assert.False(reloaded.NodeSystemRunEnabled);
+    }
+
+    [Fact]
+    public void ApplyTo_PreservesCustomFolders_AcrossSwitches()
+    {
+        // Custom folders are user-curated data, not a preset-driven setting.
+        // Switching presets must NEVER wipe the list.
+        var s = new SettingsManager(_isolatedDir);
+        s.SandboxCustomFolders.Add(new SandboxCustomFolder { Path = @"C:\Projects", Access = SandboxFolderAccess.ReadOnly });
+        s.SandboxCustomFolders.Add(new SandboxCustomFolder { Path = @"D:\work",     Access = SandboxFolderAccess.ReadWrite });
+
+        SecurityLevelResolver.ApplyTo(s, SecurityLevel.LockedDown);
+        Assert.Equal(2, s.SandboxCustomFolders.Count);
+        Assert.Equal(@"C:\Projects", s.SandboxCustomFolders[0].Path);
+
+        SecurityLevelResolver.ApplyTo(s, SecurityLevel.Trusted);
+        Assert.Equal(2, s.SandboxCustomFolders.Count);
+
+        SecurityLevelResolver.ApplyTo(s, SecurityLevel.Recommended);
+        Assert.Equal(2, s.SandboxCustomFolders.Count);
+    }
+
+    [Fact]
+    public void Recommended_GivesMoreAccessThanLockedDown_LessThanTrusted()
+    {
+        // Anchors the "balanced" positioning of Recommended against the
+        // other two presets.
+        var lockedDown = SecurityLevelResolver.DefaultsFor(SecurityLevel.LockedDown);
+        var recommended = SecurityLevelResolver.DefaultsFor(SecurityLevel.Recommended);
+        var trusted = SecurityLevelResolver.DefaultsFor(SecurityLevel.Trusted);
+
+        // Run programs: off → on → on
+        Assert.False(lockedDown.NodeSystemRunEnabled);
+        Assert.True(recommended.NodeSystemRunEnabled);
+        Assert.True(trusted.NodeSystemRunEnabled);
+
+        // Sandbox: on → on → off
+        Assert.True(recommended.SystemRunSandboxEnabled);
+        Assert.False(trusted.SystemRunSandboxEnabled);
+
+        // Outbound network: off → off → on
+        Assert.False(recommended.SystemRunAllowOutbound);
+        Assert.True(trusted.SystemRunAllowOutbound);
+
+        // Capability count enabled: 0 → 6 → 6
+        Assert.Equal(0, CapsOn(lockedDown));
+        Assert.Equal(6, CapsOn(recommended));
+        Assert.Equal(6, CapsOn(trusted));
+
+        // Clipboard: None < Read < Both
+        Assert.Equal(SandboxClipboardMode.None, lockedDown.SandboxClipboard);
+        Assert.Equal(SandboxClipboardMode.Read, recommended.SandboxClipboard);
+        Assert.Equal(SandboxClipboardMode.Both, trusted.SandboxClipboard);
+
+        static int CapsOn(SecurityLevelResolver.LevelDefaults d) =>
+            (d.NodeCameraEnabled       ? 1 : 0) +
+            (d.NodeScreenEnabled       ? 1 : 0) +
+            (d.NodeSttEnabled          ? 1 : 0) +
+            (d.NodeLocationEnabled     ? 1 : 0) +
+            (d.NodeBrowserProxyEnabled ? 1 : 0) +
+            (d.NodeCanvasEnabled       ? 1 : 0);
+    }
+
+    [Fact]
+    public void Recommended_DownloadsIsReadWrite_OthersReadOnly()
+    {
+        var s = new SettingsManager(_isolatedDir);
+        SecurityLevelResolver.ApplyTo(s, SecurityLevel.Recommended);
+
+        // The reasoning: Downloads is where projects/exports/installers land,
+        // so most agent shell work happens there. Documents/Desktop are more
+        // personal — keep them read only by default on the balanced preset.
+        Assert.Equal(SandboxFolderAccess.ReadOnly,  s.SandboxDocumentsAccess);
+        Assert.Equal(SandboxFolderAccess.ReadWrite, s.SandboxDownloadsAccess);
+        Assert.Equal(SandboxFolderAccess.ReadOnly,  s.SandboxDesktopAccess);
     }
 }
