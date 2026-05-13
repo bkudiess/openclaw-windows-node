@@ -172,7 +172,7 @@
                                          Checked="OnRunInContainerChecked"/>
                             <RadioButton x:Name="RunDirectRadio"
                                          GroupName="RunMode"
-                                         Content="Direct — programs have your full Windows access. Requires confirmation."
+                                         Content="Direct — programs have your full Windows access"
                                          Checked="OnRunDirectChecked"/>
                         </StackPanel>
 
