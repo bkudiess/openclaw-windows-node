@@ -188,22 +188,25 @@ public sealed partial class CapabilitiesPage : Page
         if (hub.Settings == null) return;
         var settings = hub.Settings;
 
-        // Description: optional sub-control rendered below the toggle (e.g., Always-allow checkbox)
-        var capabilities = new (string Icon, string Label, bool Value, Action<bool> Setter, FrameworkElement? Sub)[]
+        // Captions: tiny hint rendered under the toggle. Used to surface
+        // OS permission status for camera/screen/mic so users see the
+        // dependency without opening another page. Run Programs gets an
+        // honest hint about container status.
+        var capabilities = new (string Icon, string Label, bool Value, Action<bool> Setter, FrameworkElement? Sub, string? Caption)[]
         {
-            ("🔌", "Node Mode",        settings.EnableNodeMode,           v => settings.EnableNodeMode = v,           null),
-            ("🌐", "Browser Control",  settings.NodeBrowserProxyEnabled,  v => settings.NodeBrowserProxyEnabled = v,  null),
-            ("📷", "Camera",           settings.NodeCameraEnabled,        v => settings.NodeCameraEnabled = v,        BuildAlwaysAllowSub(this, "Always allow camera (no per-call prompt)", settings.CameraRecordingConsentGiven, v => settings.CameraRecordingConsentGiven = v, hub)),
-            ("🎨", "Canvas",           settings.NodeCanvasEnabled,        v => settings.NodeCanvasEnabled = v,        null),
-            ("🖥️", "Screen Capture",   settings.NodeScreenEnabled,        v => settings.NodeScreenEnabled = v,        BuildAlwaysAllowSub(this, "Always allow screen recording (no per-call prompt)", settings.ScreenRecordingConsentGiven, v => settings.ScreenRecordingConsentGiven = v, hub)),
-            ("📍", "Location",         settings.NodeLocationEnabled,      v => settings.NodeLocationEnabled = v,      null),
-            ("⌨️", "Run Programs",     settings.NodeSystemRunEnabled,     v => settings.NodeSystemRunEnabled = v,     null),
-            ("🔊", "Text-to-Speech",   settings.NodeTtsEnabled,           v => settings.NodeTtsEnabled = v,           null),
-            ("🎤", "Speech-to-Text",   settings.NodeSttEnabled,           v => settings.NodeSttEnabled = v,           null),
+            ("🔌", "Node Mode",        settings.EnableNodeMode,           v => settings.EnableNodeMode = v,           null, null),
+            ("🌐", "Browser Control",  settings.NodeBrowserProxyEnabled,  v => settings.NodeBrowserProxyEnabled = v,  null, null),
+            ("📷", "Camera",           settings.NodeCameraEnabled,        v => settings.NodeCameraEnabled = v,        BuildAlwaysAllowSub(this, "Always allow camera (no per-call prompt)", settings.CameraRecordingConsentGiven, v => settings.CameraRecordingConsentGiven = v, hub), "🪟 Also requires Windows camera permission · check Windows Privacy settings"),
+            ("🎨", "Canvas",           settings.NodeCanvasEnabled,        v => settings.NodeCanvasEnabled = v,        null, null),
+            ("🖥️", "Screen Capture",   settings.NodeScreenEnabled,        v => settings.NodeScreenEnabled = v,        BuildAlwaysAllowSub(this, "Always allow screen recording (no per-call prompt)", settings.ScreenRecordingConsentGiven, v => settings.ScreenRecordingConsentGiven = v, hub), "🪟 Available · Windows screen capture is system-wide"),
+            ("📍", "Location",         settings.NodeLocationEnabled,      v => settings.NodeLocationEnabled = v,      null, "🪟 Also requires Windows location permission"),
+            ("⌨️", "Run Programs",     settings.NodeSystemRunEnabled,     v => settings.NodeSystemRunEnabled = v,     null, settings.SystemRunSandboxEnabled ? "📦 Runs in a Windows AppContainer · advanced sandbox options below" : "⚠️ Runs directly as you (no container) · advanced options below"),
+            ("🔊", "Text-to-Speech",   settings.NodeTtsEnabled,           v => settings.NodeTtsEnabled = v,           null, null),
+            ("🎤", "Speech-to-Text",   settings.NodeSttEnabled,           v => settings.NodeSttEnabled = v,           null, "🪟 Also requires Windows microphone permission"),
         };
 
         var items = new List<UIElement>();
-        foreach (var (icon, label, value, setter, sub) in capabilities)
+        foreach (var (icon, label, value, setter, sub, caption) in capabilities)
         {
             var toggle = new ToggleSwitch
             {
@@ -212,48 +215,45 @@ public sealed partial class CapabilitiesPage : Page
                 MinWidth = 200
             };
 
-            FrameworkElement rowContent;
+            var stack = new StackPanel { Spacing = 0 };
+            stack.Children.Add(toggle);
+
+            TextBlock? captionBlock = null;
+            if (caption != null)
+            {
+                captionBlock = new TextBlock
+                {
+                    Text = caption,
+                    FontSize = 11,
+                    Margin = new Thickness(48, 0, 0, 4),
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                    Visibility = value ? Visibility.Visible : Visibility.Collapsed
+                };
+                stack.Children.Add(captionBlock);
+            }
+
             if (sub != null)
             {
-                // Toggle + sub-control vertically stacked. Sub-control is hidden when the
-                // capability is OFF — there's nothing to "always allow" if the capability
-                // itself isn't running.
                 sub.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
                 sub.Margin = new Thickness(48, 4, 0, 4);
-
-                var stack = new StackPanel { Spacing = 0 };
-                stack.Children.Add(toggle);
                 stack.Children.Add(sub);
-                rowContent = stack;
-
-                toggle.Toggled += (s, e) =>
-                {
-                    setter(toggle.IsOn);
-                    sub.Visibility = toggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
-                    settings.Save();
-                    hub.RaiseSettingsSaved();
-                    UpdateSttCard(hub);
-                    UpdateTtsCard(hub);
-                    UpdateNodeStatus(hub);
-                    OnLevelDrivenSettingChanged();
-                };
             }
-            else
+
+            toggle.Toggled += (s, e) =>
             {
-                toggle.Toggled += (s, e) =>
-                {
-                    setter(toggle.IsOn);
-                    settings.Save();
-                    hub.RaiseSettingsSaved();
-                    UpdateSttCard(hub);
-                    UpdateTtsCard(hub);
-                    UpdateNodeStatus(hub);
-                    OnLevelDrivenSettingChanged();
-                };
-                rowContent = toggle;
-            }
+                setter(toggle.IsOn);
+                if (captionBlock != null) captionBlock.Visibility = toggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+                if (sub != null) sub.Visibility = toggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+                settings.Save();
+                hub.RaiseSettingsSaved();
+                UpdateSttCard(hub);
+                UpdateTtsCard(hub);
+                UpdateNodeStatus(hub);
+                OnLevelDrivenSettingChanged();
+            };
 
-            items.Add(rowContent);
+            items.Add(stack);
         }
 
         CapabilityRepeater.ItemsSource = items;
