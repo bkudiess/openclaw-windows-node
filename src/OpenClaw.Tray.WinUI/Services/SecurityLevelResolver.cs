@@ -48,7 +48,9 @@ internal static class SecurityLevelResolver
         // Sandbox clipboard policy
         SandboxClipboardMode SandboxClipboard,
         // Sandbox runtime ceiling (ms)
-        int SandboxTimeoutMs);
+        int SandboxTimeoutMs,
+        // Maximum stdout/stderr returned per command (bytes)
+        long SandboxMaxOutputBytes);
 
     /// <summary>
     /// Returns the canonical defaults for the given level.
@@ -74,7 +76,8 @@ internal static class SecurityLevelResolver
             SandboxDownloadsAccess: null,
             SandboxDesktopAccess: null,
             SandboxClipboard: SandboxClipboardMode.None,
-            SandboxTimeoutMs: 30_000),
+            SandboxTimeoutMs: 30_000,
+            SandboxMaxOutputBytes: 4 * 1024 * 1024),
 
         // ⚠️ Unprotected (Trusted) — power-user profile. Direct execution,
         // every capability on, full sandbox access, MCP server up.
@@ -95,7 +98,8 @@ internal static class SecurityLevelResolver
             SandboxDownloadsAccess: SandboxFolderAccess.ReadWrite,
             SandboxDesktopAccess: SandboxFolderAccess.ReadWrite,
             SandboxClipboard: SandboxClipboardMode.Both,
-            SandboxTimeoutMs: 60_000),
+            SandboxTimeoutMs: 60_000,
+            SandboxMaxOutputBytes: 4 * 1024 * 1024),
 
         // 🛡️ Recommended (Balanced) — and Custom for completeness.
         // Run programs on in container; capabilities on but camera/screen ask
@@ -119,7 +123,8 @@ internal static class SecurityLevelResolver
             SandboxDownloadsAccess: SandboxFolderAccess.ReadOnly,
             SandboxDesktopAccess: SandboxFolderAccess.ReadOnly,
             SandboxClipboard: SandboxClipboardMode.Read,
-            SandboxTimeoutMs: 30_000),
+            SandboxTimeoutMs: 30_000,
+            SandboxMaxOutputBytes: 4 * 1024 * 1024),
     };
 
     /// <summary>
@@ -154,6 +159,7 @@ internal static class SecurityLevelResolver
         settings.SandboxDesktopAccess        = d.SandboxDesktopAccess;
         settings.SandboxClipboard            = d.SandboxClipboard;
         settings.SandboxTimeoutMs            = d.SandboxTimeoutMs;
+        settings.SandboxMaxOutputBytes       = d.SandboxMaxOutputBytes;
         settings.SecurityLevel               = level;
         settings.SecurityBaseLevel           = level;
     }
@@ -191,6 +197,7 @@ internal static class SecurityLevelResolver
         if (settings.SandboxDesktopAccess        != d.SandboxDesktopAccess)        n++;
         if (settings.SandboxClipboard            != d.SandboxClipboard)            n++;
         if (settings.SandboxTimeoutMs            != d.SandboxTimeoutMs)            n++;
+        if (settings.SandboxMaxOutputBytes       != d.SandboxMaxOutputBytes)       n++;
         return n;
     }
 }

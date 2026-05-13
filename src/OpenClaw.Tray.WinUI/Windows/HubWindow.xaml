@@ -142,7 +142,7 @@
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE713;"/></NavigationViewItem.Icon>
             </NavigationViewItem>
             <!-- Permissions + Sandbox sidebar entries removed (security IA redesign).
-                 Both pages remain reachable from Capabilities → Advanced settings. -->
+                 Their content is fully inlined into Privacy & security. -->
             <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_139" Tag="activity" Content="Activity">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xEA95;"/></NavigationViewItem.Icon>
             </NavigationViewItem>

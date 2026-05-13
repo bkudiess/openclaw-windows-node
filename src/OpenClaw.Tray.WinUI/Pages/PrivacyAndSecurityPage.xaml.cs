@@ -209,13 +209,22 @@ public sealed partial class PrivacyAndSecurityPage : Page
         LoadAllFromSettings();
     }
 
-    private void OnAnyLevelDrivenChanged()
+    /// <summary>
+    /// Persist a change to a preset-tracked setting. Recomputes drift and
+    /// flips <see cref="SettingsManager.SecurityLevel"/> to Custom (or back
+    /// to the base) BEFORE saving — so the on-disk file's SecurityLevel
+    /// field is always consistent with its actual settings shape. Then
+    /// notifies the hub and refreshes the level-picker UI.
+    /// </summary>
+    private void SaveAndRefreshLevel()
     {
         if (_loading || _hub?.Settings is not { } s) return;
         var drift = SecurityLevelResolver.DriftCount(s);
         // SecurityLevel reflects the effective state; SecurityBaseLevel stays
         // anchored to the preset the user picked. We only mutate SecurityLevel.
         s.SecurityLevel = drift > 0 ? SecurityLevel.Custom : s.SecurityBaseLevel;
+        s.Save();
+        _hub.RaiseSettingsSaved();
         UpdateLevelPicker();
     }
 
@@ -227,10 +236,8 @@ public sealed partial class PrivacyAndSecurityPage : Page
     {
         if (_loading || _hub?.Settings is not { } s) return;
         s.NodeSystemRunEnabled = RunProgramsToggle.IsOn;
-        s.Save();
-        _hub.RaiseSettingsSaved();
+        SaveAndRefreshLevel();
         RefreshRunProgramsState(s);
-        OnAnyLevelDrivenChanged();
         UpdateRunProgramsSummary();
     }
 
@@ -281,10 +288,8 @@ public sealed partial class PrivacyAndSecurityPage : Page
         if (_loading || _hub?.Settings is not { } s) return;
         if (s.SystemRunSandboxEnabled) return; // already in container
         s.SystemRunSandboxEnabled = true;
-        s.Save();
-        _hub.RaiseSettingsSaved();
+        SaveAndRefreshLevel();
         RefreshRunProgramsState(s);
-        OnAnyLevelDrivenChanged();
         UpdateRunProgramsSummary();
     }
 
@@ -309,10 +314,8 @@ public sealed partial class PrivacyAndSecurityPage : Page
             return;
         }
         s.SystemRunSandboxEnabled = false;
-        s.Save();
-        _hub.RaiseSettingsSaved();
+        SaveAndRefreshLevel();
         RefreshRunProgramsState(s);
-        OnAnyLevelDrivenChanged();
         UpdateRunProgramsSummary();
     }
 
@@ -327,9 +330,7 @@ public sealed partial class PrivacyAndSecurityPage : Page
     {
         if (_loading || _hub?.Settings is not { } s) return;
         mutate(s);
-        s.Save();
-        _hub.RaiseSettingsSaved();
-        OnAnyLevelDrivenChanged();
+        SaveAndRefreshLevel();
         UpdateRunProgramsSummary();
     }
 
@@ -337,9 +338,7 @@ public sealed partial class PrivacyAndSecurityPage : Page
     {
         if (_loading || _hub?.Settings is not { } s) return;
         s.SystemRunAllowOutbound = NetworkToggle.IsOn;
-        s.Save();
-        _hub.RaiseSettingsSaved();
-        OnAnyLevelDrivenChanged();
+        SaveAndRefreshLevel();
         UpdateRunProgramsSummary();
     }
 
@@ -355,9 +354,7 @@ public sealed partial class PrivacyAndSecurityPage : Page
                 "Both" => SandboxClipboardMode.Both,
                 _ => SandboxClipboardMode.None
             };
-            s.Save();
-            _hub.RaiseSettingsSaved();
-            OnAnyLevelDrivenChanged();
+            SaveAndRefreshLevel();
         }
     }
 
@@ -367,9 +364,7 @@ public sealed partial class PrivacyAndSecurityPage : Page
         var secs = (int)Math.Round(TimeoutSlider.Value);
         TimeoutLabel.Text = $"Command timeout: {secs} sec";
         s.SandboxTimeoutMs = secs * 1000;
-        s.Save();
-        _hub.RaiseSettingsSaved();
-        OnAnyLevelDrivenChanged();
+        SaveAndRefreshLevel();
     }
 
     private void OnMaxOutputChanged(object sender, SelectionChangedEventArgs e)
@@ -379,8 +374,7 @@ public sealed partial class PrivacyAndSecurityPage : Page
             long.TryParse(item.Tag?.ToString(), out var bytes))
         {
             s.SandboxMaxOutputBytes = bytes;
-            s.Save();
-            _hub.RaiseSettingsSaved();
+            SaveAndRefreshLevel();
         }
     }
 
@@ -419,9 +413,7 @@ public sealed partial class PrivacyAndSecurityPage : Page
         CustomFolders.Add(row);
         RefreshCustomFoldersUi();
         s.SandboxCustomFolders.Add(new SandboxCustomFolder { Path = folder.Path, Access = SandboxFolderAccess.ReadOnly });
-        s.Save();
-        _hub.RaiseSettingsSaved();
-        OnAnyLevelDrivenChanged();
+        SaveAndRefreshLevel();
     }
 
     private void OnCustomFolderAccessChanged(object sender, SelectionChangedEventArgs e)
@@ -455,9 +447,7 @@ public sealed partial class PrivacyAndSecurityPage : Page
         {
             s.SandboxCustomFolders.Add(new SandboxCustomFolder { Path = row.Path, Access = newAccess.Value });
         }
-        s.Save();
-        _hub.RaiseSettingsSaved();
-        OnAnyLevelDrivenChanged();
+        SaveAndRefreshLevel();
     }
 
     private void OnRemoveCustomFolder(object sender, RoutedEventArgs e)
@@ -468,9 +458,7 @@ public sealed partial class PrivacyAndSecurityPage : Page
         RefreshCustomFoldersUi();
         if (_hub?.Settings is not { } s) return;
         s.SandboxCustomFolders.RemoveAll(f => string.Equals(f.Path, path, StringComparison.OrdinalIgnoreCase));
-        s.Save();
-        _hub.RaiseSettingsSaved();
-        OnAnyLevelDrivenChanged();
+        SaveAndRefreshLevel();
     }
 
     private void UpdateRunProgramsSummary()
@@ -658,16 +646,14 @@ public sealed partial class PrivacyAndSecurityPage : Page
     {
         if (_loading || _hub?.Settings is not { } s) return;
         s.NodeBrowserProxyEnabled = BrowserToggle.IsOn;
-        s.Save(); _hub.RaiseSettingsSaved();
-        OnAnyLevelDrivenChanged();
+        SaveAndRefreshLevel();
     }
 
     private void OnCanvasToggled(object sender, RoutedEventArgs e)
     {
         if (_loading || _hub?.Settings is not { } s) return;
         s.NodeCanvasEnabled = CanvasToggle.IsOn;
-        s.Save(); _hub.RaiseSettingsSaved();
-        OnAnyLevelDrivenChanged();
+        SaveAndRefreshLevel();
     }
 
     // ─── MCP ──────────────────────────────────────────────────────────
@@ -697,8 +683,7 @@ public sealed partial class PrivacyAndSecurityPage : Page
         }
         s.EnableMcpServer = McpToggle.IsOn;
         SetPanelEnabled(McpDetailPanel, McpToggle.IsOn);
-        s.Save(); _hub.RaiseSettingsSaved();
-        OnAnyLevelDrivenChanged();
+        SaveAndRefreshLevel();
         UpdateMcpEndpoint();
     }
 
@@ -812,8 +797,7 @@ public sealed partial class PrivacyAndSecurityPage : Page
         if (_loading || _hub?.Settings is not { } s) return;
         s.NodeCameraEnabled = CameraToggle.IsOn;
         SetPanelEnabled(CameraDetailPanel, CameraToggle.IsOn);
-        s.Save(); _hub.RaiseSettingsSaved();
-        OnAnyLevelDrivenChanged();
+        SaveAndRefreshLevel();
     }
 
     private async void OnCameraAlwaysAllowChanged(object sender, RoutedEventArgs e)
@@ -839,8 +823,7 @@ public sealed partial class PrivacyAndSecurityPage : Page
             }
         }
         s.CameraRecordingConsentGiven = want;
-        s.Save(); _hub.RaiseSettingsSaved();
-        OnAnyLevelDrivenChanged();
+        SaveAndRefreshLevel();
     }
 
     private void OnOpenWindowsCamera(object sender, RoutedEventArgs e)
@@ -851,8 +834,7 @@ public sealed partial class PrivacyAndSecurityPage : Page
         if (_loading || _hub?.Settings is not { } s) return;
         s.NodeScreenEnabled = ScreenToggle.IsOn;
         SetPanelEnabled(ScreenDetailPanel, ScreenToggle.IsOn);
-        s.Save(); _hub.RaiseSettingsSaved();
-        OnAnyLevelDrivenChanged();
+        SaveAndRefreshLevel();
     }
 
     private async void OnScreenAlwaysAllowChanged(object sender, RoutedEventArgs e)
@@ -878,8 +860,7 @@ public sealed partial class PrivacyAndSecurityPage : Page
             }
         }
         s.ScreenRecordingConsentGiven = want;
-        s.Save(); _hub.RaiseSettingsSaved();
-        OnAnyLevelDrivenChanged();
+        SaveAndRefreshLevel();
     }
 
     private void OnOpenWindowsScreen(object sender, RoutedEventArgs e)
@@ -890,9 +871,8 @@ public sealed partial class PrivacyAndSecurityPage : Page
         if (_loading || _hub?.Settings is not { } s) return;
         s.NodeSttEnabled = SttToggle.IsOn;
         SetPanelEnabled(SttDetailPanel, SttToggle.IsOn);
-        s.Save(); _hub.RaiseSettingsSaved();
+        SaveAndRefreshLevel();
         UpdateSttEngineHint();
-        OnAnyLevelDrivenChanged();
     }
 
     private void UpdateSttEngineHint()
@@ -913,8 +893,7 @@ public sealed partial class PrivacyAndSecurityPage : Page
         if (_loading || _hub?.Settings is not { } s) return;
         s.NodeLocationEnabled = LocationToggle.IsOn;
         SetPanelEnabled(LocationDetailPanel, LocationToggle.IsOn);
-        s.Save(); _hub.RaiseSettingsSaved();
-        OnAnyLevelDrivenChanged();
+        SaveAndRefreshLevel();
     }
 
     private void OnOpenWindowsLocation(object sender, RoutedEventArgs e)

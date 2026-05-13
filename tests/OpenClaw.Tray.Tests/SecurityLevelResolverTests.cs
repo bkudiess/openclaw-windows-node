@@ -63,8 +63,9 @@ public sealed class SecurityLevelResolverTests : IDisposable
         Assert.Null(s.SandboxDesktopAccess);
         Assert.Equal(SandboxClipboardMode.None, s.SandboxClipboard);
 
-        // Timeout pinned at the conservative default
+        // Timeout and max-output pinned at the conservative defaults
         Assert.Equal(30_000, s.SandboxTimeoutMs);
+        Assert.Equal(4L * 1024 * 1024, s.SandboxMaxOutputBytes);
 
         Assert.Equal(SecurityLevel.LockedDown, s.SecurityLevel);
     }
@@ -100,8 +101,9 @@ public sealed class SecurityLevelResolverTests : IDisposable
         Assert.Equal(SandboxFolderAccess.ReadOnly, s.SandboxDesktopAccess);
         Assert.Equal(SandboxClipboardMode.Read, s.SandboxClipboard);
 
-        // Same conservative timeout as Locked down
+        // Same conservative timeout and max-output as Locked down
         Assert.Equal(30_000, s.SandboxTimeoutMs);
+        Assert.Equal(4L * 1024 * 1024, s.SandboxMaxOutputBytes);
 
         Assert.Equal(SecurityLevel.Recommended, s.SecurityLevel);
     }
@@ -134,8 +136,12 @@ public sealed class SecurityLevelResolverTests : IDisposable
         Assert.Equal(SandboxFolderAccess.ReadWrite, s.SandboxDesktopAccess);
         Assert.Equal(SandboxClipboardMode.Both, s.SandboxClipboard);
 
-        // Trusted gives a longer per-command budget
+        // Trusted gives a longer per-command budget but shares the default
+        // 4 MiB output cap (all three presets pin the same value today; the
+        // field lives in LevelDefaults so future preset tweaks won't silently
+        // skip it).
         Assert.Equal(60_000, s.SandboxTimeoutMs);
+        Assert.Equal(4L * 1024 * 1024, s.SandboxMaxOutputBytes);
 
         Assert.Equal(SecurityLevel.Trusted, s.SecurityLevel);
     }

@@ -172,7 +172,12 @@ public class SettingsManager
         var isFirstLaunch = !File.Exists(_settingsFilePath);
         Load();
 
-        if (isFirstLaunch)
+        // Re-check the file *after* Load() to close a TOCTOU window where the
+        // file could appear between the initial existence check and Load
+        // (concurrent process, parallel tests creating the same dir, an
+        // installer dropping a seed file, etc.). If anything ended up on disk
+        // we treat Load's result as authoritative and skip the migration.
+        if (isFirstLaunch && !File.Exists(_settingsFilePath))
         {
             // First-launch migration: persist the Recommended preset's concrete
             // values to settings.json so reloads round-trip cleanly and the
