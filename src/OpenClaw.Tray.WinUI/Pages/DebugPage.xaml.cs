@@ -30,6 +30,56 @@ public sealed partial class DebugPage : Page
         LoadLog();
         LoadConnectionStatus();
         LoadDeviceIdentity();
+        LoadChatSurfaceOverrides();
+    }
+
+    // ── Debug Overrides ──────────────────────────────────────────────
+
+    private bool _suppressOverrideChange;
+
+    private void LoadChatSurfaceOverrides()
+    {
+        _suppressOverrideChange = true;
+        try
+        {
+            SelectByTag(HubChatOverrideCombo, OpenClawTray.Chat.DebugChatSurfaceOverrides.HubChat.ToString());
+            SelectByTag(TrayChatOverrideCombo, OpenClawTray.Chat.DebugChatSurfaceOverrides.TrayChat.ToString());
+        }
+        finally { _suppressOverrideChange = false; }
+    }
+
+    private static void SelectByTag(ComboBox combo, string tag)
+    {
+        for (int i = 0; i < combo.Items.Count; i++)
+        {
+            if (combo.Items[i] is ComboBoxItem item &&
+                string.Equals(item.Tag?.ToString(), tag, StringComparison.Ordinal))
+            {
+                combo.SelectedIndex = i;
+                return;
+            }
+        }
+        combo.SelectedIndex = 0;
+    }
+
+    private static OpenClawTray.Chat.ChatSurfaceOverride ParseOverride(ComboBox combo)
+    {
+        if (combo.SelectedItem is ComboBoxItem item &&
+            Enum.TryParse<OpenClawTray.Chat.ChatSurfaceOverride>(item.Tag?.ToString(), out var v))
+            return v;
+        return OpenClawTray.Chat.ChatSurfaceOverride.NoOverride;
+    }
+
+    private void OnHubChatOverrideChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressOverrideChange) return;
+        OpenClawTray.Chat.DebugChatSurfaceOverrides.HubChat = ParseOverride(HubChatOverrideCombo);
+    }
+
+    private void OnTrayChatOverrideChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressOverrideChange) return;
+        OpenClawTray.Chat.DebugChatSurfaceOverrides.TrayChat = ParseOverride(TrayChatOverrideCombo);
     }
 
     // ── Log Viewer ───────────────────────────────────────────────────
@@ -205,5 +255,25 @@ public sealed partial class DebugPage : Page
     private void OnRelaunchOnboarding(object sender, RoutedEventArgs e)
     {
         _hub?.OpenSetupAction?.Invoke();
+    }
+
+    private ChatExplorationsWindow? _explorationsWindow;
+
+    private void OnOpenChatExplorations(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (_explorationsWindow is { } existing)
+            {
+                try { existing.Activate(); return; } catch { _explorationsWindow = null; }
+            }
+            _explorationsWindow = new ChatExplorationsWindow();
+            _explorationsWindow.Closed += (_, _) => _explorationsWindow = null;
+            _explorationsWindow.Activate();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"OnOpenChatExplorations failed: {ex}");
+        }
     }
 }

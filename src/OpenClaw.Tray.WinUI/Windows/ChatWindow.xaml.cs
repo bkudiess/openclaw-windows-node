@@ -1,14 +1,15 @@
-using Microsoft.UI.Composition;
+using OpenClaw.Chat;
+using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Hosting;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.Web.WebView2.Core;
 using OpenClaw.Shared;
+using OpenClawTray.Chat;
+using OpenClawTray.Chat.Explorations;
 using OpenClawTray.Helpers;
 using OpenClawTray.Services;
 using System;
 using System.Diagnostics;
-using System.IO;
-using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using WinUIEx;
@@ -19,8 +20,11 @@ public sealed partial class ChatWindow : WindowEx
 {
     private string _gatewayUrl;
     private string _token;
-    private string _chatUrl = "";
+    private string _chatUrl;
+    private IDisposable? _functionalHost;
+    private IChatDataProvider? _mountedProvider;
     private bool _webViewInitialized;
+    private bool _webViewMode;
     public bool IsClosed { get; private set; }
 
     [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
@@ -30,7 +34,9 @@ public sealed partial class ChatWindow : WindowEx
     [DllImport("user32.dll")] private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO mi);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
     [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, uint attr, ref int val, int size);
+    [DllImport("dwmapi.dll")] private static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS margins);
 
     private const int GWL_EXSTYLE = -20;
     private const int GWL_STYLE = -16;
@@ -40,6 +46,9 @@ public sealed partial class ChatWindow : WindowEx
     private const uint MONITOR_DEFAULTTONEAREST = 2;
     private const uint DWMWA_WINDOW_CORNER_PREFERENCE = 33;
     private const int DWMWCP_ROUND = 2;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MARGINS { public int Left, Right, Top, Bottom; }
 
     [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] private struct RECT2 { public int Left, Top, Right, Bottom; }
@@ -56,13 +65,13 @@ public sealed partial class ChatWindow : WindowEx
     {
         _gatewayUrl = gatewayUrl;
         _token = token;
+        _chatUrl = BuildChatUrl(gatewayUrl, token);
         InitializeComponent();
 
-        // No system title bar for popup panel — our custom header replaces it
-        this.SetWindowSize(480, 640);
-        this.SetIcon(IconHelper.GetStatusIconPath(ConnectionStatus.Connected));
+        this.SetWindowSize(DefaultChatWidth, DefaultChatHeight);
+        this.SetIcon("Assets\\openclaw.ico");
 
-        // Set as tool window (hidden from taskbar) + remove system caption
+        // Set as tool window (hidden from taskbar) + remove system caption.
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         var exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
         SetWindowLong(hwnd, GWL_EXSTYLE, exStyle | WS_EX_TOOLWINDOW);
@@ -76,71 +85,191 @@ public sealed partial class ChatWindow : WindowEx
         // Auto-hide when clicking outside the panel
         Activated += OnWindowActivated;
 
-        // Hide instead of close — preserves WebView2 session for instant reopen
+        // Hide instead of close — preserves native chat state for instant reopen
         Closed += OnWindowClosing;
+
+        // a11y: Esc to hide the popup + try to focus composer on first show.
+        // KeyboardAccelerator on the root content gets first-class keyboard
+        // handling without needing a focus host.
+        if (this.Content is FrameworkElement contentRoot)
+        {
+            var escAccel = new Microsoft.UI.Xaml.Input.KeyboardAccelerator
+            {
+                Key = global::Windows.System.VirtualKey.Escape,
+            };
+            escAccel.Invoked += (_, args) =>
+            {
+                args.Handled = true;
+                this.Hide();
+            };
+            contentRoot.KeyboardAccelerators.Add(escAccel);
+            // Suppress the default "Esc" tooltip that WinUI shows for
+            // keyboard accelerators — it lingers as a floating orphan
+            // when the user scrolls the chat timeline.
+            contentRoot.KeyboardAcceleratorPlacementMode =
+                Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
+        }
+
+        // Subscribe to global SettingsChanged so the surface swaps when the
+        // user toggles "Use standard Gateway Chat interface" while the
+        // pre-warmed window is alive.
+        if (App.Current is App app)
+        {
+            app.SettingsChanged += OnAppSettingsChanged;
+            app.ChatProviderChanged += OnAppChatProviderChanged;
+        }
+
+        // Per-surface debug override (DebugPage > "Debug Overrides").
+        OpenClawTray.Chat.DebugChatSurfaceOverrides.Changed -= OnDebugOverrideChanged;
+        OpenClawTray.Chat.DebugChatSurfaceOverrides.Changed += OnDebugOverrideChanged;
+
+        // ChatExploration backdrop / theme — re-apply when toggled live.
+        ChatExplorationState.Changed -= OnExplorationChanged;
+        ChatExplorationState.Changed += OnExplorationChanged;
+
+        ApplyChatSurface();
+        ApplySystemBackdrop();
+        ApplyPreviewTheme();
+    }
+
+    private const int DefaultChatWidth = 480;
+    private const int DefaultChatHeight = 640;
+
+    private void OnAppSettingsChanged(object? sender, EventArgs e) => ApplyChatSurface();
+
+    private void OnAppChatProviderChanged(object? sender, EventArgs e)
+    {
+        if (IsClosed) return;
+
+        var dispatcher = DispatcherQueue;
+        if (dispatcher is null || dispatcher.HasThreadAccess)
+        {
+            ApplyChatSurface();
+            return;
+        }
+
+        _ = dispatcher.TryEnqueue(ApplyChatSurface);
+    }
+
+    private void OnDebugOverrideChanged(object? sender, EventArgs e) => ApplyChatSurface();
+
+    private void OnExplorationChanged(object? sender, EventArgs e)
+    {
+        // Marshal back to UI thread — Changed may fire from anywhere.
+        DispatcherQueue?.TryEnqueue(() =>
+        {
+            ApplySystemBackdrop();
+            ApplyPreviewTheme();
+        });
+    }
+
+    /// <summary>
+    /// Swap <see cref="Window.SystemBackdrop"/> based on
+    /// <see cref="ChatExplorationState.BackdropMode"/>. When
+    /// <see cref="ChatExplorationState.UsesHostBackdrop"/> is true (embedded
+    /// chat scenarios), leave whatever the host already set in place.
+    /// </summary>
+    private void ApplySystemBackdrop()
+    {
+        if (ChatExplorationState.UsesHostBackdrop) return;
+
+        SystemBackdrop = ChatExplorationState.BackdropMode switch
+        {
+            ChatBackdropMode.Mica     => new MicaBackdrop { Kind = MicaKind.Base },
+            ChatBackdropMode.MicaAlt  => new MicaBackdrop { Kind = MicaKind.BaseAlt },
+            ChatBackdropMode.Acrylic  => new DesktopAcrylicBackdrop(),
+            _ /* Solid */             => null!,
+        };
+    }
+
+    private void ApplyPreviewTheme()
+    {
+        if (Content is FrameworkElement root)
+            root.RequestedTheme = ChatVisualResolver.ResolvePreviewTheme();
+    }
+
+    private void ApplyChatSurface()
+    {
+        var setting = (App.Current as App)?.Settings?.UseLegacyWebChat ?? false;
+        var useLegacy = OpenClawTray.Chat.DebugChatSurfaceOverrides.ResolveUseLegacy(
+            OpenClawTray.Chat.DebugChatSurfaceOverrides.TrayChat,
+            setting);
+        if (useLegacy)
+            ShowWebViewSurface();
+        else
+            ShowFunctionalSurface();
+    }
+
+    private void ShowFunctionalSurface()
+    {
+        _webViewMode = false;
+        StopWebViewNavigation();
+        WebView.Visibility = Visibility.Collapsed;
+        LoadingRing.IsActive = false;
+        LoadingRing.Visibility = Visibility.Collapsed;
+        ErrorPanel.Visibility = Visibility.Collapsed;
+        TryMountFunctionalChat();
+    }
+
+    private void ShowWebViewSurface()
+    {
+        _webViewMode = true;
+
+        // Tear down native chat so the WebView2 owns the row.
+        DisposeFunctionalHost();
+
+        ChatHost.Visibility = Visibility.Collapsed;
+        PlaceholderPanel.Visibility = Visibility.Collapsed;
+
+        if (_webViewInitialized)
+        {
+            if (!NavigateWebViewToCurrentChatUrl())
+                ShowMissingChatCredentialError();
+            return;
+        }
+
+        if (string.IsNullOrEmpty(_chatUrl))
+        {
+            ShowMissingChatCredentialError();
+            return;
+        }
+
         _ = InitializeWebViewAsync();
     }
 
-    private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
+    private bool NavigateWebViewToCurrentChatUrl()
     {
-        if (args.WindowActivationState == WindowActivationState.Deactivated)
+        if (string.IsNullOrEmpty(_chatUrl) || WebView.CoreWebView2 is null)
+            return false;
+
+        ErrorPanel.Visibility = Visibility.Collapsed;
+        WebView.Visibility = Visibility.Visible;
+        WebView.CoreWebView2.Navigate(_chatUrl);
+        return true;
+    }
+
+    private void ShowMissingChatCredentialError()
+    {
+        StopWebViewNavigation();
+        LoadingRing.IsActive = false;
+        LoadingRing.Visibility = Visibility.Collapsed;
+        WebView.Visibility = Visibility.Collapsed;
+        PlaceholderPanel.Visibility = Visibility.Collapsed;
+        ErrorPanel.Visibility = Visibility.Visible;
+        ErrorText.Text = "Unable to load chat. The gateway URL or token is not available.";
+    }
+
+    private void StopWebViewNavigation()
+    {
+        try
         {
-            this.Hide();
+            WebView.CoreWebView2?.Stop();
+            WebView.CoreWebView2?.Navigate("about:blank");
         }
-    }
-
-    private void OnCloseClick(object sender, RoutedEventArgs e)
-    {
-        this.Hide();
-    }
-
-    /// <summary>Position near the system tray and show with animation.</summary>
-    public void ShowNearTray()
-    {
-        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-
-        // Get cursor position (near tray icon click)
-        GetCursorPos(out POINT pt);
-
-        // Get work area of the monitor containing the cursor
-        var hMon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
-        var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
-        GetMonitorInfo(hMon, ref mi);
-        var work = mi.rcWork;
-
-        // Get DPI scale for this monitor
-        uint dpi = GetDpiForWindow(hwnd);
-        double scale = dpi / 96.0;
-
-        // Panel size in physical pixels
-        int panelWPx = (int)(480 * scale);
-        int panelHPx = (int)(640 * scale);
-
-        // Position: bottom-right of work area, 8px margin from edges
-        // This places the panel just above the taskbar, near the tray
-        int margin = 8;
-        int x = work.Right - panelWPx - margin;
-        int y = work.Bottom - panelHPx - margin;
-
-        this.Move(x, y);
-        this.SetWindowSize(480, 640); // DIPs
-
-        this.Show();
-        SetForegroundWindow(hwnd);
-        RequestChatInputFocus();
-    }
-
-    /// <summary>Show near tray. No animation — WebView2 doesn't participate in composition animations.</summary>
-    public void ShowNearTrayAnimated()
-    {
-        ShowNearTray();
-    }
-
-    private void OnWindowClosing(object sender, WindowEventArgs args)
-    {
-        // Intercept close → hide instead (keeps WebView2 warm)
-        args.Handled = true;
-        this.Hide();
+        catch (Exception ex)
+        {
+            Logger.Warn($"ChatWindow WebView stop failed: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -158,12 +287,27 @@ public sealed partial class ChatWindow : WindowEx
         _token = token;
         _chatUrl = BuildChatUrl(_gatewayUrl, _token);
 
-        Logger.Info($"[ChatWindow] Refreshing to {_chatUrl}");
+        // HIGH 4: never log the full chat URL — its query string contains the
+        // auth token. Strip the query before logging.
+        Logger.Info($"[ChatWindow] Refreshing to {SafeLogUrl(_chatUrl)}");
 
         // If WebView2 is already up, navigate it to the refreshed URL so the user gets a
         // working chat instead of the pre-warmed (auth-failed) view.
-        if (_webViewInitialized && WebView?.CoreWebView2 != null)
+        // BUT only when we're actively in webview mode — otherwise this would
+        // un-hide the WebView on top of the active native surface (e.g. when
+        // the Debug Overrides force the Companion Chat UI on the Tray popup).
+        if (_webViewMode && _webViewInitialized && WebView?.CoreWebView2 != null)
         {
+            if (string.IsNullOrEmpty(_chatUrl))
+            {
+                LoadingRing.IsActive = false;
+                LoadingRing.Visibility = Visibility.Collapsed;
+                WebView.Visibility = Visibility.Collapsed;
+                ErrorPanel.Visibility = Visibility.Visible;
+                ErrorText.Text = "Unable to load chat. The gateway URL or token is not available.";
+                return;
+            }
+
             try
             {
                 ErrorPanel.Visibility = Visibility.Collapsed;
@@ -174,17 +318,28 @@ public sealed partial class ChatWindow : WindowEx
             }
             catch (Exception ex)
             {
+                LoadingRing.IsActive = false;
+                LoadingRing.Visibility = Visibility.Collapsed;
+                WebView.Visibility = Visibility.Collapsed;
+                ErrorPanel.Visibility = Visibility.Visible;
+                ErrorText.Text = $"Unable to load chat. Please try again. ({ex.Message})";
                 Logger.Warn($"ChatWindow.RefreshCredentials navigate failed: {ex.Message}");
             }
         }
     }
 
-    /// <summary>Actually close and dispose (called on app shutdown).</summary>
-    public void ForceClose()
+    /// <summary>
+    /// Exposes a script executor wrapping CoreWebView2.ExecuteScriptAsync without
+    /// leaking the WebView2 control field. Returns null if CoreWebView2 is not ready.
+    /// </summary>
+    public Func<string, Task<string>>? TryGetScriptExecutor()
     {
-        Closed -= OnWindowClosing;
-        IsClosed = true;
-        Close();
+        if (!_webViewInitialized || WebView?.CoreWebView2 == null)
+        {
+            return null;
+        }
+        var core = WebView.CoreWebView2;
+        return script => core.ExecuteScriptAsync(script).AsTask();
     }
 
     private async Task InitializeWebViewAsync()
@@ -195,17 +350,8 @@ public sealed partial class ChatWindow : WindowEx
             LoadingRing.IsActive = true;
             LoadingRing.Visibility = Visibility.Visible;
 
-            var userDataFolder = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "OpenClawTray", "WebView2");
-            Directory.CreateDirectory(userDataFolder);
-            Environment.SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", userDataFolder);
-
-            await WebView.EnsureCoreWebView2Async();
+            await GatewayChatHelper.InitializeWebView2Async(WebView);
             _webViewInitialized = true;
-
-            WebView.CoreWebView2.Settings.IsStatusBarEnabled = false;
-            WebView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
 
             WebView.CoreWebView2.NavigationCompleted += (s, e) =>
             {
@@ -227,18 +373,15 @@ public sealed partial class ChatWindow : WindowEx
                 }
                 else
                 {
-                    // Successful navigation — ensure we're in the right visual state (e.g. after retry)
                     ErrorPanel.Visibility = Visibility.Collapsed;
                     WebView.Visibility = Visibility.Visible;
                     RequestChatInputFocus();
                 }
             };
 
-            // Build chat URL
-            _chatUrl = BuildChatUrl(_gatewayUrl, _token);
-
             WebView.Visibility = Visibility.Visible;
-            WebView.CoreWebView2.Navigate(_chatUrl);
+            if (!string.IsNullOrEmpty(_chatUrl))
+                WebView.CoreWebView2.Navigate(_chatUrl);
         }
         catch (Exception ex)
         {
@@ -256,20 +399,6 @@ public sealed partial class ChatWindow : WindowEx
             WebView.CoreWebView2?.Navigate(_chatUrl);
     }
 
-    private static string BuildChatUrl(string gatewayUrl, string token)
-    {
-        if (GatewayUrlHelper.TryNormalizeWebSocketUrl(gatewayUrl, out var normalizedUrl) &&
-            Uri.TryCreate(normalizedUrl, UriKind.Absolute, out var gatewayUri))
-        {
-            var scheme = gatewayUri.Scheme.Equals("wss", StringComparison.OrdinalIgnoreCase) ? "https" : "http";
-            var builder = new UriBuilder(gatewayUri) { Scheme = scheme, Port = gatewayUri.Port };
-            var baseUrl = builder.Uri.GetLeftPart(UriPartial.Authority);
-            return $"{baseUrl}?token={Uri.EscapeDataString(token)}";
-        }
-
-        return $"http://127.0.0.1:19001?token={Uri.EscapeDataString(token)}";
-    }
-
     private void OnRefresh(object sender, RoutedEventArgs e)
     {
         if (_webViewInitialized) WebView.CoreWebView2?.Reload();
@@ -285,10 +414,175 @@ public sealed partial class ChatWindow : WindowEx
         WebView.CoreWebView2?.Navigate(_chatUrl);
     }
 
+    private void TryMountFunctionalChat()
+    {
+        var app = App.Current as App;
+        var provider = app?.ChatProvider;
+        Func<string, Task>? readAloud = app is null ? null : app.SpeakChatTextAsync;
+
+        if (_functionalHost is not null && ReferenceEquals(_mountedProvider, provider))
+        {
+            PlaceholderPanel.Visibility = Visibility.Collapsed;
+            ChatHost.Visibility = Visibility.Visible;
+            return;
+        }
+
+        DisposeFunctionalHost();
+
+        if (provider is null)
+        {
+            PlaceholderPanel.Visibility = Visibility.Visible;
+            ChatHost.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        PlaceholderPanel.Visibility = Visibility.Collapsed;
+        ChatHost.Visibility = Visibility.Visible;
+        _functionalHost = ((Window)this).MountFunctionalChat(
+            ChatHost,
+            provider,
+            onReadAloud: readAloud);
+        _mountedProvider = provider;
+    }
+
+    private void DisposeFunctionalHost()
+    {
+        var host = _functionalHost;
+        _functionalHost = null;
+        _mountedProvider = null;
+        try { host?.Dispose(); } catch { /* tear-down race — non-fatal */ }
+    }
+
+    private static string BuildChatUrl(string gatewayUrl, string token)
+    {
+        return GatewayChatUrlBuilder.TryBuildChatUrl(gatewayUrl, token, out var url, out _)
+            ? url
+            : string.Empty;
+    }
+
+    private bool _backdropAppliedOnce;
+
+    private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
+    {
+        if (args.WindowActivationState != WindowActivationState.Deactivated)
+        {
+            // First time the window actually becomes visible/active — re-apply the
+            // system backdrop. Setting SystemBackdrop on a pre-warmed (never shown)
+            // window doesn't always attach the controller, which is why acrylic
+            // appeared blank until the user toggled it from the exploration panel.
+            if (!_backdropAppliedOnce)
+            {
+                _backdropAppliedOnce = true;
+                ApplySystemBackdrop();
+            }
+
+            // a11y: place keyboard focus on the composer text box so the user
+            // can start typing immediately. Defer to next dispatcher pass so
+            // FunctionalUI has finished mounting the composer.
+            DispatcherQueue?.TryEnqueue(() =>
+            {
+                if (this.Content is FrameworkElement root && FindFirstFocusableTextBox(root) is { } tb)
+                    tb.Focus(FocusState.Programmatic);
+            });
+            return;
+        }
+
+        // Pinned via Chat exploration panel — keep open so the user can
+        // preview backdrop/composer changes side-by-side.
+        if (ChatWindowPinState.IsPinned) return;
+        this.Hide();
+    }
+
+    private static Microsoft.UI.Xaml.Controls.TextBox? FindFirstFocusableTextBox(DependencyObject root)
+    {
+        if (root is Microsoft.UI.Xaml.Controls.TextBox tb && tb.IsEnabled && tb.Visibility == Visibility.Visible)
+            return tb;
+        var count = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < count; i++)
+        {
+            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, i);
+            if (FindFirstFocusableTextBox(child) is { } found) return found;
+        }
+        return null;
+    }
+
+    private void OnCloseClick(object sender, RoutedEventArgs e)
+    {
+        this.Hide();
+    }
+
+    /// <summary>Position near the system tray and show with animation.</summary>
+    public void ShowNearTray()
+    {
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+
+        GetCursorPos(out POINT pt);
+
+        var hMon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+        var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+        GetMonitorInfo(hMon, ref mi);
+        var work = mi.rcWork;
+
+        uint dpi = GetDpiForWindow(hwnd);
+        double scale = dpi / 96.0;
+
+        int panelWPx = (int)(DefaultChatWidth * scale);
+        int panelHPx = (int)(DefaultChatHeight * scale);
+
+        int margin = 8;
+        int x = work.Right - panelWPx - margin;
+        int y = work.Bottom - panelHPx - margin;
+
+        // Position and size atomically while still hidden to avoid flicker.
+        const uint SWP_NOZORDER = 0x0004;
+        const uint SWP_NOACTIVATE = 0x0010;
+        SetWindowPos(hwnd, IntPtr.Zero, x, y, panelWPx, panelHPx, SWP_NOZORDER | SWP_NOACTIVATE);
+
+        // Provider may have arrived after construction — re-apply surface so
+        // a native-mode window swaps placeholder → live tree on first show.
+        ApplyChatSurface();
+
+        this.Show();
+        SetForegroundWindow(hwnd);
+        RequestChatInputFocus();
+    }
+
+    /// <summary>Show near tray. Native chat renders synchronously so no animation gating needed.</summary>
+    public void ShowNearTrayAnimated() => ShowNearTray();
+
+    private void OnWindowClosing(object sender, WindowEventArgs args)
+    {
+        // Intercept close → hide instead (keeps native chat state warm).
+        args.Handled = true;
+        this.Hide();
+    }
+
+    /// <summary>Actually close and dispose (called on app shutdown).</summary>
+    public void ForceClose()
+    {
+        Closed -= OnWindowClosing;
+        if (App.Current is App app)
+        {
+            app.SettingsChanged -= OnAppSettingsChanged;
+            app.ChatProviderChanged -= OnAppChatProviderChanged;
+        }
+        OpenClawTray.Chat.DebugChatSurfaceOverrides.Changed -= OnDebugOverrideChanged;
+        ChatExplorationState.Changed -= OnExplorationChanged;
+        IsClosed = true;
+        DisposeFunctionalHost();
+        Close();
+    }
+
     private void OnPopout(object sender, RoutedEventArgs e)
     {
-        if (!string.IsNullOrEmpty(_chatUrl))
-            try { Process.Start(new ProcessStartInfo(_chatUrl) { UseShellExecute = true }); } catch { }
+        // Open in Companion app — route to the Hub window's chat tab so the
+        // full companion experience is available, then dismiss the tray popup.
+        try
+        {
+            (App.Current as App)?.ShowHub("chat");
+            this.Hide();
+        }
+        catch { }
     }
 
     private void RequestChatInputFocus()
@@ -341,5 +635,18 @@ public sealed partial class ChatWindow : WindowEx
         {
             Logger.Warn($"Failed to focus chat input: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Strip the query string (which carries <c>?token=…</c>) from a chat URL
+    /// before logging. Returns the bare scheme + authority + path so the host
+    /// is still recognisable for diagnostics.
+    /// </summary>
+    private static string SafeLogUrl(string? url)
+    {
+        if (string.IsNullOrEmpty(url)) return "(empty)";
+        if (Uri.TryCreate(url, UriKind.Absolute, out var u))
+            return u.GetLeftPart(UriPartial.Path);
+        return "(unparseable)";
     }
 }

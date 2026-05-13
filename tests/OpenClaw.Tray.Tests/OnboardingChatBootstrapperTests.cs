@@ -181,6 +181,10 @@ public sealed class OnboardingChatBootstrapperTests : IDisposable
         public Task RequestNodePairListAsync() => Task.CompletedTask;
         public Task<bool> NodePairApproveAsync(string requestId) => Task.FromResult(false);
         public Task<bool> NodePairRejectAsync(string requestId) => Task.FromResult(false);
+        public Task<NodeForgetResult> NodePairRemoveAsync(string nodeId) =>
+            Task.FromResult(new NodeForgetResult(false, "stub"));
+        public Task<NodeRenameResult> NodeRenameAsync(string nodeId, string displayName) =>
+            Task.FromResult(new NodeRenameResult(false, ErrorMessage: "stub"));
         public Task RequestDevicePairListAsync() => Task.CompletedTask;
         public Task<bool> DevicePairApproveAsync(string requestId) => Task.FromResult(false);
         public Task<bool> DevicePairRejectAsync(string requestId) => Task.FromResult(false);

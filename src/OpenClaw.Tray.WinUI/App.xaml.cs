@@ -3,7 +3,6 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using OpenClaw.Shared;
-using OpenClaw.Shared.Capabilities;
 using OpenClawTray.Dialogs;
 using OpenClawTray.Helpers;
 using OpenClawTray.Services;
@@ -42,6 +41,7 @@ public partial class App : Application
     private TrayIcon? _trayIcon;
     private GatewayConnectionManager? _connectionManager;
     private GatewayRegistry? _gatewayRegistry;
+    private OpenClawTray.Chat.OpenClawChatCoordinator? _chatCoordinator;
     /// <summary>
     /// Cached reference to the most recently constructed local-setup engine. Used by
     /// <see cref="OnPairingStatusChanged"/> to suppress the "copy pairing command" toast
@@ -60,6 +60,17 @@ public partial class App : Application
     public GatewayRegistry? Registry => _gatewayRegistry;
     public GatewayConnectionManager? ConnectionManager => _connectionManager;
     internal SettingsManager Settings => _settings ?? throw new InvalidOperationException("Settings are not initialized.");
+
+    public OpenClawTray.Chat.OpenClawChatDataProvider? ChatProvider => _chatCoordinator?.Provider;
+
+    /// <summary>
+    /// Raised after the tray-wide settings have been saved (either via the
+    /// SettingsPage Save button or a direct toggle from the tray menu).
+    /// Subscribers can refresh UI that depends on a setting (e.g. switching
+    /// the chat surface between native chat and WebView2).
+    /// </summary>
+    public event EventHandler? SettingsChanged;
+    public event EventHandler? ChatProviderChanged;
 
     /// <summary>
     /// Ensures the managed SSH tunnel is started using the current settings.
@@ -580,6 +591,13 @@ public partial class App : Application
         // Initialize settings before update check so skip selections can be remembered.
         _settings = new SettingsManager();
         _previousSettingsSnapshot = _settings.ToSettingsData();
+        _chatCoordinator = new OpenClawTray.Chat.OpenClawChatCoordinator(
+            _settings,
+            () => _nodeService,
+            new AppLogger(),
+            _dispatcherQueue is null
+                ? null
+                : OpenClawTray.Chat.FunctionalChatHostExtensions.AsPost(_dispatcherQueue));
         DiagnosticsJsonlService.Configure(DataPath);
         DiagnosticsJsonlService.Write("app.start", new
         {
@@ -616,6 +634,9 @@ public partial class App : Application
         // propagate through `await ShowOnboardingAsync()` and abort OnLaunched
         // before the tray ever initializes.
         InitializeTrayIcon();
+        // Apply the user's saved default chat preset (if any) before any chat
+        // surface mounts so initial render uses their preferred styling.
+        OpenClawTray.Chat.Explorations.ChatExplorationPresetStore.ApplyDefaultIfPresent();
         ShowSurfaceImprovementsTipIfNeeded();
 
         // First-run check (also supports forced onboarding for testing).
@@ -1383,18 +1404,21 @@ public partial class App : Application
         }
 
         // ── Connected Devices with inline permission toggles ──
-        if (_lastNodes.Length > 0)
+        // Only show currently-connected nodes; offline/stale paired nodes
+        // remain visible on the full Nodes page where they can be renamed
+        // or forgotten.
+        var connectedNodes = _lastNodes.Where(n => n.IsOnline).ToArray();
+        if (connectedNodes.Length > 0)
         {
             menu.AddSeparator();
 
-            var onlineCount = _lastNodes.Count(n => n.IsOnline);
-            var totalCaps = _lastNodes.Sum(n => n.CapabilityCount);
-            var deviceSummaryRight = $"{onlineCount} online · {totalCaps} caps";
+            var totalCaps = connectedNodes.Sum(n => n.CapabilityCount);
+            var deviceSummaryRight = $"{connectedNodes.Length} online · {totalCaps} caps";
             menu.AddCustomElement(BuildSectionHeader("Devices", deviceSummaryRight));
 
             var currentHost = Environment.MachineName;
 
-            foreach (var node in _lastNodes.Take(5))
+            foreach (var node in connectedNodes.Take(5))
             {
                 var card = BuildDeviceCard(node);
                 var flyoutItems = BuildDeviceFlyoutItems(node);
@@ -2220,7 +2244,15 @@ public partial class App : Application
             client.AgentsListUpdated += OnAgentsListUpdated;
             client.AgentFilesListUpdated += OnAgentFilesListUpdated;
             client.AgentFileContentUpdated += OnAgentFileContentUpdated;
+
+            _chatCoordinator?.SetOperatorClient(client);
         }
+        else
+        {
+            _chatCoordinator?.SetOperatorClient(null);
+        }
+
+        RaiseChatProviderChanged();
 
         _lastGatewaySelf = null;
 
@@ -2233,6 +2265,11 @@ public partial class App : Application
                 _hubWindow.CurrentStatus = _currentStatus;
             }
         });
+    }
+
+    private void RaiseChatProviderChanged()
+    {
+        ChatProviderChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
@@ -3084,7 +3121,7 @@ public partial class App : Application
             // TTS: read response aloud whenever the toggle is on (any chat surface).
             if (_settings?.VoiceTtsEnabled == true)
             {
-                _ = SpeakResponseAsync(notification.Message);
+                _ = (_chatCoordinator?.SpeakResponseAsync(notification.Message) ?? Task.CompletedTask);
             }
         }
 
@@ -3152,6 +3189,8 @@ public partial class App : Application
         if (notification.IsChat)
         {
             if (_hubWindow != null && !_hubWindow.IsClosed)
+                return false;
+            if (_chatWindow is { IsClosed: false, Visible: true })
                 return false;
             if (_onboardingWindow != null)
                 return false; // Onboarding window has chat overlay
@@ -3225,13 +3264,10 @@ public partial class App : Application
     {
         if (_trayIcon == null) return;
 
-        var status = _currentStatus;
-        if (_currentActivity != null && _currentActivity.Kind != OpenClaw.Shared.ActivityKind.Idle)
-        {
-            status = ConnectionStatus.Connecting; // Use connecting icon for activity
-        }
-
-        var iconPath = IconHelper.GetStatusIconPath(status);
+        // Tray icon is pinned to the app icon so it visually matches the agent
+        // avatar and chat-window title bar. Status is communicated via the
+        // tooltip text below rather than swapping the icon image.
+        var iconPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "openclaw.ico");
         var tooltip = BuildTrayTooltip();
 
         try
@@ -3494,6 +3530,10 @@ public partial class App : Application
             _hubWindow.GatewayClient = _connectionManager?.OperatorClient;
             _hubWindow.CurrentStatus = _currentStatus;
         }
+
+        // Notify ad-hoc listeners (e.g. ChatWindow may be alive but not
+        // owned by the hub) that settings have changed.
+        SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void ShowWebChat()
@@ -4387,50 +4427,8 @@ public partial class App : Application
             await voiceService.StopAsync();
     }
 
-    private int _ttsMuteCount;
-
-    private async Task SpeakResponseAsync(string text)
-    {
-        var voiceService = _nodeService?.VoiceService;
-        var ttsService = _nodeService?.TextToSpeech;
-        try
-        {
-            if (voiceService == null || _settings == null || ttsService == null) return;
-
-            // Increment mute counter — multiple concurrent TTS won't unmute prematurely
-            Interlocked.Increment(ref _ttsMuteCount);
-            voiceService.IsMutedForPlayback = true;
-
-            var speakText = text.Length > 500 ? text[..500] + "..." : text;
-
-            // Don't pass VoiceId here. The shared TextToSpeechService picks
-            // the right per-provider voice from settings (TtsPiperVoiceId,
-            // TtsWindowsVoiceId, TtsElevenLabsVoiceId). Cross-provider
-            // voice IDs would otherwise leak across providers.
-            var speakArgs = new OpenClaw.Shared.Capabilities.TtsSpeakArgs
-            {
-                Text = speakText,
-                Provider = _settings.TtsProvider ?? TtsCapability.PiperProvider,
-                Interrupt = true
-            };
-
-            await ttsService.SpeakAsync(speakArgs);
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"TTS response playback failed: {ex.Message}");
-        }
-        finally
-        {
-            // Only unmute when all concurrent TTS operations have finished
-            if (voiceService != null)
-            {
-                await Task.Delay(300);
-                if (Interlocked.Decrement(ref _ttsMuteCount) <= 0)
-                    voiceService.IsMutedForPlayback = false;
-            }
-        }
-    }
+    public Task SpeakChatTextAsync(string text) =>
+        _chatCoordinator?.SpeakChatTextAsync(text) ?? Task.CompletedTask;
 
     private static void SendDeepLinkToRunningInstance(string uri)
     {
@@ -4529,6 +4527,12 @@ public partial class App : Application
         SafeShutdownStep("gateway client", () =>
         {
             _connectionManager?.Dispose();
+        });
+
+        SafeShutdownStep("chat coordinator", () =>
+        {
+            _chatCoordinator?.Dispose();
+            _chatCoordinator = null;
         });
 
         SafeShutdownStep("node service", () =>
