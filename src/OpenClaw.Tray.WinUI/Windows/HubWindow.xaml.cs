@@ -653,8 +653,8 @@ public sealed partial class HubWindow : WindowEx
                 instances.Initialize(this);
                 if (LastPresence != null) instances.UpdatePresenceData(LastPresence);
                 break;
-            // PermissionsPage + SandboxPage removed; their content merged into CapabilitiesPage.
-            case CapabilitiesPage capabilities: capabilities.Initialize(this); break;
+            // PermissionsPage + SandboxPage removed; their content merged into PrivacyAndSecurityPage.
+            case PrivacyAndSecurityPage privacyAndSecurity: privacyAndSecurity.Initialize(this); break;
             case VoiceSettingsPage voice: voice.Initialize(this, VoiceServiceInstance); break;
             case ConversationsPage convos: convos.Initialize(this); break;
             case ActivityPage activity: activity.Initialize(this); break;
@@ -703,11 +703,11 @@ public sealed partial class HubWindow : WindowEx
         "config" => typeof(ConfigPage),
         "usage" => typeof(UsagePage),
         "bindings" => typeof(BindingsPage),
-        "capabilities" => typeof(CapabilitiesPage),
+        "capabilities" => typeof(PrivacyAndSecurityPage),
         "voice" => typeof(VoiceSettingsPage),
-        // "permissions" and "sandbox" pages were merged into the Security (Capabilities) page.
-        "permissions" => typeof(CapabilitiesPage),
-        "sandbox" => typeof(CapabilitiesPage),
+        // "permissions" and "sandbox" pages were merged into the Privacy & security page.
+        "permissions" => typeof(PrivacyAndSecurityPage),
+        "sandbox" => typeof(PrivacyAndSecurityPage),
         "activity" => typeof(ActivityPage),
         "settings" => typeof(SettingsPage),
         "debug" => typeof(DebugPage),

@@ -32,7 +32,7 @@ namespace OpenClawTray.Pages;
 /// aliased to this page in <c>HubWindow.TagToPageType</c>). TTS lives on the
 /// Voice &amp; Audio page; Node mode + Node status moved to Settings.
 /// </summary>
-public sealed partial class CapabilitiesPage : Page
+public sealed partial class PrivacyAndSecurityPage : Page
 {
     private HubWindow? _hub;
     private bool _loading;
@@ -43,7 +43,7 @@ public sealed partial class CapabilitiesPage : Page
 
     private const string SavedApiKeySentinel = "••••••••";
 
-    public CapabilitiesPage()
+    public PrivacyAndSecurityPage()
     {
         InitializeComponent();
         CustomFoldersList.ItemsSource = CustomFolders;
