@@ -1605,10 +1605,10 @@ On your gateway host (Mac/Linux), run:
     <value>Refresh</value>
   </data>
   <data name="CapabilitiesPage_TextBlock_10.Text" xml:space="preserve">
-    <value>🖥️ This Computer</value>
+    <value>Security</value>
   </data>
   <data name="CapabilitiesPage_TextBlock_15.Text" xml:space="preserve">
-    <value>Device capabilities provided to agents via the gateway. Toggle what this computer can do.</value>
+    <value>An agent connected through your gateway can use the capabilities below. Choose how protected this PC should be and what each agent can access.</value>
   </data>
   <data name="CapabilitiesPage_TextBlock_33.Text" xml:space="preserve">
     <value>Local MCP Server</value>
@@ -2199,7 +2199,7 @@ On your gateway host (Mac/Linux), run:
     <value>This Computer</value>
   </data>
   <data name="HubWindow_NavigationViewItem_130.Content" xml:space="preserve">
-    <value>Capabilities</value>
+    <value>Security</value>
   </data>
   <data name="HubWindow_NavigationViewItem_133.Content" xml:space="preserve">
     <value>Settings</value>
@@ -2400,19 +2400,19 @@ On your gateway host (Mac/Linux), run:
     <value>Remove job</value>
   </data>
   <data name="CapabilitiesPage_SttCardDescription.Text" xml:space="preserve">
-    <value>Recognizes microphone audio locally on this PC using Whisper. The model is downloaded once on first use.</value>
+    <value>Transcribes microphone audio to text locally on this PC. The speech model downloads once on first use; audio doesn't leave this PC.</value>
   </data>
   <data name="CapabilitiesPage_SttCardHeader.Text" xml:space="preserve">
-    <value>🎤 Speech-to-Text</value>
+    <value>Microphone</value>
   </data>
   <data name="CapabilitiesPage_SttMoreSettingsLink.Content" xml:space="preserve">
-    <value>More voice settings…</value>
+    <value>More voice settings</value>
   </data>
   <data name="CapabilitiesPage_TtsCardDescription.Text" xml:space="preserve">
-    <value>Default provider for tts.speak. Per-call provider/voiceId/model overrides this default.</value>
+    <value>Lets agents speak through your speakers. Choose a provider below.</value>
   </data>
   <data name="CapabilitiesPage_TtsCardHeader.Text" xml:space="preserve">
-    <value>🔊 Text-to-Speech</value>
+    <value>Text to speech</value>
   </data>
   <data name="CapabilitiesPage_TtsElevenLabsApiKey.Header" xml:space="preserve">
     <value>ElevenLabs API key</value>
@@ -2433,13 +2433,13 @@ On your gateway host (Mac/Linux), run:
     <value>Provider</value>
   </data>
   <data name="CapabilitiesPage_TtsProviderElevenLabs.Content" xml:space="preserve">
-    <value>ElevenLabs</value>
+    <value>ElevenLabs — cloud</value>
   </data>
   <data name="CapabilitiesPage_TtsProviderPiper.Content" xml:space="preserve">
-    <value>Piper (local ML, recommended)</value>
+    <value>Piper — local, recommended</value>
   </data>
   <data name="CapabilitiesPage_TtsProviderWindows.Content" xml:space="preserve">
-    <value>Windows built-in speech</value>
+    <value>Windows — built-in speech</value>
   </data>
   <data name="VoiceSettingsPage_PageTitle.Text" xml:space="preserve">
     <value>🎙️ Voice &amp; Audio</value>

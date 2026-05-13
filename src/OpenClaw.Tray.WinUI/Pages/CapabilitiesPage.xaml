@@ -203,9 +203,9 @@
                              Title="Container unavailable"
                              Message="Container-based execution isn't supported on this PC. Switch to 'Direct' below to allow commands to run (less safe), or update Windows to add container support."/>
 
-                    <StackPanel x:Name="RunProgramsDetail" Spacing="16" Visibility="Collapsed">
+                    <StackPanel x:Name="RunProgramsDetail" Spacing="12" Visibility="Collapsed">
 
-                        <!-- How -->
+                        <!-- How they run — visible, not collapsed (high-importance choice) -->
                         <StackPanel Spacing="6">
                             <TextBlock Text="How programs run" Style="{StaticResource BodyStrongTextBlockStyle}"/>
                             <RadioButton x:Name="RunInContainerRadio"
@@ -218,151 +218,206 @@
                                          Checked="OnRunDirectChecked"/>
                         </StackPanel>
 
-                        <!-- Files -->
-                        <StackPanel Spacing="6" x:Name="FileAccessPanel">
-                            <TextBlock Text="Files (when in a container)" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <TextBlock Text="By default, agents only see a temporary workspace folder. Grant access to your user folders below."
-                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                       TextWrapping="Wrap"/>
-                            <Grid ColumnSpacing="8" RowSpacing="6">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="120"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition/>
-                                    <RowDefinition/>
-                                    <RowDefinition/>
-                                </Grid.RowDefinitions>
-                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Documents" VerticalAlignment="Center"/>
-                                <ComboBox Grid.Row="0" Grid.Column="1" x:Name="DocsAccessCombo"
-                                          HorizontalAlignment="Stretch"
-                                          SelectionChanged="OnDocsAccessChanged">
-                                    <ComboBoxItem Content="Blocked" Tag="None"/>
-                                    <ComboBoxItem Content="Read only" Tag="ReadOnly"/>
-                                    <ComboBoxItem Content="Read and write" Tag="ReadWrite"/>
-                                </ComboBox>
-                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Downloads" VerticalAlignment="Center"/>
-                                <ComboBox Grid.Row="1" Grid.Column="1" x:Name="DownloadsAccessCombo"
-                                          HorizontalAlignment="Stretch"
-                                          SelectionChanged="OnDownloadsAccessChanged">
-                                    <ComboBoxItem Content="Blocked" Tag="None"/>
-                                    <ComboBoxItem Content="Read only" Tag="ReadOnly"/>
-                                    <ComboBoxItem Content="Read and write" Tag="ReadWrite"/>
-                                </ComboBox>
-                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Desktop" VerticalAlignment="Center"/>
-                                <ComboBox Grid.Row="2" Grid.Column="1" x:Name="DesktopAccessCombo"
-                                          HorizontalAlignment="Stretch"
-                                          SelectionChanged="OnDesktopAccessChanged">
-                                    <ComboBoxItem Content="Blocked" Tag="None"/>
-                                    <ComboBoxItem Content="Read only" Tag="ReadOnly"/>
-                                    <ComboBoxItem Content="Read and write" Tag="ReadWrite"/>
-                                </ComboBox>
-                            </Grid>
-                            <TextBlock x:Name="CustomFolderSummary" Margin="0,4,0,0"
-                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                            <HyperlinkButton Content="Manage custom folders"
-                                             Click="OnManageCustomFolders" Padding="0"/>
-                        </StackPanel>
-
-                        <!-- Network -->
-                        <StackPanel Spacing="6" x:Name="NetworkPanel">
-                            <TextBlock Text="Network access" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <ToggleSwitch x:Name="NetworkToggle"
-                                          Header="Allow internet from program code"
-                                          OffContent="Off — programs can't reach the internet"
-                                          OnContent="On — programs can reach public internet endpoints"
-                                          Toggled="OnNetworkToggled"/>
-                            <TextBlock Text="When file or clipboard read access is on, programs that reach the internet could send that data outside this PC."
-                                       Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                        </StackPanel>
-
-                        <!-- Clipboard -->
-                        <StackPanel Spacing="6" x:Name="ClipboardPanel">
-                            <TextBlock Text="Clipboard access" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <TextBlock Text="Your clipboard often contains passwords, tokens, and private text."
-                                       Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                            <RadioButton x:Name="ClipNoneRadio" Content="None (recommended)" GroupName="Clipboard" Checked="OnClipboardChanged" Tag="None"/>
-                            <RadioButton x:Name="ClipReadRadio" Content="Read only — agent can see what you copied" GroupName="Clipboard" Checked="OnClipboardChanged" Tag="Read"/>
-                            <RadioButton x:Name="ClipWriteRadio" Content="Write only — agent can replace your clipboard" GroupName="Clipboard" Checked="OnClipboardChanged" Tag="Write"/>
-                            <RadioButton x:Name="ClipBothRadio" Content="Read and write" GroupName="Clipboard" Checked="OnClipboardChanged" Tag="Both"/>
-                        </StackPanel>
-
-                        <!-- Limits -->
-                        <StackPanel Spacing="6" x:Name="LimitsPanel">
-                            <TextBlock Text="Resource limits" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <StackPanel Spacing="2">
-                                <TextBlock x:Name="TimeoutLabel" Text="Command timeout: 30 seconds"/>
-                                <Slider x:Name="TimeoutSlider" Minimum="5" Maximum="300" StepFrequency="5"
-                                        Value="30" SmallChange="5" LargeChange="15"
-                                        ValueChanged="OnTimeoutChanged"/>
+                        <!-- Files — collapsible -->
+                        <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsExpanded="False">
+                            <Expander.Header>
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE8B7;" FontSize="14" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Files" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                                    <TextBlock x:Name="FilesExpanderSummary"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Expander.Header>
+                            <StackPanel Spacing="8" Padding="0,4">
+                                <TextBlock Text="By default, agents only see a temporary workspace folder. Grant access to your user folders below."
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           TextWrapping="Wrap"/>
+                                <Grid ColumnSpacing="8" RowSpacing="6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="120"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition/>
+                                        <RowDefinition/>
+                                        <RowDefinition/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Documents" VerticalAlignment="Center"/>
+                                    <ComboBox Grid.Row="0" Grid.Column="1" x:Name="DocsAccessCombo"
+                                              HorizontalAlignment="Stretch"
+                                              SelectionChanged="OnDocsAccessChanged">
+                                        <ComboBoxItem Content="Blocked" Tag="None"/>
+                                        <ComboBoxItem Content="Read only" Tag="ReadOnly"/>
+                                        <ComboBoxItem Content="Read and write" Tag="ReadWrite"/>
+                                    </ComboBox>
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Downloads" VerticalAlignment="Center"/>
+                                    <ComboBox Grid.Row="1" Grid.Column="1" x:Name="DownloadsAccessCombo"
+                                              HorizontalAlignment="Stretch"
+                                              SelectionChanged="OnDownloadsAccessChanged">
+                                        <ComboBoxItem Content="Blocked" Tag="None"/>
+                                        <ComboBoxItem Content="Read only" Tag="ReadOnly"/>
+                                        <ComboBoxItem Content="Read and write" Tag="ReadWrite"/>
+                                    </ComboBox>
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Desktop" VerticalAlignment="Center"/>
+                                    <ComboBox Grid.Row="2" Grid.Column="1" x:Name="DesktopAccessCombo"
+                                              HorizontalAlignment="Stretch"
+                                              SelectionChanged="OnDesktopAccessChanged">
+                                        <ComboBoxItem Content="Blocked" Tag="None"/>
+                                        <ComboBoxItem Content="Read only" Tag="ReadOnly"/>
+                                        <ComboBoxItem Content="Read and write" Tag="ReadWrite"/>
+                                    </ComboBox>
+                                </Grid>
+                                <TextBlock x:Name="CustomFolderSummary" Margin="0,4,0,0"
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                <HyperlinkButton Content="Manage custom folders"
+                                                 Click="OnManageCustomFolders" Padding="0"/>
                             </StackPanel>
-                            <StackPanel Spacing="2">
-                                <TextBlock Text="Maximum captured output"/>
-                                <ComboBox x:Name="MaxOutputCombo" HorizontalAlignment="Stretch"
-                                          SelectionChanged="OnMaxOutputChanged">
-                                    <ComboBoxItem Content="1 MB" Tag="1048576"/>
-                                    <ComboBoxItem Content="4 MB (default)" Tag="4194304"/>
-                                    <ComboBoxItem Content="16 MB" Tag="16777216"/>
-                                    <ComboBoxItem Content="64 MB" Tag="67108864"/>
-                                </ComboBox>
-                            </StackPanel>
-                        </StackPanel>
+                        </Expander>
 
-                        <!-- Approval rules -->
-                        <StackPanel Spacing="6" x:Name="ExecPolicyPanel">
-                            <TextBlock Text="Approval rules" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <TextBlock Text="What happens when an agent tries to run a command that doesn't match any rule below:"
-                                       Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                            <ComboBox x:Name="ExecDefaultActionCombo" Width="240"
-                                      SelectionChanged="OnExecDefaultActionChanged">
-                                <ComboBoxItem Content="Deny — block unknown commands" Tag="deny"/>
-                                <ComboBoxItem Content="Allow — run unknown commands" Tag="allow"/>
-                                <ComboBoxItem Content="Ask — prompt for each unknown command" Tag="ask"/>
-                            </ComboBox>
-                            <TextBlock Text="Rules (evaluated top to bottom; first match wins):"
-                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                       Margin="0,4,0,0"/>
-                            <ListView x:Name="ExecRulesList" SelectionMode="None" MaxHeight="280">
-                                <ListView.ItemTemplate>
-                                    <DataTemplate>
-                                        <Grid Padding="8,6" ColumnSpacing="8">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="90"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" Text="{Binding Pattern}" FontFamily="Consolas" VerticalAlignment="Center"/>
-                                            <Border Grid.Column="1" CornerRadius="4" Padding="6,2" HorizontalAlignment="Center"
-                                                    Background="{Binding ActionBrush}">
-                                                <TextBlock Text="{Binding Action}" FontSize="11" FontWeight="SemiBold" Foreground="White"/>
-                                            </Border>
-                                            <Button Grid.Column="2" Click="OnRemoveExecRule" Tag="{Binding Index}"
-                                                    Padding="4,2" MinWidth="0" Background="Transparent"
-                                                    ToolTipService.ToolTip="Remove rule">
-                                                <FontIcon Glyph="&#xE894;" FontSize="12"/>
-                                            </Button>
-                                        </Grid>
-                                    </DataTemplate>
-                                </ListView.ItemTemplate>
-                            </ListView>
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <TextBox x:Name="NewExecRulePattern" PlaceholderText="Command pattern (for example: echo *)" Width="320"/>
-                                <ComboBox x:Name="NewExecRuleAction" Width="110" SelectedIndex="0">
-                                    <ComboBoxItem Content="allow"/>
-                                    <ComboBoxItem Content="deny"/>
-                                </ComboBox>
-                                <Button Content="Add rule" Click="OnAddExecRule"/>
+                        <!-- Network — collapsible -->
+                        <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsExpanded="False">
+                            <Expander.Header>
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE839;" FontSize="14" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Network" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                                    <TextBlock x:Name="NetworkExpanderSummary"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Expander.Header>
+                            <StackPanel Spacing="6" Padding="0,4">
+                                <ToggleSwitch x:Name="NetworkToggle"
+                                              Header="Allow internet from program code"
+                                              OffContent="Off — programs can't reach the internet"
+                                              OnContent="On — programs can reach public internet endpoints"
+                                              Toggled="OnNetworkToggled"/>
+                                <TextBlock Text="When file or clipboard read access is on, programs that reach the internet could send that data outside this PC."
+                                           Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                             </StackPanel>
-                            <Button x:Name="SaveExecPolicyButton" Content="Save rules" Click="OnSaveExecPolicy"
-                                    Style="{ThemeResource AccentButtonStyle}" HorizontalAlignment="Right"/>
-                        </StackPanel>
+                        </Expander>
+
+                        <!-- Clipboard — collapsible -->
+                        <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsExpanded="False">
+                            <Expander.Header>
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE77F;" FontSize="14" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Clipboard" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                                    <TextBlock x:Name="ClipboardExpanderSummary"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Expander.Header>
+                            <StackPanel Spacing="6" Padding="0,4">
+                                <TextBlock Text="Your clipboard often contains passwords, tokens, and private text."
+                                           Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                <RadioButton x:Name="ClipNoneRadio" Content="None (recommended)" GroupName="Clipboard" Checked="OnClipboardChanged" Tag="None"/>
+                                <RadioButton x:Name="ClipReadRadio" Content="Read only — agent can see what you copied" GroupName="Clipboard" Checked="OnClipboardChanged" Tag="Read"/>
+                                <RadioButton x:Name="ClipWriteRadio" Content="Write only — agent can replace your clipboard" GroupName="Clipboard" Checked="OnClipboardChanged" Tag="Write"/>
+                                <RadioButton x:Name="ClipBothRadio" Content="Read and write" GroupName="Clipboard" Checked="OnClipboardChanged" Tag="Both"/>
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- Limits — collapsible -->
+                        <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsExpanded="False">
+                            <Expander.Header>
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE916;" FontSize="14" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Resource limits" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                                    <TextBlock x:Name="LimitsExpanderSummary"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Expander.Header>
+                            <StackPanel Spacing="8" Padding="0,4">
+                                <StackPanel Spacing="2">
+                                    <TextBlock x:Name="TimeoutLabel" Text="Command timeout: 30 seconds"/>
+                                    <Slider x:Name="TimeoutSlider" Minimum="5" Maximum="300" StepFrequency="5"
+                                            Value="30" SmallChange="5" LargeChange="15"
+                                            ValueChanged="OnTimeoutChanged"/>
+                                </StackPanel>
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Maximum captured output"/>
+                                    <ComboBox x:Name="MaxOutputCombo" HorizontalAlignment="Stretch"
+                                              SelectionChanged="OnMaxOutputChanged">
+                                        <ComboBoxItem Content="1 MB" Tag="1048576"/>
+                                        <ComboBoxItem Content="4 MB (default)" Tag="4194304"/>
+                                        <ComboBoxItem Content="16 MB" Tag="16777216"/>
+                                        <ComboBoxItem Content="64 MB" Tag="67108864"/>
+                                    </ComboBox>
+                                </StackPanel>
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- Approval rules — collapsible -->
+                        <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsExpanded="False">
+                            <Expander.Header>
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE9CE;" FontSize="14" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Approval rules" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                                    <TextBlock x:Name="ApprovalExpanderSummary"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Expander.Header>
+                            <StackPanel Spacing="6" Padding="0,4">
+                                <TextBlock Text="What happens when an agent tries to run a command that doesn't match any rule below:"
+                                           Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                <ComboBox x:Name="ExecDefaultActionCombo" Width="240"
+                                          SelectionChanged="OnExecDefaultActionChanged">
+                                    <ComboBoxItem Content="Deny — block unknown commands" Tag="deny"/>
+                                    <ComboBoxItem Content="Allow — run unknown commands" Tag="allow"/>
+                                    <ComboBoxItem Content="Ask — prompt for each unknown command" Tag="ask"/>
+                                </ComboBox>
+                                <TextBlock Text="Rules (evaluated top to bottom; first match wins):"
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           Margin="0,4,0,0"/>
+                                <ListView x:Name="ExecRulesList" SelectionMode="None" MaxHeight="280">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Padding="8,6" ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="90"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="{Binding Pattern}" FontFamily="Consolas" VerticalAlignment="Center"/>
+                                                <Border Grid.Column="1" CornerRadius="4" Padding="6,2" HorizontalAlignment="Center"
+                                                        Background="{Binding ActionBrush}">
+                                                    <TextBlock Text="{Binding Action}" FontSize="11" FontWeight="SemiBold" Foreground="White"/>
+                                                </Border>
+                                                <Button Grid.Column="2" Click="OnRemoveExecRule" Tag="{Binding Index}"
+                                                        Padding="4,2" MinWidth="0" Background="Transparent"
+                                                        ToolTipService.ToolTip="Remove rule">
+                                                    <FontIcon Glyph="&#xE894;" FontSize="12"/>
+                                                </Button>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBox x:Name="NewExecRulePattern" PlaceholderText="Command pattern (for example: echo *)" Width="320"/>
+                                    <ComboBox x:Name="NewExecRuleAction" Width="110" SelectedIndex="0">
+                                        <ComboBoxItem Content="allow"/>
+                                        <ComboBoxItem Content="deny"/>
+                                    </ComboBox>
+                                    <Button Content="Add rule" Click="OnAddExecRule"/>
+                                </StackPanel>
+                                <Button x:Name="SaveExecPolicyButton" Content="Save rules" Click="OnSaveExecPolicy"
+                                        Style="{ThemeResource AccentButtonStyle}" HorizontalAlignment="Right"/>
+                            </StackPanel>
+                        </Expander>
                     </StackPanel>
                 </StackPanel>
             </Border>

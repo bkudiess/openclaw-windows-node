@@ -384,14 +384,25 @@ public sealed partial class CapabilitiesPage : Page
 
     private void UpdateRunProgramsSummary()
     {
-        if (_hub?.Settings is not { } s)
-            return;
-        var parts = new List<string>();
-        if (!s.NodeSystemRunEnabled) { RunProgramsSummary.Text = "Off — agents cannot run programs."; return; }
-        parts.Add(s.SystemRunSandboxEnabled ? "📦 In container" : "⚠️ Direct (no container)");
-        parts.Add(s.SystemRunAllowOutbound ? "Internet on" : "Internet blocked");
-        parts.Add($"Files: {FmtAccess(s.SandboxDocumentsAccess)} docs · {FmtAccess(s.SandboxDownloadsAccess)} downloads · {FmtAccess(s.SandboxDesktopAccess)} desktop");
-        RunProgramsSummary.Text = string.Join("  ·  ", parts);
+        if (_hub?.Settings is not { } s) return;
+        if (!s.NodeSystemRunEnabled) { RunProgramsSummary.Text = "Lets agents run shell commands, scripts, and programs on this PC."; return; }
+        var mode = s.SystemRunSandboxEnabled ? "In a container" : "Direct (no container)";
+        var net  = s.SystemRunAllowOutbound ? "Internet on" : "Internet blocked";
+        RunProgramsSummary.Text = $"{mode}  ·  {net}  ·  Files: {FmtAccess(s.SandboxDocumentsAccess)} Documents / {FmtAccess(s.SandboxDownloadsAccess)} Downloads / {FmtAccess(s.SandboxDesktopAccess)} Desktop";
+
+        // Per-expander summaries — visible in collapsed headers so users see state without expanding
+        FilesExpanderSummary.Text = $"  ·  {FmtAccess(s.SandboxDocumentsAccess)} / {FmtAccess(s.SandboxDownloadsAccess)} / {FmtAccess(s.SandboxDesktopAccess)}";
+        NetworkExpanderSummary.Text = s.SystemRunAllowOutbound ? "  ·  Internet on" : "  ·  Internet blocked";
+        ClipboardExpanderSummary.Text = s.SandboxClipboard switch
+        {
+            SandboxClipboardMode.Read  => "  ·  Read only",
+            SandboxClipboardMode.Write => "  ·  Write only",
+            SandboxClipboardMode.Both  => "  ·  Read and write",
+            _                          => "  ·  None"
+        };
+        var secs = Math.Clamp(s.SandboxTimeoutMs / 1000, 5, 300);
+        LimitsExpanderSummary.Text = $"  ·  {secs}s timeout";
+        ApprovalExpanderSummary.Text = $"  ·  {_execRules.Count} rule{(_execRules.Count == 1 ? "" : "s")}";
     }
 
     private static string FmtAccess(SandboxFolderAccess? a) => a switch
