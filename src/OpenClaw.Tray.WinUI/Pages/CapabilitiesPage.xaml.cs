@@ -137,9 +137,9 @@ public sealed partial class CapabilitiesPage : Page
                 "Locked down",
                 "Programs can't run. Camera and screen ask before each use. No internet from program code."),
             SecurityLevel.Trusted => (
-                "\uE930",
-                "Trusted (developer)",
-                "Programs run directly with your full Windows access. Camera and screen are pre-approved. The local MCP server is on."),
+                "\uE7BA",
+                "Unprotected",
+                "Programs run with your full Windows access. Camera and screen never ask. The local MCP server is on. Use only if you trust every connected agent."),
             _ => (
                 "\uE73E",
                 "Recommended",
@@ -179,8 +179,8 @@ public sealed partial class CapabilitiesPage : Page
 
     private static string LevelLabel(SecurityLevel l) => l switch
     {
-        SecurityLevel.LockedDown => "Locked Down",
-        SecurityLevel.Trusted    => "Trusted",
+        SecurityLevel.LockedDown => "Locked down",
+        SecurityLevel.Trusted    => "Unprotected",
         _                        => "Recommended"
     };
 
@@ -190,7 +190,7 @@ public sealed partial class CapabilitiesPage : Page
     private async void OnLevelTrustedClick(object sender, RoutedEventArgs e)
     {
         var content = new StackPanel { Spacing = 8 };
-        content.Children.Add(new TextBlock { Text = "Switching to Trusted (developer) will:", TextWrapping = TextWrapping.Wrap });
+        content.Children.Add(new TextBlock { Text = "Switching to Unprotected will:", TextWrapping = TextWrapping.Wrap });
         content.Children.Add(new TextBlock
         {
             Text = "• Run programs directly on this PC with no container isolation\n" +
@@ -201,14 +201,14 @@ public sealed partial class CapabilitiesPage : Page
         });
         content.Children.Add(new TextBlock
         {
-            Text = "Only use this if you trust every agent that connects.",
+            Text = "Only use this if you trust every agent that can connect to your gateway.",
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0), Opacity = 0.7
         });
         var dialog = new ContentDialog
         {
-            Title = "Switch to Trusted?",
+            Title = "Remove all protection?",
             Content = content,
-            PrimaryButtonText = "Switch to Trusted",
+            PrimaryButtonText = "Switch to Unprotected",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = XamlRoot
