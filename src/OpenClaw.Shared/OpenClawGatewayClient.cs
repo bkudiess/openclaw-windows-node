@@ -484,9 +484,9 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
         return TrySendTrackedRequestAsync("skills.install", new { id = skillId });
     }
 
-    public Task<bool> UpdateSkillAsync(string skillId)
+    public Task<bool> SetSkillEnabledAsync(string skillKey, bool enabled)
     {
-        return TrySendTrackedRequestAsync("skills.update", new { id = skillId });
+        return TrySendTrackedRequestAsync("skills.update", new { skillKey, enabled });
     }
 
     // Gateway config management
@@ -1164,6 +1164,8 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
                 return true;
             case "skills.install":
             case "skills.update":
+                // Re-fetch skills status so the UI reflects the change
+                _ = RequestSkillsStatusAsync();
                 return true;
             case "config.get":
                 ConfigUpdated?.Invoke(this, payload.Clone());

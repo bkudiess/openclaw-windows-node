@@ -69,6 +69,9 @@ public sealed partial class HubWindow : WindowEx
 
     public System.Text.Json.JsonElement? LastConfig { get; private set; }
     public System.Text.Json.JsonElement? LastConfigSchema { get; private set; }
+    public System.Text.Json.JsonElement? LastSkillsData { get; private set; }
+    public string? LastSkillsAgentId { get; private set; }
+    public System.Text.Json.JsonElement? LastAgentFilesList { get; private set; }
 
     // Event for settings saved (App.xaml.cs subscribes)
     public event EventHandler? SettingsSaved;
@@ -95,7 +98,7 @@ public sealed partial class HubWindow : WindowEx
     private void OnRootGridSizeChanged(object sender, SizeChangedEventArgs e)
     {
         const double minPane = 200;
-        const double maxPane = 320;
+        const double maxPane = 260;
         const double ratio = 0.25;
 
         double desired = e.NewSize.Width * ratio;
@@ -368,10 +371,16 @@ public sealed partial class HubWindow : WindowEx
     {
         try
         {
+            var snapshot = data.Clone();
+            LastSkillsData = snapshot;
             DispatcherQueue?.TryEnqueue(() =>
             {
                 if (IsClosed) return;
-                if (ContentFrame?.Content is SkillsPage sp) sp.UpdateFromGateway(data);
+                if (ContentFrame?.Content is SkillsPage sp)
+                {
+                    LastSkillsAgentId = sp.CurrentAgentId;
+                    sp.UpdateFromGateway(snapshot);
+                }
             });
         }
         catch { }
@@ -439,10 +448,12 @@ public sealed partial class HubWindow : WindowEx
     {
         try
         {
+            var snapshot = data.Clone();
+            LastAgentFilesList = snapshot;
             DispatcherQueue?.TryEnqueue(() =>
             {
                 if (IsClosed) return;
-                if (ContentFrame?.Content is WorkspacePage wp) wp.UpdateAgentFilesList(data);
+                if (ContentFrame?.Content is WorkspacePage wp) wp.UpdateAgentFilesList(snapshot);
             });
         }
         catch { }
@@ -452,10 +463,11 @@ public sealed partial class HubWindow : WindowEx
     {
         try
         {
+            var snapshot = data.Clone();
             DispatcherQueue?.TryEnqueue(() =>
             {
                 if (IsClosed) return;
-                if (ContentFrame?.Content is WorkspacePage wp) wp.UpdateAgentFileContent(data);
+                if (ContentFrame?.Content is WorkspacePage wp) wp.UpdateAgentFileContent(snapshot);
             });
         }
         catch { }
@@ -635,7 +647,11 @@ public sealed partial class HubWindow : WindowEx
                 if (LastPresence != null) nodes.UpdatePresence(LastPresence);
                 break;
             case CronPage cron: cron.Initialize(this); SeedCronData(cron); break;
-            case SkillsPage skills: skills.Initialize(this); break;
+            case SkillsPage skills:
+                skills.Initialize(this);
+                if (LastSkillsData.HasValue && LastSkillsAgentId == skills.CurrentAgentId)
+                    skills.UpdateFromGateway(LastSkillsData.Value);
+                break;
             case ConfigPage config:
                 try
                 {
@@ -670,7 +686,10 @@ public sealed partial class HubWindow : WindowEx
                         agentEvents.AddEvent(LastAgentEvents[i]);
                 }
                 break;
-            case WorkspacePage workspace: workspace.Initialize(this); break;
+            case WorkspacePage workspace:
+                workspace.Initialize(this);
+                if (LastAgentFilesList.HasValue) workspace.UpdateAgentFilesList(LastAgentFilesList.Value);
+                break;
             case BindingsPage bindings:
                 bindings.Initialize(this);
                 if (LastConfig.HasValue) bindings.UpdateConfig(LastConfig.Value);

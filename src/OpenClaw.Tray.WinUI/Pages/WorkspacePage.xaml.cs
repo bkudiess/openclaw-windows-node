@@ -24,14 +24,17 @@ public sealed partial class WorkspacePage : Page
     public void Initialize(HubWindow hub)
     {
         _hub = hub;
-        if (hub.GatewayClient != null && hub.CurrentStatus == ConnectionStatus.Connected)
+        // If HubWindow has cached file list data, it will replay via UpdateAgentFilesList after Initialize.
+        // Only request fresh data if no cache exists.
+        if (hub.GatewayClient != null && hub.CurrentStatus == ConnectionStatus.Connected && !hub.LastAgentFilesList.HasValue)
         {
             FallbackInfoBar.IsOpen = false;
             LoadingRing.IsActive = true;
+            LoadingPanel.Visibility = Visibility.Visible;
             ClearTabs();
             _ = hub.GatewayClient.RequestAgentFilesListAsync(AgentId);
         }
-        else
+        else if (hub.GatewayClient == null || hub.CurrentStatus != ConnectionStatus.Connected)
         {
             FallbackInfoBar.IsOpen = true;
             FallbackInfoBar.Message = "Connect to gateway to view workspace files.";
@@ -41,7 +44,7 @@ public sealed partial class WorkspacePage : Page
     public void UpdateAgentFilesList(JsonElement data)
     {
         LoadingRing.IsActive = false;
-        FallbackInfoBar.IsOpen = false;
+        LoadingPanel.Visibility = Visibility.Collapsed;
         ClearTabs();
 
         if (data.TryGetProperty("workspace", out var workspaceEl))
@@ -62,9 +65,6 @@ public sealed partial class WorkspacePage : Page
                 if (!string.IsNullOrEmpty(name) && exists)
                 {
                     AddFileTab(name, size);
-                    // Fetch all contents upfront
-                    if (_hub?.GatewayClient != null)
-                        _ = _hub.GatewayClient.RequestAgentFileGetAsync(AgentId, name);
                 }
             }
         }
@@ -80,6 +80,9 @@ public sealed partial class WorkspacePage : Page
             FileTabs.Visibility = Visibility.Visible;
             FileTabs.SelectedIndex = 0;
             _tabsPopulated = true;
+            // Explicitly fetch first tab content (SelectionChanged may not fire for programmatic index set)
+            if (FileTabs.SelectedItem is TabViewItem firstTab && firstTab.Tag is string firstName && _hub?.GatewayClient != null)
+                _ = _hub.GatewayClient.RequestAgentFileGetAsync(AgentId, firstName);
         }
     }
 
@@ -103,12 +106,22 @@ public sealed partial class WorkspacePage : Page
             Padding = new Thickness(16)
         };
 
-        tab.Content = new ScrollViewer
+        var scrollViewer = new ScrollViewer
         {
             Content = textBlock,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
+
+        tab.Content = scrollViewer;
+
+        // WinUI TabView doesn't visually refresh when Content changes on the selected tab.
+        // Force re-render by cycling the selection.
+        if (FileTabs.SelectedItem == tab)
+        {
+            FileTabs.SelectedItem = null;
+            FileTabs.SelectedItem = tab;
+        }
     }
 
     private void AddFileTab(string fileName, long size)
@@ -165,6 +178,7 @@ public sealed partial class WorkspacePage : Page
         if (_hub?.GatewayClient != null)
         {
             LoadingRing.IsActive = true;
+            LoadingPanel.Visibility = Visibility.Visible;
             FallbackInfoBar.IsOpen = false;
             ClearTabs();
             _ = _hub.GatewayClient.RequestAgentFilesListAsync(AgentId);
