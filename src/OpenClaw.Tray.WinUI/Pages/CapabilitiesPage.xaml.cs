@@ -119,7 +119,6 @@ public sealed partial class CapabilitiesPage : Page
         }
         UpdateRunProgramsSummary();
         UpdateLevelPicker();
-        UpdateNodeStatus();
     }
 
     // ─── Security Level ───────────────────────────────────────────────
@@ -908,23 +907,6 @@ public sealed partial class CapabilitiesPage : Page
             GatewayAllowlistEmpty.Text = "Failed to parse allowlist from gateway config.";
             GatewayAllowlistEmpty.Visibility = Visibility.Visible;
         }
-    }
-
-    // ─── Node status ──────────────────────────────────────────────────
-
-    private void UpdateNodeStatus()
-    {
-        if (_hub?.Settings is not { } s) return;
-        if (!s.EnableNodeMode)
-        {
-            NodeStatusDot.Fill = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 128, 128, 128));
-            NodeStatusText.Text = "Node mode disabled";
-            NodeDetailsText.Text = "Turn on Node Mode above to expose capabilities to a gateway.";
-            return;
-        }
-        NodeStatusDot.Fill = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 76, 175, 80));
-        NodeStatusText.Text = "Node mode enabled";
-        NodeDetailsText.Text = $"Capabilities exposed to the connected gateway. Hostname: {Environment.MachineName}.";
     }
 
     // ─── Types ────────────────────────────────────────────────────────

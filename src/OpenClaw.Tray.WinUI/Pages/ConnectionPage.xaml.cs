@@ -66,16 +66,9 @@ public sealed partial class ConnectionPage : Page
         LoadConnectionLog();
         LoadRecentGateways();
         LoadLocalGatewaySection(settings);
-        NodeModeToggle.IsOn = settings.EnableNodeMode;
     }
 
-    private void OnNodeModeToggled(object sender, RoutedEventArgs e)
-    {
-        if (_hub?.Settings is not { } s) return;
-        s.EnableNodeMode = NodeModeToggle.IsOn;
-        s.Save();
-        _hub.RaiseSettingsSaved();
-    }
+    // Node mode toggle moved to Settings page
 
     // ─── Local Gateway lifecycle (moved from SettingsPage) ───────────────────
 

@@ -31,7 +31,35 @@ public sealed partial class SettingsPage : Page
             RegisterDirtyHandlers();
             _initialized = true;
         }
-        // No external-state re-bind needed: pre-approve toggles moved to Capabilities → Camera/Screen rows.
+        if (hub.Settings != null)
+        {
+            NodeModeToggle.IsOn = hub.Settings.EnableNodeMode;
+            UpdateNodeStatus();
+        }
+    }
+
+    private void OnNodeModeToggled(object sender, RoutedEventArgs e)
+    {
+        if (!_initialized || _hub?.Settings is not { } s) return;
+        s.EnableNodeMode = NodeModeToggle.IsOn;
+        s.Save();
+        _hub.RaiseSettingsSaved();
+        UpdateNodeStatus();
+    }
+
+    private void UpdateNodeStatus()
+    {
+        if (_hub?.Settings is not { } s) return;
+        if (!s.EnableNodeMode)
+        {
+            NodeStatusDot.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 128, 128, 128));
+            NodeStatusText.Text = "Node mode is off — no gateway connection.";
+        }
+        else
+        {
+            NodeStatusDot.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 76, 175, 80));
+            NodeStatusText.Text = $"Node mode is on — exposed as {Environment.MachineName}.";
+        }
     }
 
     private void RegisterDirtyHandlers()

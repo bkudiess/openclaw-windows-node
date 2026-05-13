@@ -723,23 +723,7 @@
                 </StackPanel>
             </Border>
 
-            <!-- Node status -->
-            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,12,0,0">
-                <StackPanel Spacing="6">
-                    <TextBlock Text="Node status" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <Ellipse x:Name="NodeStatusDot" Width="10" Height="10"
-                                 VerticalAlignment="Center" Fill="Gray"/>
-                        <TextBlock x:Name="NodeStatusText" Text="Node mode is off" VerticalAlignment="Center"/>
-                    </StackPanel>
-                    <TextBlock x:Name="NodeDetailsText"
-                               Style="{StaticResource CaptionTextBlockStyle}"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                               TextWrapping="Wrap"/>
-                </StackPanel>
-            </Border>
+            <!-- Node status moved to Settings page -->
 
         </StackPanel>
     </ScrollViewer>

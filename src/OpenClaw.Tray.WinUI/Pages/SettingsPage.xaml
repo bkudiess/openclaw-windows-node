@@ -18,6 +18,41 @@
                            Style="{StaticResource CaptionTextBlockStyle}"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,0,0,8"/>
 
+                <!-- Node mode (master switch + status) — moved here from Connection and Security pages -->
+                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="16"
+                        AutomationProperties.AutomationId="NodeModeCard">
+                    <StackPanel Spacing="10">
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="28"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Grid.Column="0" Glyph="&#xE839;" FontSize="20"
+                                      Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                      VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock Text="Node mode" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                                <TextBlock Text="When on, this PC connects to the gateway and exposes the capabilities you've enabled on the Security page."
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <ToggleSwitch x:Name="NodeModeToggle" Grid.Column="2" VerticalAlignment="Center"
+                                          OnContent="" OffContent="" Toggled="OnNodeModeToggled"
+                                          AutomationProperties.AutomationId="NodeModeToggle"/>
+                        </Grid>
+                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="40,4,0,0">
+                            <Ellipse x:Name="NodeStatusDot" Width="10" Height="10"
+                                     VerticalAlignment="Center" Fill="Gray"/>
+                            <TextBlock x:Name="NodeStatusText" Text="Node mode is off" VerticalAlignment="Center"
+                                       Style="{StaticResource CaptionTextBlockStyle}"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
                 <!-- Startup -->
                 <Expander x:Name="StartupExpander" IsExpanded="True"
                           HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
