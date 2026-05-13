@@ -18,93 +18,109 @@
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                        TextWrapping="Wrap" MaxWidth="680" Margin="0,0,0,4"/>
 
-            <!-- ════ Security level ════ -->
+            <!-- ════ Hero status + Security level (Sandbox-style hero) ════ -->
             <Border x:Name="SecurityLevelCard"
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="16"
+                    BorderThickness="1" CornerRadius="8" Padding="20"
                     AutomationProperties.AutomationId="SecurityLevelCard">
-                <StackPanel Spacing="12">
-                    <Grid ColumnSpacing="12">
+                <StackPanel Spacing="16">
+                    <!-- Hero row: big icon · big title · subtext · status pill -->
+                    <Grid ColumnSpacing="16">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <FontIcon Grid.Column="0" Glyph="&#xE72E;" FontSize="20"
+                        <FontIcon Grid.Column="0" x:Name="HeroIcon"
+                                  Glyph="&#xE73E;" FontSize="32"
                                   Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                                   VerticalAlignment="Center"/>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                            <TextBlock Text="Security level" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <TextBlock Text="Choose how protected this PC is. Pick a profile to set safe defaults below, then override anything you like."
-                                       Style="{StaticResource CaptionTextBlockStyle}"
+                            <TextBlock x:Name="HeroTitle" Text="Recommended"
+                                       Style="{StaticResource TitleTextBlockStyle}"/>
+                            <TextBlock x:Name="HeroSubtext"
+                                       Text="Programs run inside a Windows container. Camera and screen require approval. MCP server is off."
+                                       Style="{StaticResource BodyTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        TextWrapping="Wrap"/>
                         </StackPanel>
                         <Border x:Name="LevelBadge" Grid.Column="2"
-                                CornerRadius="10" Padding="10,2"
+                                CornerRadius="12" Padding="12,4"
                                 Background="{ThemeResource AccentFillColorTertiaryBrush}"
                                 VerticalAlignment="Center">
-                            <TextBlock x:Name="LevelBadgeText" Text="Recommended" FontSize="11"
+                            <TextBlock x:Name="LevelBadgeText" Text="Recommended" FontSize="12"
                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"/>
                         </Border>
                     </Grid>
 
-                    <Grid ColumnSpacing="8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
+                    <!-- Preset buttons (Sandbox-style — bigger, with icon + title + description) -->
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="Choose a security level"
+                                   Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                        <TextBlock Text="Sets safe defaults for everything below. You can override anything afterward — changes show as 'Custom'."
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   TextWrapping="Wrap"/>
+                        <Grid ColumnSpacing="12" Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
 
-                        <Button x:Name="LockedDownButton" Grid.Column="0"
-                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                                Padding="14,12" Click="OnLevelLockedDownClick"
-                                AutomationProperties.AutomationId="LockedDownButton">
-                            <StackPanel Spacing="4">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon Glyph="&#xE72E;" FontSize="14" VerticalAlignment="Center"/>
-                                    <TextBlock Text="Locked down" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                            <Button x:Name="LockedDownButton" Grid.Column="0"
+                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                    VerticalAlignment="Stretch" VerticalContentAlignment="Top"
+                                    Padding="20,16" MinHeight="130" CornerRadius="8"
+                                    Click="OnLevelLockedDownClick"
+                                    AutomationProperties.AutomationId="LockedDownButton">
+                                <StackPanel Spacing="8">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <FontIcon Glyph="&#xE72E;" FontSize="18"/>
+                                        <TextBlock Text="Locked down" FontSize="16" FontWeight="SemiBold"/>
+                                    </StackPanel>
+                                    <TextBlock Text="No programs. No network. No camera or screen without asking."
+                                               TextWrapping="Wrap" FontSize="13"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                                 </StackPanel>
-                                <TextBlock Text="Blocks program execution. Asks before camera and screen."
-                                           Style="{StaticResource CaptionTextBlockStyle}"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                           TextWrapping="Wrap"/>
-                            </StackPanel>
-                        </Button>
+                            </Button>
 
-                        <Button x:Name="RecommendedButton" Grid.Column="1"
-                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                                Padding="14,12" Click="OnLevelRecommendedClick"
-                                AutomationProperties.AutomationId="RecommendedButton">
-                            <StackPanel Spacing="4">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon Glyph="&#xE73E;" FontSize="14" VerticalAlignment="Center"/>
-                                    <TextBlock Text="Recommended" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                            <Button x:Name="RecommendedButton" Grid.Column="1"
+                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                    VerticalAlignment="Stretch" VerticalContentAlignment="Top"
+                                    Padding="20,16" MinHeight="130" CornerRadius="8"
+                                    Click="OnLevelRecommendedClick"
+                                    AutomationProperties.AutomationId="RecommendedButton">
+                                <StackPanel Spacing="8">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <FontIcon Glyph="&#xE73E;" FontSize="18"/>
+                                        <TextBlock Text="Recommended" FontSize="16" FontWeight="SemiBold"/>
+                                    </StackPanel>
+                                    <TextBlock Text="Programs run in a container. Camera and screen ask first. Internet is blocked from program code."
+                                               TextWrapping="Wrap" FontSize="13"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                                 </StackPanel>
-                                <TextBlock Text="Safe defaults. Programs run inside a container."
-                                           Style="{StaticResource CaptionTextBlockStyle}"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                           TextWrapping="Wrap"/>
-                            </StackPanel>
-                        </Button>
+                            </Button>
 
-                        <Button x:Name="TrustedButton" Grid.Column="2"
-                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                                Padding="14,12" Click="OnLevelTrustedClick"
-                                AutomationProperties.AutomationId="TrustedButton">
-                            <StackPanel Spacing="4">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon Glyph="&#xE930;" FontSize="14" VerticalAlignment="Center"/>
-                                    <TextBlock Text="Trusted (developer)" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                            <Button x:Name="TrustedButton" Grid.Column="2"
+                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                    VerticalAlignment="Stretch" VerticalContentAlignment="Top"
+                                    Padding="20,16" MinHeight="130" CornerRadius="8"
+                                    Click="OnLevelTrustedClick"
+                                    AutomationProperties.AutomationId="TrustedButton">
+                                <StackPanel Spacing="8">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <FontIcon Glyph="&#xE930;" FontSize="18"/>
+                                        <TextBlock Text="Trusted (developer)" FontSize="16" FontWeight="SemiBold"/>
+                                    </StackPanel>
+                                    <TextBlock Text="Programs run directly. Camera and screen pre-approved. Internet allowed. Requires confirmation."
+                                               TextWrapping="Wrap" FontSize="13"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                                 </StackPanel>
-                                <TextBlock Text="Programs run directly. Camera and screen pre-approved. Requires confirmation."
-                                           Style="{StaticResource CaptionTextBlockStyle}"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                           TextWrapping="Wrap"/>
-                            </StackPanel>
-                        </Button>
-                    </Grid>
+                            </Button>
+                        </Grid>
+                    </StackPanel>
 
                     <StackPanel x:Name="DriftPanel" Orientation="Horizontal" Spacing="8" Visibility="Collapsed">
                         <FontIcon Glyph="&#xE946;" FontSize="14"

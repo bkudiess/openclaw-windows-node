@@ -132,10 +132,31 @@ public sealed partial class CapabilitiesPage : Page
         var drift = SecurityLevelResolver.DriftCount(s);
         var baseLevel = s.SecurityLevel == SecurityLevel.Custom ? SecurityLevel.Recommended : s.SecurityLevel;
 
-        var label = drift > 0
+        // Badge text (compact)
+        var badge = drift > 0
             ? $"{LevelLabel(baseLevel)} + {drift} change{(drift == 1 ? "" : "s")}"
             : LevelLabel(baseLevel);
-        LevelBadgeText.Text = label;
+        LevelBadgeText.Text = badge;
+
+        // Hero status (Sandbox-style: big icon + title + subtext)
+        var (heroGlyph, heroTitle, heroSubtext) = baseLevel switch
+        {
+            SecurityLevel.LockedDown => (
+                "\uE72E",
+                drift > 0 ? $"Locked down · {drift} change{(drift == 1 ? "" : "s")}" : "Locked down",
+                "Programs cannot run. Camera and screen ask before each use. Internet from program code is blocked."),
+            SecurityLevel.Trusted => (
+                "\uE930",
+                drift > 0 ? $"Trusted · {drift} change{(drift == 1 ? "" : "s")}" : "Trusted (developer)",
+                "Programs run directly with your full Windows access. Camera and screen are pre-approved. The local MCP server is on."),
+            _ => (
+                "\uE73E",
+                drift > 0 ? $"Recommended · {drift} change{(drift == 1 ? "" : "s")}" : "Recommended",
+                "Programs run inside a Windows container with limited access. Camera and screen ask before each use."),
+        };
+        HeroIcon.Glyph = heroGlyph;
+        HeroTitle.Text = heroTitle;
+        HeroSubtext.Text = heroSubtext;
 
         DriftPanel.Visibility = drift > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (drift > 0)
