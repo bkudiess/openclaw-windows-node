@@ -100,15 +100,7 @@ public sealed partial class CapabilitiesPage : Page
             LocationToggle.IsOn = s.NodeLocationEnabled;
             LocationDetailPanel.Visibility = s.NodeLocationEnabled ? Visibility.Visible : Visibility.Collapsed;
 
-            // TTS
-            TtsToggle.IsOn = s.NodeTtsEnabled;
-            TtsDetailPanel.Visibility = s.NodeTtsEnabled ? Visibility.Visible : Visibility.Collapsed;
-            SelectTtsProvider(s.TtsProvider);
-            UpdateTtsProviderPanels(s.TtsProvider);
-            // Show sentinel for stored API key so user knows one is saved.
-            TtsElevenLabsKey.Password = string.IsNullOrEmpty(s.TtsElevenLabsApiKey) ? "" : SavedApiKeySentinel;
-            TtsElevenLabsVoice.Text = s.TtsElevenLabsVoiceId ?? "";
-            TtsElevenLabsModelBox.Text = s.TtsElevenLabsModel ?? "";
+            // TTS lives on the Voice & Audio page now — settings still round-trip there.
 
             // Gateway allowlist (read-only)
             UpdateGatewayAllowlist();
@@ -806,64 +798,7 @@ public sealed partial class CapabilitiesPage : Page
         try { Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true }); } catch { }
     }
 
-    // ─── TTS ──────────────────────────────────────────────────────────
-
-    private void OnTtsToggled(object sender, RoutedEventArgs e)
-    {
-        if (_loading || _hub?.Settings is not { } s) return;
-        s.NodeTtsEnabled = TtsToggle.IsOn;
-        TtsDetailPanel.Visibility = TtsToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
-        s.Save(); _hub.RaiseSettingsSaved();
-    }
-
-    private void SelectTtsProvider(string provider)
-    {
-        for (int i = 0; i < TtsProviderCombo.Items.Count; i++)
-        {
-            if (TtsProviderCombo.Items[i] is ComboBoxItem item && (string)item.Tag == provider)
-            { TtsProviderCombo.SelectedIndex = i; return; }
-        }
-        TtsProviderCombo.SelectedIndex = 0;
-    }
-
-    private void OnTtsProviderChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_loading || _hub?.Settings is not { } s) return;
-        if (TtsProviderCombo.SelectedItem is ComboBoxItem item && item.Tag is string tag)
-        {
-            s.TtsProvider = tag;
-            s.Save(); _hub.RaiseSettingsSaved();
-            UpdateTtsProviderPanels(tag);
-        }
-    }
-
-    private void UpdateTtsProviderPanels(string provider)
-    {
-        TtsElevenLabsPanel.Visibility = provider == TtsCapability.ElevenLabsProvider ? Visibility.Visible : Visibility.Collapsed;
-        TtsStatusText.Text = provider switch
-        {
-            TtsCapability.PiperProvider => "Piper voice runs locally on this PC.",
-            TtsCapability.WindowsProvider => "Uses the Windows built-in speech engine.",
-            TtsCapability.ElevenLabsProvider => "ElevenLabs requires an API key. Audio is generated in the cloud.",
-            _ => ""
-        };
-    }
-
-    private void OnTtsElevenLabsCommitted(object sender, RoutedEventArgs e)
-    {
-        if (_loading || _hub?.Settings is not { } s) return;
-        // Only update the API key if the user typed something new — preserve
-        // the saved value when sentinel is shown.
-        var typed = TtsElevenLabsKey.Password;
-        if (!string.IsNullOrEmpty(typed) && typed != SavedApiKeySentinel)
-        {
-            s.TtsElevenLabsApiKey = typed;
-            TtsElevenLabsKey.Password = SavedApiKeySentinel;
-        }
-        s.TtsElevenLabsVoiceId = string.IsNullOrWhiteSpace(TtsElevenLabsVoice.Text) ? null : TtsElevenLabsVoice.Text;
-        s.TtsElevenLabsModel = string.IsNullOrWhiteSpace(TtsElevenLabsModelBox.Text) ? null : TtsElevenLabsModelBox.Text;
-        s.Save(); _hub.RaiseSettingsSaved();
-    }
+    // ─── TTS moved to Voice & Audio page ──────────────────────────────
 
     // ─── Gateway allowlist (read-only echo) ───────────────────────────
 

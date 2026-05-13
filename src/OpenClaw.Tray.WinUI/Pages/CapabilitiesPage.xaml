@@ -644,63 +644,7 @@
                 </StackPanel>
             </Border>
 
-            <!-- ════════ AUDIO OUTPUT section ════════ -->
-            <TextBlock Text="Audio output"
-                       Style="{StaticResource SubtitleTextBlockStyle}"
-                       Margin="0,16,0,4"/>
-
-            <!-- Text to speech -->
-            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="16">
-                <StackPanel Spacing="10">
-                    <Grid ColumnSpacing="12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="28"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Grid.Column="0" HorizontalAlignment="Center" Glyph="&#xE767;" FontSize="20"
-                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                  VerticalAlignment="Center"/>
-                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                            <TextBlock x:Uid="CapabilitiesPage_TtsCardHeader" Text="Text to speech" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <TextBlock x:Uid="CapabilitiesPage_TtsCardDescription"
-                                       Text="Lets agents speak through your speakers. Choose a provider below."
-                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                       TextWrapping="Wrap"/>
-                        </StackPanel>
-                        <ToggleSwitch x:Name="TtsToggle" Grid.Column="2" VerticalAlignment="Center"
-                                      OnContent="" OffContent="" MinWidth="0" Toggled="OnTtsToggled"/>
-                    </Grid>
-                    <StackPanel x:Name="TtsDetailPanel" Spacing="8" Visibility="Collapsed" Margin="40,0,0,0">
-                        <ComboBox x:Name="TtsProviderCombo" x:Uid="CapabilitiesPage_TtsProviderComboBox" Header="Provider"
-                                  SelectionChanged="OnTtsProviderChanged">
-                            <ComboBoxItem x:Uid="CapabilitiesPage_TtsProviderPiper" Content="Piper — local, recommended" Tag="piper"/>
-                            <ComboBoxItem x:Uid="CapabilitiesPage_TtsProviderWindows" Content="Windows — built-in speech" Tag="windows"/>
-                            <ComboBoxItem x:Uid="CapabilitiesPage_TtsProviderElevenLabs" Content="ElevenLabs — cloud" Tag="elevenlabs"/>
-                        </ComboBox>
-                        <StackPanel x:Name="TtsElevenLabsPanel" Spacing="6" Visibility="Collapsed">
-                            <PasswordBox x:Name="TtsElevenLabsKey" x:Uid="CapabilitiesPage_TtsElevenLabsApiKey" Header="ElevenLabs API key"
-                                         LostFocus="OnTtsElevenLabsCommitted"/>
-                            <TextBox x:Name="TtsElevenLabsVoice" x:Uid="CapabilitiesPage_TtsElevenLabsVoiceId" Header="Voice ID"
-                                     LostFocus="OnTtsElevenLabsCommitted"/>
-                            <TextBox x:Name="TtsElevenLabsModelBox" x:Uid="CapabilitiesPage_TtsElevenLabsModel" Header="Model"
-                                     PlaceholderText="eleven_multilingual_v2"
-                                     LostFocus="OnTtsElevenLabsCommitted"/>
-                            <TextBlock x:Uid="CapabilitiesPage_TtsElevenLabsHelp"
-                                       Text="The API key is encrypted at rest with Windows DPAPI."
-                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                       TextWrapping="Wrap"/>
-                        </StackPanel>
-                        <TextBlock x:Name="TtsStatusText"
-                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                    </StackPanel>
-                </StackPanel>
-            </Border>
+            <!-- Text to speech moved to the Voice & Audio page. -->
 
             <!-- ════════ GATEWAY ════════ -->
             <TextBlock Text="From the gateway"

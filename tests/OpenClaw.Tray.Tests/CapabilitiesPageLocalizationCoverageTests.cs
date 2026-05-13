@@ -61,8 +61,9 @@ public sealed class CapabilitiesPageLocalizationCoverageTests
     }
 
     /// <summary>
-    /// Contract for the STT/TTS surface introduced by the audio merge.
-    /// Each entry: x:Uid + the resw key suffixes that MUST exist in en-us.
+    /// Contract for the STT surface on the Security page. The TTS card
+    /// previously lived here but moved to the Voice & Audio page; its
+    /// localization is verified by that page's own tests.
     /// </summary>
     public static IEnumerable<object[]> SttAndTtsCardUids => new[]
     {
@@ -70,17 +71,6 @@ public sealed class CapabilitiesPageLocalizationCoverageTests
         new object[] { "CapabilitiesPage_SttCardHeader",        new[] { ".Text" } },
         new object[] { "CapabilitiesPage_SttCardDescription",   new[] { ".Text" } },
         new object[] { "CapabilitiesPage_SttMoreSettingsLink",  new[] { ".Content" } },
-        // TTS card (provider picker, ElevenLabs sub-panel)
-        new object[] { "CapabilitiesPage_TtsCardHeader",        new[] { ".Text" } },
-        new object[] { "CapabilitiesPage_TtsCardDescription",   new[] { ".Text" } },
-        new object[] { "CapabilitiesPage_TtsProviderComboBox",  new[] { ".Header" } },
-        new object[] { "CapabilitiesPage_TtsProviderPiper",     new[] { ".Content" } },
-        new object[] { "CapabilitiesPage_TtsProviderWindows",   new[] { ".Content" } },
-        new object[] { "CapabilitiesPage_TtsProviderElevenLabs",new[] { ".Content" } },
-        new object[] { "CapabilitiesPage_TtsElevenLabsApiKey",  new[] { ".Header" } },
-        new object[] { "CapabilitiesPage_TtsElevenLabsVoiceId", new[] { ".Header" } },
-        new object[] { "CapabilitiesPage_TtsElevenLabsModel",   new[] { ".Header", ".PlaceholderText" } },
-        new object[] { "CapabilitiesPage_TtsElevenLabsHelp",    new[] { ".Text" } },
     };
 
     [Theory]
