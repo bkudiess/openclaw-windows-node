@@ -58,8 +58,6 @@ public sealed partial class CapabilitiesPage : Page
 
             // Run Programs
             RunProgramsToggle.IsOn = s.NodeSystemRunEnabled;
-            RunProgramsDetail.Visibility = s.NodeSystemRunEnabled ? Visibility.Visible : Visibility.Collapsed;
-            UpdateRunProgramsRadios(s);
             SelectAccessTag(DocsAccessCombo, s.SandboxDocumentsAccess);
             SelectAccessTag(DownloadsAccessCombo, s.SandboxDownloadsAccess);
             SelectAccessTag(DesktopAccessCombo, s.SandboxDesktopAccess);
@@ -76,6 +74,9 @@ public sealed partial class CapabilitiesPage : Page
             TimeoutSlider.Value = secs;
             TimeoutLabel.Text = $"Command timeout: {secs} sec";
             SelectMaxOutputTag(s.SandboxMaxOutputBytes);
+            // Apply the full Run Programs enabled-state cascade AFTER all sub-controls
+            // are populated so we don't disable controls that aren't loaded yet.
+            RefreshRunProgramsState(s);
 
             // Exec policy
             LoadExecPolicy();
@@ -86,23 +87,23 @@ public sealed partial class CapabilitiesPage : Page
 
             // MCP
             McpToggle.IsOn = s.EnableMcpServer;
-            McpDetailPanel.Visibility = s.EnableMcpServer ? Visibility.Visible : Visibility.Collapsed;
+            SetPanelEnabled(McpDetailPanel, s.EnableMcpServer);
             UpdateMcpEndpoint();
 
             // Sensors
             CameraToggle.IsOn = s.NodeCameraEnabled;
-            CameraDetailPanel.Visibility = s.NodeCameraEnabled ? Visibility.Visible : Visibility.Collapsed;
+            SetPanelEnabled(CameraDetailPanel, s.NodeCameraEnabled);
             CameraAlwaysAllowCb.IsChecked = s.CameraRecordingConsentGiven;
 
             ScreenToggle.IsOn = s.NodeScreenEnabled;
-            ScreenDetailPanel.Visibility = s.NodeScreenEnabled ? Visibility.Visible : Visibility.Collapsed;
+            SetPanelEnabled(ScreenDetailPanel, s.NodeScreenEnabled);
             ScreenAlwaysAllowCb.IsChecked = s.ScreenRecordingConsentGiven;
 
             SttToggle.IsOn = s.NodeSttEnabled;
-            SttDetailPanel.Visibility = s.NodeSttEnabled ? Visibility.Visible : Visibility.Collapsed;
+            SetPanelEnabled(SttDetailPanel, s.NodeSttEnabled);
 
             LocationToggle.IsOn = s.NodeLocationEnabled;
-            LocationDetailPanel.Visibility = s.NodeLocationEnabled ? Visibility.Visible : Visibility.Collapsed;
+            SetPanelEnabled(LocationDetailPanel, s.NodeLocationEnabled);
 
             // TTS lives on the Voice & Audio page now — settings still round-trip there.
 
@@ -212,29 +213,55 @@ public sealed partial class CapabilitiesPage : Page
     {
         if (_loading || _hub?.Settings is not { } s) return;
         s.NodeSystemRunEnabled = RunProgramsToggle.IsOn;
-        RunProgramsDetail.Visibility = RunProgramsToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
         s.Save();
         _hub.RaiseSettingsSaved();
+        RefreshRunProgramsState(s);
         OnAnyLevelDrivenChanged();
         UpdateRunProgramsSummary();
     }
 
-    private void UpdateRunProgramsRadios(SettingsManager s)
+    /// <summary>
+    /// Recursively sets <c>IsEnabled</c> on every <see cref="Control"/> inside
+    /// <paramref name="panel"/>. WinUI panels (StackPanel/Grid) don't have an
+    /// IsEnabled property themselves — that's a Control-only concern — so we
+    /// walk the children. TextBlocks render at full opacity either way, which
+    /// keeps labels readable while interactive controls visibly gray out.
+    /// </summary>
+    private static void SetPanelEnabled(Panel panel, bool enabled)
     {
-        var inContainer = s.SystemRunSandboxEnabled;
-        InContainerSelectedOverlay.Visibility = inContainer ? Visibility.Visible : Visibility.Collapsed;
-        DirectSelectedOverlay.Visibility = inContainer ? Visibility.Collapsed : Visibility.Visible;
-
-        // Files / Network / Clipboard / Limits only apply inside the container.
-        // Disable each child Expander when Direct is selected so the user can
-        // see these settings exist but understands they're inactive. StackPanel
-        // itself has no IsEnabled — IsEnabled is a Control property — so we
-        // walk the children and set it on each Expander.
-        foreach (var child in ContainerOnlyGroup.Children)
+        foreach (var child in panel.Children)
         {
-            if (child is Control control) control.IsEnabled = inContainer;
+            switch (child)
+            {
+                case Control c: c.IsEnabled = enabled; break;
+                case Panel p:   SetPanelEnabled(p, enabled); break;
+            }
         }
     }
+
+    private void RefreshRunProgramsState(SettingsManager s)
+    {
+        var runOn = s.NodeSystemRunEnabled;
+        var inContainer = s.SystemRunSandboxEnabled;
+
+        // 1) Gray out the whole detail block when Run programs is off.
+        SetPanelEnabled(RunProgramsDetail, runOn);
+
+        // 2) Container-only group: Files / Network / Clipboard / Limits only
+        //    apply inside the sandbox. Enabled only when Run programs is ON
+        //    AND container mode is selected. (Approval rules stays as a sibling
+        //    of ContainerOnlyGroup so it follows step 1.)
+        foreach (var child in ContainerOnlyGroup.Children)
+        {
+            if (child is Control control) control.IsEnabled = runOn && inContainer;
+        }
+
+        // 3) Selection overlay for the container-vs-direct chooser.
+        InContainerSelectedOverlay.Visibility = inContainer ? Visibility.Visible : Visibility.Collapsed;
+        DirectSelectedOverlay.Visibility = inContainer ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void UpdateRunProgramsRadios(SettingsManager s) => RefreshRunProgramsState(s);
 
     private void OnRunInContainerClick(object sender, RoutedEventArgs e)
     {
@@ -243,7 +270,7 @@ public sealed partial class CapabilitiesPage : Page
         s.SystemRunSandboxEnabled = true;
         s.Save();
         _hub.RaiseSettingsSaved();
-        UpdateRunProgramsRadios(s);
+        RefreshRunProgramsState(s);
         OnAnyLevelDrivenChanged();
         UpdateRunProgramsSummary();
     }
@@ -265,13 +292,13 @@ public sealed partial class CapabilitiesPage : Page
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary)
         {
-            UpdateRunProgramsRadios(s);
+            RefreshRunProgramsState(s);
             return;
         }
         s.SystemRunSandboxEnabled = false;
         s.Save();
         _hub.RaiseSettingsSaved();
-        UpdateRunProgramsRadios(s);
+        RefreshRunProgramsState(s);
         OnAnyLevelDrivenChanged();
         UpdateRunProgramsSummary();
     }
@@ -653,7 +680,7 @@ public sealed partial class CapabilitiesPage : Page
             }
         }
         s.EnableMcpServer = McpToggle.IsOn;
-        McpDetailPanel.Visibility = McpToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        SetPanelEnabled(McpDetailPanel, McpToggle.IsOn);
         s.Save(); _hub.RaiseSettingsSaved();
         OnAnyLevelDrivenChanged();
         UpdateMcpEndpoint();
@@ -741,7 +768,7 @@ public sealed partial class CapabilitiesPage : Page
     {
         if (_loading || _hub?.Settings is not { } s) return;
         s.NodeCameraEnabled = CameraToggle.IsOn;
-        CameraDetailPanel.Visibility = CameraToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        SetPanelEnabled(CameraDetailPanel, CameraToggle.IsOn);
         s.Save(); _hub.RaiseSettingsSaved();
     }
 
@@ -779,7 +806,7 @@ public sealed partial class CapabilitiesPage : Page
     {
         if (_loading || _hub?.Settings is not { } s) return;
         s.NodeScreenEnabled = ScreenToggle.IsOn;
-        ScreenDetailPanel.Visibility = ScreenToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        SetPanelEnabled(ScreenDetailPanel, ScreenToggle.IsOn);
         s.Save(); _hub.RaiseSettingsSaved();
     }
 
@@ -817,7 +844,7 @@ public sealed partial class CapabilitiesPage : Page
     {
         if (_loading || _hub?.Settings is not { } s) return;
         s.NodeSttEnabled = SttToggle.IsOn;
-        SttDetailPanel.Visibility = SttToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        SetPanelEnabled(SttDetailPanel, SttToggle.IsOn);
         s.Save(); _hub.RaiseSettingsSaved();
         UpdateSttEngineHint();
     }
@@ -839,7 +866,7 @@ public sealed partial class CapabilitiesPage : Page
     {
         if (_loading || _hub?.Settings is not { } s) return;
         s.NodeLocationEnabled = LocationToggle.IsOn;
-        LocationDetailPanel.Visibility = LocationToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        SetPanelEnabled(LocationDetailPanel, LocationToggle.IsOn);
         s.Save(); _hub.RaiseSettingsSaved();
     }
 

@@ -176,7 +176,7 @@
                              Title="Container unavailable"
                              Message="Container-based execution isn't supported on this PC. Switch to 'Direct' below to allow commands to run (less safe), or update Windows to add container support."/>
 
-                    <StackPanel x:Name="RunProgramsDetail" Spacing="12" Visibility="Collapsed">
+                    <StackPanel x:Name="RunProgramsDetail" Spacing="12">
 
                         <!-- How programs run — prominent two-card chooser (mirrors the
                              preset chooser at the top of the page; this is a major decision
@@ -568,7 +568,7 @@
                         <ToggleSwitch x:Name="McpToggle" Grid.Column="2" VerticalAlignment="Center"
                                       OnContent="" OffContent="" MinWidth="0" Toggled="OnMcpToggled"/>
                     </Grid>
-                    <StackPanel x:Name="McpDetailPanel" Spacing="8" Visibility="Collapsed">
+                    <StackPanel x:Name="McpDetailPanel" Spacing="8">
                         <Grid ColumnSpacing="8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
@@ -637,7 +637,7 @@
                         <ToggleSwitch x:Name="CameraToggle" Grid.Column="2" VerticalAlignment="Center"
                                       OnContent="" OffContent="" MinWidth="0" Toggled="OnCameraToggled"/>
                     </Grid>
-                    <StackPanel x:Name="CameraDetailPanel" Spacing="6" Visibility="Collapsed" Margin="40,0,0,0">
+                    <StackPanel x:Name="CameraDetailPanel" Spacing="6" Margin="40,0,0,0">
                         <CheckBox x:Name="CameraAlwaysAllowCb" Content="Always allow — don't ask before each use"
                                   Checked="OnCameraAlwaysAllowChanged" Unchecked="OnCameraAlwaysAllowChanged"/>
                         <HyperlinkButton Content="Open Windows camera settings"
@@ -670,7 +670,7 @@
                         <ToggleSwitch x:Name="ScreenToggle" Grid.Column="2" VerticalAlignment="Center"
                                       OnContent="" OffContent="" MinWidth="0" Toggled="OnScreenToggled"/>
                     </Grid>
-                    <StackPanel x:Name="ScreenDetailPanel" Spacing="6" Visibility="Collapsed" Margin="40,0,0,0">
+                    <StackPanel x:Name="ScreenDetailPanel" Spacing="6" Margin="40,0,0,0">
                         <CheckBox x:Name="ScreenAlwaysAllowCb" Content="Always allow — don't ask before each recording"
                                   Checked="OnScreenAlwaysAllowChanged" Unchecked="OnScreenAlwaysAllowChanged"/>
                         <HyperlinkButton Content="Open Windows screen recording settings"
@@ -704,7 +704,7 @@
                         <ToggleSwitch x:Name="SttToggle" Grid.Column="2" VerticalAlignment="Center"
                                       OnContent="" OffContent="" MinWidth="0" Toggled="OnSttToggled"/>
                     </Grid>
-                    <StackPanel x:Name="SttDetailPanel" Spacing="6" Visibility="Collapsed" Margin="40,0,0,0">
+                    <StackPanel x:Name="SttDetailPanel" Spacing="6" Margin="40,0,0,0">
                         <TextBlock x:Name="SttEngineHint"
                                    Style="{StaticResource CaptionTextBlockStyle}"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
@@ -741,7 +741,7 @@
                         <ToggleSwitch x:Name="LocationToggle" Grid.Column="2" VerticalAlignment="Center"
                                       OnContent="" OffContent="" MinWidth="0" Toggled="OnLocationToggled"/>
                     </Grid>
-                    <StackPanel x:Name="LocationDetailPanel" Spacing="6" Visibility="Collapsed" Margin="40,0,0,0">
+                    <StackPanel x:Name="LocationDetailPanel" Spacing="6" Margin="40,0,0,0">
                         <HyperlinkButton Content="Open Windows location settings"
                                          Click="OnOpenWindowsLocation" Padding="0"/>
                     </StackPanel>
