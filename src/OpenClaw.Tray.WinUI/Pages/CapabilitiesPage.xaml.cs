@@ -51,8 +51,7 @@ public sealed partial class CapabilitiesPage : Page
         _loading = true;
         try
         {
-            // Master node toggle
-            NodeModeToggle.IsOn = s.EnableNodeMode;
+            // Master node toggle moved to Connection page
 
             // Run Programs
             RunProgramsToggle.IsOn = s.NodeSystemRunEnabled;
@@ -228,16 +227,7 @@ public sealed partial class CapabilitiesPage : Page
         UpdateLevelPicker();
     }
 
-    // ─── Node Mode ────────────────────────────────────────────────────
-
-    private void OnNodeModeToggled(object sender, RoutedEventArgs e)
-    {
-        if (_loading || _hub?.Settings is not { } s) return;
-        s.EnableNodeMode = NodeModeToggle.IsOn;
-        s.Save();
-        _hub.RaiseSettingsSaved();
-        UpdateNodeStatus();
-    }
+    // ─── Node Mode moved to Connection page ────────────────────────────────
 
     // ─── Run Programs ─────────────────────────────────────────────────
 

@@ -12,6 +12,33 @@
                        Style="{StaticResource CaptionTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,0,0,8"/>
 
+            <!-- ═══ Node mode master switch ═══ -->
+            <!-- Moved from Security page — this is a connectivity concern, not a security level. -->
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <FontIcon Grid.Column="0" Glyph="&#xE839;" FontSize="20"
+                              Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                              VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Text="Node mode" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                        <TextBlock Text="Master switch. When on, this PC connects to the gateway and exposes the capabilities you've enabled on the Security page."
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <ToggleSwitch x:Name="NodeModeToggle" Grid.Column="2" VerticalAlignment="Center"
+                                  OnContent="" OffContent="" Toggled="OnNodeModeToggled"
+                                  AutomationProperties.AutomationId="NodeModeToggle"/>
+                </Grid>
+            </Border>
+
             <!-- ═══ Auth Error ═══ -->
             <InfoBar x:Uid="AuthErrorBar" x:Name="AuthErrorBar" Title="Connection Error"
                      Severity="Error" IsOpen="False" IsClosable="True"
