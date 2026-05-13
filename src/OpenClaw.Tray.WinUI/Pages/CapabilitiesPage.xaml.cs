@@ -30,7 +30,6 @@ public sealed partial class CapabilitiesPage : Page
 {
     private HubWindow? _hub;
     private bool _loading;
-    private bool _suppressRunModeRadio;
     private bool _mcpTokenRevealed;
     private List<ExecRuleRow> _execRules = new();
     public ObservableCollection<CustomFolderRow> CustomFolders { get; } = new();
@@ -222,28 +221,37 @@ public sealed partial class CapabilitiesPage : Page
 
     private void UpdateRunProgramsRadios(SettingsManager s)
     {
-        _suppressRunModeRadio = true;
-        try
+        var inContainer = s.SystemRunSandboxEnabled;
+        InContainerSelectedOverlay.Visibility = inContainer ? Visibility.Visible : Visibility.Collapsed;
+        DirectSelectedOverlay.Visibility = inContainer ? Visibility.Collapsed : Visibility.Visible;
+
+        // Files / Network / Clipboard / Limits only apply inside the container.
+        // Disable each child Expander when Direct is selected so the user can
+        // see these settings exist but understands they're inactive. StackPanel
+        // itself has no IsEnabled — IsEnabled is a Control property — so we
+        // walk the children and set it on each Expander.
+        foreach (var child in ContainerOnlyGroup.Children)
         {
-            RunInContainerRadio.IsChecked = s.SystemRunSandboxEnabled;
-            RunDirectRadio.IsChecked = !s.SystemRunSandboxEnabled;
+            if (child is Control control) control.IsEnabled = inContainer;
         }
-        finally { _suppressRunModeRadio = false; }
     }
 
-    private void OnRunInContainerChecked(object sender, RoutedEventArgs e)
+    private void OnRunInContainerClick(object sender, RoutedEventArgs e)
     {
-        if (_loading || _suppressRunModeRadio || _hub?.Settings is not { } s) return;
+        if (_loading || _hub?.Settings is not { } s) return;
+        if (s.SystemRunSandboxEnabled) return; // already in container
         s.SystemRunSandboxEnabled = true;
         s.Save();
         _hub.RaiseSettingsSaved();
+        UpdateRunProgramsRadios(s);
         OnAnyLevelDrivenChanged();
         UpdateRunProgramsSummary();
     }
 
-    private async void OnRunDirectChecked(object sender, RoutedEventArgs e)
+    private async void OnRunDirectClick(object sender, RoutedEventArgs e)
     {
-        if (_loading || _suppressRunModeRadio || _hub?.Settings is not { } s) return;
+        if (_loading || _hub?.Settings is not { } s) return;
+        if (!s.SystemRunSandboxEnabled) return; // already direct
         // Risk-increasing transition — confirm.
         var dialog = new ContentDialog
         {
@@ -263,6 +271,7 @@ public sealed partial class CapabilitiesPage : Page
         s.SystemRunSandboxEnabled = false;
         s.Save();
         _hub.RaiseSettingsSaved();
+        UpdateRunProgramsRadios(s);
         OnAnyLevelDrivenChanged();
         UpdateRunProgramsSummary();
     }

@@ -163,18 +163,74 @@
 
                     <StackPanel x:Name="RunProgramsDetail" Spacing="12" Visibility="Collapsed">
 
-                        <!-- How they run — visible, not collapsed (high-importance choice) -->
+                        <!-- How programs run — prominent two-card chooser (mirrors the
+                             preset chooser at the top of the page; this is a major decision
+                             that gates every container setting below it). -->
                         <StackPanel Spacing="6">
                             <TextBlock Text="How programs run" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <RadioButton x:Name="RunInContainerRadio"
-                                         GroupName="RunMode"
-                                         Content="In a container (recommended) — programs run with only the access you grant below"
-                                         Checked="OnRunInContainerChecked"/>
-                            <RadioButton x:Name="RunDirectRadio"
-                                         GroupName="RunMode"
-                                         Content="Direct — programs have your full Windows access"
-                                         Checked="OnRunDirectChecked"/>
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <Grid Grid.Column="0">
+                                    <Button x:Name="InContainerButton"
+                                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                            VerticalAlignment="Stretch" VerticalContentAlignment="Top"
+                                            Padding="16,14" MinHeight="100" CornerRadius="8"
+                                            Click="OnRunInContainerClick"
+                                            AutomationProperties.AutomationId="InContainerButton">
+                                        <StackPanel Spacing="6">
+                                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                <TextBlock Text="🛡️" FontSize="16" VerticalAlignment="Center"/>
+                                                <TextBlock Text="In a container" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                            <TextBlock Text="Programs run with only the access you grant below. Recommended."
+                                                       TextWrapping="Wrap" FontSize="12"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Border x:Name="InContainerSelectedOverlay"
+                                            CornerRadius="8"
+                                            BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                            BorderThickness="2"
+                                            IsHitTestVisible="False"
+                                            Visibility="Collapsed"/>
+                                </Grid>
+
+                                <Grid Grid.Column="1">
+                                    <Button x:Name="DirectButton"
+                                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                            VerticalAlignment="Stretch" VerticalContentAlignment="Top"
+                                            Padding="16,14" MinHeight="100" CornerRadius="8"
+                                            Click="OnRunDirectClick"
+                                            AutomationProperties.AutomationId="DirectButton">
+                                        <StackPanel Spacing="6">
+                                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                <TextBlock Text="⚠️" FontSize="16" VerticalAlignment="Center"/>
+                                                <TextBlock Text="Directly" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                            <TextBlock Text="Programs have your full Windows access. No file, network, or clipboard limits below apply."
+                                                       TextWrapping="Wrap" FontSize="12"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Border x:Name="DirectSelectedOverlay"
+                                            CornerRadius="8"
+                                            BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                            BorderThickness="2"
+                                            IsHitTestVisible="False"
+                                            Visibility="Collapsed"/>
+                                </Grid>
+                            </Grid>
                         </StackPanel>
+
+                        <!-- Container-only settings — disabled when "Directly" is selected.
+                             Files / Network / Clipboard / Limits only apply inside the sandbox;
+                             in direct mode programs already have full access so these settings
+                             have no effect. Approval rules (below) applies to both modes. -->
+                        <StackPanel x:Name="ContainerOnlyGroup" Spacing="12">
 
                         <!-- Files — collapsible -->
                         <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsExpanded="False">
@@ -354,6 +410,9 @@
                                 </StackPanel>
                             </StackPanel>
                         </Expander>
+
+                        </StackPanel>
+                        <!-- ─ end ContainerOnlyGroup ─ -->
 
                         <!-- Approval rules — collapsible -->
                         <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsExpanded="False">
