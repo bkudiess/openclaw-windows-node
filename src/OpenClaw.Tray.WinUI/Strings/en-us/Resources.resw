@@ -1605,7 +1605,7 @@ On your gateway host (Mac/Linux), run:
     <value>Refresh</value>
   </data>
   <data name="CapabilitiesPage_TextBlock_10.Text" xml:space="preserve">
-    <value>Security</value>
+    <value>Privacy &amp; security</value>
   </data>
   <data name="CapabilitiesPage_TextBlock_15.Text" xml:space="preserve">
     <value>An agent connected through your gateway can use the capabilities below. Choose how protected this PC should be and what each agent can access.</value>
@@ -2199,7 +2199,7 @@ On your gateway host (Mac/Linux), run:
     <value>This Computer</value>
   </data>
   <data name="HubWindow_NavigationViewItem_130.Content" xml:space="preserve">
-    <value>Security</value>
+    <value>Privacy &amp; security</value>
   </data>
   <data name="HubWindow_NavigationViewItem_133.Content" xml:space="preserve">
     <value>Settings</value>

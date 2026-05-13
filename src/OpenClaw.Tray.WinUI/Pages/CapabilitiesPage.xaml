@@ -8,7 +8,7 @@
         <StackPanel Padding="24,16" Spacing="12" HorizontalAlignment="Stretch" MaxWidth="980">
 
             <!-- ════ Title ════ -->
-            <TextBlock x:Uid="CapabilitiesPage_TextBlock_10" Text="Security" Style="{StaticResource TitleTextBlockStyle}"/>
+            <TextBlock x:Uid="CapabilitiesPage_TextBlock_10" Text="Privacy &amp; security" Style="{StaticResource TitleTextBlockStyle}"/>
             <TextBlock x:Uid="CapabilitiesPage_TextBlock_15"
                        Text="Choose how protected this PC is, and what connected agents can access."
                        Style="{StaticResource BodyTextBlockStyle}"
