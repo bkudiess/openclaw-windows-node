@@ -6,36 +6,25 @@ namespace OpenClaw.Tray.Tests;
 public class StartupSetupStateTests
 {
     [Fact]
-    public void RequiresSetup_ReturnsFalse_WhenOperatorTokenExists()
-    {
-        using var temp = TempSettings.Create();
-        var settings = new SettingsManager(temp.Path) { Token = "operator-token" };
-
-        Assert.False(StartupSetupState.RequiresSetup(settings, temp.Path));
-    }
-
-    [Fact]
-    public void RequiresSetup_ReturnsFalse_WhenNodeBootstrapTokenExists()
-    {
-        using var temp = TempSettings.Create();
-        var settings = new SettingsManager(temp.Path)
-        {
-            EnableNodeMode = true,
-            BootstrapToken = "bootstrap-token"
-        };
-
-        Assert.False(StartupSetupState.RequiresSetup(settings, temp.Path));
-    }
-
-    [Fact]
     public void RequiresSetup_ReturnsFalse_WhenNodeHasStoredDeviceToken()
+    {
+        using var temp = TempSettings.Create();
+        StoreNodeDeviceToken(temp.Path);
+        var settings = new SettingsManager(temp.Path) { EnableNodeMode = true };
+
+        Assert.False(StartupSetupState.RequiresSetup(settings, temp.Path));
+        Assert.True(StartupSetupState.CanStartNodeGateway(settings, temp.Path));
+    }
+
+    [Fact]
+    public void RequiresSetup_ReturnsTrue_WhenOnlyOperatorTokenExistsForNodeMode()
     {
         using var temp = TempSettings.Create();
         StoreDeviceToken(temp.Path);
         var settings = new SettingsManager(temp.Path) { EnableNodeMode = true };
 
-        Assert.False(StartupSetupState.RequiresSetup(settings, temp.Path));
-        Assert.True(StartupSetupState.CanStartNodeGateway(settings, temp.Path));
+        Assert.True(StartupSetupState.RequiresSetup(settings, temp.Path));
+        Assert.False(StartupSetupState.CanStartNodeGateway(settings, temp.Path));
     }
 
     [Fact]
@@ -62,6 +51,13 @@ public class StartupSetupStateTests
         var identity = new DeviceIdentity(dataPath);
         identity.Initialize();
         identity.StoreDeviceToken("stored-device-token");
+    }
+
+    private static void StoreNodeDeviceToken(string dataPath)
+    {
+        var identity = new DeviceIdentity(dataPath);
+        identity.Initialize();
+        identity.StoreDeviceTokenForRole("node", "stored-node-token");
     }
 
     private sealed class TempSettings : IDisposable

@@ -66,34 +66,6 @@ public sealed class ConnectionPage : Component<OnboardingState>
         return DefaultLocalUrl;
     }
 
-    /// <summary>
-    /// Probes common local gateway ports and returns the first reachable URL.
-    /// Checks the default port (18789) first, then the dev port (19001).
-    /// Uses a very short timeout for responsiveness.
-    /// </summary>
-    private static async Task<string> DetectLocalGatewayUrlAsync()
-    {
-        foreach (var candidate in new[] { DefaultLocalUrl, DevLocalUrl })
-        {
-            try
-            {
-                var uri = new Uri(candidate.Replace("ws://", "http://"));
-                using var client = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMilliseconds(800) };
-                var response = await client.GetAsync($"{uri.GetLeftPart(UriPartial.Authority)}/health");
-                if (response.IsSuccessStatusCode)
-                {
-                    Logger.Info($"[Connection] Detected local gateway at {candidate}");
-                    return candidate;
-                }
-            }
-            catch
-            {
-                // Port not reachable, try next
-            }
-        }
-        return DefaultLocalUrl; // Fallback to default
-    }
-
     private static string GetVisualTestPairingDeviceId() =>
         Environment.GetEnvironmentVariable("OPENCLAW_VISUAL_TEST_PAIRING") == "1"
             ? VisualTestPairingDeviceId
@@ -110,7 +82,7 @@ public sealed class ConnectionPage : Component<OnboardingState>
             Props.Settings.SshTunnelLocalPort,
             GetDetectedLocalUrl);
         var (url, setUrl) = UseState(initialUrl);
-        var (token, setToken) = UseState(Props.Settings.Token);
+        var (token, setToken) = UseState("");
         var (nodeMode, setNodeMode) = UseState(Props.Settings.EnableNodeMode);
         var (setupCode, setSetupCode) = UseState("");
 
@@ -164,14 +136,14 @@ public sealed class ConnectionPage : Component<OnboardingState>
 
         void OnSetupCodeChanged(string code)
         {
-            setSetupCode(code);
             if (string.IsNullOrWhiteSpace(code)) return;
 
             var result = SetupCodeDecoder.Decode(code);
 
             if (!result.Success)
             {
-                // Not a valid setup code — user might be still typing
+                // Not a valid setup code — user might be still typing.
+                // Don't call setSetupCode here to avoid re-render that steals focus.
                 if (code.Length > 2048)
                     Logger.Warn("[Connection] Setup code rejected: exceeds 2048 character limit");
                 else
@@ -179,6 +151,8 @@ public sealed class ConnectionPage : Component<OnboardingState>
                 return;
             }
 
+            // Valid setup code decoded — now update state (will re-render)
+            setSetupCode(code);
             if (result.Url != null)
             {
                 setUrl(result.Url);
@@ -187,8 +161,7 @@ public sealed class ConnectionPage : Component<OnboardingState>
             if (result.Token != null)
             {
                 setToken(result.Token);
-                Props.Settings.Token = result.Token;
-                Props.Settings.BootstrapToken = result.Token;
+                // Bootstrap token stored in GatewayRegistry via ApplySetupCodeAsync
             }
             setStatusMsg($"✅ {LocalizationHelper.GetString("Onboarding_Connection_StatusDecoded")}");
         }
@@ -204,8 +177,6 @@ public sealed class ConnectionPage : Component<OnboardingState>
         void OnTokenChanged(string v)
         {
             setToken(v);
-            Props.Settings.Token = v;
-            Props.Settings.BootstrapToken = "";
             Props.ConnectionTested = false;
             setStatusMsg("");
         }
@@ -233,7 +204,6 @@ public sealed class ConnectionPage : Component<OnboardingState>
         async void TestConnection()
         {
             Props.Settings.GatewayUrl = url;
-            Props.Settings.Token = token;
 
             // When SSH mode, start the managed tunnel before health-checking the local URL.
             if (mode == ConnectionMode.Ssh)
@@ -304,28 +274,43 @@ public sealed class ConnectionPage : Component<OnboardingState>
                     return;
                 }
 
-                // Phase 2: Use App's PERSISTENT client (matching Mac app architecture)
+                // Phase 2: Connect via GatewayConnectionManager (same as Direct Connect flow)
                 setStatusMsg($"🔄 {LocalizationHelper.GetString("Onboarding_Connection_StatusAuthenticating")}");
                 Props.Settings.Save();
 
                 var app = (App)Microsoft.UI.Xaml.Application.Current;
+                var manager = app.ConnectionManager;
+                var registry = app.Registry;
 
-                // Reuse existing client if it already has a result, otherwise (re)initialize
-                var existingClient = app.GatewayClient;
-                if (existingClient == null ||
-                    (!existingClient.IsConnectedToGateway && !existingClient.IsPairingRequired && !existingClient.IsAuthFailed))
+                if (manager != null && registry != null)
                 {
-                    var useBootstrapHandoffAuth =
-                        !string.IsNullOrWhiteSpace(Props.Settings.BootstrapToken) &&
-                        string.Equals(token, Props.Settings.BootstrapToken, StringComparison.Ordinal);
-                    app.ReinitializeGatewayClient(useBootstrapHandoffAuth);
+                    await manager.DisconnectAsync();
+
+                    // Create/update GatewayRecord with shared token
+                    var normalizedUrl = GatewayUrlHelper.NormalizeForWebSocket(url);
+                    var existing = registry.FindByUrl(normalizedUrl);
+                    var recordId = existing?.Id ?? System.Guid.NewGuid().ToString();
+                    var sshConfig = useSshTunnel
+                        ? new OpenClawTray.Services.Connection.SshTunnelConfig(sshUser, sshHost, sshRemotePort, sshLocalPort)
+                        : null;
+                    var record = new OpenClawTray.Services.Connection.GatewayRecord
+                    {
+                        Id = recordId,
+                        Url = normalizedUrl,
+                        SharedGatewayToken = !string.IsNullOrWhiteSpace(token) ? token : null,
+                        SshTunnel = sshConfig,
+                    };
+                    registry.AddOrUpdate(record);
+                    registry.SetActive(recordId);
+                    registry.Save();
+
+                    await manager.ConnectAsync(recordId);
                 }
 
-                // Set Props.GatewayClient IMMEDIATELY so WizardPage can access it
-                // even if still connecting (WizardPage will poll for Connected status)
+                // Set Props.GatewayClient from app for WizardPage compat
                 Props.GatewayClient = app.GatewayClient;
 
-                // Poll for definitive auth result (V3→V2 fallback takes ~8s)
+                // Poll manager state for definitive result
                 bool connected = false;
                 bool pairingRequired = false;
                 bool authFailed = false;
@@ -333,13 +318,17 @@ public sealed class ConnectionPage : Component<OnboardingState>
                 for (int attempt = 0; attempt < 30; attempt++)
                 {
                     await Task.Delay(1000);
-                    var client = app.GatewayClient;
-                    Props.GatewayClient = client; // Keep in sync
+                    Props.GatewayClient = app.GatewayClient; // Keep in sync
 
-                    if (client == null) continue;
-                    if (client.IsConnectedToGateway) { connected = true; break; }
-                    if (client.IsPairingRequired) { pairingRequired = true; break; }
-                    if (client.IsAuthFailed) { authFailed = true; break; }
+                    var snapshot = app.ConnectionManager?.CurrentSnapshot;
+                    if (snapshot == null) continue;
+                    if (snapshot.OverallState is OpenClawTray.Services.Connection.OverallConnectionState.Connected
+                        or OpenClawTray.Services.Connection.OverallConnectionState.Ready)
+                    { connected = true; break; }
+                    if (snapshot.OverallState == OpenClawTray.Services.Connection.OverallConnectionState.PairingRequired)
+                    { pairingRequired = true; break; }
+                    if (snapshot.OverallState == OpenClawTray.Services.Connection.OverallConnectionState.Error)
+                    { authFailed = true; break; }
                 }
 
                 if (connected)
@@ -501,40 +490,14 @@ public sealed class ConnectionPage : Component<OnboardingState>
                 catch { /* clipboard unavailable — ignore */ }
             }
 
-            // Setup code row: TextField + Paste + QR buttons (Grid keeps the field expanding)
+            // Setup code row: TextField + Paste + QR buttons
             cardChildren.Add(
                 Grid(["1*", "Auto", "Auto"], ["Auto"],
                     TextField(setupCode, OnSetupCodeChanged,
                         placeholder: LocalizationHelper.GetString("Onboarding_Connection_SetupCodePlaceholder"),
                         header: LocalizationHelper.GetString("Onboarding_Connection_SetupCode"))
-                        .OnGotFocus((sender, _) =>
-                        {
-                            if (sender is Microsoft.UI.Xaml.Controls.TextBox tb && string.IsNullOrEmpty(tb.Text))
-                            {
-                                try
-                                {
-                                    var content = global::Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
-                                    if (content.Contains(global::Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
-                                    {
-                                        var task = content.GetTextAsync();
-                                        task.Completed = (op, status) =>
-                                        {
-                                            if (status == global::Windows.Foundation.AsyncStatus.Completed)
-                                            {
-                                                var text = op.GetResults();
-                                                tb.DispatcherQueue.TryEnqueue(() =>
-                                                {
-                                                    tb.Text = text;
-                                                    OnSetupCodeChanged(text);
-                                                });
-                                            }
-                                        };
-                                    }
-                                }
-                                catch { }
-                            }
-                        })
-                        .Grid(row: 0, column: 0),
+                        .Grid(row: 0, column: 0)
+                        .Set(tb => Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(tb, "OnboardingSetupCode")),
                     Button(LocalizationHelper.GetString("Onboarding_Connection_PasteSetup"), PasteSetupCode)
                         .VAlign(VerticalAlignment.Bottom)
                         .Margin(6, 0, 0, 0)
@@ -659,7 +622,7 @@ public sealed class ConnectionPage : Component<OnboardingState>
                         ).Padding(12)
                     )
                     .CornerRadius(6)
-                    .Background("#FFFFFF")
+                    .BackgroundResource("CardBackgroundFillColorDefaultBrush")
                 );
             }
 
@@ -737,7 +700,7 @@ public sealed class ConnectionPage : Component<OnboardingState>
                 )
                 .MinHeight(40)
                 .CornerRadius(4)
-                .Background("#FFFFFF")
+                .BackgroundResource("CardBackgroundFillColorDefaultBrush")
             );
         }
         else
@@ -757,7 +720,7 @@ public sealed class ConnectionPage : Component<OnboardingState>
                 VStack(8, cardChildren.ToArray()).Padding(12)
             )
             .CornerRadius(8)
-            .Background("#FFFFFF")
+            .BackgroundResource("CardBackgroundFillColorDefaultBrush")
             .Margin(0, 4, 0, 0)
         );
 
@@ -798,31 +761,5 @@ public sealed class ConnectionPage : Component<OnboardingState>
                 .MaxWidth(460)
                 .Padding(0, 12, 0, 12)
         );
-    }
-
-    /// <summary>
-    /// Lightweight logger that captures the first and last error/warning for UI display.
-    /// Preserves the first error so reconnect noise doesn't overwrite the real cause.
-    /// </summary>
-    private sealed class ConnectionTestLogger : IOpenClawLogger
-    {
-        /// <summary>The first error captured — preserves the original cause.</summary>
-        public string? FirstError { get; private set; }
-        public string? LastError { get; private set; }
-        public string? LastWarn { get; private set; }
-
-        public void Info(string message) { }
-        public void Debug(string message) { }
-        public void Warn(string message)
-        {
-            LastWarn = message;
-            FirstError ??= message;
-            LastError ??= message;
-        }
-        public void Error(string message, Exception? ex = null)
-        {
-            FirstError ??= message;
-            LastError = message;
-        }
     }
 }

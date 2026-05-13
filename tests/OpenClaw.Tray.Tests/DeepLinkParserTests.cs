@@ -121,6 +121,21 @@ public class DeepLinkParserTests
         Assert.Equal("settings", result.Path);
     }
 
+    [Theory]
+    [InlineData("openclaw://send/?message=hello", "send")]
+    [InlineData("openclaw://agent/?message=hi&key=abc", "agent")]
+    [InlineData("openclaw://activity/?filter=nodes", "activity")]
+    public void ParseDeepLink_TrailingSlashBeforeQuery_IsStripped(string uri, string expectedPath)
+    {
+        // Windows canonicalizes openclaw://send?... to openclaw://send/?...
+        // before handing it to us. The slash sits before the `?`, so a naïve
+        // TrimEnd before query split fails to strip it. Regression test for
+        // the off-by-one fix in DeepLinkParser.ParseDeepLink.
+        var result = DeepLinkParser.ParseDeepLink(uri);
+        Assert.NotNull(result);
+        Assert.Equal(expectedPath, result!.Path);
+    }
+
     [Fact]
     public void ParseDeepLink_CaseInsensitiveScheme()
     {
@@ -227,11 +242,11 @@ public class DeepLinkParserTests
     #region DeepLinkHandler
 
     [Theory]
-    [InlineData("openclaw://settings", nameof(DeepLinkActions.OpenSettings))]
+    [InlineData("openclaw://settings", nameof(DeepLinkActions.OpenHub))]
     [InlineData("openclaw://setup", nameof(DeepLinkActions.OpenSetup))]
-    [InlineData("openclaw://chat", nameof(DeepLinkActions.OpenChat))]
-    [InlineData("openclaw://commandcenter", nameof(DeepLinkActions.OpenCommandCenter))]
-    [InlineData("openclaw://history", nameof(DeepLinkActions.OpenNotificationHistory))]
+    [InlineData("openclaw://chat", nameof(DeepLinkActions.OpenHub))]
+    [InlineData("openclaw://commandcenter", nameof(DeepLinkActions.OpenHub))]
+    [InlineData("openclaw://history", nameof(DeepLinkActions.OpenActivityStream))]
     [InlineData("openclaw://logs", nameof(DeepLinkActions.OpenLogFile))]
     [InlineData("openclaw://log-folder", nameof(DeepLinkActions.OpenLogFolder))]
     [InlineData("openclaw://config", nameof(DeepLinkActions.OpenConfigFolder))]
@@ -252,11 +267,8 @@ public class DeepLinkParserTests
         var invoked = "";
         var actions = new DeepLinkActions
         {
-            OpenSettings = () => invoked = nameof(DeepLinkActions.OpenSettings),
+            OpenHub = _ => invoked = nameof(DeepLinkActions.OpenHub),
             OpenSetup = () => invoked = nameof(DeepLinkActions.OpenSetup),
-            OpenChat = () => invoked = nameof(DeepLinkActions.OpenChat),
-            OpenCommandCenter = () => invoked = nameof(DeepLinkActions.OpenCommandCenter),
-            OpenNotificationHistory = () => invoked = nameof(DeepLinkActions.OpenNotificationHistory),
             OpenLogFile = () => invoked = nameof(DeepLinkActions.OpenLogFile),
             OpenLogFolder = () => invoked = nameof(DeepLinkActions.OpenLogFolder),
             OpenConfigFolder = () => invoked = nameof(DeepLinkActions.OpenConfigFolder),
@@ -270,6 +282,7 @@ public class DeepLinkParserTests
             CopyChannelSummary = () => invoked = nameof(DeepLinkActions.CopyChannelSummary),
             CopyActivitySummary = () => invoked = nameof(DeepLinkActions.CopyActivitySummary),
             CopyExtensibilitySummary = () => invoked = nameof(DeepLinkActions.CopyExtensibilitySummary),
+            OpenActivityStream = _ => invoked = nameof(DeepLinkActions.OpenActivityStream),
             CheckForUpdates = () =>
             {
                 invoked = nameof(DeepLinkActions.CheckForUpdates);

@@ -57,14 +57,30 @@ public static class DeepLinkHandler
         if (result == null)
             return;
 
-        var path = result.Path;
+        var path = result.Path?.TrimEnd('/') ?? string.Empty;
 
         Logger.Info($"Handling deep link: {path}");
 
         switch (path.ToLowerInvariant())
         {
             case "settings":
-                actions.OpenSettings?.Invoke();
+                actions.OpenHub?.Invoke("settings");
+                break;
+
+            case "chat":
+                actions.OpenHub?.Invoke("chat");
+                break;
+
+            case "activity":
+                actions.OpenActivityStream?.Invoke(result.Parameters.GetValueOrDefault("filter"));
+                break;
+
+            case "history":
+                actions.OpenActivityStream?.Invoke("notification");
+                break;
+
+            case "commandcenter":
+                actions.OpenHub?.Invoke("general");
                 break;
 
             case "setup":
@@ -170,14 +186,9 @@ public static class DeepLinkHandler
                 actions.RestartSshTunnel?.Invoke();
                 break;
 
-            case "chat":
-                actions.OpenChat?.Invoke();
-                break;
-
             case "status":
-            case "commandcenter":
             case "command-center":
-                actions.OpenCommandCenter?.Invoke();
+                actions.OpenHub?.Invoke("general");
                 break;
 
             case "tray":
@@ -186,17 +197,14 @@ public static class DeepLinkHandler
                 actions.OpenTrayMenu?.Invoke();
                 break;
 
-            case "activity":
-            case "activity-stream":
-                actions.OpenActivityStream?.Invoke(result.Parameters.GetValueOrDefault("filter"));
-                break;
-
-            case "history":
             case "notifications":
             case "notification-history":
-                actions.OpenNotificationHistory?.Invoke();
+                actions.OpenHub?.Invoke("activity");
                 break;
 
+            case "activity-stream":
+                actions.OpenHub?.Invoke("activity");
+                break;
             case "dashboard":
                 actions.OpenDashboard?.Invoke(null);
                 break;
@@ -234,8 +242,25 @@ public static class DeepLinkHandler
                 }
                 break;
 
+            case "voice":
+            case "voice-start":
+                actions.OpenVoice?.Invoke();
+                break;
+
+            case "voice-stop":
+                actions.StopVoice?.Invoke();
+                break;
+
             default:
-                Logger.Warn($"Unknown deep link path: {path}");
+                if (path == "hub" || path.StartsWith("hub/"))
+                {
+                    var hubPage = path == "hub" ? null : path["hub/".Length..];
+                    actions.OpenHub?.Invoke(hubPage);
+                }
+                else
+                {
+                    Logger.Warn($"Unknown deep link path: {path}");
+                }
                 break;
         }
     }
@@ -251,6 +276,7 @@ public class DeepLinkActions
     public Action? OpenLogFolder { get; set; }
     public Action? OpenConfigFolder { get; set; }
     public Action? OpenDiagnosticsFolder { get; set; }
+    public Action? OpenConnectionStatus { get; set; }
     public Action? CopySupportContext { get; set; }
     public Action? CopyDebugBundle { get; set; }
     public Action? CopyBrowserSetupGuidance { get; set; }
@@ -268,5 +294,8 @@ public class DeepLinkActions
     public Action? OpenNotificationHistory { get; set; }
     public Action<string?>? OpenDashboard { get; set; }
     public Action<string?>? OpenQuickSend { get; set; }
+    public Action<string?>? OpenHub { get; set; }
     public Func<string, Task>? SendMessage { get; set; }
+    public Action? OpenVoice { get; set; }
+    public Action? StopVoice { get; set; }
 }

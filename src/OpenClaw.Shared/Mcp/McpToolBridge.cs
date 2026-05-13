@@ -236,9 +236,40 @@ public class McpToolBridge
         ["camera.clip"] =
             "Record a short clip from a camera. Args: deviceId (string, optional), durationMs (int, required, max 60000), format ('mp4'|'webm', default 'mp4'), maxWidth (int, default 1280). Returns { format, durationMs, base64 }.",
 
+        // stt.* — microphone capture → text. Default-off; privacy-sensitive.
+        // Single engine: Whisper.net runs locally on the device.
+        ["stt.transcribe"] =
+            "Capture microphone audio for a bounded duration and return the transcribed text. Args: maxDurationMs (int, required, > 0, max 30000), language (string, optional BCP-47 tag like 'en-US' or 'auto' — falls back to the configured SttLanguage setting). Returns { transcribed, text, durationMs, language, engineEffective ('whisper') }. Whisper model is downloaded on first use; until then this returns an error pointing to Voice Settings. Requires NodeSttEnabled.",
+        ["stt.listen"] =
+            "Capture microphone audio with voice-activity detection and return when the user stops speaking, or after timeoutMs. Args: timeoutMs (int, optional, default 30000, range 1000..120000), language (string, optional BCP-47 tag or 'auto', default 'auto'). Returns { text, language, durationMs, segments[{ text, startMs, endMs }], engineEffective ('whisper') }. Result is the full silence-bounded utterance (all Whisper segments concatenated), not a partial first segment. Requires NodeSttEnabled.",
+        ["stt.status"] =
+            "Report STT engine readiness. No args. Returns { engine ('whisper'), readiness ('ready'|'initializing'|'model-downloading'|'model-not-downloaded'|'unavailable'), modelDownloadProgress (0..1 or null), isListenWithVadSupported (bool), isBoundedTranscribeSupported (bool) }. Carries no PII (no transcript history, no language history, no device IDs, no model paths).",
+
         // tts.*
         ["tts.speak"] =
-            "Speak text aloud on the Windows node. Args: text (string, required), provider ('windows'|'elevenlabs', optional), voiceId (string, optional), model (string, optional), interrupt (bool, default false). Returns { spoken, provider, contentType, durationMs }.",
+            "Speak text aloud on the Windows node. Args: text (string, required), provider ('piper'|'windows'|'elevenlabs', optional — falls back to the configured TtsProvider setting, default 'piper' for fresh installs), voiceId (string, optional — overrides the per-provider configured voice), model (string, optional, ElevenLabs only), interrupt (bool, default false — interrupts any in-progress playback). Returns { spoken, provider, contentType, durationMs }.",
+
+        // app.*
+        ["app.navigate"] =
+            "Navigate the companion app to a specific page (e.g., 'home', 'sessions', 'settings'). Args: page (string, required). Returns { navigated, page }.",
+        ["app.status"] =
+            "Get current connection status, node state, and gateway info. Returns { connectionStatus, nodeConnected, nodePaired, nodePendingApproval, gatewayVersion, sessionCount, nodeCount }.",
+        ["app.sessions"] =
+            "List active sessions with optional agent filter. Args: agentId (string, optional). Returns array of { Key, Status, Model, AgeText, tokens }.",
+        ["app.agents"] =
+            "List agents from the connected gateway. Returns the raw agents JSON array.",
+        ["app.nodes"] =
+            "List connected nodes and their capabilities. Returns array of { DisplayName, NodeId, IsOnline, Platform, CapabilityCount }.",
+        ["app.config.get"] =
+            "Read gateway configuration value at a dot-path. Args: path (string, optional). Returns the config subtree or full config.",
+        ["app.settings.get"] =
+            "Read a local app setting by name. Args: name (string, required). Returns the setting value.",
+        ["app.settings.set"] =
+            "Set a local app setting (name and value). Args: name (string, required), value (string, required). Returns { name, value }.",
+        ["app.menu"] =
+            "Get tray menu state (status, session count, node count). Returns array of menu items.",
+        ["app.search"] =
+            "Search the command palette and return matching commands. Args: query (string, required). Returns array of { Title, Subtitle, Icon }.",
     };
 
     private async Task<object> HandleToolsCallAsync(JsonElement parameters, CancellationToken cancellationToken)

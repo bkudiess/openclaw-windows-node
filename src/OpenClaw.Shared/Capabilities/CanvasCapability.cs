@@ -216,8 +216,8 @@ public class CanvasCapability : NodeCapabilityBase
         }
         catch (Exception ex)
         {
-            Logger.Error($"canvas.navigate handler failed: {ex.Message}", ex);
-            return Error($"Navigate failed: {ex.Message}");
+            Logger.Error("canvas.navigate handler failed", ex);
+            return Error("Navigate failed");
         }
     }
     
@@ -246,7 +246,8 @@ public class CanvasCapability : NodeCapabilityBase
         }
         catch (Exception ex)
         {
-            return Error($"Eval failed: {ex.Message}");
+            Logger.Error("canvas.eval handler failed", ex);
+            return Error("Eval failed");
         }
     }
     
@@ -277,7 +278,8 @@ public class CanvasCapability : NodeCapabilityBase
         }
         catch (Exception ex)
         {
-            return Error($"Snapshot failed: {ex.Message}");
+            Logger.Error("canvas.snapshot handler failed", ex);
+            return Error("Snapshot failed");
         }
     }
     
@@ -367,7 +369,7 @@ public class CanvasCapability : NodeCapabilityBase
         }
         catch (Exception ex)
         {
-            throw new InvalidOperationException($"Invalid jsonlPath: {ex.Message}", ex);
+            throw new InvalidOperationException("Invalid jsonlPath", ex);
         }
 
         if (!IsPathWithinRoot(fullPath, tempRoot))
@@ -404,8 +406,10 @@ public class CanvasCapability : NodeCapabilityBase
         }
 
         using var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        // GetFinalPathFromHandle is a Windows-only guard (returns "" on non-Windows); skip the
+        // containment check when no resolved path is available — prior symlink resolution covers that case.
         var finalPath = GetFinalPathFromHandle(stream.SafeFileHandle);
-        if (!IsPathWithinRoot(finalPath, tempRoot))
+        if (!string.IsNullOrEmpty(finalPath) && !IsPathWithinRoot(finalPath, tempRoot))
         {
             Logger.Warn($"{command}: jsonlPath file handle resolves outside temp directory: {finalPath}");
             throw new InvalidOperationException("jsonlPath must resolve within the system temp directory");
@@ -495,7 +499,8 @@ public class CanvasCapability : NodeCapabilityBase
         }
         catch (Exception ex)
         {
-            return Error($"CANVAS_DUMP_FAILED: {ex.Message}");
+            Logger.Error("canvas.a2ui.dump handler failed", ex);
+            return Error("CANVAS_DUMP_FAILED");
         }
     }
 
@@ -521,7 +526,8 @@ public class CanvasCapability : NodeCapabilityBase
         }
         catch (Exception ex)
         {
-            return Error($"CANVAS_CAPS_FAILED: {ex.Message}");
+            Logger.Error("canvas.a2ui.caps handler failed", ex);
+            return Error("CANVAS_CAPS_FAILED");
         }
     }
 }

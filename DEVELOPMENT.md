@@ -34,7 +34,7 @@ A comprehensive guide for building, running, and contributing to the OpenClaw Wi
 
 ## Project Structure
 
-This monorepo contains three projects:
+This monorepo contains these main projects:
 
 ```
 openclaw-windows-hub/
@@ -43,6 +43,13 @@ openclaw-windows-hub/
 │   │   ├── OpenClawGatewayClient.cs  # WebSocket client for gateway protocol
 │   │   ├── Models.cs                 # Data models (SessionInfo, ChannelHealth, etc.)
 │   │   └── IOpenClawLogger.cs        # Logging interface
+│   │
+│   ├── OpenClaw.Chat/                # Native chat model and reducer
+│   │   ├── ChatModels.cs             # Threads, entries, events, provider contract
+│   │   └── ChatTimelineReducer.cs    # Timeline state transitions
+│   │
+│   ├── OpenClawTray.FunctionalUI/    # Small in-repo declarative WinUI helper
+│   │   └── FunctionalUI.cs           # Components, hooks, elements, host control
 │   │
 │   ├── OpenClaw.Tray.WinUI/          # WinUI 3 system tray application (primary)
 │   │   ├── App.xaml.cs               # Main application, tray icon, gateway connection
@@ -87,7 +94,7 @@ OpenClaw.Tray.Tests  ──tests──▶  OpenClaw.Shared
 |-----------|----------|---------|
 | **Gateway Communication** | `OpenClaw.Shared/OpenClawGatewayClient.cs` | WebSocket client with protocol v3, reconnect/backoff logic |
 | **Notification System** | `OpenClaw.Tray.WinUI/App.xaml.cs` | Event routing, toast notifications, classification |
-| **WebView2 Integration** | `OpenClaw.Tray.WinUI/Windows/WebChatWindow.xaml.cs` | Embedded chat panel with lifecycle management |
+| **WebView2 Integration** | `OpenClaw.Tray.WinUI/Windows/ChatWindow.xaml.cs` | Embedded chat panel with lifecycle management |
 | **Tray Icon Management** | `OpenClaw.Tray.WinUI/Helpers/IconHelper.cs` | GDI handle management, dynamic icon generation |
 | **Session Tracking** | `OpenClaw.Shared/OpenClawGatewayClient.cs` | Session state, activity tracking, polling |
 | **Settings & Logging** | `OpenClaw.Tray.WinUI/Services/` | JSON settings persistence, file rotation logging |
@@ -220,6 +227,47 @@ This creates a standalone executable with all dependencies bundled.
 
 ## Architecture Overview
 
+### Native chat surface (FunctionalUI + OpenClaw.Chat)
+
+The Hub Chat tab (`src/OpenClaw.Tray.WinUI/Pages/ChatPage.xaml`) and the
+tray ChatWindow popup (`src/OpenClaw.Tray.WinUI/Windows/ChatWindow.xaml`)
+render their conversations with native WinUI 3 controls via the in-repo
+`OpenClawTray.FunctionalUI` helper and `OpenClaw.Chat` model/reducer code.
+The standard WebView2-hosted gateway web client remains available as a
+settings-controlled fallback.
+
+**Layering:**
+
+```
+src/OpenClaw.Tray.WinUI/Chat/    OpenClawChatTimeline · OpenClawComposer · OpenClawSessionHeader
+                                 OpenClawChatDataProvider (adapts OpenClawGatewayClient → IChatDataProvider)
+                                 OpenClawChatRoot         (FunctionalUI component composing the chat surface)
+                                 FunctionalChatHostExtensions (mounts FunctionalUI into a XAML <Border>)
+                                 IChatGatewayBridge       (testability seam over OpenClawGatewayClient)
+        ▲ depends on
+src/OpenClaw.Chat/               ChatThread · ChatTimelineState · IChatDataProvider · ChatTimelineReducer
+        ▲ rendered by
+src/OpenClawTray.FunctionalUI/   Component · RenderContext · FunctionalHostControl · WinUI elements
+```
+
+**Lifecycle:**
+
+- One `OpenClawChatDataProvider` instance lives on `App` (`App.ChatProvider`),
+  created in `InitializeGatewayClient` and disposed inside
+  `UnsubscribeGatewayEvents`. Both the Hub Chat tab and the tray ChatWindow
+  consume the same provider — opening either surface shows identical state.
+- Each XAML host (`ChatPage`, `ChatWindow`) mounts its own `FunctionalHostControl`
+  with `ContentTarget` pointing at a `<Border x:Name="ChatHost"/>`. The
+  surrounding chrome (NavigationView, popup header) stays XAML.
+- Provider events fire on the WebSocket-receive thread; the provider
+  marshals `Changed` / `NotificationRequested` callbacks through a
+  dispatcher post delegate (`DispatcherQueue.AsPost()`), so FunctionalUI
+  components observe state on the UI thread.
+
+**Adding new chat behavior:** model new events in `OpenClaw.Chat`'s
+`ChatEvent` discriminated union, handle them in `ChatTimelineReducer`, and
+emit them from `OpenClawChatDataProvider` in response to gateway signals.
+
 ### Gateway WebSocket Connection
 
 The `OpenClawGatewayClient` manages the connection to the OpenClaw gateway:
@@ -285,7 +333,7 @@ Notifications are classified using two strategies:
 
 ### WebView2 Lifecycle
 
-The `WebChatWindow` uses Microsoft Edge WebView2 for embedded web content:
+The `ChatWindow` uses Microsoft Edge WebView2 for embedded web content:
 
 **Initialization:**
 1. WebView2 control created in XAML
@@ -299,7 +347,7 @@ Window Created → WebView2.EnsureCoreWebView2Async() → Navigate to Chat URL �
 ```
 
 **Key Design Decisions:**
-- **Singleton pattern**: Only one WebChat window instance exists
+- **Singleton pattern**: Only one chat window instance exists
 - **Hidden instead of disposed**: Window is hidden when closed to preserve state
 - **Separate user data folder**: Isolates cookies/storage from browser
 - **Navigation guard**: Prevents accidental navigation away from chat
@@ -425,8 +473,8 @@ dotnet test --filter "FullyQualifiedName~AgentActivityTests"
 ```
 
 **Test Coverage:**
-- ✅ **652 tests** in `OpenClaw.Shared.Tests` — models, gateway client, exec approvals, capabilities, URL helpers, notification categorization, shell quoting
-- ✅ **262 tests** in `OpenClaw.Tray.Tests` — menu display, menu positioning, settings round-trip, deep link parsing, onboarding state, setup code decoder, security validation, wizard step parsing, localization validation
+- ✅ **1182 tests** in `OpenClaw.Shared.Tests` — models, gateway client, exec approvals, capabilities, URL helpers, notification categorization, shell quoting, MCP, device identity, and WinNode client coverage
+- ✅ **388 tests** in `OpenClaw.Tray.Tests` — settings round-trip, deep link parsing, onboarding state, setup code decoder, gateway health/chat helpers, security validation, wizard step parsing, gateway discovery, localization validation
 - ✅ All tests are pure unit tests (no network, no file system, no external dependencies)
 
 See [tests/OpenClaw.Shared.Tests/README.md](tests/OpenClaw.Shared.Tests/README.md) for detailed test documentation.
@@ -441,7 +489,7 @@ You can test the UI and basic functionality without a running gateway:
 3. Enter a dummy gateway URL (e.g., `ws://localhost:18789`)
 4. The app will show "Disconnected" status but you can:
    - Test the tray menu structure
-   - Open Settings dialog and configure preferences
+   - Open the Settings page and configure preferences
    - Test auto-start functionality
    - View logs
 
@@ -487,8 +535,8 @@ You can test the UI and basic functionality without a running gateway:
    - Verify Windows toast notification appears (if enabled)
    - Click toast → should open relevant UI
 
-2. **Notification History**:
-   - Right-click tray → **Notification History**
+2. **Activity / notification history**:
+   - Right-click tray → **Activity Stream** or **Notification History**
    - Verify past notifications are listed
    - Test filtering by category
 

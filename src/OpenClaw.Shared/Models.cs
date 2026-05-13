@@ -27,12 +27,14 @@ public class PairingStatusEventArgs : EventArgs
     public PairingStatus Status { get; }
     public string DeviceId { get; }
     public string? Message { get; }
+    public string? RequestId { get; }
     
-    public PairingStatusEventArgs(PairingStatus status, string deviceId, string? message = null)
+    public PairingStatusEventArgs(PairingStatus status, string deviceId, string? message = null, string? requestId = null)
     {
         Status = status;
         DeviceId = deviceId;
         Message = message;
+        RequestId = requestId;
     }
 }
 
@@ -762,7 +764,7 @@ public static class PermissionDiagnostics
             {
                 Name = "Microphone",
                 Status = "review",
-                Detail = "Required only for camera clips with audio or future voice features.",
+                Detail = "Required for camera clips with audio and for stt.transcribe speech-to-text capture.",
                 SettingsUri = "ms-settings:privacy-microphone"
             },
             new()
@@ -1019,12 +1021,20 @@ public static class CommandCenterCommandGroups
     public static readonly FrozenSet<string> SafeCompanionCommandSet =
         SafeCompanionCommands.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-    public static readonly string[] DangerousCommands =
+    public static readonly string[] CommonDangerousCommands =
     [
         "camera.snap",
         "camera.clip",
         "screen.record",
         "tts.speak"
+    ];
+
+    public static readonly string[] DangerousCommands =
+    [
+        .. CommonDangerousCommands,
+        "stt.transcribe",
+        "stt.listen",
+        "stt.status"
     ];
 
     public static readonly FrozenSet<string> DangerousCommandSet =
@@ -1235,7 +1245,7 @@ public static class CommandCenterDiagnostics
                 Severity = GatewayDiagnosticSeverity.Info,
                 Category = "allowlist",
                 Title = "Privacy-sensitive commands are currently blocked",
-                Detail = $"{blocked} {(node.MissingDangerousAllowlistCommands.Count == 1 ? "is" : "are")} declared but filtered by gateway policy. Leave blocked unless you explicitly want camera or screen recording access for this node.",
+                Detail = $"{blocked} {(node.MissingDangerousAllowlistCommands.Count == 1 ? "is" : "are")} declared but filtered by gateway policy. Leave blocked unless you explicitly want camera, microphone, or screen recording access for this node.",
                 RepairAction = "Copy opt-in guidance",
                 CopyText = BuildDangerousCommandOptInGuidance(node.MissingDangerousAllowlistCommands)
             });
@@ -1502,6 +1512,405 @@ internal static class ModelFormatting
         if (n >= 1_000_000) return (n / 1_000_000.0).ToString("F1", CultureInfo.InvariantCulture) + "M";
         if (n >= 1_000) return (n / 1_000.0).ToString("F1", CultureInfo.InvariantCulture) + "K";
         return n.ToString();
+    }
+}
+
+// ── Agent Events ──
+
+/// <summary>
+/// Chat message broadcast by the gateway via a "chat" event. Emitted for
+/// both user echoes and final assistant messages. Streaming deltas are not
+/// currently produced by the gateway; consumers should treat each message as
+/// the complete final text for the given role.
+/// </summary>
+public class ChatMessageInfo
+{
+    /// <summary>Session this message belongs to (e.g. "main").</summary>
+    public string SessionKey { get; set; } = "";
+
+    /// <summary>"user", "assistant", "system", etc.</summary>
+    public string Role { get; set; } = "";
+
+    /// <summary>Full text content of the message.</summary>
+    public string Text { get; set; } = "";
+
+    /// <summary>
+    /// Optional gateway-assigned message state. "final" indicates a complete
+    /// terminal message; absent or other values indicate intermediate state.
+    /// </summary>
+    public string? State { get; set; }
+
+    /// <summary>True when the message represents a final (non-streaming) state.</summary>
+    public bool IsFinal => string.Equals(State, "final", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Unix epoch milliseconds when the gateway logged this message (0 if unknown).</summary>
+    public long Ts { get; set; }
+
+    /// <summary>
+    /// Optional cumulative input (prompt) token count for the turn this
+    /// message belongs to, when the gateway includes a <c>usage</c> block on
+    /// the chat event payload. <c>null</c> when not reported (deltas usually
+    /// don't carry this; the final summary or lifecycle event does).
+    /// </summary>
+    public int? InputTokens { get; set; }
+
+    /// <summary>Optional cumulative output token count.</summary>
+    public int? OutputTokens { get; set; }
+
+    /// <summary>
+    /// Optional total response token count (input + output, surfaced as
+    /// <c>R&lt;n&gt;</c> in the assistant footer).
+    /// </summary>
+    public int? ResponseTokens { get; set; }
+
+    /// <summary>
+    /// Optional percentage of model context window consumed (0–100), shown as
+    /// <c>23% ctx</c> in the footer.
+    /// </summary>
+    public int? ContextPercent { get; set; }
+}
+
+/// <summary>
+/// Result of a <c>chat.history</c> RPC: the full transcript for a session.
+/// The gateway already applies display normalization (strips delivery
+/// directive tags, tool-call XML, control tokens, silent NO_REPLY entries,
+/// reasoning-flagged payloads, and oversized messages) so consumers can
+/// render the messages directly.
+/// </summary>
+public class ChatHistoryInfo
+{
+    /// <summary>Immutable session UUID assigned by the gateway.</summary>
+    public string? SessionId { get; set; }
+
+    /// <summary>Session key the history was requested for (e.g. "main").</summary>
+    public string SessionKey { get; set; } = "";
+
+    /// <summary>Ordered transcript messages (oldest first).</summary>
+    public IReadOnlyList<ChatMessageInfo> Messages { get; set; } = Array.Empty<ChatMessageInfo>();
+}
+
+/// <summary>Raw agent event from gateway broadcast.</summary>
+public class AgentEventInfo
+{
+    public string RunId { get; set; } = "";
+    public int Seq { get; set; }
+    public string Stream { get; set; } = "";
+    public double Ts { get; set; }
+    public JsonElement Data { get; set; }
+    public string? SessionKey { get; set; }
+    public string? Summary { get; set; }
+
+    public DateTime Timestamp => DateTimeOffset.FromUnixTimeMilliseconds((long)Ts).LocalDateTime;
+
+    public string FormattedTime => Timestamp.ToString("HH:mm:ss.fff");
+
+    /// <summary>Resolved event kind — for "item" stream events, uses data.kind instead.</summary>
+    public string ResolvedStream
+    {
+        get
+        {
+            var s = Stream.ToLowerInvariant();
+            if (s == "item" && Data.ValueKind == JsonValueKind.Object &&
+                Data.TryGetProperty("kind", out var k))
+            {
+                return k.GetString()?.ToLowerInvariant() ?? s;
+            }
+            return s;
+        }
+    }
+
+    public string StreamUpper => ResolvedStream.ToUpperInvariant();
+
+    /// <summary>Color hex for stream badge (used by UI to create brush).</summary>
+    public string BadgeColorHex => ResolvedStream switch
+    {
+        "tool" => "#FFB45D3A",       // Burnt sienna
+        "assistant" => "#FF28A050",   // Green
+        "error" => "#FFC83232",       // Red
+        "lifecycle" => "#FF3C78C8",   // Blue
+        "plan" => "#FF8C50C8",        // Purple
+        "approval" => "#FFC8A01E",    // Amber
+        "thinking" => "#FF648CB4",    // Steel
+        "patch" => "#FF50A0A0",       // Teal
+        _ => "#FF646464"              // Gray
+    };
+
+    /// <summary>Human-readable summary extracted from event data.</summary>
+    public string SummaryLine
+    {
+        get
+        {
+            if (!string.IsNullOrEmpty(Summary)) return Summary;
+            try
+            {
+                var s = ResolvedStream;
+                if (s == "tool" && Data.ValueKind == JsonValueKind.Object)
+                {
+                    var name = Data.TryGetProperty("name", out var n) ? n.GetString() : null;
+                    var title = Data.TryGetProperty("title", out var ti) ? ti.GetString() : null;
+                    var phase = Data.TryGetProperty("phase", out var p) ? p.GetString() : null;
+                    var status = Data.TryGetProperty("status", out var st) ? st.GetString() : null;
+                    // Prefer title (richer) over just name
+                    if (title != null)
+                        return phase != null ? $"🔧 {title} ({phase})" : $"🔧 {title}";
+                    if (name != null)
+                        return phase != null ? $"🔧 {name} ({phase})" : $"🔧 {name}";
+                }
+                if (s == "assistant" && Data.ValueKind == JsonValueKind.Object)
+                {
+                    var text = Data.TryGetProperty("text", out var t) ? t.GetString() : null;
+                    if (text != null) return text.Length > 300 ? text[..300] + "…" : text;
+                }
+                if (s == "error" && Data.ValueKind == JsonValueKind.Object)
+                {
+                    var msg = Data.TryGetProperty("message", out var m) ? m.GetString()
+                        : Data.TryGetProperty("error", out var e) ? e.GetString() : null;
+                    if (msg != null) return $"❌ {msg}";
+                }
+                if (s == "lifecycle" && Data.ValueKind == JsonValueKind.Object)
+                {
+                    var state = Data.TryGetProperty("state", out var st) ? st.GetString()
+                        : Data.TryGetProperty("livenessState", out var ls) ? ls.GetString() : null;
+                    var phase = Data.TryGetProperty("phase", out var ph) ? ph.GetString() : null;
+                    if (state != null)
+                        return phase != null ? $"⚡ {state} ({phase})" : $"⚡ {state}";
+                }
+            }
+            catch { }
+            return "";
+        }
+    }
+
+    public bool HasSummary => !string.IsNullOrEmpty(SummaryLine);
+
+    /// <summary>Full assistant message text (no truncation), for expanded view.</summary>
+    public string? FullAssistantText
+    {
+        get
+        {
+            if (ResolvedStream != "assistant" || Data.ValueKind != JsonValueKind.Object) return null;
+            try { return Data.TryGetProperty("text", out var t) ? t.GetString() : null; }
+            catch { return null; }
+        }
+    }
+
+    /// <summary>Whether this event is an assistant stream (expanded view shows full text instead of JSON).</summary>
+    public bool IsAssistantStream => ResolvedStream == "assistant";
+
+    /// <summary>Whether to show the raw DataJson section. Hidden for streams where SummaryLine is sufficient.</summary>
+    public bool ShowDataJson
+    {
+        get
+        {
+            var s = ResolvedStream;
+            if (s is "assistant" or "error" or "lifecycle") return false;
+            return true;
+        }
+    }
+
+    // UI-only state for expand/collapse (not serialized)
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsExpanded { get; set; }
+
+    private string? _cachedDataJson;
+
+    public string DataJson
+    {
+        get
+        {
+            if (_cachedDataJson != null) return _cachedDataJson;
+            try
+            {
+                _cachedDataJson = JsonSerializer.Serialize(Data, new JsonSerializerOptions { WriteIndented = true });
+            }
+            catch
+            {
+                _cachedDataJson = Data.ToString() ?? "{}";
+            }
+            return _cachedDataJson;
+        }
+    }
+}
+
+public sealed class ChatSendResult
+{
+    public string? RunId { get; init; }
+    public string? SessionKey { get; init; }
+    public bool Cached { get; init; }
+}
+
+// ── Node/Device Pairing ──
+
+public class PairingRequest
+{
+    public string RequestId { get; set; } = "";
+    public string NodeId { get; set; } = "";
+    public string? DisplayName { get; set; }
+    public string? Platform { get; set; }
+    public string? Version { get; set; }
+    public string? RemoteIp { get; set; }
+    public bool IsRepair { get; set; }
+    public double Ts { get; set; }
+
+    public DateTime Timestamp => DateTimeOffset.FromUnixTimeMilliseconds((long)Ts).LocalDateTime;
+
+    public string Description
+    {
+        get
+        {
+            var lines = new List<string>();
+            lines.Add($"Node: {DisplayName ?? NodeId}");
+            if (!string.IsNullOrEmpty(Platform)) lines.Add($"Platform: {Platform}");
+            if (!string.IsNullOrEmpty(Version)) lines.Add($"Version: {Version}");
+            if (!string.IsNullOrEmpty(RemoteIp)) lines.Add($"IP: {RemoteIp}");
+            if (IsRepair) lines.Add("Repair: yes");
+            return string.Join("\n", lines);
+        }
+    }
+}
+
+public class DevicePairingRequest
+{
+    public string RequestId { get; set; } = "";
+    public string DeviceId { get; set; } = "";
+    public string? PublicKey { get; set; }
+    public string? DisplayName { get; set; }
+    public string? Platform { get; set; }
+    public string? ClientId { get; set; }
+    public string? ClientMode { get; set; }
+    public string? Role { get; set; }
+    public string[]? Scopes { get; set; }
+    public string? RemoteIp { get; set; }
+    public bool IsRepair { get; set; }
+    public double Ts { get; set; }
+
+    public DateTime Timestamp => DateTimeOffset.FromUnixTimeMilliseconds((long)Ts).LocalDateTime;
+
+    public string Description
+    {
+        get
+        {
+            var lines = new List<string>();
+            lines.Add($"Device: {DisplayName ?? DeviceId}");
+            if (!string.IsNullOrEmpty(Platform)) lines.Add($"Platform: {Platform}");
+            if (!string.IsNullOrEmpty(Role)) lines.Add($"Role: {Role}");
+            if (Scopes is { Length: > 0 }) lines.Add($"Scopes: {string.Join(", ", Scopes)}");
+            if (!string.IsNullOrEmpty(RemoteIp)) lines.Add($"IP: {RemoteIp}");
+            if (IsRepair) lines.Add("Repair: yes");
+            return string.Join("\n", lines);
+        }
+    }
+}
+
+public class PairingListInfo
+{
+    public List<PairingRequest> Pending { get; set; } = new();
+}
+
+public class DevicePairingListInfo
+{
+    public List<DevicePairingRequest> Pending { get; set; } = new();
+}
+
+// ── Models List ──
+
+public class ModelInfo
+{
+    public string Id { get; set; } = "";
+    public string? Name { get; set; }
+    public string? Provider { get; set; }
+    public int? ContextWindow { get; set; }
+    public bool IsConfigured { get; set; }
+
+    public string DisplayName => Name ?? Id;
+}
+
+public class ModelsListInfo
+{
+    public List<ModelInfo> Models { get; set; } = new();
+}
+
+// ── Agent Info ──
+
+public class AgentInfo
+{
+    public string Id { get; set; } = "";
+    public string? Name { get; set; }
+    public string? Emoji { get; set; }
+    public string? Workspace { get; set; }
+    public string? ModelPrimary { get; set; }
+    public string DisplayName => Name ?? Id;
+}
+
+// ── Presence (connected clients/instances) ──
+
+public class PresenceEntry
+{
+    public string? Host { get; set; }
+    public string? Ip { get; set; }
+    public string? Version { get; set; }
+    public string? Platform { get; set; }
+    public string? DeviceFamily { get; set; }
+    public string? ModelIdentifier { get; set; }
+    public string? Mode { get; set; }
+    public int? LastInputSeconds { get; set; }
+    public string? Reason { get; set; }
+    public string[]? Tags { get; set; }
+    public string? Text { get; set; }
+    public long Ts { get; set; }
+    public string? DeviceId { get; set; }
+    public string[]? Roles { get; set; }
+    public string[]? Scopes { get; set; }
+    public string? InstanceId { get; set; }
+
+    public string DisplayName => Host ?? DeviceId ?? Ip ?? "Unknown";
+    public DateTime Timestamp => DateTimeOffset.FromUnixTimeSeconds(Ts).LocalDateTime;
+    public string PlatformLabel => Platform ?? "unknown";
+    public string ModeLabel => Mode ?? "unknown";
+
+    public string LastSeenText
+    {
+        get
+        {
+            if (LastInputSeconds is not { } secs) return "";
+            if (secs < 60) return $"{secs}s ago";
+            if (secs < 3600) return $"{secs / 60}m ago";
+            return $"{secs / 3600}h ago";
+        }
+    }
+}
+
+// ── Gateway Discovery ──
+
+public class DiscoveredGateway
+{
+    public string Id { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public string? Host { get; set; }
+    public int Port { get; set; }
+    public string? LanHost { get; set; }
+    public string? TailnetDns { get; set; }
+    public bool TlsEnabled { get; set; }
+    public string? TlsFingerprint { get; set; }
+
+    public string ConnectionUrl
+    {
+        get
+        {
+            var scheme = TlsEnabled ? "wss" : "ws";
+            var host = Host ?? LanHost ?? "localhost";
+            return $"{scheme}://{host}:{Port}";
+        }
+    }
+
+    public string HttpUrl
+    {
+        get
+        {
+            var scheme = TlsEnabled ? "https" : "http";
+            var host = Host ?? LanHost ?? "localhost";
+            return $"{scheme}://{host}:{Port}";
+        }
     }
 }
 

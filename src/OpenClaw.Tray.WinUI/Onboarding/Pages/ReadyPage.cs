@@ -2,6 +2,7 @@ using OpenClawTray.FunctionalUI;
 using OpenClawTray.FunctionalUI.Core;
 using OpenClawTray.Helpers;
 using OpenClawTray.Onboarding.Services;
+using OpenClawTray.Services;
 using static OpenClawTray.FunctionalUI.Factories;
 using Microsoft.UI.Xaml;
 
@@ -16,7 +17,16 @@ public sealed class ReadyPage : Component<OnboardingState>
 {
     public override Element Render()
     {
-        var (launchAtLogin, setLaunchAtLogin) = UseState(false);
+        // Safety-default the rendered switch to ON, then sync from persisted settings
+        // on mount (SettingsManager defaults AutoStart=true for fresh users). The mount
+        // sync also materializes the Run-key even if the user never touches the switch.
+        var (launchAtLogin, setLaunchAtLogin) = UseState(true);
+        UseEffect(() =>
+        {
+            var persisted = Props.Settings.AutoStart;
+            setLaunchAtLogin(persisted);
+            ApplyLaunchAtLogin(persisted);
+        }, Props.Settings.AutoStart);
 
         return ScrollView(
             VStack(12,
@@ -45,11 +55,15 @@ public sealed class ReadyPage : Component<OnboardingState>
                     ).Padding(12)
                 )
                 .CornerRadius(8)
-                .Background("#FFFFFF"),
+                .BackgroundResource("CardBackgroundFillColorDefaultBrush"),
 
                 // Launch at Login toggle
                 HStack(8,
-                    ToggleSwitch(launchAtLogin, v => setLaunchAtLogin(v)),
+                    ToggleSwitch(launchAtLogin, v =>
+                    {
+                        setLaunchAtLogin(v);
+                        ApplyLaunchAtLogin(v);
+                    }),
                     TextBlock(LocalizationHelper.GetString("Onboarding_Ready_LaunchAtLogin"))
                         .FontSize(13)
                         .VAlign(VerticalAlignment.Center)
@@ -61,25 +75,41 @@ public sealed class ReadyPage : Component<OnboardingState>
         ).HorizontalScrollMode(Microsoft.UI.Xaml.Controls.ScrollMode.Disabled);
     }
 
+    private void ApplyLaunchAtLogin(bool enabled)
+    {
+        Props.Settings.AutoStart = enabled;
+        // Persist immediately so a user who toggles and then closes the wizard via
+        // the X button still gets their preference saved (OnboardingState.Complete()
+        // also saves on Finish — this is belt-and-braces).
+        Props.Settings.Save();
+
+        try
+        {
+            AutoStartManager.SetAutoStart(enabled);
+        }
+        catch (System.Exception ex)
+        {
+            Logger.Warn($"[ReadyPage] Failed to apply autostart={enabled}: {ex.Message}");
+        }
+    }
+
     private Element ModeInfoCard()
     {
         if (Props.Settings.EnableNodeMode)
         {
             return Border(
                 VStack(8,
-                    TextBlock("🔌 Node Mode Active")
+                    TextBlock(LocalizationHelper.GetString("Onboarding_Ready_NodeModeActive"))
                         .FontSize(14)
                         .FontWeight(new global::Windows.UI.Text.FontWeight(600)),
-                    TextBlock("This PC will operate as a remote compute node. " +
-                        "The gateway can invoke screen capture, camera, and system " +
-                        "commands on this machine.")
+                    TextBlock(LocalizationHelper.GetString("Onboarding_Ready_NodeModeActiveDetail"))
                         .FontSize(12)
                         .Opacity(0.8)
                         .TextWrapping()
                 ).Padding(12)
             )
             .CornerRadius(8)
-            .Background("#FFF3E0")
+            .BackgroundResource("SystemFillColorCautionBackgroundBrush")
             .Margin(0, 8, 0, 0);
         }
 
@@ -106,7 +136,7 @@ public sealed class ReadyPage : Component<OnboardingState>
             TextBlock(message).FontSize(12).Opacity(0.8).TextWrapping().Padding(12)
         )
         .CornerRadius(8)
-        .Background("#E8F4FD")
+        .BackgroundResource("SystemFillColorAttentionBackgroundBrush")
         .Margin(0, 8, 0, 0);
     }
 

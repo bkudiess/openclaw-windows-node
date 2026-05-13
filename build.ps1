@@ -185,6 +185,18 @@ function Build-Project($name, $path, $useRid = $false) {
     }
 }
 
+function Get-ProjectTargetFramework($path) {
+    if (-not (Test-Path $path)) {
+        return $null
+    }
+
+    [xml]$projectXml = Get-Content $path -Raw
+    return $projectXml.Project.PropertyGroup |
+        ForEach-Object { $_.TargetFramework } |
+        Where-Object { $_ } |
+        Select-Object -First 1
+}
+
 $projects = @{
     "Shared" = @{ Path = "src/OpenClaw.Shared/OpenClaw.Shared.csproj"; UseRid = $false }
     "Cli" = @{ Path = "src/OpenClaw.Cli/OpenClaw.Cli.csproj"; UseRid = $false }
@@ -230,8 +242,16 @@ if ($failCount -eq 0) {
     Write-Host "🦞 All builds succeeded!" -ForegroundColor Green
     
     Write-Host "`nTo run:" -ForegroundColor Cyan
-    if ($buildResults.ContainsKey("WinUI") -or $buildResults.ContainsKey("All")) {
-        Write-Host "  WinUI:    .\src\OpenClaw.Tray.WinUI\bin\$Configuration\net10.0-windows10.0.19041.0\$rid\OpenClaw.Tray.WinUI.exe" -ForegroundColor White
+    if (($buildResults.ContainsKey("WinUI") -and $buildResults["WinUI"]) -or ($buildResults.ContainsKey("Tray") -and $buildResults["Tray"])) {
+        $winUIProjectPath = $projects["WinUI"].Path
+        $winUITargetFramework = Get-ProjectTargetFramework $winUIProjectPath
+        $winUIProjectDirectory = (Split-Path -Parent $winUIProjectPath).Replace("/", "\")
+
+        if ($winUITargetFramework) {
+            Write-Host "  WinUI:    .\$winUIProjectDirectory\bin\$Configuration\$winUITargetFramework\$rid\OpenClaw.Tray.WinUI.exe" -ForegroundColor White
+        } else {
+            Write-Warning "Unable to determine WinUI target framework from $winUIProjectPath"
+        }
     }
 } else {
     Write-Host "❌ $failCount build(s) failed" -ForegroundColor Red

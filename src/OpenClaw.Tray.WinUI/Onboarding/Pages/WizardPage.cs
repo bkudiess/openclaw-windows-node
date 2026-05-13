@@ -18,6 +18,13 @@ namespace OpenClawTray.Onboarding.Pages;
 /// </summary>
 public sealed class WizardPage : Component<OnboardingState>
 {
+    private static readonly Regex UrlInMessagePattern = new(
+        @"(https?://[^\s\)\"",]+)",
+        RegexOptions.Compiled);
+
+    private static readonly Regex DeviceCodePattern = new(
+        @"(?:^|\s)(?:[Cc]ode|user_code|USER_CODE)\s*[:=]\s*([A-Z0-9]{2,8}(?:-[A-Z0-9]{2,8})+|[A-Z0-9]{4,12})\b",
+        RegexOptions.Compiled);
     public override Element Render()
     {
         // Read persisted wizard state from shared OnboardingState
@@ -47,9 +54,9 @@ public sealed class WizardPage : Component<OnboardingState>
             // Guard against default/undefined JsonElement
             if (payload.ValueKind == JsonValueKind.Undefined || payload.ValueKind == JsonValueKind.Null)
             {
-                setErrorMsg("Empty response from gateway");
+                setErrorMsg(LocalizationHelper.GetString("Onboarding_Wizard_ErrorEmptyGatewayResponse"));
                 setWizardState("error");
-                SaveState("error", "Empty response from gateway");
+                SaveState("error", LocalizationHelper.GetString("Onboarding_Wizard_ErrorEmptyGatewayResponse"));
                 return;
             }
 
@@ -261,9 +268,9 @@ public sealed class WizardPage : Component<OnboardingState>
 
             if (!client.IsConnectedToGateway)
             {
-                setErrorMsg("Lost connection to gateway. Click Next to skip the wizard, or wait for reconnection.");
+                setErrorMsg(LocalizationHelper.GetString("Onboarding_Wizard_ErrorGatewayDisconnectedDetail"));
                 setWizardState("error");
-                SaveState("error", "Gateway disconnected");
+                SaveState("error", LocalizationHelper.GetString("Onboarding_Wizard_ErrorGatewayDisconnected"));
                 return;
             }
 
@@ -282,7 +289,7 @@ public sealed class WizardPage : Component<OnboardingState>
                 var answerValue = string.IsNullOrEmpty(stepInput) ? "true" : stepInput;
 
                 // Smart timeout: 5min for auth-related steps (device code polling), 30s for everything else
-                var isAuthStep = !string.IsNullOrEmpty(stepMessage) && 
+                var isAuthStep = !string.IsNullOrEmpty(stepMessage) &&
                     (stepMessage.Contains("device", StringComparison.OrdinalIgnoreCase) ||
                      stepMessage.Contains("authorize", StringComparison.OrdinalIgnoreCase) ||
                      stepMessage.Contains("login", StringComparison.OrdinalIgnoreCase) ||
@@ -299,9 +306,9 @@ public sealed class WizardPage : Component<OnboardingState>
                 // Validate response before applying
                 if (response.ValueKind == JsonValueKind.Undefined || response.ValueKind == JsonValueKind.Null)
                 {
-                    setErrorMsg("Gateway returned empty response for wizard.next");
+                    setErrorMsg(LocalizationHelper.GetString("Onboarding_Wizard_ErrorEmptyNextResponse"));
                     setWizardState("error");
-                    SaveState("error", "Empty wizard.next response");
+                    SaveState("error", LocalizationHelper.GetString("Onboarding_Wizard_ErrorEmptyNextResponse"));
                 }
                 else
                 {
@@ -333,9 +340,9 @@ public sealed class WizardPage : Component<OnboardingState>
 
             if (!client.IsConnectedToGateway)
             {
-                setErrorMsg("Lost connection to gateway. Click Next to skip the wizard, or wait for reconnection.");
+                setErrorMsg(LocalizationHelper.GetString("Onboarding_Wizard_ErrorGatewayDisconnectedDetail"));
                 setWizardState("error");
-                SaveState("error", "Gateway disconnected");
+                SaveState("error", LocalizationHelper.GetString("Onboarding_Wizard_ErrorGatewayDisconnected"));
                 return;
             }
 
@@ -464,21 +471,21 @@ public sealed class WizardPage : Component<OnboardingState>
                     }
                     else
                     {
-                        inputArea = TextBlock("No options available").FontSize(12).Opacity(0.5);
+                        inputArea = TextBlock(LocalizationHelper.GetString("Onboarding_Wizard_NoOptionsAvailable")).FontSize(12).Opacity(0.5);
                         showButtons = false; // Don't allow submit with no valid selection
                     }
                 }
                 else if (stepType == "confirm")
                 {
-                    buttonLabel1 = "Yes";
-                    buttonLabel2 = "No / Skip";
+                    buttonLabel1 = LocalizationHelper.GetString("Onboarding_Wizard_Yes");
+                    buttonLabel2 = LocalizationHelper.GetString("Onboarding_Wizard_NoSkip");
                 }
                 else if (stepType == "progress")
                 {
                     // Show spinner while gateway polls for auth completion
                     inputArea = HStack(8,
                         ProgressRing().Width(24).Height(24),
-                        TextBlock("Waiting...").FontSize(13).Opacity(0.7)
+                        TextBlock(LocalizationHelper.GetString("Onboarding_Wizard_Waiting")).FontSize(13).Opacity(0.7)
                             .VAlign(VerticalAlignment.Center)
                     );
                     showButtons = false; // Gateway auto-advances on completion
@@ -488,23 +495,23 @@ public sealed class WizardPage : Component<OnboardingState>
 
             case "complete":
                 displayTitle = $"✅ {LocalizationHelper.GetString("Onboarding_Wizard_Complete")}";
-                displayMessage = "Click Next to continue.";
+                displayMessage = LocalizationHelper.GetString("Onboarding_Wizard_ClickNextToContinue");
                 break;
 
             case "error":
-                displayTitle = "❌ Wizard error";
+                displayTitle = $"❌ {LocalizationHelper.GetString("Onboarding_Wizard_ErrorTitle")}";
                 displayMessage = errorMsg;
                 showButtons = true;
-                buttonLabel1 = "Retry";
-                buttonLabel2 = "Skip Wizard";
+                buttonLabel1 = LocalizationHelper.GetString("Onboarding_Retry");
+                buttonLabel2 = LocalizationHelper.GetString("Onboarding_Wizard_SkipWizard");
                 break;
 
             case "loading":
                 displayTitle = $"🔄 {LocalizationHelper.GetString("Onboarding_Connection_StatusAuthenticating")}";
-                displayMessage = "Connecting to gateway...";
+                displayMessage = LocalizationHelper.GetString("Onboarding_Wizard_ConnectingToGateway");
                 inputArea = HStack(8,
                     ProgressRing().Width(24).Height(24),
-                    TextBlock("Please wait while the connection is established...")
+                    TextBlock(LocalizationHelper.GetString("Onboarding_Wizard_ConnectionWaitDetail"))
                         .FontSize(13).Opacity(0.7)
                         .VAlign(VerticalAlignment.Center)
                 );
@@ -512,7 +519,7 @@ public sealed class WizardPage : Component<OnboardingState>
 
             default:
                 displayTitle = $"🔌  {LocalizationHelper.GetString("Onboarding_Wizard_Offline")}";
-                displayMessage = $"{LocalizationHelper.GetString("Onboarding_Wizard_OfflineMessage")}\n\nClick Next to continue.";
+                displayMessage = $"{LocalizationHelper.GetString("Onboarding_Wizard_OfflineMessage")}\n\n{LocalizationHelper.GetString("Onboarding_Wizard_ClickNextToContinue")}";
                 break;
         }
 
@@ -523,7 +530,7 @@ public sealed class WizardPage : Component<OnboardingState>
         if (!string.IsNullOrEmpty(displayMessage))
         {
             // URL detection — find https:// URLs in the message
-            var urlMatch = Regex.Match(displayMessage, @"(https?://[^\s\)\"",]+)");
+            var urlMatch = UrlInMessagePattern.Match(displayMessage);
             if (urlMatch.Success)
             {
                 var detectedUrl = urlMatch.Value;
@@ -545,9 +552,7 @@ public sealed class WizardPage : Component<OnboardingState>
             // Capture must contain a digit or hyphen (or be all uppercase) to avoid
             // matching common English words like "below" that follow "code".
             // Case-sensitive on the value to require the GitHub-style uppercase code.
-            var codeMatch = Regex.Match(
-                displayMessage,
-                @"(?:^|\s)(?:[Cc]ode|user_code|USER_CODE)\s*[:=]\s*([A-Z0-9]{2,8}(?:-[A-Z0-9]{2,8})+|[A-Z0-9]{4,12})\b");
+            var codeMatch = DeviceCodePattern.Match(displayMessage);
             if (codeMatch.Success)
             {
                 var code = codeMatch.Groups[1].Value;
@@ -571,7 +576,7 @@ public sealed class WizardPage : Component<OnboardingState>
                     ).Padding(12)
                 )
                 .CornerRadius(6)
-                .Background("#E8F4FD")
+                .BackgroundResource("SystemFillColorAttentionBackgroundBrush")
                 .HAlign(HorizontalAlignment.Center);
             }
         }
@@ -581,7 +586,7 @@ public sealed class WizardPage : Component<OnboardingState>
         {
             if (!string.IsNullOrEmpty(displayMessage))
             {
-                var urlMatch = Regex.Match(displayMessage, @"(https?://[^\s\)\"",]+)");
+                var urlMatch = UrlInMessagePattern.Match(displayMessage);
                 if (urlMatch.Success)
                 {
                     try
@@ -615,7 +620,7 @@ public sealed class WizardPage : Component<OnboardingState>
                 ).HorizontalScrollMode(Microsoft.UI.Xaml.Controls.ScrollMode.Disabled)
             )
             .CornerRadius(8)
-            .Background("#FFFFFF")
+            .BackgroundResource("CardBackgroundFillColorDefaultBrush")
             .MaxHeight(350),
 
             // Device code display (large, copyable — for auth flows)
@@ -639,4 +644,3 @@ public sealed class WizardPage : Component<OnboardingState>
         .Padding(0, 8, 0, 0);
     }
 }
-

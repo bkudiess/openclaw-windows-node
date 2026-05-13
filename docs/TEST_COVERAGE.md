@@ -1,17 +1,17 @@
 # Test Coverage Summary
 
-**914 tests total** (652 shared + 262 tray) — all passing ✅
+**2349 tests total** (1464 shared + 885 tray) — required suites passing ✅
 
 | Metric | Value |
 |--------|-------|
-| Total Tests | 914 |
-| Passing | 914 (100%) |
+| Total Tests | 2349 |
+| Result | 2327 passed, 22 skipped |
 | Failing | 0 |
-| Framework | xUnit 2.9.3 / .NET 10.0 |
+| Framework | xUnit / .NET 10.0 |
 
 ## Test Projects
 
-### OpenClaw.Shared.Tests — 652 tests
+### OpenClaw.Shared.Tests — 1464 tests
 
 #### ModelsTests
 - **AgentActivityTests** (~15) — glyph mapping for all ActivityKind values, display text formatting
@@ -71,7 +71,7 @@
 
 ---
 
-### OpenClaw.Tray.Tests — 262 tests
+### OpenClaw.Tray.Tests — 885 tests
 
 #### Core Tray Tests
 
@@ -83,26 +83,34 @@
 #### Onboarding Tests
 
 - **OnboardingStateTests** (19) — Page order, mode logic, route changes, wizard state persistence, completion, disposal
-- **WizardStepPropsTests** (4) — Enum values, record defaults, callback verification
 - **GatewayChatHelperTests** (11) — URL scheme conversion, token encoding, localhost checks, session keys
 - **LocalGatewayApproverTests** (13) — IsLocalGateway for localhost/remote/edge cases
 - **SetupCodeDecoderTests** (14) — Base64url decode, size limits, JSON validation, URL/token extraction
 - **GatewayHealthCheckTests** (6) — Health URI building, scheme conversion, port preservation
 - **SecurityValidationTests** (16) — Locale whitelist, port range, path traversal, URI scheme validation
 - **WizardStepParsingTests** (12) — JSON step parsing, options, completion, sensitive fields
-- **LocalizationValidationTests** (6) — 5-locale key parity, onboarding key presence, no duplicates
+- **GatewayDiscoveryServiceTests** — mDNS host selection and connection URL regression coverage
+- **LocalizationValidationTests** — locale key parity, onboarding key presence, duplicate detection, and all-or-none translation consistency
+
+#### Connection Architecture Tests
+
+- **GatewayRegistryTests / GatewayRegistryMigrationTests** — active gateway persistence, URL lookup, migration from legacy settings, per-gateway identity copy.
+- **CredentialResolverTests / InteractiveGatewayCredentialResolverTests** — device-token-first precedence, shared token fallback, bootstrap pairing state, legacy fallback for user-facing chat.
+- **GatewayConnectionManagerTests / ConnectionStateMachineTests** — operator/node lifecycle, transitions, diagnostics, reconnect/disconnect behavior.
+- **PairingFlowTests / SetupCodeFlowTests / StaleEventGuardTests** — bootstrap setup codes, pairing state transitions, and stale event suppression.
+- **RetryPolicyTests / ConnectionDiagnosticsTests / NodeConnectorTests / SettingsChangeImpactTests** — retry classification, diagnostics, node connector behavior, and settings change impact.
 
 ---
 
 ## Running Tests
 
-```bash
+```powershell
 # All tests
 dotnet test
 
 # Single project
-dotnet test tests/OpenClaw.Shared.Tests
-dotnet test tests/OpenClaw.Tray.Tests
+dotnet test .\tests\OpenClaw.Shared.Tests\OpenClaw.Shared.Tests.csproj --no-restore
+dotnet test .\tests\OpenClaw.Tray.Tests\OpenClaw.Tray.Tests.csproj --no-restore
 
 # Specific test class
 dotnet test --filter "FullyQualifiedName~MenuDisplayHelperTests"
@@ -116,14 +124,12 @@ dotnet test --logger "console;verbosity=detailed"
 
 ## Not Covered (Requires Integration Tests)
 
-- WebSocket connection/reconnection flow
-- Real gateway message parsing
-- Concurrent event handling
-- File I/O and thread synchronization
-- End-to-end onboarding wizard flow (WebView2 requires runtime)
+- Windows shell tray hover/click behavior
+- Full WinUI onboarding wizard flow, including WebView2 navigation
+- Real gateway/node pairing against a live gateway
 
 ---
 
-**Last Updated**: 2026-04-26
-**Framework**: xUnit 2.9.3 / .NET 10.0
-**Status**: ✅ 914 tests passing
+**Last Updated**: 2026-05-10
+**Framework**: xUnit / .NET 10.0
+**Status**: ✅ required suites passing (`.\build.ps1`, Shared tests, Tray tests)
