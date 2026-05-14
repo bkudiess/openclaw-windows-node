@@ -575,11 +575,14 @@ public sealed partial class TrayMenuWindow : WindowEx
         {
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
+        var leftPad = indent ? 28 : 12;
+        // Column 0 holds the left padding + a 24-px icon slot. The previous
+        // version had column 0 = 24 px while the icon Border also took a
+        // leftPad margin → glyphs were clipped at the column boundary.
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(leftPad + 24) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        var leftPad = indent ? 28 : 12;
         var iconSlot = new Border
         {
             Width = 24,
