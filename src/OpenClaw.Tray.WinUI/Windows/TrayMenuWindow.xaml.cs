@@ -500,6 +500,181 @@ public sealed partial class TrayMenuWindow : WindowEx
     }
 
     /// <summary>
+    /// Adds a row with [icon] [title (+ optional description)] [WinUI ToggleSwitch].
+    /// Toggling the switch fires MenuItemClicked with the supplied action id.
+    /// Used by the Permissions flyout to mirror the in-app PermissionsPage.
+    /// </summary>
+    public void AddToggleItem(string title, string? icon, string? description, bool isOn, string action)
+    {
+        var grid = new Grid
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Padding = new Thickness(12, 6, 12, 6),
+            ColumnSpacing = 8
+        };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var iconElement = ResolveIcon(icon);
+        if (iconElement != null)
+        {
+            AutomationProperties.SetAccessibilityView(iconElement, AccessibilityView.Raw);
+            if (iconElement is FrameworkElement ife)
+            {
+                ife.HorizontalAlignment = HorizontalAlignment.Center;
+                ife.VerticalAlignment = VerticalAlignment.Center;
+            }
+            Grid.SetColumn(iconElement, 0);
+            grid.Children.Add(iconElement);
+        }
+
+        var labelStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 1 };
+        labelStack.Children.Add(new TextBlock
+        {
+            Text = title,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            FontSize = 13,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            IsTextSelectionEnabled = false
+        });
+        if (!string.IsNullOrEmpty(description))
+        {
+            labelStack.Children.Add(new TextBlock
+            {
+                Text = description!,
+                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+                Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                FontSize = 11,
+                TextWrapping = TextWrapping.Wrap,
+                IsTextSelectionEnabled = false,
+                MaxWidth = 280
+            });
+        }
+        Grid.SetColumn(labelStack, 1);
+        grid.Children.Add(labelStack);
+
+        var toggle = new ToggleSwitch
+        {
+            IsOn = isOn,
+            OnContent = null,
+            OffContent = null,
+            MinWidth = 0,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        AutomationProperties.SetName(toggle, title);
+        toggle.Toggled += (s, e) =>
+        {
+            if (!string.IsNullOrEmpty(action))
+                MenuItemClicked?.Invoke(this, action);
+        };
+        Grid.SetColumn(toggle, 2);
+        grid.Children.Add(toggle);
+
+        grid.PointerEntered += (s, e) => HideActiveFlyout();
+        MenuPanel.Children.Add(grid);
+        _itemCount++;
+    }
+
+    /// <summary>
+    /// Adds a standard menu item with a right-aligned secondary text hint
+    /// (used for keyboard-shortcut display like "Win+;").
+    /// </summary>
+    public void AddMenuItemWithHint(string text, IconElement? icon, string action, string hint, bool indent = false)
+    {
+        var hintBlock = new TextBlock
+        {
+            Text = hint,
+            FontSize = 11,
+            Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+            VerticalAlignment = VerticalAlignment.Center,
+            IsTextSelectionEnabled = false
+        };
+        AutomationProperties.SetAccessibilityView(hintBlock, AccessibilityView.Raw);
+        AddMenuItemWithTrailingElement(text, icon, action, hintBlock, indent);
+    }
+
+    private void AddMenuItemWithTrailingElement(string text, IconElement? icon, string action, FrameworkElement trailing, bool indent)
+    {
+        var row = BuildItemRowWithTrailing(text, icon, trailing, indent, out var label);
+        var button = new Button
+        {
+            Content = row,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Padding = new Thickness(0, 8, 0, 8),
+            Background = s_transparentBrush,
+            BorderThickness = new Thickness(0),
+            Tag = action,
+            CornerRadius = new CornerRadius(4)
+        };
+        AutomationProperties.SetAutomationId(button, BuildMenuItemAutomationId(action, text));
+        AutomationProperties.SetName(button, text);
+        button.Click += (s, e) =>
+        {
+            MenuItemClicked?.Invoke(this, action);
+            HideCascade();
+        };
+        button.PointerEntered += (s, e) =>
+        {
+            HideActiveFlyout();
+            button.Background = SubtleHoverBrush;
+        };
+        button.PointerExited += (s, e) =>
+        {
+            button.Background = s_transparentBrush;
+        };
+        MenuPanel.Children.Add(button);
+        _itemCount++;
+    }
+
+    private static Grid BuildItemRowWithTrailing(string text, IconElement? icon, FrameworkElement? trailing, bool indent, out TextBlock label)
+    {
+        var grid = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch };
+        var leftPad = indent ? 28 : 12;
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(leftPad + 24) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var iconSlot = new Border
+        {
+            Width = 24,
+            Margin = new Thickness(leftPad, 0, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        if (icon != null)
+        {
+            AutomationProperties.SetAccessibilityView(icon, AccessibilityView.Raw);
+            if (icon is FrameworkElement fe)
+            {
+                fe.HorizontalAlignment = HorizontalAlignment.Center;
+                fe.VerticalAlignment = VerticalAlignment.Center;
+            }
+            iconSlot.Child = icon;
+        }
+        Grid.SetColumn(iconSlot, 0);
+        grid.Children.Add(iconSlot);
+        label = new TextBlock
+        {
+            Text = text,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            IsTextSelectionEnabled = false,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 8, 0)
+        };
+        Grid.SetColumn(label, 1);
+        grid.Children.Add(label);
+        if (trailing != null)
+        {
+            trailing.Margin = new Thickness(0, 0, 12, 0);
+            trailing.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(trailing, 2);
+            grid.Children.Add(trailing);
+        }
+        return grid;
+    }
+
+    /// <summary>
     /// Adds a custom UIElement as a flyout-enabled menu item with hover/click behavior.
     /// Same behavior as AddFlyoutMenuItem but accepts any UIElement instead of text.
     /// </summary>
@@ -873,6 +1048,14 @@ public sealed partial class TrayMenuWindow : WindowEx
                 {
                     flyoutWindow.AddHeader(item.Text);
                 }
+                else if (item.CustomContent != null)
+                {
+                    flyoutWindow.AddCustomElement(item.CustomContent);
+                }
+                else if (item.IsToggle)
+                {
+                    flyoutWindow.AddToggleItem(item.Text, item.Icon, item.Description, item.IsOn, item.Action);
+                }
                 else if (string.IsNullOrEmpty(item.Action))
                 {
                     // Non-interactive detail line — compact padding
@@ -1045,4 +1228,16 @@ public sealed class TrayMenuFlyoutItem
     public string? Icon { get; set; }
     public string Action { get; set; } = "";
     public bool IsHeader { get; set; }
+
+    // Renders the row with a WinUI ToggleSwitch on the right. When toggled
+    // the flyout fires MenuItemClicked with Action.
+    public bool IsToggle { get; set; }
+    public bool IsOn { get; set; }
+
+    // Optional secondary description text shown below the title (for ToggleSwitch rows).
+    public string? Description { get; set; }
+
+    // Free-form content: when set, the renderer drops the row in via
+    // AddCustomElement and ignores Text/Icon/Action.
+    public UIElement? CustomContent { get; set; }
 }

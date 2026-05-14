@@ -730,6 +730,7 @@ public partial class App : Application
             _globalHotkey = new GlobalHotkeyService();
             _globalHotkey.HotkeyPressed += OnGlobalHotkeyPressed;
             _globalHotkey.VoiceHotkeyPressed += OnVoiceHotkeyPressed;
+            _globalHotkey.SettingsHotkeyPressed += OnSettingsHotkeyPressed;
             _globalHotkey.Register();
         }
 
@@ -1401,22 +1402,61 @@ public partial class App : Application
             });
         }
 
-        // Hover flyout: Disconnect/Reconnect action verbs + open settings.
-        // Button label uses the ACTION verb ("Disconnect") not the current
-        // state, per UX convention.
-        var gwFlyoutItems = new List<TrayMenuFlyoutItem>
+        // Wrap the 2-line content in a Grid with a visible Disconnect/Connect
+        // button on the right side. The info area is clickable to open
+        // connection settings; the button is its own click target.
+        var gwHost = new Grid
         {
-            new() { Text = "Gateway", IsHeader = true },
+            Padding = new Thickness(14, 6, 14, 8),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            ColumnSpacing = 8
         };
-        if (isConnected)
-            gwFlyoutItems.Add(new() { Text = "Disconnect", Action = "disconnect" });
-        else
-            gwFlyoutItems.Add(new() { Text = "Connect", Action = "reconnect" });
-        gwFlyoutItems.Add(new() { Text = "Open connection settings", Action = "connection" });
+        gwHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        gwHost.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        // Move gwOuter padding to the host Grid since gwOuter is now nested.
+        gwOuter.Padding = new Thickness(0);
+        gwOuter.Tapped += (s, ev) => ShowHub("connection");
+        Grid.SetColumn(gwOuter, 0);
+        gwHost.Children.Add(gwOuter);
+
+        var gwBtn = new Button
+        {
+            Content = isConnected ? "Disconnect" : "Connect",
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Padding = new Thickness(12, 4, 12, 4),
+            MinHeight = 0,
+            MinWidth = 0,
+            FontSize = 11
+        };
+        AutomationProperties.SetName(gwBtn, isConnected ? "Disconnect from gateway" : "Connect to gateway");
+        ToolTipService.SetToolTip(gwBtn, isConnected ? "Disconnect from gateway" : "Connect to gateway");
+        gwBtn.Click += (s, ev) =>
+        {
+            if (isConnected)
+            {
+                _ = _connectionManager?.DisconnectAsync();
+                _lastSessions = Array.Empty<SessionInfo>();
+                _lastNodePairList = null;
+                _lastDevicePairList = null;
+                _lastModelsList = null;
+                _agentEventsCache.Clear();
+                UpdateTrayIcon();
+                _hubWindow?.UpdateStatus(ConnectionStatus.Disconnected);
+            }
+            else
+            {
+                _ = _connectionManager?.ReconnectAsync();
+            }
+            _trayMenuWindow?.HideCascade();
+        };
+        Grid.SetColumn(gwBtn, 1);
+        gwHost.Children.Add(gwBtn);
 
         AutomationProperties.SetName(gwOuter,
             $"Gateway {statusText}. Activate to open connection settings.");
-        menu.AddFlyoutCustomItem(gwOuter, gwFlyoutItems, action: "connection");
+        menu.AddCustomElement(gwHost);
 
         // ── Connected Devices (moved above Sessions) ──
         var connectedNodes = _lastNodes.Where(n => n.IsOnline).ToArray();
@@ -1428,30 +1468,11 @@ public partial class App : Application
             var deviceSummaryRight = $"{connectedNodes.Length} online · {totalCaps} caps";
             menu.AddCustomElement(BuildSectionHeader("Devices", deviceSummaryRight));
 
-            var currentHost = Environment.MachineName;
-
             foreach (var node in connectedNodes.Take(5))
             {
                 var card = BuildDeviceCard(node, successBrush, neutralBrush, secondaryText);
                 var flyoutItems = BuildDeviceFlyoutItems(node);
                 menu.AddFlyoutCustomItem(card, flyoutItems, action: "nodes");
-
-                // If this node is the local machine, surface a Permissions
-                // submenu directly beneath it. The 3-column inline toggle
-                // grid that used to live here was too dense and shipped with
-                // emoji icons; the flyout collapses to a single row and
-                // routes through FluentIconCatalog.
-                bool isLocal = node.DisplayName?.Contains(currentHost, StringComparison.OrdinalIgnoreCase) == true
-                    || node.NodeId?.Contains(currentHost, StringComparison.OrdinalIgnoreCase) == true;
-                if (isLocal && _settings != null)
-                {
-                    var permIcon = FluentIconCatalog.Build(FluentIconCatalog.Permissions);
-                    menu.AddFlyoutMenuItem(
-                        "Permissions",
-                        permIcon,
-                        BuildPermissionsFlyoutItems(_settings),
-                        indent: true);
-                }
             }
         }
 
@@ -1468,24 +1489,25 @@ public partial class App : Application
 
             foreach (var session in _lastSessions.Take(4))
             {
-                var card = BuildSessionCard(session, successBrush, cautionBrush, neutralBrush, criticalBrush, secondaryText);
-                var flyoutItems = BuildSessionFlyoutItems(session);
+                var card = BuildSessionCardCompact(session, successBrush, cautionBrush, neutralBrush, secondaryText);
+                var flyoutItems = BuildSessionFlyoutItems(session, secondaryText);
                 menu.AddFlyoutCustomItem(card, flyoutItems, action: "sessions");
-            }
-
-            if (_lastSessions.Length > 4)
-            {
-                var extra = _lastSessions.Length - 4;
-                menu.AddMenuItem(
-                    $"More ({extra} more)",
-                    FluentIconCatalog.Build(FluentIconCatalog.Sessions),
-                    "sessions",
-                    indent: true);
             }
         }
 
-        // ── Pairing approval pending (closest analogue to the spec's
-        // "exec approvals" row in current code) ──
+        // ── Usage ──
+        if (_lastSessions.Length > 0)
+        {
+            menu.AddSeparator();
+            var totalTokensAll2 = _lastSessions.Sum(s => s.InputTokens + s.OutputTokens);
+            menu.AddCustomElement(BuildSectionHeader("Usage", $"{FormatTokenCount(totalTokensAll2)} tokens"));
+            menu.AddMenuItem(
+                "View detailed usage",
+                FluentIconCatalog.Build(FluentIconCatalog.About),
+                "usage");
+        }
+
+        // ── Pairing approval pending ──
         var nodePendingCount = _lastNodePairList?.Pending.Count ?? 0;
         var devicePendingCount = _lastDevicePairList?.Pending.Count ?? 0;
         if (nodePendingCount + devicePendingCount > 0)
@@ -1499,24 +1521,25 @@ public partial class App : Application
 
         // ── Actions ──
         menu.AddSeparator();
+        if (_settings != null)
+        {
+            menu.AddFlyoutMenuItem(
+                "Permissions",
+                FluentIconCatalog.Build(FluentIconCatalog.Permissions),
+                BuildPermissionsFlyoutItems(_settings));
+        }
         menu.AddMenuItem("Dashboard", FluentIconCatalog.Build(FluentIconCatalog.Dashboard), "dashboard");
         menu.AddMenuItem("Chat", FluentIconCatalog.Build(FluentIconCatalog.Chat), "openchat");
         menu.AddMenuItem("Canvas", FluentIconCatalog.Build(FluentIconCatalog.CanvasAct), "canvas");
         menu.AddMenuItem("Voice", FluentIconCatalog.Build(FluentIconCatalog.VoiceAct), "voice");
-        menu.AddMenuItem("Companion Settings...", FluentIconCatalog.Build(FluentIconCatalog.Settings), "companion");
-        menu.AddMenuItem(LocalizationHelper.GetString("Menu_QuickSend"), FluentIconCatalog.Build(FluentIconCatalog.QuickSend), "quicksend");
-
-        // Setup Guide / Reconfigure entry (PR #274 must-fix #6) — label flips
-        // based on whether prior config exists.
-        var setupMenuLabel = _settings != null
-            && new OpenClawTray.Onboarding.Services.OnboardingExistingConfigGuard(_settings, IdentityDataPath)
-                .HasExistingConfiguration()
-            ? LocalizationHelper.GetString("Menu_Reconfigure")
-            : LocalizationHelper.GetString("Menu_SetupGuide");
-        menu.AddMenuItem(setupMenuLabel, FluentIconCatalog.Build(FluentIconCatalog.Setup), "setup");
 
         // ── Footer ──
         menu.AddSeparator();
+        menu.AddMenuItemWithHint(
+            "Companion Settings...",
+            FluentIconCatalog.Build(FluentIconCatalog.Settings),
+            "companion",
+            "Win+;");
         menu.AddMenuItem("About", FluentIconCatalog.Build(FluentIconCatalog.About), "about");
         menu.AddMenuItem(LocalizationHelper.GetString("Menu_Exit"), FluentIconCatalog.Build(FluentIconCatalog.Exit), "exit");
     }
@@ -1547,30 +1570,29 @@ public partial class App : Application
             () => settings.NodeLocationEnabled, v => settings.NodeLocationEnabled = v);
         AddPermToggle(items, "Allow voice (TTS)", FluentIconCatalog.Voice,
             () => settings.NodeTtsEnabled, v => settings.NodeTtsEnabled = v);
+        AddPermToggle(items, "Allow speech-to-text (STT)", FluentIconCatalog.Voice,
+            () => settings.NodeSttEnabled, v => settings.NodeSttEnabled = v);
 
         return items;
     }
 
     private void AddPermToggle(List<TrayMenuFlyoutItem> items, string label, string iconGlyph, Func<bool> get, Action<bool> set)
     {
-        // Encode current state in the visible glyph: a check prefix when on,
-        // the capability glyph alone when off. The action id round-trips
-        // through OnTrayMenuItemClicked which calls back into the toggler.
         var on = get();
-        var prefix = on ? FluentIconCatalog.Check : iconGlyph;
         var actionId = $"perm-toggle|{label}";
         items.Add(new TrayMenuFlyoutItem
         {
-            Text = (on ? "✓  " : "    ") + label,
-            Icon = prefix,
+            Text = label,
+            Icon = iconGlyph,
             Action = actionId,
+            IsToggle = true,
+            IsOn = on,
         });
         _permToggleActions[actionId] = () =>
         {
             set(!get());
             _settings?.Save();
             _ = _connectionManager?.ReconnectAsync();
-            // Repaint the menu so the check mark reflects new state.
             if (_trayMenuWindow != null && _trayMenuWindow.IsShown)
             {
                 _trayMenuWindow.ClearItems();
@@ -1639,41 +1661,30 @@ public partial class App : Application
         return $"{(int)age.TotalDays}d ago";
     }
 
-    private static UIElement BuildSessionCard(
+    private static UIElement BuildSessionCardCompact(
         SessionInfo session,
         Microsoft.UI.Xaml.Media.Brush successBrush,
         Microsoft.UI.Xaml.Media.Brush cautionBrush,
         Microsoft.UI.Xaml.Media.Brush neutralBrush,
-        Microsoft.UI.Xaml.Media.Brush criticalBrush,
         Microsoft.UI.Xaml.Media.Brush secondaryText)
     {
-        // VarB: verbose two-row session card with progress bar.
-        //   Row 0: ● {name}                              {N}m ago
-        //   Row 1: {model}
-        //          [████████░░░░░░]  {used} / {context}
-        var usedTokens = session.InputTokens + session.OutputTokens;
-        var contextTokens = session.ContextTokens > 0 ? session.ContextTokens : 200_000;
-        var pct = usedTokens > 0 ? (int)(Math.Min(1.0, (double)usedTokens / contextTokens) * 100) : 0;
+        // VarB compact: one line — ● {name}    {N}m ago
+        // Details (model + ProgressBar) live in the hover flyout.
         var isActive = string.Equals(session.Status, "active", StringComparison.OrdinalIgnoreCase);
         var isIdle = string.Equals(session.Status, "idle", StringComparison.OrdinalIgnoreCase);
 
         var resources = Application.Current.Resources;
-        var tertiaryText = (Microsoft.UI.Xaml.Media.Brush)resources["TextFillColorTertiaryBrush"];
         var captionStyle = (Style)resources["CaptionTextBlockStyle"];
 
-        var grid = new Grid
+        var row = new Grid
         {
-            Padding = new Thickness(12, 8, 12, 8),
+            Padding = new Thickness(12, 6, 12, 6),
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            RowSpacing = 4,
             ColumnSpacing = 8
         };
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        // Row 0 Col 0: status dot + display name
         var nameRow = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -1684,9 +1695,7 @@ public partial class App : Application
         {
             Width = 8, Height = 8,
             VerticalAlignment = VerticalAlignment.Center,
-            Fill = isActive ? successBrush
-                : isIdle ? cautionBrush
-                : neutralBrush
+            Fill = isActive ? successBrush : isIdle ? cautionBrush : neutralBrush
         });
         nameRow.Children.Add(new TextBlock
         {
@@ -1697,62 +1706,72 @@ public partial class App : Application
             VerticalAlignment = VerticalAlignment.Center,
             IsTextSelectionEnabled = false
         });
-        Grid.SetRow(nameRow, 0);
         Grid.SetColumn(nameRow, 0);
-        grid.Children.Add(nameRow);
+        row.Children.Add(nameRow);
 
-        // Row 0 Col 1: relative time (only if UpdatedAt is set)
         if (session.UpdatedAt.HasValue)
         {
-            grid.Children.Add(new TextBlock
+            var time = new TextBlock
             {
                 Text = FormatRelative(session.UpdatedAt.Value),
                 Style = captionStyle,
                 FontSize = 11,
                 Foreground = secondaryText,
-                HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Center,
                 IsTextSelectionEnabled = false,
-            });
-            var timeBlock = (TextBlock)grid.Children[^1];
-            Grid.SetRow(timeBlock, 0);
-            Grid.SetColumn(timeBlock, 1);
+            };
+            Grid.SetColumn(time, 1);
+            row.Children.Add(time);
         }
 
-        // Row 1 spans both columns: model line + progress row
-        var detailStack = new StackPanel { Spacing = 4 };
+        return row;
+    }
 
+    private static List<TrayMenuFlyoutItem> BuildSessionFlyoutItems(SessionInfo session, Microsoft.UI.Xaml.Media.Brush secondaryText)
+    {
+        var usedTokens = session.InputTokens + session.OutputTokens;
+        var contextTokens = session.ContextTokens > 0 ? session.ContextTokens : 200_000;
+        var pct = usedTokens > 0 ? (int)(Math.Min(1.0, (double)usedTokens / contextTokens) * 100) : 0;
+
+        var items = new List<TrayMenuFlyoutItem>
+        {
+            new() { Text = session.DisplayName ?? session.Key, IsHeader = true },
+        };
+
+        // Custom row: model name + ProgressBar + ratio
+        var resources = Application.Current.Resources;
+        var captionStyle = (Style)resources["CaptionTextBlockStyle"];
+
+        var detailStack = new StackPanel
+        {
+            Padding = new Thickness(12, 6, 12, 8),
+            Spacing = 4
+        };
         var modelText = !string.IsNullOrEmpty(session.Model) ? session.Model! : "unknown model";
         detailStack.Children.Add(new TextBlock
         {
             Text = modelText,
             Style = captionStyle,
             FontSize = 12,
-            Foreground = string.IsNullOrEmpty(session.Model) ? tertiaryText : secondaryText,
+            Foreground = secondaryText,
             TextTrimming = TextTrimming.CharacterEllipsis,
             IsTextSelectionEnabled = false
         });
-
         var progressRow = new Grid { ColumnSpacing = 8 };
         progressRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         progressRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
         var bar = new ProgressBar
         {
-            Minimum = 0,
-            Maximum = 100,
-            Value = pct,
-            Height = 4,
+            Minimum = 0, Maximum = 100, Value = pct, Height = 4,
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             CornerRadius = new CornerRadius(2)
         };
         Grid.SetColumn(bar, 0);
         progressRow.Children.Add(bar);
-
-        var tokenLabel = new TextBlock
+        var tokLbl = new TextBlock
         {
-            Text = $"{FormatTokenCount(usedTokens)} / {FormatTokenCount(contextTokens)}",
+            Text = $"{FormatTokenCount(usedTokens)} / {FormatTokenCount(contextTokens)} ({pct}%)",
             Style = captionStyle,
             FontSize = 11,
             Foreground = secondaryText,
@@ -1760,80 +1779,33 @@ public partial class App : Application
             HorizontalAlignment = HorizontalAlignment.Right,
             IsTextSelectionEnabled = false
         };
-        Grid.SetColumn(tokenLabel, 1);
-        progressRow.Children.Add(tokenLabel);
-
+        Grid.SetColumn(tokLbl, 1);
+        progressRow.Children.Add(tokLbl);
         detailStack.Children.Add(progressRow);
+        items.Add(new() { CustomContent = detailStack });
 
-        Grid.SetRow(detailStack, 1);
-        Grid.SetColumn(detailStack, 0);
-        Grid.SetColumnSpan(detailStack, 2);
-        grid.Children.Add(detailStack);
-
-        return grid;
-    }
-
-    private static List<TrayMenuFlyoutItem> BuildSessionFlyoutItems(SessionInfo session)
-    {
-        var usedTokens = session.InputTokens + session.OutputTokens;
-        var contextTokens = session.ContextTokens > 0 ? session.ContextTokens : 200_000;
-        var pct = usedTokens > 0 ? (int)(Math.Min(1.0, (double)usedTokens / contextTokens) * 100) : 0;
-        var statusIcon = string.Equals(session.Status, "active", StringComparison.OrdinalIgnoreCase) ? "🟢"
-            : string.Equals(session.Status, "done", StringComparison.OrdinalIgnoreCase) ? "✅" : "⚪";
-
-        var items = new List<TrayMenuFlyoutItem>
-        {
-            new() { Text = session.DisplayName ?? session.Key, IsHeader = true },
-        };
-
-        // Model · Provider
-        var modelParts = new List<string>();
-        if (!string.IsNullOrEmpty(session.Model)) modelParts.Add(session.Model);
-        if (!string.IsNullOrEmpty(session.Provider)) modelParts.Add(session.Provider);
-        if (modelParts.Count > 0) items.Add(new() { Text = string.Join(" · ", modelParts) });
-
-        // Channel
+        // Channel / status
         if (!string.IsNullOrEmpty(session.Channel))
-            items.Add(new() { Text = $"📡 {session.Channel}" });
+            items.Add(new() { Text = $"Channel: {session.Channel}" });
+        items.Add(new() { Text = $"{session.Status} · {session.AgeText}" });
 
-        // Status · age
-        items.Add(new() { Text = $"{statusIcon} {session.Status} · {session.AgeText}" });
-
-        // Token usage
+        // Token detail breakdown
         items.Add(new() { Text = "Token Usage", IsHeader = true });
         if (usedTokens > 0)
         {
             items.Add(new() { Text = $"Input     {FormatTokenCount(session.InputTokens)}" });
             items.Add(new() { Text = $"Output    {FormatTokenCount(session.OutputTokens)}" });
-            items.Add(new() { Text = $"Total     {FormatTokenCount(usedTokens)} / {FormatTokenCount(contextTokens)} ({pct}%)" });
         }
         else
         {
             items.Add(new() { Text = "No token usage yet" });
         }
 
-        // Context window
-        if (session.ContextTokens > 0)
-            items.Add(new() { Text = $"Context   {FormatTokenCount(session.ContextTokens)} window" });
-
-        // Thinking / Verbose
-        if (!string.IsNullOrEmpty(session.ThinkingLevel) || !string.IsNullOrEmpty(session.VerboseLevel))
-        {
-            items.Add(new() { Text = "Settings", IsHeader = true });
-            if (!string.IsNullOrEmpty(session.ThinkingLevel))
-                items.Add(new() { Text = $"🧠 Thinking: {session.ThinkingLevel}" });
-            if (!string.IsNullOrEmpty(session.VerboseLevel))
-                items.Add(new() { Text = $"📝 Verbose: {session.VerboseLevel}" });
-        }
-
-        // Subject / Room
-        if (!string.IsNullOrEmpty(session.Subject))
-            items.Add(new() { Text = $"Subject: {session.Subject}" });
-        if (!string.IsNullOrEmpty(session.Room))
-            items.Add(new() { Text = $"Room: {session.Room}" });
-
         return items;
     }
+
+    private static List<TrayMenuFlyoutItem> BuildSessionFlyoutItems(SessionInfo session)
+        => BuildSessionFlyoutItems(session, (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]);
 
     private static UIElement BuildDeviceCard(
         GatewayNodeInfo node,
@@ -3583,6 +3555,8 @@ public partial class App : Application
             _globalHotkey ??= new GlobalHotkeyService();
             _globalHotkey.HotkeyPressed -= OnGlobalHotkeyPressed;
             _globalHotkey.HotkeyPressed += OnGlobalHotkeyPressed;
+            _globalHotkey.SettingsHotkeyPressed -= OnSettingsHotkeyPressed;
+            _globalHotkey.SettingsHotkeyPressed += OnSettingsHotkeyPressed;
             _globalHotkey.Register();
         }
         else
@@ -4159,6 +4133,12 @@ public partial class App : Application
     {
         if (_dispatcherQueue == null) return;
         _dispatcherQueue.TryEnqueue(() => ShowVoiceOverlay());
+    }
+
+    private void OnSettingsHotkeyPressed(object? sender, EventArgs e)
+    {
+        if (_dispatcherQueue == null) return;
+        _dispatcherQueue.TryEnqueue(() => ShowHub("companion"));
     }
 
     #endregion
