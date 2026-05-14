@@ -591,6 +591,41 @@ public class SystemCapabilityTests
         }
     }
 
+    [Theory]
+    [InlineData(@"C:\Users\Public\evil.exe")]
+    [InlineData(@"C:\Windows\System32\cmd.exe")]
+    [InlineData(@"D:/tools/run.exe")]
+    [InlineData(@"\\server\share\tool.exe")]
+    [InlineData(@"\\?\C:\evil.exe")]
+    public async Task ExecApprovalsSet_RejectsAbsolutePathAllowRules(string pattern)
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var cap = new SystemCapability(NullLogger.Instance);
+            var policy = new ExecApprovalPolicy(tempDir, NullLogger.Instance);
+            cap.SetApprovalPolicy(policy);
+
+            var escapedPattern = pattern.Replace(@"\", @"\\");
+            var req = new NodeInvokeRequest
+            {
+                Id = "ea-path-allow",
+                Command = "system.execApprovals.set",
+                Args = Parse($$"""{"baseHash":"{{policy.GetPolicyHash()}}","rules":[{"pattern":"{{escapedPattern}}","action":"allow","enabled":true}],"defaultAction":"deny"}""")
+            };
+
+            var res = await cap.ExecuteAsync(req);
+
+            Assert.False(res.Ok);
+            Assert.Contains("allow rule", res.Error, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
     [Fact]
     public async Task Run_BlockedEnvVar_ReturnsError()
     {

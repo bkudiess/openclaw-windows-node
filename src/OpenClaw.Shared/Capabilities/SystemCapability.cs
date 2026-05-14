@@ -643,6 +643,17 @@ public class SystemCapability : NodeCapabilityBase
             if (normalized is "powershell *" or "pwsh *" or "cmd *" or "cmd.exe *")
                 return $"Broad allow rule is not permitted: {pattern}";
 
+            // Reject Allow rules whose pattern looks like an absolute file path.
+            // A remote .set call should never be able to whitelist a specific binary
+            // by path — that would be a two-step EoP (compromise MCP token → whitelist
+            // attacker binary → invoke it). Legitimate rules name commands, not paths.
+            // Covers: drive-rooted paths (C:\, D:/), UNC paths (\\server\), and the
+            // Windows long-path namespace prefix (\\?\).
+            if (normalized.Length >= 3 &&
+                ((char.IsLetter(normalized[0]) && normalized[1] == ':' && (normalized[2] == '\\' || normalized[2] == '/')) ||
+                 normalized.StartsWith(@"\\", StringComparison.Ordinal)))
+                return $"Absolute path allow rule is not permitted: {pattern}";
+
             foreach (var dangerous in DangerousAllowPatternFragments)
             {
                 if (normalized.Contains(dangerous, StringComparison.Ordinal))
