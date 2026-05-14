@@ -1086,6 +1086,15 @@
   <data name="Onboarding_Finish" xml:space="preserve">
     <value>完成</value>
   </data>
+  <data name="Onboarding_IncompleteSetup_Title" xml:space="preserve">
+    <value>设置尚未完成</value>
+  </data>
+  <data name="Onboarding_IncompleteSetup_Body" xml:space="preserve">
+    <value>OpenClaw 仍需要完成设置，才能打开 Hub。请使用“返回”回到向导或连接步骤，修复缺失的设置，然后再次尝试“完成”。</value>
+  </data>
+  <data name="Onboarding_IncompleteSetup_Close" xml:space="preserve">
+    <value>确定</value>
+  </data>
   <data name="Onboarding_Welcome_Title" xml:space="preserve">
     <value>欢迎使用 OpenClaw</value>
   </data>
@@ -1608,16 +1617,16 @@
   <data name="CapabilitiesPage_TextBlock_10.Text" xml:space="preserve">
     <value>🖥️ 此计算机</value>
   </data>
-  <data name="CapabilitiesPage_TextBlock_15.Text" xml:space="preserve">
+  <data name="PermissionsPage_IntroText.Text" xml:space="preserve">
     <value>通过网关提供给代理的设备功能。切换此计算机可以执行的操作。</value>
   </data>
-  <data name="CapabilitiesPage_TextBlock_33.Text" xml:space="preserve">
+  <data name="PermissionsPage_McpHeader.Text" xml:space="preserve">
     <value>本地 MCP 服务器</value>
   </data>
-  <data name="CapabilitiesPage_TextBlock_34.Text" xml:space="preserve">
+  <data name="PermissionsPage_McpDescription.Text" xml:space="preserve">
     <value>通过 HTTP 向 CLI 工具和本地集成公开功能。</value>
   </data>
-  <data name="CapabilitiesPage_TextBlock_44.Text" xml:space="preserve">
+  <data name="PermissionsPage_McpEndpointLabel.Text" xml:space="preserve">
     <value>终结点：</value>
   </data>
   <data name="CopyMcpTokenButton.Content" xml:space="preserve">
@@ -1643,15 +1652,6 @@
   </data>
   <data name="ChatPage_TextBlock_53.Text" xml:space="preserve">
     <value>连接到网关以开始聊天</value>
-  </data>
-  <data name="ChatPage_TextBlock_56.Text" xml:space="preserve">
-    <value>建立网关连接后，WebView2 聊天将在此处加载。</value>
-  </data>
-  <data name="ChatPage_TextBlock_65.Text" xml:space="preserve">
-    <value>网页聊天不可用</value>
-  </data>
-  <data name="ChatPage_Button_69.Content" xml:space="preserve">
-    <value>改在浏览器中打开</value>
   </data>
   <data name="ConfigPage_TextBlock_17.Text" xml:space="preserve">
     <value>⚙️ 配置</value>
@@ -1926,6 +1926,84 @@
   <data name="NodesPage_TextBlock_41.Text" xml:space="preserve">
     <value>🌐 已连接的客户端</value>
   </data>
+  <data name="NodesPage_Action_Rename" xml:space="preserve">
+    <value>重命名</value>
+  </data>
+  <data name="NodesPage_Action_Forget" xml:space="preserve">
+    <value>忘记</value>
+  </data>
+  <data name="NodesPage_Action_MoreOptions" xml:space="preserve">
+    <value>更多选项</value>
+  </data>
+  <data name="NodesPage_Label_Version" xml:space="preserve">
+    <value>Version</value>
+  </data>
+  <data name="NodesPage_Label_Hardware" xml:space="preserve">
+    <value>Hardware</value>
+  </data>
+  <data name="NodesPage_Label_Network" xml:space="preserve">
+    <value>网络</value>
+  </data>
+  <data name="NodesPage_Label_Approved" xml:space="preserve">
+    <value>已批准</value>
+  </data>
+  <data name="NodesPage_Label_Connected" xml:space="preserve">
+    <value>已连接</value>
+  </data>
+  <data name="NodesPage_Label_LastSeen" xml:space="preserve">
+    <value>上次见到</value>
+  </data>
+  <data name="NodesPage_Label_Capabilities" xml:space="preserve">
+    <value>功能</value>
+  </data>
+  <data name="NodesPage_Label_Permissions" xml:space="preserve">
+    <value>权限</value>
+  </data>
+  <data name="NodesPage_Label_PathEnv" xml:space="preserve">
+    <value>PATH</value>
+  </data>
+  <data name="NodesPage_Commands_Header" xml:space="preserve">
+    <value>命令 ({0})</value>
+  </data>
+  <data name="NodesPage_Command_DisabledSuffix" xml:space="preserve">
+    <value>（已禁用）</value>
+  </data>
+  <data name="NodesPage_Rename_Title" xml:space="preserve">
+    <value>重命名节点</value>
+  </data>
+  <data name="NodesPage_Rename_Body" xml:space="preserve">
+    <value>为 {0} 选择新的显示名称。</value>
+  </data>
+  <data name="NodesPage_Rename_Placeholder" xml:space="preserve">
+    <value>显示名称</value>
+  </data>
+  <data name="NodesPage_Rename_Primary" xml:space="preserve">
+    <value>重命名</value>
+  </data>
+  <data name="NodesPage_Rename_Error_Empty" xml:space="preserve">
+    <value>显示名称不能为空。</value>
+  </data>
+  <data name="NodesPage_Rename_Error_Generic" xml:space="preserve">
+    <value>重命名失败。</value>
+  </data>
+  <data name="NodesPage_Forget_Title" xml:space="preserve">
+    <value>忘记节点？</value>
+  </data>
+  <data name="NodesPage_Forget_Body" xml:space="preserve">
+    <value>这将从网关中删除下面节点的记录。节点需要重新配对才能再次连接。</value>
+  </data>
+  <data name="NodesPage_Forget_Warning" xml:space="preserve">
+    <value>针对该节点的活动操作员和聊天会话将立即失去访问权限。</value>
+  </data>
+  <data name="NodesPage_Forget_Primary" xml:space="preserve">
+    <value>忘记节点</value>
+  </data>
+  <data name="NodesPage_Forget_Error_Generic" xml:space="preserve">
+    <value>无法忘记节点 — 网关不可达或权限被拒绝。</value>
+  </data>
+  <data name="NodesPage_Common_Cancel" xml:space="preserve">
+    <value>取消</value>
+  </data>
   <data name="PermissionsPage_TextBlock_8.Text" xml:space="preserve">
     <value>🔐 权限</value>
   </data>
@@ -1962,10 +2040,7 @@
   <data name="PermissionsPage_Button_57.Content" xml:space="preserve">
     <value>添加规则</value>
   </data>
-  <data name="SaveExecPolicyButton.Content" xml:space="preserve">
-    <value>保存执行策略</value>
-  </data>
-  <data name="PermissionsPage_TextBlock_69.Text" xml:space="preserve">
+<data name="PermissionsPage_TextBlock_69.Text" xml:space="preserve">
     <value>节点允许列表</value>
   </data>
   <data name="PermissionsPage_TextBlock_72.Text" xml:space="preserve">
@@ -2112,11 +2187,17 @@
   <data name="UsagePage_TextBlock_55.Text" xml:space="preserve">
     <value>提供程序</value>
   </data>
-  <data name="Period7DaysButton.Content" xml:space="preserve">
+  <data name="Period7DaysItem.Text" xml:space="preserve">
     <value>7 天</value>
   </data>
-  <data name="Period30DaysButton.Content" xml:space="preserve">
+  <data name="Period30DaysItem.Text" xml:space="preserve">
     <value>30 天</value>
+  </data>
+  <data name="UsagePage_ProviderLoading.Text" xml:space="preserve">
+    <value>正在加载提供程序…</value>
+  </data>
+  <data name="UsagePage_NoProviders.Text" xml:space="preserve">
+    <value>未配置任何提供程序</value>
   </data>
   <data name="UsagePage_TextBlock_70.Text" xml:space="preserve">
     <value>提供程序明细</value>
@@ -2135,12 +2216,6 @@
   </data>
   <data name="ChatWindow_TextBlock_60.Text" xml:space="preserve">
     <value>连接到网关以开始聊天</value>
-  </data>
-  <data name="ChatWindow_TextBlock_67.Text" xml:space="preserve">
-    <value>聊天不可用</value>
-  </data>
-  <data name="ChatWindow_Button_71.Content" xml:space="preserve">
-    <value>改在浏览器中打开</value>
   </data>
   <data name="TitleText.Text" xml:space="preserve">
     <value>OpenClaw Windows Companion</value>
@@ -2373,73 +2448,46 @@
   <data name="UsagePage_TextBlock_10.Text" xml:space="preserve">
     <value>📊 使用量和成本</value>
   </data>
-  <data name="ChatWindowHomeToolTip.Content" xml:space="preserve">
-    <value>主页</value>
-  </data>
-  <data name="ChatWindowRefreshToolTip.Content" xml:space="preserve">
-    <value>刷新</value>
-  </data>
   <data name="ChatWindowOpenInBrowserToolTip.Content" xml:space="preserve">
     <value>在浏览器中打开</value>
   </data>
   <data name="ChatWindowCloseToolTip.Content" xml:space="preserve">
     <value>关闭</value>
   </data>
-  <data name="ChatPageHomeToolTip.Content" xml:space="preserve">
-    <value>主页</value>
-  </data>
-  <data name="ChatPageRefreshToolTip.Content" xml:space="preserve">
-    <value>刷新</value>
-  </data>
   <data name="ChatPageOpenInBrowserToolTip.Content" xml:space="preserve">
     <value>在浏览器中打开</value>
-  </data>
-  <data name="ChatPageDeveloperToolsToolTip.Content" xml:space="preserve">
-    <value>开发人员工具</value>
   </data>
   <data name="CronPageRemoveJobToolTip.Content" xml:space="preserve">
     <value>删除任务</value>
   </data>
-  <data name="CapabilitiesPage_SttCardDescription.Text" xml:space="preserve">
-    <value>使用 Whisper 在本机本地识别麦克风音频。模型在首次使用时下载一次。</value>
-  </data>
-  <data name="CapabilitiesPage_SttCardHeader.Text" xml:space="preserve">
-    <value>🎤 语音转文字</value>
-  </data>
-  <data name="CapabilitiesPage_SttMoreSettingsLink.Content" xml:space="preserve">
+<data name="PermissionsPage_SttMoreSettingsLink.Content" xml:space="preserve">
     <value>更多语音设置…</value>
   </data>
-  <data name="CapabilitiesPage_TtsCardDescription.Text" xml:space="preserve">
-    <value>tts.speak 的默认提供程序。按调用传入的 provider/voiceId/model 会覆盖此默认值。</value>
-  </data>
-  <data name="CapabilitiesPage_TtsCardHeader.Text" xml:space="preserve">
-    <value>🔊 文字转语音</value>
-  </data>
-  <data name="CapabilitiesPage_TtsElevenLabsApiKey.Header" xml:space="preserve">
+<data name="PermissionsPage_TtsElevenLabsApiKey.Header" xml:space="preserve">
     <value>ElevenLabs API 密钥</value>
   </data>
-  <data name="CapabilitiesPage_TtsElevenLabsHelp.Text" xml:space="preserve">
+  <data name="PermissionsPage_TtsElevenLabsHelp.Text" xml:space="preserve">
     <value>API 密钥使用 Windows DPAPI 加密保存。修改其他字段时如保持为空，则保留先前保存的值。</value>
   </data>
-  <data name="CapabilitiesPage_TtsElevenLabsModel.Header" xml:space="preserve">
+  <data name="PermissionsPage_TtsElevenLabsModel.Header" xml:space="preserve">
     <value>ElevenLabs 模型</value>
   </data>
-  <data name="CapabilitiesPage_TtsElevenLabsModel.PlaceholderText" xml:space="preserve">
+  <data name="PermissionsPage_TtsElevenLabsModel.PlaceholderText" xml:space="preserve">
     <value>eleven_multilingual_v2</value>
   </data>
-  <data name="CapabilitiesPage_TtsElevenLabsVoiceId.Header" xml:space="preserve">
+  <data name="PermissionsPage_TtsElevenLabsVoiceId.Header" xml:space="preserve">
     <value>ElevenLabs 语音 ID</value>
   </data>
-  <data name="CapabilitiesPage_TtsProviderComboBox.Header" xml:space="preserve">
+  <data name="PermissionsPage_TtsProviderComboBox.Header" xml:space="preserve">
     <value>提供程序</value>
   </data>
-  <data name="CapabilitiesPage_TtsProviderElevenLabs.Content" xml:space="preserve">
+  <data name="PermissionsPage_TtsProviderElevenLabs.Content" xml:space="preserve">
     <value>ElevenLabs</value>
   </data>
-  <data name="CapabilitiesPage_TtsProviderPiper.Content" xml:space="preserve">
+  <data name="PermissionsPage_TtsProviderPiper.Content" xml:space="preserve">
     <value>Piper（本地 ML，推荐）</value>
   </data>
-  <data name="CapabilitiesPage_TtsProviderWindows.Content" xml:space="preserve">
+  <data name="PermissionsPage_TtsProviderWindows.Content" xml:space="preserve">
     <value>Windows 内置语音</value>
   </data>
   <data name="VoiceSettingsPage_PageTitle.Text" xml:space="preserve">
@@ -2747,5 +2795,280 @@
   </data>
   <data name="VoiceSettingsPage_PreviewVoiceButtonContent" xml:space="preserve">
     <value>▶ 预览语音</value>
+  </data>  <data name="DebugPage_TextBlock_OverridesHeader.Text" xml:space="preserve">
+    <value>调试覆盖</value>
   </data>
+  <data name="DebugPage_TextBlock_OverridesCaption.Text" xml:space="preserve">
+    <value>按聊天容器覆盖全局的“使用标准网关聊天界面”设置。应用重启后重置。</value>
+  </data>
+  <data name="DebugPage_TextBlock_HubChatLabel.Text" xml:space="preserve">
+    <value>中心聊天选项卡 UI：</value>
+  </data>
+  <data name="DebugPage_TextBlock_TrayChatLabel.Text" xml:space="preserve">
+    <value>托盘聊天弹窗 UI：</value>
+  </data>
+  <data name="DebugPage_ChatOverride_NoOverride_Hub.Content" xml:space="preserve">
+    <value>不覆盖</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceLegacy_Hub.Content" xml:space="preserve">
+    <value>强制使用网关聊天 UI</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceNative_Hub.Content" xml:space="preserve">
+    <value>强制使用伴侣聊天 UI</value>
+  </data>
+  <data name="DebugPage_ChatOverride_NoOverride_Tray.Content" xml:space="preserve">
+    <value>不覆盖</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceLegacy_Tray.Content" xml:space="preserve">
+    <value>强制使用网关聊天 UI</value>
+  </data>
+  <data name="DebugPage_ChatOverride_ForceNative_Tray.Content" xml:space="preserve">
+    <value>强制使用伴侣聊天 UI</value>
+  </data>
+  <data name="Chat_ZeroState_WelcomeTitle" xml:space="preserve">
+    <value>欢迎使用 OpenClaw</value>
+  </data>
+  <data name="Chat_ZeroState_WelcomeSubtitle" xml:space="preserve">
+    <value>今天我能帮你做什么？</value>
+  </data>
+  <data name="Chat_Status_Done" xml:space="preserve">
+    <value>完成</value>
+  </data>
+  <data name="Chat_Status_Running" xml:space="preserve">
+    <value>运行中</value>
+  </data>
+  <data name="Chat_Status_Error" xml:space="preserve">
+    <value>错误</value>
+  </data>
+  <data name="Chat_Timeline_LoadEarlier" xml:space="preserve">
+    <value>加载更早的消息</value>
+  </data>
+  <data name="Chat_Tool_CallLabel" xml:space="preserve">
+    <value>工具调用</value>
+  </data>
+  <data name="Chat_Tool_OutputLabel" xml:space="preserve">
+    <value>工具输出</value>
+  </data>
+  <data name="Chat_Tool_ErrorLabel" xml:space="preserve">
+    <value>工具错误</value>
+  </data>
+  <data name="Chat_Tool_InputSection" xml:space="preserve">
+    <value>工具输入</value>
+  </data>
+  <data name="Chat_Tool_FooterLabel" xml:space="preserve">
+    <value>工具</value>
+  </data>
+  <data name="Chat_Tool_FooterWithTimeFormat" xml:space="preserve">
+    <value>工具 · {0}</value>
+  </data>
+  <data name="Chat_Reasoning_ThinkingHeader" xml:space="preserve">
+    <value>🧠 思考中</value>
+  </data>
+  <data name="Chat_Reasoning_ThinkingEllipsis" xml:space="preserve">
+    <value>🧠 思考中…</value>
+  </data>
+  <data name="Chat_Timeline_AssistantThinkingFormat" xml:space="preserve">
+    <value>{0} 正在思考…</value>
+  </data>
+  <data name="Chat_Composer_Reasoning_Default" xml:space="preserve">
+    <value>默认</value>
+  </data>
+  <data name="Chat_Composer_Reasoning_Auto" xml:space="preserve">
+    <value>自动</value>
+  </data>
+  <data name="Chat_Composer_Reasoning_Maximum" xml:space="preserve">
+    <value>最大</value>
+  </data>
+  <data name="Chat_Composer_Placeholder_Connected" xml:space="preserve">
+    <value>给助手发送消息（按 Enter 发送）</value>
+  </data>
+  <data name="Chat_Composer_Placeholder_Connecting" xml:space="preserve">
+    <value>连接中…</value>
+  </data>
+  <data name="Chat_Composer_Placeholder_NotConnected" xml:space="preserve">
+    <value>未连接</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Attach" xml:space="preserve">
+    <value>附加</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Voice" xml:space="preserve">
+    <value>语音</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_More" xml:space="preserve">
+    <value>更多</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Send" xml:space="preserve">
+    <value>发送</value>
+  </data>
+  <data name="Chat_Composer_Tooltip_Stop" xml:space="preserve">
+    <value>停止</value>
+  </data>
+  <data name="Chat_Composer_AssistantWorking" xml:space="preserve">
+    <value>助手正在工作…</value>
+  </data>
+  <data name="Chat_Assistant_Action_Copy" xml:space="preserve">
+    <value>复制消息</value>
+  </data>
+  <data name="Chat_Assistant_Action_ReadAloud" xml:space="preserve">
+    <value>朗读</value>
+  </data>
+  <data name="Chat_User_Action_Delete" xml:space="preserve">
+    <value>删除消息</value>
+  </data>
+  <data name="Chat_TruncationMarkerFormat" xml:space="preserve">
+    <value> … [已截断 {0} 字节]</value>
+  </data>
+  <data name="Chat_Permission_Allow" xml:space="preserve">
+    <value>允许</value>
+  </data>
+  <data name="Chat_Permission_Deny" xml:space="preserve">
+    <value>拒绝</value>
+  </data>
+  <data name="Chat_Root_ConnectingToGateway" xml:space="preserve">
+    <value>正在连接到网关…</value>
+  </data>
+  <data name="Chat_Root_EmptyState_SelectSession" xml:space="preserve">
+    <value>在侧栏中选择一个会话以开始聊天。</value>
+  </data>
+  <data name="Chat_Notification_SendFailed" xml:space="preserve">
+    <value>发送失败</value>
+  </data>
+  <data name="Chat_Notification_AbortFailed" xml:space="preserve">
+    <value>中止失败</value>
+  </data>
+  <data name="Chat_Notification_LoadHistoryFailed" xml:space="preserve">
+    <value>加载历史失败</value>
+  </data>
+  <data name="Chat_Notification_AssistantReplied" xml:space="preserve">
+    <value>助手已回复</value>
+  </data>
+  <data name="Chat_Notification_ConnectionInterrupted" xml:space="preserve">
+    <value>连接已断开 — 回复已中断。</value>
+  </data>
+  <data name="VoiceSettingsPage_TestVoiceButtonText.Text" xml:space="preserve">
+    <value>测试语音输入</value>
+  </data>  <data name="PermissionsPage_FeaturesDescription_Enabled" xml:space="preserve">
+    <value>Toggle individual features that agents may request from this PC.</value>
+  </data>
+  <data name="PermissionsPage_FeaturesDescription_Disabled" xml:space="preserve">
+    <value>Turn on Node Mode above to enable these features.</value>
+  </data>
+  <data name="PermissionsPage_Cap_Browser_Label" xml:space="preserve">
+    <value>Browser control</value>
+  </data>
+  <data name="PermissionsPage_Cap_Browser_Description" xml:space="preserve">
+    <value>Lets agents drive a Chromium browser on this PC — open pages, click, and read content.</value>
+  </data>
+  <data name="PermissionsPage_Cap_Camera_Label" xml:space="preserve">
+    <value>Camera</value>
+  </data>
+  <data name="PermissionsPage_Cap_Camera_Description" xml:space="preserve">
+    <value>Lets agents capture still images and short clips from this PC's camera.</value>
+  </data>
+  <data name="PermissionsPage_Cap_Canvas_Label" xml:space="preserve">
+    <value>Canvas</value>
+  </data>
+  <data name="PermissionsPage_Cap_Canvas_Description" xml:space="preserve">
+    <value>Lets agents render and interact with a shared visual canvas hosted on this PC.</value>
+  </data>
+  <data name="PermissionsPage_Cap_Screen_Label" xml:space="preserve">
+    <value>Screen capture</value>
+  </data>
+  <data name="PermissionsPage_Cap_Screen_Description" xml:space="preserve">
+    <value>Lets agents take screenshots and short screen recordings of this PC.</value>
+  </data>
+  <data name="PermissionsPage_Cap_Location_Label" xml:space="preserve">
+    <value>Location</value>
+  </data>
+  <data name="PermissionsPage_Cap_Location_Description" xml:space="preserve">
+    <value>Lets agents read this PC's approximate location.</value>
+  </data>
+  <data name="PermissionsPage_Cap_Tts_Label" xml:space="preserve">
+    <value>Text-to-speech</value>
+  </data>
+  <data name="PermissionsPage_Cap_Tts_Description" xml:space="preserve">
+    <value>Lets agents speak text aloud through this PC's speakers.</value>
+  </data>
+  <data name="PermissionsPage_Cap_Stt_Label" xml:space="preserve">
+    <value>Speech-to-text</value>
+  </data>
+  <data name="PermissionsPage_Cap_Stt_Description" xml:space="preserve">
+    <value>Lets agents transcribe microphone audio locally using Whisper. Turning this on downloads the Whisper model (~140 MB) on first use.</value>
+  </data>
+  <data name="PermissionsPage_SttHint_Ready" xml:space="preserve">
+    <value>Whisper model is ready. Speech-to-text runs fully on this PC; no audio leaves the device.</value>
+  </data>
+  <data name="PermissionsPage_SttHint_Downloading" xml:space="preserve">
+    <value>Whisper model is downloading. Speech-to-text will be available once it's ready.</value>
+  </data>
+  <data name="PermissionsPage_SttHint_FailedFormat" xml:space="preserve">
+    <value>Whisper model download failed: {0}. Toggle Speech-to-text off and back on to retry.</value>
+  </data>
+  <data name="PermissionsPage_SttHint_NotDownloaded" xml:space="preserve">
+    <value>Whisper model is not downloaded. Open More voice settings… to download it before using speech-to-text.</value>
+  </data>
+  <data name="PermissionsPage_NodeStatus_Disabled" xml:space="preserve">
+    <value>Node mode disabled</value>
+  </data>
+  <data name="PermissionsPage_NodeStatus_DisabledDetails" xml:space="preserve">
+    <value>Enable Node Mode to provide device capabilities to agents.</value>
+  </data>
+  <data name="PermissionsPage_NodeStatus_Active" xml:space="preserve">
+    <value>Node active</value>
+  </data>
+  <data name="PermissionsPage_NodeStatus_ActiveDetailsFormat" xml:space="preserve">
+    <value>Providing {0} capabilities: {1}</value>
+  </data>
+  <data name="PermissionsPage_NodeStatus_NoCapabilities" xml:space="preserve">
+    <value>No capabilities enabled.</value>
+  </data>
+  <data name="PermissionsPage_NodeStatus_NotConnected" xml:space="preserve">
+    <value>Node mode enabled, not connected</value>
+  </data>
+  <data name="PermissionsPage_NodeStatus_NotConnectedDetails" xml:space="preserve">
+    <value>Connect to a gateway to start providing device capabilities.</value>
+  </data>
+  <data name="PermissionsPage_McpStatus_TokenReady" xml:space="preserve">
+    <value>Server enabled — token ready</value>
+  </data>
+  <data name="PermissionsPage_McpStatus_TokenPending" xml:space="preserve">
+    <value>Server enabled — token will be created on next start</value>
+  </data>
+  <data name="PermissionsPage_McpStatus_TokenCopied" xml:space="preserve">
+    <value>Token copied to clipboard</value>
+  </data>
+  <data name="PermissionsPage_McpStatus_TokenNotFound" xml:space="preserve">
+    <value>Token file not found — start the MCP server first</value>
+  </data>
+  <data name="PermissionsPage_McpStatus_UrlCopied" xml:space="preserve">
+    <value>URL copied to clipboard</value>
+  </data>
+  <data name="PermissionsPage_RulesCount_None" xml:space="preserve">
+    <value>No rules</value>
+  </data>
+  <data name="PermissionsPage_RulesCount_One" xml:space="preserve">
+    <value>1 rule</value>
+  </data>
+  <data name="PermissionsPage_RulesCount_ManyFormat" xml:space="preserve">
+    <value>{0} rules</value>
+  </data>
+  <data name="PermissionsPage_Allowlist_NoConfig" xml:space="preserve">
+    <value>No allowlist data available. Connect to a gateway first.</value>
+  </data>
+  <data name="PermissionsPage_Allowlist_NoCommands" xml:space="preserve">
+    <value>No allowed commands configured in gateway.</value>
+  </data>
+  <data name="PermissionsPage_Allowlist_ParseFailed" xml:space="preserve">
+    <value>Failed to parse allowlist from config.</value>
+  </data>  <data name="PermissionsPage_TtsStatus_DefaultProviderFormat" xml:space="preserve">
+    <value>Default provider: {0}</value>
+  </data>
+  <data name="PermissionsPage_TtsStatus_ElevenLabsSaved" xml:space="preserve">
+    <value>ElevenLabs settings saved.</value>
+  </data>
+  <data name="PermissionsPage_McpStatus_TokenReadFailedFormat" xml:space="preserve">
+    <value>Failed to read token: {0}</value>
+  </data>
+
+
 </root>

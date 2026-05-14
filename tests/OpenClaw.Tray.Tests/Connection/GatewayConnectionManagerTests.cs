@@ -158,12 +158,78 @@ public class GatewayConnectionManagerTests : IDisposable
         Assert.Equal(0, _manager.Diagnostics.Count);
     }
 
+    [Fact]
+    public async Task HandshakeSucceeded_SuppressesManagerNodeConnector_WhenLocalNodeServiceOwnsIdentity()
+    {
+        SetupGateway("gw-local", "ws://localhost:18789", isLocal: true);
+        _resolver.OperatorCredential = new GatewayCredential("op-tok", false, "test");
+        _resolver.NodeCredential = new GatewayCredential("node-tok", false, "test");
+        var nodeConnector = new CountingNodeConnector();
+        using var manager = new GatewayConnectionManager(
+            _resolver, _factory, _registry, NullLogger.Instance,
+            nodeConnector: nodeConnector,
+            shouldStartNodeConnection: (record, _) => !record.IsLocal);
+
+        await manager.ConnectAsync("gw-local");
+        await InvokeHandshakeSucceededAsync(manager);
+
+        Assert.Equal(0, nodeConnector.ConnectCount);
+    }
+
+    [Fact]
+    public async Task HandshakeSucceeded_StartsManagerNodeConnector_WhenNoLocalNodeServiceOwnsIdentity()
+    {
+        SetupGateway("gw-remote", "wss://remote.example", isLocal: false);
+        _resolver.OperatorCredential = new GatewayCredential("op-tok", false, "test");
+        _resolver.NodeCredential = new GatewayCredential("node-tok", false, "test");
+        var nodeConnector = new CountingNodeConnector();
+        using var manager = new GatewayConnectionManager(
+            _resolver, _factory, _registry, NullLogger.Instance,
+            nodeConnector: nodeConnector,
+            shouldStartNodeConnection: (record, _) => !record.IsLocal);
+
+        await manager.ConnectAsync("gw-remote");
+        await InvokeHandshakeSucceededAsync(manager);
+
+        Assert.Equal(1, nodeConnector.ConnectCount);
+        Assert.Equal("wss://remote.example", nodeConnector.LastGatewayUrl);
+    }
+
+    [Fact]
+    public async Task ChatPageNavigationReadiness_DoesNotCompleteUntilHandshakeSucceeded()
+    {
+        SetupGateway("gw-chat", "ws://localhost:18789", isLocal: true);
+        _resolver.OperatorCredential = new GatewayCredential("op-tok", false, "test");
+
+        await _manager.ConnectAsync("gw-chat");
+
+        var readiness = ChatNavigationReadiness.WaitForOperatorHandshakeAsync(
+            _manager,
+            TimeSpan.FromSeconds(5));
+
+        Assert.False(readiness.IsCompleted);
+
+        await InvokeHandshakeSucceededAsync(_manager);
+
+        Assert.True(await readiness);
+    }
+
     // ─── Helpers ───
 
-    private void SetupGateway(string id, string url)
+    private void SetupGateway(string id, string url, bool isLocal = false)
     {
-        _registry.AddOrUpdate(new GatewayRecord { Id = id, Url = url });
+        _registry.AddOrUpdate(new GatewayRecord { Id = id, Url = url, IsLocal = isLocal });
         _registry.SetActive(id);
+    }
+
+    private static async Task InvokeHandshakeSucceededAsync(GatewayConnectionManager manager)
+    {
+        var method = typeof(GatewayConnectionManager).GetMethod(
+            "HandleHandshakeSucceededAsync",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var task = (Task)method!.Invoke(manager, [1L])!;
+        await task;
     }
 
     // ─── Mocks ───
@@ -210,6 +276,9 @@ public class GatewayConnectionManagerTests : IDisposable
         public void SimulateAuthFailed(string msg) =>
             AuthenticationFailed?.Invoke(this, msg);
 
+        public void SimulateHandshake() =>
+            _client.SimulateHandshakeSucceeded();
+
         public void Dispose() { }
     }
 
@@ -217,5 +286,100 @@ public class GatewayConnectionManagerTests : IDisposable
     {
         public MockGatewayClient(string url)
             : base(url, "mock-token", NullLogger.Instance) { }
+
+        /// <summary>Simulate a successful hello-ok handshake for testing.</summary>
+        public void SimulateHandshakeSucceeded()
+        {
+            // Fire the HandshakeSucceeded event to trigger the manager's handler
+            OnHandshakeSucceeded();
+        }
+
+        // Protected invoker — OpenClawGatewayClient.HandshakeSucceeded is a public event.
+        // We use reflection because the event doesn't have a virtual invoker.
+        private void OnHandshakeSucceeded()
+        {
+            var field = typeof(OpenClawGatewayClient).GetField(
+                nameof(HandshakeSucceeded),
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+            // Events compiled as backing fields in C# are named the same as the event.
+            // In case the compiler generates a different name, fall back to raising through the base.
+            if (field != null)
+            {
+                var handler = field.GetValue(this) as EventHandler;
+                handler?.Invoke(this, EventArgs.Empty);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task HandshakeSucceeded_StampsLastConnectedOnGatewayRecord()
+    {
+        SetupGateway("gw-1", "wss://test");
+        _resolver.OperatorCredential = new GatewayCredential("tok", false, "test");
+
+        await _manager.ConnectAsync("gw-1");
+
+        // Simulate successful handshake
+        var lifecycle = _factory.CreatedClients[0];
+        lifecycle.SimulateHandshake();
+
+        // Allow async handler to complete
+        await Task.Delay(100);
+
+        var record = _registry.GetById("gw-1");
+        Assert.NotNull(record?.LastConnected);
+    }
+
+    [Fact]
+    public async Task HandshakeSucceeded_PreservesOtherRecordFields()
+    {
+        _registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "gw-1",
+            Url = "wss://test",
+            SharedGatewayToken = "shared-tok",
+            FriendlyName = "TestGW"
+        });
+        _registry.SetActive("gw-1");
+        _resolver.OperatorCredential = new GatewayCredential("tok", false, "test");
+
+        await _manager.ConnectAsync("gw-1");
+
+        var lifecycle = _factory.CreatedClients[0];
+        lifecycle.SimulateHandshake();
+        await Task.Delay(100);
+
+        var record = _registry.GetById("gw-1")!;
+        Assert.True(record.LastConnected.HasValue);
+        Assert.Equal("shared-tok", record.SharedGatewayToken);
+        Assert.Equal("TestGW", record.FriendlyName);
+    }
+
+    private sealed class CountingNodeConnector : INodeConnector
+    {
+        public int ConnectCount { get; private set; }
+        public string? LastGatewayUrl { get; private set; }
+        public bool IsConnected => ConnectCount > 0;
+        public PairingStatus PairingStatus { get; private set; } = PairingStatus.Unknown;
+        public string? NodeDeviceId => "test-node";
+        public NodeConnectionMode Mode => IsConnected ? NodeConnectionMode.Gateway : NodeConnectionMode.Disabled;
+
+#pragma warning disable CS0067 // Events required by interface but not fired in tests
+        public event EventHandler<ConnectionStatus>? StatusChanged;
+        public event EventHandler<PairingStatusEventArgs>? PairingStatusChanged;
+        public event EventHandler<NodeClientCreatedEventArgs>? ClientCreated;
+#pragma warning restore CS0067
+
+        public Task ConnectAsync(string gatewayUrl, GatewayCredential credential, string identityPath, bool useV2Signature = false)
+        {
+            ConnectCount++;
+            LastGatewayUrl = gatewayUrl;
+            PairingStatus = PairingStatus.Paired;
+            return Task.CompletedTask;
+        }
+
+        public Task DisconnectAsync() => Task.CompletedTask;
+
+        public void Dispose() { }
     }
 }

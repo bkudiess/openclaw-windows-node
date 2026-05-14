@@ -59,6 +59,55 @@ public sealed class RenderContextTests
         Assert.Equal(1, ranCount);
     }
 
+    [Fact]
+    public void RunEffectCleanups_InvokesRegisteredCleanupOnce()
+    {
+        var ctx = new RenderContext();
+        var cleanupCount = 0;
+
+        Render(ctx, () => ctx.UseEffect(() => () => cleanupCount++, Array.Empty<object>()));
+
+        ctx.RunEffectCleanups();
+        ctx.RunEffectCleanups();
+
+        Assert.Equal(1, cleanupCount);
+    }
+
+    [Fact]
+    public void UseEffect_WithChangingDependencies_RunsPreviousCleanup()
+    {
+        var ctx = new RenderContext();
+        var cleanupCount = 0;
+
+        Render(ctx, () => ctx.UseEffect(() => () => cleanupCount++, new object[] { 1 }));
+        Render(ctx, () => ctx.UseEffect(() => () => cleanupCount++, new object[] { 2 }));
+
+        Assert.Equal(1, cleanupCount);
+    }
+
+    [Fact]
+    public void UseReducer_UpdaterUsesLatestHookValue()
+    {
+        var ctx = new RenderContext();
+        var value = 0;
+        Action<Func<int, int>> update = _ => { };
+
+        Render(ctx, () =>
+        {
+            (value, update) = ctx.UseReducer(0, threadSafe: true);
+        });
+
+        update(prev => prev + 1);
+        update(prev => prev + 1);
+
+        Render(ctx, () =>
+        {
+            (value, update) = ctx.UseReducer(0, threadSafe: true);
+        });
+
+        Assert.Equal(2, value);
+    }
+
     private static void Render(RenderContext ctx, Action render)
     {
         var effects = new List<Action>();

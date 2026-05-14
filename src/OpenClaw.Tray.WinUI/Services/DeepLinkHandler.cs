@@ -57,7 +57,7 @@ public static class DeepLinkHandler
         if (result == null)
             return;
 
-        var path = result.Path;
+        var path = result.Path?.TrimEnd('/') ?? string.Empty;
 
         Logger.Info($"Handling deep link: {path}");
 

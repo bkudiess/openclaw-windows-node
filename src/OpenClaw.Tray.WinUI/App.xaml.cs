@@ -3,7 +3,6 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using OpenClaw.Shared;
-using OpenClaw.Shared.Capabilities;
 using OpenClawTray.Dialogs;
 using OpenClawTray.Helpers;
 using OpenClawTray.Services;
@@ -19,10 +18,11 @@ using System.Drawing;
 using System.IO;
 using System.IO.Pipes;
 using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Updatum;
-using Windows.ApplicationModel.DataTransfer;
 using WinUIEx;
 
 namespace OpenClawTray;
@@ -40,6 +40,7 @@ public partial class App : Application
     private TrayIcon? _trayIcon;
     private GatewayConnectionManager? _connectionManager;
     private GatewayRegistry? _gatewayRegistry;
+    private OpenClawTray.Chat.OpenClawChatCoordinator? _chatCoordinator;
     /// <summary>
     /// Cached reference to the most recently constructed local-setup engine. Used by
     /// <see cref="OnPairingStatusChanged"/> to suppress the "copy pairing command" toast
@@ -58,6 +59,17 @@ public partial class App : Application
     public GatewayRegistry? Registry => _gatewayRegistry;
     public GatewayConnectionManager? ConnectionManager => _connectionManager;
     internal SettingsManager Settings => _settings ?? throw new InvalidOperationException("Settings are not initialized.");
+
+    public OpenClawTray.Chat.OpenClawChatDataProvider? ChatProvider => _chatCoordinator?.Provider;
+
+    /// <summary>
+    /// Raised after the tray-wide settings have been saved (either via the
+    /// SettingsPage Save button or a direct toggle from the tray menu).
+    /// Subscribers can refresh UI that depends on a setting (e.g. switching
+    /// the chat surface between native chat and WebView2).
+    /// </summary>
+    public event EventHandler? SettingsChanged;
+    public event EventHandler? ChatProviderChanged;
 
     /// <summary>
     /// Ensures the managed SSH tunnel is started using the current settings.
@@ -311,6 +323,156 @@ public partial class App : Application
         }
         catch { /* Ignore logging failures */ }
     }
+
+    // -----------------------------------------------------------------------
+    // CLI uninstall path
+    // Invoked when --uninstall is present in argv. Runs headlessly without
+    // creating the tray UI. Attaches to the parent console so stdout/stderr
+    // are visible when invoked from PowerShell or cmd.
+    // -----------------------------------------------------------------------
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AttachConsole(int dwProcessId);
+
+    private const int AttachParentProcess = -1;
+
+    private static async Task RunCliUninstallAsync(string[] args)
+    {
+        // Attach to parent console so output is visible when invoked from
+        // PowerShell or cmd.  Fails silently if no parent console exists.
+        AttachConsole(AttachParentProcess);
+
+        bool dryRun            = args.Contains("--dry-run",            StringComparer.OrdinalIgnoreCase);
+        bool confirmDestructive = args.Contains("--confirm-destructive", StringComparer.OrdinalIgnoreCase);
+
+        // Locate --json-output <path> argument
+        string? jsonOutputPath = null;
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], "--json-output", StringComparison.OrdinalIgnoreCase))
+            {
+                jsonOutputPath = args[i + 1];
+                break;
+            }
+        }
+
+        if (!confirmDestructive && !dryRun)
+        {
+            Console.Error.WriteLine(
+                "ERROR: --uninstall requires --confirm-destructive (or --dry-run).");
+            Environment.Exit(2);
+            return;
+        }
+
+        var settings = new SettingsManager();
+        var engine   = LocalGatewayUninstall.Build(settings, logger: new AppLogger());
+
+        LocalGatewayUninstallResult result;
+        try
+        {
+            result = await engine.RunAsync(new LocalGatewayUninstallOptions
+            {
+                DryRun             = dryRun,
+                ConfirmDestructive = confirmDestructive
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"ERROR: Uninstall engine threw: {ex.Message}");
+            Environment.Exit(1);
+            return;
+        }
+
+        // Human-readable summary (tokens already redacted inside engine steps)
+        Console.WriteLine("OpenClaw Local Gateway Uninstall");
+        Console.WriteLine($"DryRun:   {dryRun}");
+        Console.WriteLine($"Success:  {result.Success}");
+        Console.WriteLine($"Steps:    {result.Steps.Count} ({result.SkippedSteps.Count} skipped)");
+        Console.WriteLine($"Errors:   {result.Errors.Count}");
+        foreach (var e in result.Errors)
+            Console.Error.WriteLine($"  ERROR: {CliRedact(e)}");
+        Console.WriteLine("Postconditions:");
+        Console.WriteLine($"  WslDistroAbsent:    {result.Postconditions.WslDistroAbsent}");
+        Console.WriteLine($"  AutostartCleared:   {result.Postconditions.AutostartCleared}");
+        Console.WriteLine($"  SetupStateAbsent:   {result.Postconditions.SetupStateAbsent}");
+        Console.WriteLine($"  DeviceTokenCleared: {result.Postconditions.DeviceTokenCleared}");
+        Console.WriteLine($"  McpTokenPreserved:  {result.Postconditions.McpTokenPreserved}");
+        Console.WriteLine($"  KeepalivesAbsent:   {result.Postconditions.KeepalivesAbsent}");
+        Console.WriteLine($"  VhdDirAbsent:       {result.Postconditions.VhdDirAbsent}");
+        Console.WriteLine($"  LocalGatewayRecordsAbsent:      {result.Postconditions.LocalGatewayRecordsAbsent}");
+        Console.WriteLine($"  LocalGatewayIdentityDirsAbsent: {result.Postconditions.LocalGatewayIdentityDirsAbsent}");
+
+        // JSON output — redaction applied to step details and error strings
+        if (jsonOutputPath != null)
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(jsonOutputPath);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+
+                var payload = new
+                {
+                    success = result.Success,
+                    dry_run = dryRun,
+                    steps   = result.Steps.Select(s => new
+                    {
+                        name   = s.Name,
+                        status = s.Status.ToString(),
+                        detail = CliRedact(s.Detail)
+                    }),
+                    errors       = result.Errors.Select(CliRedact),
+                    skipped_steps = result.SkippedSteps,
+                    postconditions = new
+                    {
+                        wsl_distro_absent     = result.Postconditions.WslDistroAbsent,
+                        autostart_cleared     = result.Postconditions.AutostartCleared,
+                        setup_state_absent    = result.Postconditions.SetupStateAbsent,
+                        device_token_cleared  = result.Postconditions.DeviceTokenCleared,
+                        mcp_token_preserved   = result.Postconditions.McpTokenPreserved,
+                        keepalives_absent     = result.Postconditions.KeepalivesAbsent,
+                        vhd_dir_absent        = result.Postconditions.VhdDirAbsent,
+                        local_gateway_records_absent = result.Postconditions.LocalGatewayRecordsAbsent,
+                        local_gateway_identity_dirs_absent = result.Postconditions.LocalGatewayIdentityDirsAbsent
+                    }
+                };
+
+                File.WriteAllText(jsonOutputPath, JsonSerializer.Serialize(
+                    payload, new JsonSerializerOptions { WriteIndented = true }));
+
+                Console.WriteLine($"JSON result: {jsonOutputPath}");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"WARNING: Failed to write JSON output to '{jsonOutputPath}': {ex.Message}");
+            }
+        }
+
+        Environment.Exit(result.Success ? 0 : 1);
+    }
+
+    /// <summary>
+    /// Redacts token/key material from a string before writing it to CLI
+    /// stdout or a JSON output file.  Mirrors the PowerShell Invoke-Redact
+    /// pattern in validate-wsl-gateway-uninstall.ps1.
+    /// </summary>
+    private static string? CliRedact(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return value;
+        // Redact JSON field values for known secret fields.
+        value = System.Text.RegularExpressions.Regex.Replace(
+            value,
+            @"(""(?i:deviceToken|device_token|token|bootstrapToken|bootstrap_token|PrivateKeyBase64|PublicKeyBase64)""\s*:\s*"")[^""]+("")",
+            "$1<redacted>$2");
+        // Redact bare key=value / key: value patterns.
+        value = System.Text.RegularExpressions.Regex.Replace(
+            value,
+            @"(?i)((?:device|bootstrap|gateway|auth|mcp)[_-]?token\s*[:=]\s*)[^\s,""'}{]+",
+            "$1<redacted>");
+        return value;
+    }
     
     private static void CheckPreviousRun()
     {
@@ -372,6 +534,19 @@ public partial class App : Application
         _startupArgs = Environment.GetCommandLineArgs();
         _dispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
 
+        // -----------------------------------------------------------------------
+        // CLI uninstall path — headless; never shows tray or any windows.
+        // Approach: detect in OnLaunched before any UI is created (WinUI3 Main
+        // is auto-generated; earliest interception point is OnLaunched).
+        // Bypasses the single-instance mutex so the Inno uninstaller can invoke
+        // this even while the tray is running.
+        // -----------------------------------------------------------------------
+        if (_startupArgs.Contains("--uninstall", StringComparer.OrdinalIgnoreCase))
+        {
+            await RunCliUninstallAsync(_startupArgs);
+            return; // Environment.Exit called inside; defensive return
+        }
+
         // Check for protocol activation (MSIX packaged apps receive deep links this way)
         string? protocolUri = GetProtocolActivationUri();
 
@@ -382,6 +557,11 @@ public partial class App : Application
         // two test runs against the same data dir would otherwise pick different
         // mutex names — and `Math.Abs(int.MinValue)` overflows. Use a stable
         // SHA-256 prefix instead.
+        // NOTE: The bare "OpenClawTray" mutex name is also referenced by
+        // installer.iss `AppMutex=` for install/uninstall race coordination
+        // (round 2, Scott #5). The suffixed test-isolation variant is
+        // intentionally not covered by AppMutex — production installs only
+        // ever use the unsuffixed name.
         var mutexName = "OpenClawTray";
         if (DataDirOverride is not null)
         {
@@ -410,6 +590,13 @@ public partial class App : Application
         // Initialize settings before update check so skip selections can be remembered.
         _settings = new SettingsManager();
         _previousSettingsSnapshot = _settings.ToSettingsData();
+        _chatCoordinator = new OpenClawTray.Chat.OpenClawChatCoordinator(
+            _settings,
+            () => _nodeService,
+            new AppLogger(),
+            _dispatcherQueue is null
+                ? null
+                : OpenClawTray.Chat.FunctionalChatHostExtensions.AsPost(_dispatcherQueue));
         DiagnosticsJsonlService.Configure(DataPath);
         DiagnosticsJsonlService.Write("app.start", new
         {
@@ -446,6 +633,9 @@ public partial class App : Application
         // propagate through `await ShowOnboardingAsync()` and abort OnLaunched
         // before the tray ever initializes.
         InitializeTrayIcon();
+        // Apply the user's saved default chat preset (if any) before any chat
+        // surface mounts so initial render uses their preferred styling.
+        OpenClawTray.Chat.Explorations.ChatExplorationPresetStore.ApplyDefaultIfPresent();
         ShowSurfaceImprovementsTipIfNeeded();
 
         // First-run check (also supports forced onboarding for testing).
@@ -472,6 +662,24 @@ public partial class App : Application
         var appLogger = new AppLogger();
         var diagnostics = new ConnectionDiagnostics();
         var nodeConnector = new NodeConnector(appLogger, diagnostics);
+        // Bridge: whenever NodeConnector creates a fresh WindowsNodeClient (initial
+        // connect or reconnect), register the node's capabilities on it BEFORE the
+        // outbound "connect" handshake runs. Without this hookup the gateway sees
+        // the node as having no advertised commands and the agent cannot invoke
+        // anything on it. _nodeService may be null at app startup (constructed
+        // lazily); when null we no-op and the gateway will see an empty caps list
+        // until the next reconnect after _nodeService becomes available.
+        nodeConnector.ClientCreated += (_, args) =>
+        {
+            try
+            {
+                _nodeService?.AttachClient(args.Client, args.BearerToken);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[App] NodeConnector.ClientCreated handler failed: {ex.Message}");
+            }
+        };
         // Wrap the SSH tunnel service so the connection manager can start/stop the tunnel
         var tunnelManager = _sshTunnelService != null
             ? new SshTunnelManager(_sshTunnelService, appLogger)
@@ -482,9 +690,22 @@ public partial class App : Application
             nodeConnector: nodeConnector,
             isNodeEnabled: ShouldInitializeNodeService,
             diagnostics: diagnostics,
-            tunnelManager: tunnelManager);
+            tunnelManager: tunnelManager,
+            shouldStartNodeConnection: ShouldInitializeNodeService);
         _connectionManager.OperatorClientChanged += OnOperatorClientChanged;
         _connectionManager.StateChanged += OnManagerStateChanged;
+
+        // Ensure NodeService is constructed BEFORE InitializeGatewayClient triggers a
+        // NodeConnector connect. The NodeConnector.ClientCreated event subscription
+        // above relies on _nodeService being non-null to register capabilities on the
+        // new WindowsNodeClient. If we don't pre-construct here, the first connect
+        // happens with empty caps and the gateway records this node as having no
+        // advertised commands (which leaves the agent unable to invoke anything on it).
+        // The method is idempotent — safe to call here AND later if first-run setup runs.
+        if (ShouldInitializeNodeService() && _settings != null)
+        {
+            EnsureNodeServiceForLocalGatewaySetup(_settings);
+        }
 
         // Initialize connections — always create operator client for UI data,
         // additionally create node service for gateway node mode or local MCP.
@@ -830,9 +1051,7 @@ public partial class App : Application
         
         try
         {
-            var dataPackage = new global::Windows.ApplicationModel.DataTransfer.DataPackage();
-            dataPackage.SetText(_nodeService.FullDeviceId);
-            global::Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
+            CopyTextToClipboard(_nodeService.FullDeviceId);
             
             // Show toast confirming copy
             ShowToast(new ToastContentBuilder()
@@ -859,9 +1078,7 @@ public partial class App : Application
             });
             var summary = string.Join(Environment.NewLine, lines);
 
-            var dataPackage = new global::Windows.ApplicationModel.DataTransfer.DataPackage();
-            dataPackage.SetText(summary);
-            global::Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
+            CopyTextToClipboard(summary);
 
             ShowToast(new ToastContentBuilder()
                 .AddText(LocalizationHelper.GetString("Toast_NodeSummaryCopied"))
@@ -1182,18 +1399,21 @@ public partial class App : Application
         }
 
         // ── Connected Devices with inline permission toggles ──
-        if (_lastNodes.Length > 0)
+        // Only show currently-connected nodes; offline/stale paired nodes
+        // remain visible on the full Nodes page where they can be renamed
+        // or forgotten.
+        var connectedNodes = _lastNodes.Where(n => n.IsOnline).ToArray();
+        if (connectedNodes.Length > 0)
         {
             menu.AddSeparator();
 
-            var onlineCount = _lastNodes.Count(n => n.IsOnline);
-            var totalCaps = _lastNodes.Sum(n => n.CapabilityCount);
-            var deviceSummaryRight = $"{onlineCount} online · {totalCaps} caps";
+            var totalCaps = connectedNodes.Sum(n => n.CapabilityCount);
+            var deviceSummaryRight = $"{connectedNodes.Length} online · {totalCaps} caps";
             menu.AddCustomElement(BuildSectionHeader("Devices", deviceSummaryRight));
 
             var currentHost = Environment.MachineName;
 
-            foreach (var node in _lastNodes.Take(5))
+            foreach (var node in connectedNodes.Take(5))
             {
                 var card = BuildDeviceCard(node);
                 var flyoutItems = BuildDeviceFlyoutItems(node);
@@ -1752,8 +1972,12 @@ public partial class App : Application
         var activeRecord = _gatewayRegistry.GetActive();
         if (activeRecord != null)
         {
-            // Registry has an active gateway — connect directly
-            _ = _connectionManager.ConnectAsync(activeRecord.Id);
+            if (!TryConnectGatewayIfCredentialAvailable(activeRecord, "startup"))
+            {
+                // Still start MCP-only node if enabled — the active record may be stale
+                // and MCP-only mode must work without gateway credentials.
+                TryStartLocalMcpOnlyNode();
+            }
             return;
         }
 
@@ -1761,7 +1985,8 @@ public partial class App : Application
         activeRecord = _gatewayRegistry.GetActive();
         if (activeRecord != null)
         {
-            _ = _connectionManager.ConnectAsync(activeRecord.Id);
+            if (!TryConnectGatewayIfCredentialAvailable(activeRecord, "legacy migration"))
+                TryStartLocalMcpOnlyNode();
             return;
         }
 
@@ -1801,6 +2026,7 @@ public partial class App : Application
             {
                 Id = recordId,
                 Url = gatewayUrl,
+                IsLocal = LocalGatewayUrlClassifier.IsLocalGatewayUrl(gatewayUrl),
                 SshTunnel = _settings.UseSshTunnel
                     ? new SshTunnelConfig(
                         _settings.SshTunnelUser ?? "",
@@ -1834,7 +2060,55 @@ public partial class App : Application
 
         // Delegate to connection manager — it creates the client, fires OperatorClientChanged,
         // and our handler re-wires the 27 event subscriptions
-        _ = _connectionManager.ConnectAsync(migratedRecord.Id);
+        if (!TryConnectGatewayIfCredentialAvailable(migratedRecord, "startup bridge"))
+            TryStartLocalMcpOnlyNode();
+    }
+
+    /// <summary>
+    /// Connects only when the active gateway has a usable operator credential:
+    /// device token, shared gateway token, or bootstrap token.
+    /// </summary>
+    private bool TryConnectGatewayIfCredentialAvailable(GatewayRecord record, string context)
+    {
+        if (_connectionManager == null)
+            return false;
+
+        var credential = ResolveStartupOperatorCredential(record);
+        if (credential == null)
+        {
+            Logger.Info($"Active gateway has no usable credential — skipping {context} connect");
+            return false;
+        }
+
+        var connectionKind = record.LastConnected.HasValue
+            ? "last successful gateway"
+            : "credentialed gateway";
+        Logger.Info($"Connecting to {connectionKind} during {context}: {record.Url} ({credential.Source})");
+        _ = _connectionManager.ConnectAsync(record.Id);
+        return true;
+    }
+
+    private OpenClawTray.Services.Connection.GatewayCredential? ResolveStartupOperatorCredential(GatewayRecord record)
+    {
+        if (_gatewayRegistry == null)
+            return null;
+
+        var resolver = new CredentialResolver(DeviceIdentityFileReader.Instance);
+        var identityDir = _gatewayRegistry.GetIdentityDirectory(record.Id);
+        var credential = resolver.ResolveOperator(record, identityDir);
+        if (credential != null)
+            return credential;
+
+        // Backfill for legacy installs that still have the identity file at the
+        // root settings path while the active registry record points at that URL.
+        var effectiveUrl = _settings?.GetEffectiveGatewayUrl();
+        if (!string.IsNullOrWhiteSpace(effectiveUrl) &&
+            string.Equals(record.Url, effectiveUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            return resolver.ResolveOperator(record, SettingsManager.SettingsDirectoryPath);
+        }
+
+        return null;
     }
 
     private void TryMigrateLegacyGatewaySettings(string gatewayUrl, IOpenClawLogger logger)
@@ -1919,6 +2193,7 @@ public partial class App : Application
             old.GatewaySelfUpdated -= OnGatewaySelfUpdated;
             old.CronListUpdated -= OnCronListUpdated;
             old.CronStatusUpdated -= OnCronStatusUpdated;
+            old.CronRunsUpdated -= OnCronRunsUpdated;
             old.ConfigUpdated -= OnConfigUpdated;
             old.ConfigSchemaUpdated -= OnConfigSchemaUpdated;
             old.SkillsStatusUpdated -= OnSkillsStatusUpdated;
@@ -1952,6 +2227,7 @@ public partial class App : Application
             client.GatewaySelfUpdated += OnGatewaySelfUpdated;
             client.CronListUpdated += OnCronListUpdated;
             client.CronStatusUpdated += OnCronStatusUpdated;
+            client.CronRunsUpdated += OnCronRunsUpdated;
             client.ConfigUpdated += OnConfigUpdated;
             client.ConfigSchemaUpdated += OnConfigSchemaUpdated;
             client.SkillsStatusUpdated += OnSkillsStatusUpdated;
@@ -1963,7 +2239,15 @@ public partial class App : Application
             client.AgentsListUpdated += OnAgentsListUpdated;
             client.AgentFilesListUpdated += OnAgentFilesListUpdated;
             client.AgentFileContentUpdated += OnAgentFileContentUpdated;
+
+            _chatCoordinator?.SetOperatorClient(client);
         }
+        else
+        {
+            _chatCoordinator?.SetOperatorClient(null);
+        }
+
+        RaiseChatProviderChanged();
 
         _lastGatewaySelf = null;
 
@@ -1976,6 +2260,11 @@ public partial class App : Application
                 _hubWindow.CurrentStatus = _currentStatus;
             }
         });
+    }
+
+    private void RaiseChatProviderChanged()
+    {
+        ChatProviderChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
@@ -2185,6 +2474,27 @@ public partial class App : Application
     {
         if (_suppressNodeDuringSetup) return false;
         return _settings?.EnableNodeMode == true || _settings?.EnableMcpServer == true;
+    }
+
+    private bool ShouldInitializeNodeService(GatewayRecord activeGateway, string managerIdentityPath)
+    {
+        if (!ShouldInitializeNodeService()) return false;
+
+        if (LocalNodeServiceOwnsIdentityFor(activeGateway))
+        {
+            Logger.Info("[ConnMgr] Suppressing manager-owned NodeConnector because local NodeService owns the active local gateway identity");
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool LocalNodeServiceOwnsIdentityFor(GatewayRecord activeGateway)
+    {
+        if (!activeGateway.IsLocal || _settings == null) return false;
+        if (!StartupSetupState.HasStoredNodeDeviceToken(IdentityDataPath)) return false;
+
+        return EnsureNodeServiceForLocalGatewaySetup(_settings) != null;
     }
 
     private void OnNodeStatusChanged(object? sender, ConnectionStatus status)
@@ -2705,6 +3015,11 @@ public partial class App : Application
         _dispatcherQueue?.TryEnqueue(() => _hubWindow?.UpdateCronStatus(data));
     }
 
+    private void OnCronRunsUpdated(object? sender, System.Text.Json.JsonElement data)
+    {
+        _dispatcherQueue?.TryEnqueue(() => _hubWindow?.UpdateCronRuns(data));
+    }
+
     private void OnSkillsStatusUpdated(object? sender, System.Text.Json.JsonElement data)
     {
         _dispatcherQueue?.TryEnqueue(() => _hubWindow?.UpdateSkillsStatus(data));
@@ -2801,7 +3116,7 @@ public partial class App : Application
             // TTS: read response aloud whenever the toggle is on (any chat surface).
             if (_settings?.VoiceTtsEnabled == true)
             {
-                _ = SpeakResponseAsync(notification.Message);
+                _ = (_chatCoordinator?.SpeakResponseAsync(notification.Message) ?? Task.CompletedTask);
             }
         }
 
@@ -2869,6 +3184,8 @@ public partial class App : Application
         if (notification.IsChat)
         {
             if (_hubWindow != null && !_hubWindow.IsClosed)
+                return false;
+            if (_chatWindow is { IsClosed: false, Visible: true })
                 return false;
             if (_onboardingWindow != null)
                 return false; // Onboarding window has chat overlay
@@ -2942,13 +3259,10 @@ public partial class App : Application
     {
         if (_trayIcon == null) return;
 
-        var status = _currentStatus;
-        if (_currentActivity != null && _currentActivity.Kind != OpenClaw.Shared.ActivityKind.Idle)
-        {
-            status = ConnectionStatus.Connecting; // Use connecting icon for activity
-        }
-
-        var iconPath = IconHelper.GetStatusIconPath(status);
+        // Tray icon is pinned to the app icon so it visually matches the agent
+        // avatar and chat-window title bar. Status is communicated via the
+        // tooltip text below rather than swapping the icon image.
+        var iconPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "openclaw.ico");
         var tooltip = BuildTrayTooltip();
 
         try
@@ -3032,6 +3346,7 @@ public partial class App : Application
             _hubWindow.QuickSendAction = () => ShowQuickSend();
             _hubWindow.OpenSetupAction = () => _ = ShowOnboardingAsync();
             _hubWindow.OpenConnectionStatusAction = ShowConnectionStatusWindow;
+            _hubWindow.OpenVoiceAction = () => ShowVoiceOverlay();
             _hubWindow.ConnectionManager = _connectionManager;
             _hubWindow.GatewayRegistry = _gatewayRegistry;
             _hubWindow.ConnectAction = () =>
@@ -3210,6 +3525,10 @@ public partial class App : Application
             _hubWindow.GatewayClient = _connectionManager?.OperatorClient;
             _hubWindow.CurrentStatus = _currentStatus;
         }
+
+        // Notify ad-hoc listeners (e.g. ChatWindow may be alive but not
+        // owned by the hub) that settings have changed.
+        SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void ShowWebChat()
@@ -3368,414 +3687,27 @@ public partial class App : Application
         _hubWindow?.UpdateStatus(_currentStatus);
     }
 
-    private GatewayCommandCenterState BuildCommandCenterState()
+    private GatewayCommandCenterState BuildCommandCenterState() =>
+        new CommandCenterStateBuilder(CaptureSnapshot()).Build();
+
+    private AppStateSnapshot CaptureSnapshot() => new AppStateSnapshot
     {
-        var nodes = _lastNodes.Select(NodeCapabilityHealthInfo.FromNode).ToList();
-        if (nodes.Count == 0 && _nodeService?.GetLocalNodeInfo() is { } localNode)
-        {
-            nodes.Add(NodeCapabilityHealthInfo.FromNode(localNode));
-        }
-
-        var topology = GatewayTopologyClassifier.Classify(
-            _settings?.GatewayUrl,
-            _settings?.UseSshTunnel == true,
-            _settings?.SshTunnelHost,
-            _settings?.SshTunnelLocalPort ?? 0,
-            _settings?.SshTunnelRemotePort ?? 0);
-        var tunnel = BuildTunnelInfo();
-        var portDiagnostics = PortDiagnosticsService.BuildDiagnostics(topology, tunnel);
-        ApplyDetectedSshForwardTopology(topology, portDiagnostics);
-        var runtime = BuildGatewayRuntimeInfo(portDiagnostics);
-        var warnings = nodes.SelectMany(n => n.Warnings).ToList();
-        warnings.AddRange(CommandCenterDiagnostics.BuildTopologyWarnings(topology, tunnel));
-        warnings.AddRange(BuildPortDiagnosticWarnings(portDiagnostics, topology, tunnel));
-        warnings.AddRange(BuildBrowserProxyAuthWarnings(nodes));
-
-        if (!string.IsNullOrWhiteSpace(_authFailureMessage))
-        {
-            warnings.Insert(0, new GatewayDiagnosticWarning
-            {
-                Severity = GatewayDiagnosticSeverity.Critical,
-                Category = "auth",
-                Title = "Gateway authentication failed",
-                Detail = _authFailureMessage
-            });
-        }
-
-        if (_nodeService?.IsPendingApproval == true && !string.IsNullOrWhiteSpace(_nodeService.FullDeviceId))
-        {
-            var approvalCommand = $"openclaw devices approve {_nodeService.FullDeviceId}";
-            warnings.Add(new GatewayDiagnosticWarning
-            {
-                Severity = GatewayDiagnosticSeverity.Warning,
-                Category = "pairing",
-                Title = "Node is waiting for approval",
-                Detail = $"Approve device {_nodeService.ShortDeviceId} from the gateway CLI, then re-open the command center after reconnect.",
-                RepairAction = "Copy approval command",
-                CopyText = approvalCommand
-            });
-        }
-
-        if (_currentStatus == ConnectionStatus.Error)
-        {
-            warnings.Insert(0, new GatewayDiagnosticWarning
-            {
-                Severity = GatewayDiagnosticSeverity.Critical,
-                Category = "gateway",
-                Title = "Gateway connection error",
-                Detail = "The tray is not currently connected to the gateway."
-            });
-        }
-        else if (_currentStatus != ConnectionStatus.Connected)
-        {
-            warnings.Add(new GatewayDiagnosticWarning
-            {
-                Severity = GatewayDiagnosticSeverity.Warning,
-                Category = "gateway",
-                Title = "Gateway is not connected",
-                Detail = $"Current connection state is {_currentStatus}."
-            });
-        }
-
-        if (_currentStatus == ConnectionStatus.Connected &&
-            DateTime.Now - _lastCheckTime > TimeSpan.FromMinutes(2))
-        {
-            warnings.Add(new GatewayDiagnosticWarning
-            {
-                Severity = GatewayDiagnosticSeverity.Warning,
-                Category = "gateway",
-                Title = "Gateway health is stale",
-                Detail = $"Last health check was {_lastCheckTime:t}. Run a health check or verify the localhost tunnel."
-            });
-        }
-
-        if (_lastChannels.Length == 0 && _currentStatus == ConnectionStatus.Connected && _connectionManager?.OperatorClient != null)
-        {
-            warnings.Add(new GatewayDiagnosticWarning
-            {
-                Severity = GatewayDiagnosticSeverity.Info,
-                Category = "channel",
-                Title = "No channels reported",
-                Detail = "The gateway health payload did not report any channels."
-            });
-        }
-        else if (_lastChannels.Length == 0 && _currentStatus == ConnectionStatus.Connected && _settings?.EnableNodeMode == true)
-        {
-            warnings.Add(new GatewayDiagnosticWarning
-            {
-                Severity = GatewayDiagnosticSeverity.Info,
-                Category = "gateway",
-                Title = "Waiting for gateway health",
-                Detail = "Node mode is connected. Channel/session inventories are filled from gateway health events when available."
-            });
-        }
-        else if (_lastChannels.Length > 0 && _lastChannels.All(c => !ChannelHealth.IsHealthyStatus(c.Status)))
-        {
-            warnings.Add(new GatewayDiagnosticWarning
-            {
-                Severity = GatewayDiagnosticSeverity.Warning,
-                Category = "channel",
-                Title = "No channels are currently running",
-                Detail = "Channels are configured but none are reporting a running/ready state."
-            });
-        }
-
-        if (_currentStatus == ConnectionStatus.Connected && nodes.Count == 0 && _connectionManager?.OperatorClient != null)
-        {
-            warnings.Add(new GatewayDiagnosticWarning
-            {
-                Severity = GatewayDiagnosticSeverity.Info,
-                Category = "node",
-                Title = "No nodes reported",
-                Detail = "node.list did not report any connected nodes. Pair a Windows node or verify the operator token has node inventory access."
-            });
-        }
-
-        if (_lastUsageCost?.Totals.MissingCostEntries > 0)
-        {
-            warnings.Add(new GatewayDiagnosticWarning
-            {
-                Severity = GatewayDiagnosticSeverity.Info,
-                Category = "usage",
-                Title = "Some usage costs are missing",
-                Detail = $"{_lastUsageCost.Totals.MissingCostEntries} usage entr{(_lastUsageCost.Totals.MissingCostEntries == 1 ? "y is" : "ies are")} missing cost data."
-            });
-        }
-
-        return new GatewayCommandCenterState
-        {
-            ConnectionStatus = _currentStatus,
-            LastRefresh = _lastCheckTime.ToUniversalTime(),
-            Topology = topology,
-            Runtime = runtime,
-            Update = _lastUpdateInfo,
-            Tunnel = tunnel,
-            GatewaySelf = _lastGatewaySelf,
-            PortDiagnostics = portDiagnostics,
-            Permissions = PermissionDiagnostics.BuildDefaultWindowsMatrix(),
-            Channels = _lastChannels.Select(ChannelCommandCenterInfo.FromHealth).ToList(),
-            Sessions = _lastSessions.ToList(),
-            Usage = _lastUsage,
-            UsageStatus = _lastUsageStatus,
-            UsageCost = _lastUsageCost,
-            Nodes = nodes,
-            Warnings = CommandCenterDiagnostics.SortAndDedupeWarnings(warnings),
-            RecentActivity = ActivityStreamService.GetItems(12)
-                .Select(item => new CommandCenterActivityInfo
-                {
-                    Timestamp = item.Timestamp,
-                    Category = item.Category,
-                    Title = item.Title,
-                    Details = item.Details,
-                    DashboardPath = item.DashboardPath,
-                    SessionKey = item.SessionKey,
-                    NodeId = item.NodeId
-                })
-                .ToList()
-        };
-    }
-
-    private IEnumerable<GatewayDiagnosticWarning> BuildBrowserProxyAuthWarnings(IReadOnlyList<NodeCapabilityHealthInfo> nodes)
-    {
-        if (_settings?.NodeBrowserProxyEnabled == false ||
-            !nodes.Any(node => node.BrowserDeclaredCommands.Contains("browser.proxy", StringComparer.OrdinalIgnoreCase)))
-        {
-            yield break;
-        }
-
-        yield return new GatewayDiagnosticWarning
-        {
-            Severity = GatewayDiagnosticSeverity.Info,
-            Category = "browser",
-            Title = "Browser proxy auth may need a gateway token",
-            Detail = "This Windows node is advertising browser.proxy without a saved gateway shared token. QR/bootstrap pairing can connect the node, but an authenticated browser-control host may still require the same gateway token in Settings.",
-            RepairAction = "Copy browser proxy auth guidance",
-            CopyText = "If browser.proxy returns an auth error, enter the gateway shared token in Settings > Gateway Token, or configure the browser-control host to use auth compatible with the Windows node. Do not paste QR bootstrap tokens into the normal gateway token field."
-        };
-    }
-
-    private static IEnumerable<GatewayDiagnosticWarning> BuildPortDiagnosticWarnings(
-        IReadOnlyList<PortDiagnosticInfo> ports,
-        GatewayTopologyInfo topology,
-        TunnelCommandCenterInfo? tunnel)
-    {
-        foreach (var port in ports)
-        {
-            if (tunnel?.Status == TunnelStatus.Up &&
-                port.Purpose.Equals("SSH tunnel local forward", StringComparison.OrdinalIgnoreCase) &&
-                !port.IsListening)
-            {
-                yield return new GatewayDiagnosticWarning
-                {
-                    Severity = GatewayDiagnosticSeverity.Warning,
-                    Category = "port",
-                    Title = "SSH tunnel port is not listening",
-                    Detail = port.Detail
-                };
-            }
-
-            if (topology.DetectedKind == GatewayKind.WindowsNative &&
-                port.Purpose.Equals("Gateway endpoint", StringComparison.OrdinalIgnoreCase) &&
-                !port.IsListening)
-            {
-                yield return new GatewayDiagnosticWarning
-                {
-                    Severity = GatewayDiagnosticSeverity.Info,
-                    Category = "port",
-                    Title = "No local gateway listener detected",
-                    Detail = port.Detail
-                };
-            }
-
-            if (port.Purpose.Equals("Browser proxy host", StringComparison.OrdinalIgnoreCase) &&
-                !port.IsListening)
-            {
-                if (topology.UsesSshTunnel)
-                {
-                    yield return new GatewayDiagnosticWarning
-                    {
-                        Severity = GatewayDiagnosticSeverity.Info,
-                        Category = "browser",
-                        Title = "Browser proxy SSH forward is not listening",
-                        Detail = $"browser.proxy over SSH needs a companion local forward for port {port.Port}. Add the browser-control forward to the same tunnel, or enable the managed SSH tunnel so Windows starts both forwards.",
-                        RepairAction = "Copy browser proxy SSH forward",
-                        CopyText = BuildBrowserProxySshForwardHint(port.Port, tunnel)
-                    };
-                    continue;
-                }
-
-                yield return new GatewayDiagnosticWarning
-                {
-                    Severity = GatewayDiagnosticSeverity.Info,
-                    Category = "browser",
-                    Title = "Browser proxy host not detected",
-                    Detail = "browser.proxy needs a compatible browser-control host listening on the gateway port + 2.",
-                    RepairAction = "Copy browser setup guidance",
-                    CopyText = CommandCenterTextHelper.BuildBrowserSetupGuidance(port.Port, topology, tunnel)
-                };
-            }
-        }
-    }
-
-    private static string BuildBrowserProxySshForwardHint(int browserProxyPort, TunnelCommandCenterInfo? tunnel)
-    {
-        if (browserProxyPort is < 1 or > 65535)
-            return "ssh -N -L <local-browser-port>:127.0.0.1:<remote-browser-port> <user>@<host>";
-
-        var localBrowserPort = ResolveLocalBrowserProxyPort(browserProxyPort, tunnel);
-        var target = BuildSshTarget(tunnel);
-        var remoteBrowserPort = ResolveRemoteBrowserProxyPort(localBrowserPort, tunnel);
-        return remoteBrowserPort is >= 1 and <= 65535
-            ? $"ssh -N -L {localBrowserPort}:127.0.0.1:{remoteBrowserPort} {target}"
-            : $"ssh -N -L {localBrowserPort}:127.0.0.1:<remote-gateway-port+2> {target}";
-    }
-
-    private static string BuildSshTarget(TunnelCommandCenterInfo? tunnel)
-    {
-        var host = tunnel?.Host?.Trim();
-        var user = tunnel?.User?.Trim();
-        if (!string.IsNullOrWhiteSpace(host) && !string.IsNullOrWhiteSpace(user))
-            return $"{user}@{host}";
-        if (!string.IsNullOrWhiteSpace(host))
-            return $"<user>@{host}";
-        return "<user>@<host>";
-    }
-
-    private static int ResolveLocalBrowserProxyPort(int fallbackBrowserProxyPort, TunnelCommandCenterInfo? tunnel)
-    {
-        if (TryGetEndpointPort(tunnel?.BrowserProxyLocalEndpoint, out var browserLocalPort))
-            return browserLocalPort;
-
-        if (TryGetEndpointPort(tunnel?.LocalEndpoint, out var localGatewayPort) &&
-            localGatewayPort <= 65533)
-        {
-            return localGatewayPort + 2;
-        }
-
-        return fallbackBrowserProxyPort;
-    }
-
-    private static int? ResolveRemoteBrowserProxyPort(int localBrowserProxyPort, TunnelCommandCenterInfo? tunnel)
-    {
-        if (TryGetEndpointPort(tunnel?.BrowserProxyRemoteEndpoint, out var browserRemotePort))
-            return browserRemotePort;
-
-        if (!TryGetEndpointPort(tunnel?.RemoteEndpoint, out var remoteGatewayPort) ||
-            remoteGatewayPort > 65533)
-        {
-            return null;
-        }
-
-        if (TryGetEndpointPort(tunnel?.LocalEndpoint, out var localGatewayPort) &&
-            localBrowserProxyPort != localGatewayPort + 2)
-        {
-            return null;
-        }
-
-        return remoteGatewayPort + 2;
-    }
-
-    private static bool TryGetEndpointPort(string? endpoint, out int port)
-    {
-        port = 0;
-        if (string.IsNullOrWhiteSpace(endpoint))
-            return false;
-
-        var separator = endpoint.LastIndexOf(':');
-        return separator >= 0 &&
-            int.TryParse(endpoint[(separator + 1)..], out port) &&
-            port is >= 1 and <= 65535;
-    }
-
-    private static void ApplyDetectedSshForwardTopology(
-        GatewayTopologyInfo topology,
-        IReadOnlyList<PortDiagnosticInfo> ports)
-    {
-        if (topology.UsesSshTunnel ||
-            topology.DetectedKind != GatewayKind.WindowsNative ||
-            !topology.IsLoopback)
-        {
-            return;
-        }
-
-        var gatewayPort = ports.FirstOrDefault(port =>
-            port.Purpose.Equals("Gateway endpoint", StringComparison.OrdinalIgnoreCase));
-        if (gatewayPort is null ||
-            !gatewayPort.IsListening ||
-            !string.Equals(gatewayPort.OwningProcessName, "ssh", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        topology.DetectedKind = GatewayKind.MacOverSsh;
-        topology.DisplayName = "SSH tunnel (detected)";
-        topology.Transport = "ssh tunnel";
-        topology.UsesSshTunnel = true;
-        topology.Detail = $"Local gateway port {gatewayPort.Port} is owned by ssh, so Command Center treats it as a manually managed SSH local forward.";
-    }
-
-    private static GatewayRuntimeInfo BuildGatewayRuntimeInfo(IReadOnlyList<PortDiagnosticInfo> ports)
-    {
-        var gatewayPort = ports.FirstOrDefault(port =>
-            port.Purpose.Equals("Gateway endpoint", StringComparison.OrdinalIgnoreCase));
-        if (gatewayPort is null || !gatewayPort.IsListening)
-            return new GatewayRuntimeInfo();
-
-        return new GatewayRuntimeInfo
-        {
-            ProcessName = gatewayPort.OwningProcessName ?? "",
-            ProcessId = gatewayPort.OwningProcessId,
-            Port = gatewayPort.Port,
-            IsSshForward = string.Equals(gatewayPort.OwningProcessName, "ssh", StringComparison.OrdinalIgnoreCase)
-        };
-    }
-
-    private TunnelCommandCenterInfo? BuildTunnelInfo()
-    {
-        if (_settings?.UseSshTunnel != true)
-        {
-            return null;
-        }
-
-        var localPort = _sshTunnelService is { CurrentLocalPort: > 0 }
-            ? _sshTunnelService.CurrentLocalPort
-            : _settings.SshTunnelLocalPort;
-        var remotePort = _sshTunnelService is { CurrentRemotePort: > 0 }
-            ? _sshTunnelService.CurrentRemotePort
-            : _settings.SshTunnelRemotePort;
-        var host = string.IsNullOrWhiteSpace(_sshTunnelService?.CurrentHost)
-            ? _settings.SshTunnelHost
-            : _sshTunnelService!.CurrentHost!;
-        var user = string.IsNullOrWhiteSpace(_sshTunnelService?.CurrentUser)
-            ? _settings.SshTunnelUser
-            : _sshTunnelService!.CurrentUser!;
-        var status = _sshTunnelService?.Status is TunnelStatus.Up or TunnelStatus.Starting or TunnelStatus.Restarting or TunnelStatus.Failed
-            ? _sshTunnelService.Status
-            : string.IsNullOrWhiteSpace(_sshTunnelService?.LastError)
-                ? TunnelStatus.Stopped
-                : TunnelStatus.Failed;
-
-        return new TunnelCommandCenterInfo
-        {
-            Status = status,
-            LocalEndpoint = $"127.0.0.1:{localPort}",
-            RemoteEndpoint = string.IsNullOrWhiteSpace(host)
-                ? $"127.0.0.1:{remotePort}"
-                : $"{host}:127.0.0.1:{remotePort}",
-            BrowserProxyLocalEndpoint = _sshTunnelService?.CurrentBrowserProxyLocalPort > 0
-                ? $"127.0.0.1:{_sshTunnelService.CurrentBrowserProxyLocalPort}"
-                : "",
-            BrowserProxyRemoteEndpoint = _sshTunnelService?.CurrentBrowserProxyRemotePort > 0
-                ? string.IsNullOrWhiteSpace(host)
-                    ? $"127.0.0.1:{_sshTunnelService.CurrentBrowserProxyRemotePort}"
-                    : $"{host}:127.0.0.1:{_sshTunnelService.CurrentBrowserProxyRemotePort}"
-                : "",
-            Host = host,
-            User = user,
-            LastError = _sshTunnelService?.LastError,
-            StartedAt = _sshTunnelService?.StartedAtUtc
-        };
-    }
+        Status = _currentStatus,
+        LastCheckTime = _lastCheckTime,
+        Channels = _lastChannels,
+        Sessions = _lastSessions,
+        Nodes = _lastNodes,
+        Usage = _lastUsage,
+        UsageStatus = _lastUsageStatus,
+        UsageCost = _lastUsageCost,
+        GatewaySelf = _lastGatewaySelf,
+        AuthFailureMessage = _authFailureMessage,
+        LastUpdateInfo = _lastUpdateInfo,
+        Settings = _settings,
+        NodeService = _nodeService,
+        SshTunnelService = _sshTunnelService,
+        HasGatewayClient = _connectionManager?.OperatorClient != null
+    };
 
     private void ShowNotificationHistory()
     {
@@ -3799,9 +3731,23 @@ public partial class App : Application
             try { _onboardingWindow.Activate(); return; } catch { _onboardingWindow = null; }
         }
 
+        // Disconnect existing gateway connection for a clean setup flow.
+        // ActiveId is preserved so it can be restored if setup is cancelled.
+        var restoreGatewayId = _gatewayRegistry?.ActiveGatewayId;
+        var disconnectedForOnboarding = false;
+        if (_connectionManager != null &&
+            _connectionManager.CurrentSnapshot.OverallState is not OverallConnectionState.Idle)
+        {
+            Logger.Info("Disconnecting existing gateway connection for clean setup");
+            await _connectionManager.DisconnectAsync();
+            disconnectedForOnboarding = restoreGatewayId != null;
+        }
+
+        var onboardingCompleted = false;
         _onboardingWindow = new OnboardingWindow(_settings, IdentityDataPath);
         _onboardingWindow.OnboardingCompleted += (s, e) =>
         {
+            onboardingCompleted = true;
             Logger.Info("Onboarding completed");
             _onboardingWindow = null;
 
@@ -3812,8 +3758,18 @@ public partial class App : Application
                 return;
             }
 
-            // Otherwise reinitialize with saved settings
-            _ = _connectionManager?.ReconnectAsync();
+            // Reconnect only if there's an active gateway with credentials —
+            // don't blindly reconnect a pre-setup gateway the user may be replacing.
+            var activeRecord = _gatewayRegistry?.GetActive();
+            if (activeRecord != null && TryConnectGatewayIfCredentialAvailable(activeRecord, "post-onboarding"))
+            {
+                Logger.Info("Reconnecting to active gateway after onboarding");
+            }
+            else
+            {
+                Logger.Info("No previously connected gateway after onboarding — skipping reconnect");
+                TryStartLocalMcpOnlyNode();
+            }
 
             // Keep hub window in sync with new client
             if (_hubWindow != null && !_hubWindow.IsClosed)
@@ -3823,7 +3779,15 @@ public partial class App : Application
                 _hubWindow.CurrentStatus = _currentStatus;
             }
         };
-        _onboardingWindow.Closed += (s, e) => _onboardingWindow = null;
+        _onboardingWindow.Closed += (s, e) =>
+        {
+            _onboardingWindow = null;
+            if (!onboardingCompleted && disconnectedForOnboarding && restoreGatewayId != null)
+            {
+                Logger.Info("Onboarding closed before completion — restoring previous gateway connection");
+                _ = _connectionManager?.ConnectAsync(restoreGatewayId);
+            }
+        };
         _onboardingWindow.Activate();
     }
 
@@ -4062,140 +4026,45 @@ public partial class App : Application
         }
     }
 
-    private void CopySupportContext()
+    private void CopyDiagnostic(string label, Func<GatewayCommandCenterState, string> format)
     {
         try
         {
-            var package = new DataPackage();
-            package.SetText(CommandCenterTextHelper.BuildSupportContext(BuildCommandCenterState()));
-            Clipboard.SetContent(package);
-            Logger.Info("Copied support context from deep link");
+            CopyTextToClipboard(format(BuildCommandCenterState()));
+            Logger.Info($"Copied {label} from deep link");
         }
         catch (Exception ex)
         {
-            Logger.Warn($"Failed to copy support context from deep link: {ex.Message}");
+            Logger.Warn($"Failed to copy {label} from deep link: {ex.Message}");
         }
     }
 
-    private void CopyDebugBundle()
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(CommandCenterTextHelper.BuildDebugBundle(BuildCommandCenterState()));
-            Clipboard.SetContent(package);
-            Logger.Info("Copied debug bundle from deep link");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"Failed to copy debug bundle from deep link: {ex.Message}");
-        }
-    }
+    private void CopySupportContext() =>
+        CopyDiagnostic("support context", CommandCenterTextHelper.BuildSupportContext);
 
-    private void CopyBrowserSetupGuidance()
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(CommandCenterTextHelper.BuildBrowserSetupGuidance(BuildCommandCenterState()));
-            Clipboard.SetContent(package);
-            Logger.Info("Copied browser setup guidance from deep link");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"Failed to copy browser setup guidance from deep link: {ex.Message}");
-        }
-    }
+    private void CopyDebugBundle() =>
+        CopyDiagnostic("debug bundle", CommandCenterTextHelper.BuildDebugBundle);
 
-    private void CopyPortDiagnostics()
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(CommandCenterTextHelper.BuildPortDiagnosticsSummary(BuildCommandCenterState().PortDiagnostics));
-            Clipboard.SetContent(package);
-            Logger.Info("Copied port diagnostics from deep link");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"Failed to copy port diagnostics from deep link: {ex.Message}");
-        }
-    }
+    private void CopyBrowserSetupGuidance() =>
+        CopyDiagnostic("browser setup guidance", CommandCenterTextHelper.BuildBrowserSetupGuidance);
 
-    private void CopyCapabilityDiagnostics()
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(CommandCenterTextHelper.BuildCapabilityDiagnosticsSummary(BuildCommandCenterState()));
-            Clipboard.SetContent(package);
-            Logger.Info("Copied capability diagnostics from deep link");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"Failed to copy capability diagnostics from deep link: {ex.Message}");
-        }
-    }
+    private void CopyPortDiagnostics() =>
+        CopyDiagnostic("port diagnostics", s => CommandCenterTextHelper.BuildPortDiagnosticsSummary(s.PortDiagnostics));
 
-    private void CopyNodeInventory()
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(CommandCenterTextHelper.BuildNodeInventorySummary(BuildCommandCenterState().Nodes));
-            Clipboard.SetContent(package);
-            Logger.Info("Copied node inventory from deep link");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"Failed to copy node inventory from deep link: {ex.Message}");
-        }
-    }
+    private void CopyCapabilityDiagnostics() =>
+        CopyDiagnostic("capability diagnostics", CommandCenterTextHelper.BuildCapabilityDiagnosticsSummary);
 
-    private void CopyChannelSummary()
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(CommandCenterTextHelper.BuildChannelSummaryText(BuildCommandCenterState().Channels));
-            Clipboard.SetContent(package);
-            Logger.Info("Copied channel summary from deep link");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"Failed to copy channel summary from deep link: {ex.Message}");
-        }
-    }
+    private void CopyNodeInventory() =>
+        CopyDiagnostic("node inventory", s => CommandCenterTextHelper.BuildNodeInventorySummary(s.Nodes));
 
-    private void CopyActivitySummary()
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(CommandCenterTextHelper.BuildActivitySummary(BuildCommandCenterState().RecentActivity));
-            Clipboard.SetContent(package);
-            Logger.Info("Copied activity summary from deep link");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"Failed to copy activity summary from deep link: {ex.Message}");
-        }
-    }
+    private void CopyChannelSummary() =>
+        CopyDiagnostic("channel summary", s => CommandCenterTextHelper.BuildChannelSummaryText(s.Channels));
 
-    private void CopyExtensibilitySummary()
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(CommandCenterTextHelper.BuildExtensibilitySummary(BuildCommandCenterState().Channels));
-            Clipboard.SetContent(package);
-            Logger.Info("Copied extensibility summary from deep link");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"Failed to copy extensibility summary from deep link: {ex.Message}");
-        }
-    }
+    private void CopyActivitySummary() =>
+        CopyDiagnostic("activity summary", s => CommandCenterTextHelper.BuildActivitySummary(s.RecentActivity));
+
+    private void CopyExtensibilitySummary() =>
+        CopyDiagnostic("extensibility summary", s => CommandCenterTextHelper.BuildExtensibilitySummary(s.Channels));
 
     private void OnGlobalHotkeyPressed(object? sender, EventArgs e)
     {
@@ -4458,50 +4327,8 @@ public partial class App : Application
             await voiceService.StopAsync();
     }
 
-    private int _ttsMuteCount;
-
-    private async Task SpeakResponseAsync(string text)
-    {
-        var voiceService = _nodeService?.VoiceService;
-        var ttsService = _nodeService?.TextToSpeech;
-        try
-        {
-            if (voiceService == null || _settings == null || ttsService == null) return;
-
-            // Increment mute counter — multiple concurrent TTS won't unmute prematurely
-            Interlocked.Increment(ref _ttsMuteCount);
-            voiceService.IsMutedForPlayback = true;
-
-            var speakText = text.Length > 500 ? text[..500] + "..." : text;
-
-            // Don't pass VoiceId here. The shared TextToSpeechService picks
-            // the right per-provider voice from settings (TtsPiperVoiceId,
-            // TtsWindowsVoiceId, TtsElevenLabsVoiceId). Cross-provider
-            // voice IDs would otherwise leak across providers.
-            var speakArgs = new OpenClaw.Shared.Capabilities.TtsSpeakArgs
-            {
-                Text = speakText,
-                Provider = _settings.TtsProvider ?? TtsCapability.PiperProvider,
-                Interrupt = true
-            };
-
-            await ttsService.SpeakAsync(speakArgs);
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"TTS response playback failed: {ex.Message}");
-        }
-        finally
-        {
-            // Only unmute when all concurrent TTS operations have finished
-            if (voiceService != null)
-            {
-                await Task.Delay(300);
-                if (Interlocked.Decrement(ref _ttsMuteCount) <= 0)
-                    voiceService.IsMutedForPlayback = false;
-            }
-        }
-    }
+    public Task SpeakChatTextAsync(string text) =>
+        _chatCoordinator?.SpeakChatTextAsync(text) ?? Task.CompletedTask;
 
     private static void SendDeepLinkToRunningInstance(string uri)
     {
@@ -4562,9 +4389,7 @@ public partial class App : Application
 
     public static void CopyTextToClipboard(string text)
     {
-        var dataPackage = new global::Windows.ApplicationModel.DataTransfer.DataPackage();
-        dataPackage.SetText(text);
-        global::Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
+        ClipboardHelper.CopyText(text);
     }
 
     #endregion
@@ -4600,6 +4425,12 @@ public partial class App : Application
         SafeShutdownStep("gateway client", () =>
         {
             _connectionManager?.Dispose();
+        });
+
+        SafeShutdownStep("chat coordinator", () =>
+        {
+            _chatCoordinator?.Dispose();
+            _chatCoordinator = null;
         });
 
         SafeShutdownStep("node service", () =>
