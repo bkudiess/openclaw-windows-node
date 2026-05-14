@@ -1086,6 +1086,15 @@
   <data name="Onboarding_Finish" xml:space="preserve">
     <value>完成</value>
   </data>
+  <data name="Onboarding_IncompleteSetup_Title" xml:space="preserve">
+    <value>設定尚未完成</value>
+  </data>
+  <data name="Onboarding_IncompleteSetup_Body" xml:space="preserve">
+    <value>OpenClaw 仍需要完成設定，才能開啟 Hub。請使用「返回」回到精靈或連線步驟，修正缺少的設定，然後再次嘗試「完成」。</value>
+  </data>
+  <data name="Onboarding_IncompleteSetup_Close" xml:space="preserve">
+    <value>確定</value>
+  </data>
   <data name="Onboarding_Welcome_Title" xml:space="preserve">
     <value>歡迎使用 OpenClaw</value>
   </data>
