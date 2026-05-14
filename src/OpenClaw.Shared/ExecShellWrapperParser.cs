@@ -113,7 +113,12 @@ internal static class ExecShellWrapperParser
         if (executable.Equals("bash", StringComparison.OrdinalIgnoreCase) ||
             executable.Equals("bash.exe", StringComparison.OrdinalIgnoreCase) ||
             executable.Equals("sh", StringComparison.OrdinalIgnoreCase) ||
-            executable.Equals("sh.exe", StringComparison.OrdinalIgnoreCase))
+            executable.Equals("sh.exe", StringComparison.OrdinalIgnoreCase) ||
+            executable.Equals("zsh", StringComparison.OrdinalIgnoreCase) ||
+            executable.Equals("dash", StringComparison.OrdinalIgnoreCase) ||
+            executable.Equals("ash", StringComparison.OrdinalIgnoreCase) ||
+            executable.Equals("ksh", StringComparison.OrdinalIgnoreCase) ||
+            executable.Equals("fish", StringComparison.OrdinalIgnoreCase))
         {
             for (var i = 1; i < tokens.Length; i++)
             {
