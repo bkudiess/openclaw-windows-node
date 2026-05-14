@@ -673,11 +673,19 @@ public partial class App : Application
         {
             try
             {
+                diagnostics.Record("node", $"ClientCreated fired, _nodeService null={_nodeService is null}");
                 _nodeService?.AttachClient(args.Client, args.BearerToken);
+                var client = args.Client;
+                diagnostics.Record("node", $"After AttachClient: caps={client.Capabilities.Count}, cmds={client.RegisteredCommandCount}");
+                if (client.RegisteredCommandCount > 0)
+                    diagnostics.Record("node", $"Commands sample: {string.Join(", ", client.RegisteredCommandsSample)}...");
+                else
+                    diagnostics.Record("node", "WARNING: 0 commands registered on node client before connect");
             }
             catch (Exception ex)
             {
                 Logger.Warn($"[App] NodeConnector.ClientCreated handler failed: {ex.Message}");
+                diagnostics.Record("node", $"ClientCreated handler THREW: {ex.Message}");
             }
         };
         // Wrap the SSH tunnel service so the connection manager can start/stop the tunnel
