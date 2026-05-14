@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using OpenClaw.Shared;
+using OpenClawTray.Helpers;
 using OpenClawTray.Onboarding.Services;
 using OpenClawTray.Services;
 using OpenClawTray.Services.Connection;
@@ -8,7 +9,6 @@ using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Windows.ApplicationModel.DataTransfer;
 
 namespace OpenClawTray.Pages;
 
@@ -255,9 +255,7 @@ public sealed partial class ConnectionPage : Page
 
     private void OnCopyApproveCommand(object sender, RoutedEventArgs e)
     {
-        var dp = new DataPackage();
-        dp.SetText(PairingApproveCommandText.Text);
-        Clipboard.SetContent(dp);
+        ClipboardHelper.CopyText(PairingApproveCommandText.Text);
     }
 
     private void OnReconnectAfterApproval(object sender, RoutedEventArgs e)
@@ -920,8 +918,6 @@ public sealed partial class ConnectionPage : Page
 
     private static void CopyToClipboard(string text)
     {
-        var dp = new DataPackage();
-        dp.SetText(text);
-        Clipboard.SetContent(dp);
+        ClipboardHelper.CopyText(text);
     }
 }
