@@ -45,7 +45,7 @@ public static class FluentIconCatalog
     public const string QuickSend = "\uE724";      // Send (Mail variant) — closest universal Send glyph
     public const string Setup = "\uE825";          // MapPin (compass glyph U+E1D3 isn't reliably in Segoe Fluent; MapPin is safer)
     public const string About = "\uE946";          // Info
-    public const string Exit = "\uE7E8";           // PowerButton
+    public const string Exit = "\uE711";           // Cancel (X) — used for "Close" menu item
 
     // ── Affordances ────────────────────────────────────────────────
     public const string ChevronR = "\uE76C";       // ChevronRight

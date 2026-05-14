@@ -2,6 +2,7 @@ using Microsoft.Toolkit.Uwp.Notifications;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using OpenClaw.Shared;
 using OpenClawTray.Dialogs;
@@ -1282,12 +1283,12 @@ public partial class App : Application
             VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
-                new TextBlock
+                new Microsoft.UI.Xaml.Controls.Image
                 {
-                    Text = FluentIconCatalog.Brand,
-                    FontSize = 28,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    IsTextSelectionEnabled = false
+                    Source = new BitmapImage(new Uri("ms-appx:///Assets/Square44x44Logo.targetsize-48_altform-unplated.png")),
+                    Width = 28,
+                    Height = 28,
+                    VerticalAlignment = VerticalAlignment.Center
                 },
                 new TextBlock
                 {
@@ -1462,11 +1463,16 @@ public partial class App : Application
 
         // Tap the gateway block to open connection settings (button has its own click handler)
         gwOuter.Padding = new Thickness(14, 6, 14, 8);
-        gwOuter.Tapped += (s, ev) => ShowHub("connection");
 
         AutomationProperties.SetName(gwOuter,
             $"Gateway {statusText}. Activate to open connection settings.");
-        menu.AddCustomElement(gwOuter);
+
+        // Gateway hover flyout — richer connection details
+        var gwFlyoutItems = BuildGatewayFlyoutItems(
+            isConnected, statusText, gwUri, _lastPresence, _lastGatewaySelf,
+            _lastNodePairList, _lastDevicePairList, _authFailureMessage,
+            captionStyle, secondaryText, successBrush, neutralBrush, criticalBrush);
+        menu.AddFlyoutCustomItem(gwOuter, gwFlyoutItems, action: "connection");
 
         // ── Connected Devices (moved above Sessions) ──
         // Devices flow directly after the Gateway block without a divider
@@ -1498,9 +1504,8 @@ public partial class App : Application
             menu.AddFlyoutCustomItem(sessionsRow, sessionsFlyout, action: "sessions");
         }
 
-        // ── Usage ──
+        // ── Usage (no divider — flows directly under Sessions) ──
         {
-            menu.AddSeparator();
             var usageRow = BuildUsageRow(secondaryText);
             var usageFlyout = BuildUsageFlyoutItems(secondaryText);
             menu.AddFlyoutCustomItem(usageRow, usageFlyout, action: "usage");
@@ -1528,7 +1533,7 @@ public partial class App : Application
             "companion",
             "Win+;");
         menu.AddMenuItem("About", FluentIconCatalog.Build(FluentIconCatalog.About), "about");
-        menu.AddMenuItem(LocalizationHelper.GetString("Menu_Exit"), FluentIconCatalog.Build(FluentIconCatalog.Exit), "exit");
+        menu.AddMenuItem("Close", FluentIconCatalog.Build(FluentIconCatalog.Exit), "exit");
     }
 
     /// <summary>
@@ -1746,6 +1751,177 @@ public partial class App : Application
         grid.Children.Add(summary);
 
         return grid;
+    }
+
+    private static List<TrayMenuFlyoutItem> BuildGatewayFlyoutItems(
+        bool isConnected,
+        string statusText,
+        Uri? gwUri,
+        PresenceEntry[]? presence,
+        GatewaySelfInfo? self,
+        PairingListInfo? nodePair,
+        DevicePairingListInfo? devicePair,
+        string? authFailure,
+        Style captionStyle,
+        Microsoft.UI.Xaml.Media.Brush secondaryText,
+        Microsoft.UI.Xaml.Media.Brush successBrush,
+        Microsoft.UI.Xaml.Media.Brush neutralBrush,
+        Microsoft.UI.Xaml.Media.Brush criticalBrush)
+    {
+        var items = new List<TrayMenuFlyoutItem>
+        {
+            new() { Text = "Gateway", IsHeader = true }
+        };
+
+        // Status card: ● Online/Offline · localhost:7070
+        var statusCard = new StackPanel
+        {
+            Padding = new Thickness(12, 2, 12, 6),
+            Spacing = 2,
+            MinWidth = 280
+        };
+        var statusLine = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        statusLine.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse
+        {
+            Width = 8, Height = 8,
+            VerticalAlignment = VerticalAlignment.Center,
+            Fill = isConnected ? successBrush : neutralBrush
+        });
+        var statusParts = new List<string> { statusText };
+        if (gwUri != null) statusParts.Add($"{gwUri.Host}:{gwUri.Port}");
+        statusLine.Children.Add(new TextBlock
+        {
+            Text = string.Join(" · ", statusParts),
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsTextSelectionEnabled = false
+        });
+        statusCard.Children.Add(statusLine);
+
+        if (gwUri != null)
+        {
+            statusCard.Children.Add(new TextBlock
+            {
+                Text = gwUri.ToString(),
+                Style = captionStyle,
+                FontSize = 11,
+                Foreground = secondaryText,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                IsTextSelectionEnabled = false
+            });
+        }
+        items.Add(new() { CustomContent = statusCard });
+
+        if (!string.IsNullOrEmpty(authFailure))
+        {
+            var authRow = new StackPanel { Padding = new Thickness(12, 2, 12, 4) };
+            authRow.Children.Add(new TextBlock
+            {
+                Text = authFailure,
+                Style = captionStyle, FontSize = 11,
+                Foreground = criticalBrush,
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 260,
+                IsTextSelectionEnabled = false
+            });
+            items.Add(new() { CustomContent = authRow });
+        }
+
+        // Server details
+        if (self != null && self.HasAnyDetails)
+        {
+            items.Add(new() { Text = "Server", IsHeader = true });
+            if (!string.IsNullOrEmpty(self.ServerVersion))
+                items.Add(BuildKvRow("Version", $"v{self.ServerVersion}", secondaryText, captionStyle));
+            if (!string.IsNullOrEmpty(self.AuthMode))
+                items.Add(BuildKvRow("Auth", self.AuthMode!, secondaryText, captionStyle));
+            if (self.Protocol.HasValue)
+                items.Add(BuildKvRow("Protocol", $"v{self.Protocol}", secondaryText, captionStyle));
+            if (self.UptimeMs.HasValue)
+                items.Add(BuildKvRow("Uptime", FormatUptime(self.UptimeMs.Value), secondaryText, captionStyle));
+            if (!string.IsNullOrEmpty(self.ConnectionId))
+                items.Add(BuildKvRow("Conn ID", self.ConnectionId!, secondaryText, captionStyle));
+        }
+
+        // Presence
+        if (isConnected && presence != null && presence.Length > 0)
+        {
+            items.Add(new() { Text = $"Clients ({presence.Length})", IsHeader = true });
+            foreach (var p in presence.Take(6))
+            {
+                var name = !string.IsNullOrEmpty(p.Host) ? p.Host! : (p.Platform ?? "client");
+                var detailParts = new List<string>();
+                if (!string.IsNullOrEmpty(p.Platform)) detailParts.Add(p.Platform!);
+                if (!string.IsNullOrEmpty(p.Version)) detailParts.Add($"v{p.Version}");
+                if (!string.IsNullOrEmpty(p.Mode)) detailParts.Add(p.Mode!);
+                items.Add(BuildKvRow(name!, string.Join(" · ", detailParts), secondaryText, captionStyle));
+            }
+        }
+
+        // Pending pairings (if any) — quick summary line
+        var nodePending = nodePair?.Pending.Count ?? 0;
+        var devicePending = devicePair?.Pending.Count ?? 0;
+        if (nodePending + devicePending > 0)
+        {
+            items.Add(new() { Text = "Pending approval", IsHeader = true });
+            if (nodePending > 0)
+                items.Add(BuildKvRow("Nodes", nodePending.ToString(), secondaryText, captionStyle));
+            if (devicePending > 0)
+                items.Add(BuildKvRow("Devices", devicePending.ToString(), secondaryText, captionStyle));
+        }
+
+        return items;
+    }
+
+    private static TrayMenuFlyoutItem BuildKvRow(string key, string value, Microsoft.UI.Xaml.Media.Brush secondaryText, Style captionStyle)
+    {
+        var grid = new Grid
+        {
+            Padding = new Thickness(12, 2, 12, 2),
+            ColumnSpacing = 12,
+            MinWidth = 260
+        };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var k = new TextBlock
+        {
+            Text = key,
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = secondaryText,
+            IsTextSelectionEnabled = false
+        };
+        Grid.SetColumn(k, 0);
+        grid.Children.Add(k);
+
+        var v = new TextBlock
+        {
+            Text = value,
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextAlignment = TextAlignment.Right,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            IsTextSelectionEnabled = false
+        };
+        Grid.SetColumn(v, 1);
+        grid.Children.Add(v);
+
+        return new TrayMenuFlyoutItem { CustomContent = grid };
+    }
+
+    private static string FormatUptime(long ms)
+    {
+        var ts = TimeSpan.FromMilliseconds(ms);
+        if (ts.TotalDays >= 1) return $"{(int)ts.TotalDays}d {ts.Hours}h";
+        if (ts.TotalHours >= 1) return $"{(int)ts.TotalHours}h {ts.Minutes}m";
+        if (ts.TotalMinutes >= 1) return $"{(int)ts.TotalMinutes}m";
+        return $"{(int)ts.TotalSeconds}s";
     }
 
     private List<TrayMenuFlyoutItem> BuildSessionsListFlyoutItems(
