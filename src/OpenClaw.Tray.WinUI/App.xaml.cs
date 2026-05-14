@@ -14,6 +14,7 @@ using OpenClawTray.Services.LocalGatewaySetup;
 using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -1485,26 +1486,19 @@ public partial class App : Application
             var activeCount = _lastSessions.Count(s => string.Equals(s.Status, "active", StringComparison.OrdinalIgnoreCase));
             var totalTokensAll = _lastSessions.Sum(s => s.InputTokens + s.OutputTokens);
             var sessionSummaryRight = $"{activeCount} active · {FormatTokenCount(totalTokensAll)} tokens";
-            menu.AddCustomElement(BuildSectionHeader("Sessions", sessionSummaryRight));
 
-            foreach (var session in _lastSessions.Take(4))
-            {
-                var card = BuildSessionCardCompact(session, successBrush, cautionBrush, neutralBrush, secondaryText);
-                var flyoutItems = BuildSessionFlyoutItems(session, secondaryText);
-                menu.AddFlyoutCustomItem(card, flyoutItems, action: "sessions");
-            }
+            // Single collapsed entry whose hover flyout reveals the session list.
+            var sessionsRow = BuildSessionsListRow(sessionCount, activeCount, totalTokensAll, secondaryText);
+            var sessionsFlyout = BuildSessionsListFlyoutItems(secondaryText, successBrush, cautionBrush, neutralBrush);
+            menu.AddFlyoutCustomItem(sessionsRow, sessionsFlyout, action: "sessions");
         }
 
         // ── Usage ──
-        if (_lastSessions.Length > 0)
         {
             menu.AddSeparator();
-            var totalTokensAll2 = _lastSessions.Sum(s => s.InputTokens + s.OutputTokens);
-            menu.AddCustomElement(BuildSectionHeader("Usage", $"{FormatTokenCount(totalTokensAll2)} tokens"));
-            menu.AddMenuItem(
-                "View detailed usage",
-                FluentIconCatalog.Build(FluentIconCatalog.About),
-                "usage");
+            var usageRow = BuildUsageRow(secondaryText);
+            var usageFlyout = BuildUsageFlyoutItems(secondaryText);
+            menu.AddFlyoutCustomItem(usageRow, usageFlyout, action: "usage");
         }
 
         // ── Pairing approval pending ──
@@ -1661,36 +1655,116 @@ public partial class App : Application
         return $"{(int)age.TotalDays}d ago";
     }
 
-    private static UIElement BuildSessionCardCompact(
-        SessionInfo session,
+    // ── Sessions: collapsed entry + flyout list ─────────────────────────
+
+    private UIElement BuildSessionsListRow(int total, int active, long totalTokens, Microsoft.UI.Xaml.Media.Brush secondaryText)
+    {
+        // Card row: [icon] Sessions    (N active · X tokens)
+        var resources = Application.Current.Resources;
+        var captionStyle = (Style)resources["CaptionTextBlockStyle"];
+
+        var grid = new Grid
+        {
+            Padding = new Thickness(12, 8, 12, 8),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            ColumnSpacing = 8
+        };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var icon = FluentIconCatalog.Build(FluentIconCatalog.Sessions);
+        icon.HorizontalAlignment = HorizontalAlignment.Center;
+        icon.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(icon, 0);
+        grid.Children.Add(icon);
+
+        var title = new TextBlock
+        {
+            Text = "Sessions",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            FontSize = 13,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsTextSelectionEnabled = false
+        };
+        Grid.SetColumn(title, 1);
+        grid.Children.Add(title);
+
+        var summary = new TextBlock
+        {
+            Text = $"{active} active · {FormatTokenCount(totalTokens)} tokens",
+            Style = captionStyle,
+            FontSize = 11,
+            Foreground = secondaryText,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsTextSelectionEnabled = false
+        };
+        Grid.SetColumn(summary, 2);
+        grid.Children.Add(summary);
+
+        return grid;
+    }
+
+    private List<TrayMenuFlyoutItem> BuildSessionsListFlyoutItems(
+        Microsoft.UI.Xaml.Media.Brush secondaryText,
         Microsoft.UI.Xaml.Media.Brush successBrush,
         Microsoft.UI.Xaml.Media.Brush cautionBrush,
-        Microsoft.UI.Xaml.Media.Brush neutralBrush,
-        Microsoft.UI.Xaml.Media.Brush secondaryText)
+        Microsoft.UI.Xaml.Media.Brush neutralBrush)
     {
-        // VarB compact: one line — ● {name}    {N}m ago
-        // Details (model + ProgressBar) live in the hover flyout.
+        var items = new List<TrayMenuFlyoutItem>
+        {
+            new() { Text = $"Sessions ({_lastSessions.Length})", IsHeader = true }
+        };
+
+        if (_lastSessions.Length == 0)
+        {
+            items.Add(new() { Text = "No active sessions" });
+            return items;
+        }
+
+        foreach (var session in _lastSessions.Take(8))
+        {
+            var card = BuildSessionListCard(session, secondaryText, successBrush, cautionBrush, neutralBrush);
+            items.Add(new() { CustomContent = card });
+        }
+
+        items.Add(new() { Text = "Open Sessions →", Action = "sessions" });
+        return items;
+    }
+
+    private static UIElement BuildSessionListCard(
+        SessionInfo session,
+        Microsoft.UI.Xaml.Media.Brush secondaryText,
+        Microsoft.UI.Xaml.Media.Brush successBrush,
+        Microsoft.UI.Xaml.Media.Brush cautionBrush,
+        Microsoft.UI.Xaml.Media.Brush neutralBrush)
+    {
+        // 2-row card:
+        //   Row 0: ● {name}                              {age}
+        //   Row 1: {model}              [████░░░░] {used}/{ctx} ({pct}%)
         var isActive = string.Equals(session.Status, "active", StringComparison.OrdinalIgnoreCase);
         var isIdle = string.Equals(session.Status, "idle", StringComparison.OrdinalIgnoreCase);
+        var usedTokens = session.InputTokens + session.OutputTokens;
+        var contextTokens = session.ContextTokens > 0 ? session.ContextTokens : 200_000;
+        var pct = usedTokens > 0 ? Math.Min(100.0, (double)usedTokens / contextTokens * 100.0) : 0.0;
 
         var resources = Application.Current.Resources;
         var captionStyle = (Style)resources["CaptionTextBlockStyle"];
 
-        var row = new Grid
+        var outer = new StackPanel
         {
-            Padding = new Thickness(12, 6, 12, 6),
+            Padding = new Thickness(12, 6, 12, 8),
+            Spacing = 4,
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            ColumnSpacing = 8
+            MinWidth = 260
         };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        var nameRow = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 6,
-            VerticalAlignment = VerticalAlignment.Center
-        };
+        // Row 0: dot + name + age
+        var line1 = new Grid { ColumnSpacing = 6 };
+        line1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        line1.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var nameRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
         nameRow.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse
         {
             Width = 8, Height = 8,
@@ -1707,105 +1781,322 @@ public partial class App : Application
             IsTextSelectionEnabled = false
         });
         Grid.SetColumn(nameRow, 0);
-        row.Children.Add(nameRow);
+        line1.Children.Add(nameRow);
 
         if (session.UpdatedAt.HasValue)
         {
-            var time = new TextBlock
+            var age = new TextBlock
             {
                 Text = FormatRelative(session.UpdatedAt.Value),
-                Style = captionStyle,
-                FontSize = 11,
-                Foreground = secondaryText,
+                Style = captionStyle, FontSize = 11, Foreground = secondaryText,
                 VerticalAlignment = VerticalAlignment.Center,
-                IsTextSelectionEnabled = false,
+                IsTextSelectionEnabled = false
             };
-            Grid.SetColumn(time, 1);
-            row.Children.Add(time);
+            Grid.SetColumn(age, 1);
+            line1.Children.Add(age);
         }
+        outer.Children.Add(line1);
 
-        return row;
+        // Row 1: model + progress + ratio
+        var line2 = new Grid { ColumnSpacing = 8 };
+        line2.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        line2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        line2.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var modelText = !string.IsNullOrEmpty(session.Model) ? session.Model! : "unknown";
+        var model = new TextBlock
+        {
+            Text = modelText,
+            Style = captionStyle, FontSize = 11, Foreground = secondaryText,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+            MaxWidth = 100,
+            IsTextSelectionEnabled = false
+        };
+        Grid.SetColumn(model, 0);
+        line2.Children.Add(model);
+
+        var bar = new ProgressBar
+        {
+            Minimum = 0, Maximum = 100, Value = pct,
+            Height = 6,
+            IsIndeterminate = false,
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            CornerRadius = new CornerRadius(3),
+            MinWidth = 80
+        };
+        Grid.SetColumn(bar, 1);
+        line2.Children.Add(bar);
+
+        var ratio = new TextBlock
+        {
+            Text = $"{FormatTokenCount(usedTokens)}/{FormatTokenCount(contextTokens)} ({(int)pct}%)",
+            Style = captionStyle, FontSize = 11, Foreground = secondaryText,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsTextSelectionEnabled = false
+        };
+        Grid.SetColumn(ratio, 2);
+        line2.Children.Add(ratio);
+
+        outer.Children.Add(line2);
+        return outer;
     }
 
-    private static List<TrayMenuFlyoutItem> BuildSessionFlyoutItems(SessionInfo session, Microsoft.UI.Xaml.Media.Brush secondaryText)
+    // ── Usage: collapsed entry + flyout body ────────────────────────────
+
+    private UIElement BuildUsageRow(Microsoft.UI.Xaml.Media.Brush secondaryText)
     {
-        var usedTokens = session.InputTokens + session.OutputTokens;
-        var contextTokens = session.ContextTokens > 0 ? session.ContextTokens : 200_000;
-        var pct = usedTokens > 0 ? (int)(Math.Min(1.0, (double)usedTokens / contextTokens) * 100) : 0;
-
-        var items = new List<TrayMenuFlyoutItem>
-        {
-            new() { Text = session.DisplayName ?? session.Key, IsHeader = true },
-        };
-
-        // Custom row: model name + ProgressBar + ratio
         var resources = Application.Current.Resources;
         var captionStyle = (Style)resources["CaptionTextBlockStyle"];
 
-        var detailStack = new StackPanel
+        var grid = new Grid
         {
-            Padding = new Thickness(12, 6, 12, 8),
-            Spacing = 4
-        };
-        var modelText = !string.IsNullOrEmpty(session.Model) ? session.Model! : "unknown model";
-        detailStack.Children.Add(new TextBlock
-        {
-            Text = modelText,
-            Style = captionStyle,
-            FontSize = 12,
-            Foreground = secondaryText,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            IsTextSelectionEnabled = false
-        });
-        var progressRow = new Grid { ColumnSpacing = 8 };
-        progressRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        progressRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var bar = new ProgressBar
-        {
-            Minimum = 0, Maximum = 100, Value = pct, Height = 4,
-            VerticalAlignment = VerticalAlignment.Center,
+            Padding = new Thickness(12, 8, 12, 8),
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            CornerRadius = new CornerRadius(2)
+            ColumnSpacing = 8
         };
-        Grid.SetColumn(bar, 0);
-        progressRow.Children.Add(bar);
-        var tokLbl = new TextBlock
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var icon = FluentIconCatalog.Build(FluentIconCatalog.Dashboard);
+        icon.HorizontalAlignment = HorizontalAlignment.Center;
+        icon.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(icon, 0);
+        grid.Children.Add(icon);
+
+        var title = new TextBlock
         {
-            Text = $"{FormatTokenCount(usedTokens)} / {FormatTokenCount(contextTokens)} ({pct}%)",
-            Style = captionStyle,
-            FontSize = 11,
-            Foreground = secondaryText,
+            Text = "Usage",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            FontSize = 13,
             VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Right,
             IsTextSelectionEnabled = false
         };
-        Grid.SetColumn(tokLbl, 1);
-        progressRow.Children.Add(tokLbl);
-        detailStack.Children.Add(progressRow);
-        items.Add(new() { CustomContent = detailStack });
+        Grid.SetColumn(title, 1);
+        grid.Children.Add(title);
 
-        // Channel / status
-        if (!string.IsNullOrEmpty(session.Channel))
-            items.Add(new() { Text = $"Channel: {session.Channel}" });
-        items.Add(new() { Text = $"{session.Status} · {session.AgeText}" });
+        // Right-side summary: $X.XX · Y tokens (from gateway _lastUsage, fallback to session aggregation)
+        var totalTokens = _lastUsage?.TotalTokens
+            ?? _lastSessions.Sum(s => s.InputTokens + s.OutputTokens);
+        var cost = _lastUsage?.CostUsd
+            ?? _lastUsageCost?.Totals.TotalCost
+            ?? 0.0;
+        var summaryParts = new List<string>();
+        if (cost > 0) summaryParts.Add($"${cost.ToString("F2", CultureInfo.InvariantCulture)}");
+        if (totalTokens > 0) summaryParts.Add($"{FormatTokenCount(totalTokens)} tokens");
+        var summaryText = summaryParts.Count > 0 ? string.Join(" · ", summaryParts) : "no data";
 
-        // Token detail breakdown
-        items.Add(new() { Text = "Token Usage", IsHeader = true });
-        if (usedTokens > 0)
+        var summary = new TextBlock
         {
-            items.Add(new() { Text = $"Input     {FormatTokenCount(session.InputTokens)}" });
-            items.Add(new() { Text = $"Output    {FormatTokenCount(session.OutputTokens)}" });
+            Text = summaryText,
+            Style = captionStyle, FontSize = 11,
+            Foreground = secondaryText,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsTextSelectionEnabled = false
+        };
+        Grid.SetColumn(summary, 2);
+        grid.Children.Add(summary);
+
+        return grid;
+    }
+
+    private List<TrayMenuFlyoutItem> BuildUsageFlyoutItems(Microsoft.UI.Xaml.Media.Brush secondaryText)
+    {
+        var resources = Application.Current.Resources;
+        var captionStyle = (Style)resources["CaptionTextBlockStyle"];
+        var subhead = (Style)resources["BodyStrongTextBlockStyle"];
+
+        var items = new List<TrayMenuFlyoutItem>
+        {
+            new() { Text = "Usage", IsHeader = true }
+        };
+
+        var totalTokens = _lastUsage?.TotalTokens
+            ?? _lastSessions.Sum(s => s.InputTokens + s.OutputTokens);
+        var inputTokens = _lastUsage?.InputTokens
+            ?? _lastSessions.Sum(s => s.InputTokens);
+        var outputTokens = _lastUsage?.OutputTokens
+            ?? _lastSessions.Sum(s => s.OutputTokens);
+        var cost = _lastUsage?.CostUsd
+            ?? _lastUsageCost?.Totals.TotalCost
+            ?? 0.0;
+        var requests = _lastUsage?.RequestCount ?? 0;
+
+        // Totals card
+        if (totalTokens > 0 || cost > 0)
+        {
+            var totalsCard = new StackPanel
+            {
+                Padding = new Thickness(12, 6, 12, 8),
+                Spacing = 2,
+                MinWidth = 260
+            };
+            if (cost > 0)
+            {
+                totalsCard.Children.Add(new TextBlock
+                {
+                    Text = "$" + cost.ToString("F2", CultureInfo.InvariantCulture),
+                    FontSize = 20,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    IsTextSelectionEnabled = false
+                });
+            }
+            var detail = new List<string>();
+            if (totalTokens > 0) detail.Add($"{FormatTokenCount(totalTokens)} tokens");
+            if (inputTokens > 0 || outputTokens > 0)
+                detail.Add($"in {FormatTokenCount(inputTokens)} · out {FormatTokenCount(outputTokens)}");
+            if (requests > 0) detail.Add($"{requests} requests");
+            if (detail.Count > 0)
+            {
+                totalsCard.Children.Add(new TextBlock
+                {
+                    Text = string.Join(" · ", detail),
+                    Style = captionStyle, FontSize = 11,
+                    Foreground = secondaryText,
+                    IsTextSelectionEnabled = false
+                });
+            }
+            items.Add(new() { CustomContent = totalsCard });
         }
         else
         {
-            items.Add(new() { Text = "No token usage yet" });
+            items.Add(new() { Text = "No usage data yet" });
         }
 
+        // Providers section
+        var providers = _lastUsageStatus?.Providers;
+        if (providers != null && providers.Count > 0)
+        {
+            items.Add(new() { Text = "Providers", IsHeader = true });
+            foreach (var prov in providers)
+            {
+                var provCard = new StackPanel
+                {
+                    Padding = new Thickness(12, 4, 12, 6),
+                    Spacing = 3,
+                    MinWidth = 260
+                };
+                var header = !string.IsNullOrEmpty(prov.DisplayName) ? prov.DisplayName : prov.Provider;
+                if (!string.IsNullOrEmpty(prov.Plan)) header += $" · {prov.Plan}";
+                provCard.Children.Add(new TextBlock
+                {
+                    Text = header,
+                    FontSize = 12,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    IsTextSelectionEnabled = false
+                });
+
+                if (!string.IsNullOrEmpty(prov.Error))
+                {
+                    provCard.Children.Add(new TextBlock
+                    {
+                        Text = prov.Error!,
+                        Style = captionStyle, FontSize = 11,
+                        Foreground = (Microsoft.UI.Xaml.Media.Brush)resources["SystemFillColorCriticalBrush"],
+                        TextWrapping = TextWrapping.Wrap,
+                        IsTextSelectionEnabled = false
+                    });
+                }
+
+                foreach (var win in prov.Windows)
+                {
+                    var winRow = new Grid { ColumnSpacing = 8 };
+                    winRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
+                    winRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    winRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                    var label = new TextBlock
+                    {
+                        Text = win.Label,
+                        Style = captionStyle, FontSize = 11,
+                        Foreground = secondaryText,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        IsTextSelectionEnabled = false
+                    };
+                    Grid.SetColumn(label, 0);
+                    winRow.Children.Add(label);
+
+                    var bar = new ProgressBar
+                    {
+                        Minimum = 0, Maximum = 100,
+                        Value = Math.Min(100.0, Math.Max(0.0, win.UsedPercent)),
+                        Height = 6,
+                        IsIndeterminate = false,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                        CornerRadius = new CornerRadius(3),
+                        MinWidth = 80
+                    };
+                    Grid.SetColumn(bar, 1);
+                    winRow.Children.Add(bar);
+
+                    var pctLbl = new TextBlock
+                    {
+                        Text = $"{(int)win.UsedPercent}%",
+                        Style = captionStyle, FontSize = 11,
+                        Foreground = secondaryText,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        IsTextSelectionEnabled = false
+                    };
+                    Grid.SetColumn(pctLbl, 2);
+                    winRow.Children.Add(pctLbl);
+
+                    provCard.Children.Add(winRow);
+                }
+
+                items.Add(new() { CustomContent = provCard });
+            }
+        }
+
+        // By Model section — aggregate from sessions
+        var byModel = _lastSessions
+            .Where(s => !string.IsNullOrEmpty(s.Model))
+            .GroupBy(s => s.Model!, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new { Model = g.Key, Tokens = g.Sum(s => s.InputTokens + s.OutputTokens) })
+            .Where(x => x.Tokens > 0)
+            .OrderByDescending(x => x.Tokens)
+            .Take(3)
+            .ToList();
+        if (byModel.Count > 0)
+        {
+            items.Add(new() { Text = "By Model", IsHeader = true });
+            foreach (var m in byModel)
+            {
+                var row = new Grid
+                {
+                    Padding = new Thickness(12, 2, 12, 2),
+                    ColumnSpacing = 8,
+                    MinWidth = 260
+                };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var name = new TextBlock
+                {
+                    Text = m.Model,
+                    Style = captionStyle, FontSize = 11,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    IsTextSelectionEnabled = false
+                };
+                Grid.SetColumn(name, 0);
+                row.Children.Add(name);
+                var amt = new TextBlock
+                {
+                    Text = $"{FormatTokenCount(m.Tokens)} tokens",
+                    Style = captionStyle, FontSize = 11,
+                    Foreground = secondaryText,
+                    IsTextSelectionEnabled = false
+                };
+                Grid.SetColumn(amt, 1);
+                row.Children.Add(amt);
+                items.Add(new() { CustomContent = row });
+            }
+        }
+
+        items.Add(new() { Text = "Open detailed usage →", Action = "usage" });
         return items;
     }
-
-    private static List<TrayMenuFlyoutItem> BuildSessionFlyoutItems(SessionInfo session)
-        => BuildSessionFlyoutItems(session, (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]);
 
     private static UIElement BuildDeviceCard(
         GatewayNodeInfo node,
