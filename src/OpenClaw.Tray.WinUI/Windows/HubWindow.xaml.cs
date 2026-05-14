@@ -127,7 +127,6 @@ public sealed partial class HubWindow : WindowEx
     {
         // Map legacy tags
         if (tag == "general") tag = "home";
-        // "chat" tag opens the ChatPage (WebView2) directly
         if (tag == "about") tag = "info";
         // Map legacy agent-scoped workspace/cron tags
         if (tag == "cron") tag = $"agent:{_currentAgentId}:cron";
@@ -683,7 +682,6 @@ public sealed partial class HubWindow : WindowEx
                 if (LastPresence != null) instances.UpdatePresenceData(LastPresence);
                 break;
             case PermissionsPage permissions: permissions.Initialize(this); break;
-            case CapabilitiesPage capabilities: capabilities.Initialize(this); break;
             case SandboxPage sandbox: sandbox.Initialize(this); break;
             case VoiceSettingsPage voice: voice.Initialize(this, VoiceServiceInstance); break;
             case ActivityPage activity: activity.Initialize(this); break;
@@ -739,7 +737,7 @@ public sealed partial class HubWindow : WindowEx
         "config" => typeof(ConfigPage),
         "usage" => typeof(UsagePage),
         "bindings" => typeof(BindingsPage),
-        "capabilities" => typeof(CapabilitiesPage),
+        "capabilities" => typeof(PermissionsPage),
         "voice" => typeof(VoiceSettingsPage),
         "permissions" => typeof(PermissionsPage),
         "sandbox" => typeof(SandboxPage),
@@ -867,8 +865,7 @@ public sealed partial class HubWindow : WindowEx
             new() { Icon = "📡", Title = "Go to Config", Subtitle = "Gateway configuration", Tag = "config" },
             new() { Icon = "📡", Title = "Go to Usage", Subtitle = "Usage statistics", Tag = "usage" },
             new() { Icon = "📡", Title = "Go to Bindings", Subtitle = "Gateway bindings", Tag = "bindings" },
-            new() { Icon = "🖥️", Title = "Go to Capabilities", Subtitle = "Device capabilities", Tag = "capabilities" },
-            new() { Icon = "🛡️", Title = "Go to Permissions", Subtitle = "Exec policy & allowlists", Tag = "permissions" },
+            new() { Icon = "🛡️", Title = "Go to Permissions", Subtitle = "Capabilities, exec policy & allowlists", Tag = "permissions" },
             new() { Icon = "🕐", Title = "Go to Activity", Subtitle = "Activity stream", Tag = "activity" },
             new() { Icon = "⚙️", Title = "Go to Settings", Subtitle = "Application settings", Tag = "settings" },
             new() { Icon = "🐛", Title = "Go to Debug", Subtitle = "Debug information", Tag = "debug" },
