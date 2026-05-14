@@ -1489,7 +1489,7 @@ public class CanvasCapabilityTests
         };
         var res = await cap.ExecuteAsync(req);
         Assert.False(res.Ok);
-        Assert.Contains("temp directory", res.Error);
+        Assert.Equal("Failed to read jsonlPath", res.Error);
     }
     
     [Fact]
@@ -1506,7 +1506,7 @@ public class CanvasCapabilityTests
         };
         var res = await cap.ExecuteAsync(req);
         Assert.False(res.Ok);
-        Assert.Contains("temp directory", res.Error);
+        Assert.Equal("Failed to read jsonlPath", res.Error);
     }
 
     [Fact]
