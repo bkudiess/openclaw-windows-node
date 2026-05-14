@@ -2324,6 +2324,7 @@ public partial class App : Application
                 identityDataPath: IdentityDataPath);
             _nodeService.StatusChanged += OnNodeStatusChanged;
             _nodeService.NotificationRequested += OnNodeNotificationRequested;
+            _nodeService.ToastRequested += OnNodeToastRequested;
             _nodeService.PairingStatusChanged += OnPairingStatusChanged;
             _nodeService.ChannelHealthUpdated += OnChannelHealthUpdated;
             _nodeService.InvokeCompleted += OnNodeInvokeCompleted;
@@ -2685,6 +2686,10 @@ public partial class App : Application
             Logger.Warn($"Failed to show node notification: {ex.Message}");
         }
     }
+
+    private void OnNodeToastRequested(object? sender, Microsoft.Toolkit.Uwp.Notifications.ToastContentBuilder builder)
+        => _dispatcherQueue?.TryEnqueue(() =>
+            NonFatalAction.Run(() => ShowToast(builder), msg => Logger.Warn($"Failed to show node toast: {msg}")));
 
     private void OnNodeInvokeCompleted(object? sender, NodeInvokeCompletedEventArgs args)
     {
