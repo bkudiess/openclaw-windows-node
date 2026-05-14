@@ -481,9 +481,9 @@ public class WindowsNodeClient : WebSocketClientBase
         catch (Exception ex)
         {
             _logger.Error($"[NODE] Command execution failed: {command}", ex);
-            await SendNodeInvokeResultAsync(requestId, false, null, $"Execution failed: {ex.Message}");
+            await SendNodeInvokeResultAsync(requestId, false, null, "Command execution failed");
             stopwatch.Stop();
-            RaiseInvokeCompleted(requestId, command, false, $"Execution failed: {ex.Message}", stopwatch.Elapsed);
+            RaiseInvokeCompleted(requestId, command, false, "Command execution failed", stopwatch.Elapsed);
         }
     }
     
@@ -1003,9 +1003,9 @@ public class WindowsNodeClient : WebSocketClientBase
         catch (Exception ex)
         {
             _logger.Error($"Command execution failed: {command}", ex);
-            await SendErrorResponseAsync(requestId, $"Execution failed: {ex.Message}");
+            await SendErrorResponseAsync(requestId, "Command execution failed");
             stopwatch.Stop();
-            RaiseInvokeCompleted(requestId, command, false, $"Execution failed: {ex.Message}", stopwatch.Elapsed);
+            RaiseInvokeCompleted(requestId, command, false, "Command execution failed", stopwatch.Elapsed);
         }
     }
 
