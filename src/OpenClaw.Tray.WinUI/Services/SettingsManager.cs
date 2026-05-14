@@ -30,13 +30,16 @@ public class SettingsManager
 
     // Connection
     public string GatewayUrl { get; set; } = "ws://localhost:18789";
-    public string Token { get; set; } = "";
-    public string BootstrapToken { get; set; } = "";
     public bool UseSshTunnel { get; set; } = false;
     public string SshTunnelUser { get; set; } = "";
     public string SshTunnelHost { get; set; } = "";
     public int SshTunnelRemotePort { get; set; } = 18789;
     public int SshTunnelLocalPort { get; set; } = 18789;
+    public string? LegacyToken { get; private set; }
+    public string? LegacyBootstrapToken { get; private set; }
+    public bool HasLegacyGatewayCredentials =>
+        !string.IsNullOrWhiteSpace(LegacyToken) ||
+        !string.IsNullOrWhiteSpace(LegacyBootstrapToken);
 
     // Startup
     public bool AutoStart { get; set; } = true;
@@ -65,8 +68,16 @@ public class SettingsManager
     public bool NotifyChatResponses { get; set; } = true;
     public bool PreferStructuredCategories { get; set; } = true;
     public List<OpenClaw.Shared.UserNotificationRule> UserRules { get; set; } = new();
-    
-    // Node mode (gateway WebSocket connection — separate from MCP)
+
+    // User interface
+    /// <summary>
+    /// When true, host the legacy WebView2 gateway chat UI instead of the
+    /// native chat surface in both the Hub Chat tab and tray Chat popup.
+    /// Default false (native).
+    /// </summary>
+    public bool UseLegacyWebChat { get; set; } = false;
+
+    // Node mode(gateway WebSocket connection — separate from MCP)
     public bool EnableNodeMode { get; set; } = false;
     public bool NodeCanvasEnabled { get; set; } = true;
     public bool NodeScreenEnabled { get; set; } = true;
@@ -109,6 +120,21 @@ public class SettingsManager
     public string SkippedUpdateTag { get; set; } = "";
     public string? PreferredGatewayId { get; set; }
 
+    // ── MXC sandbox ─────────────────────────────────────────────────────
+    /// <summary>Master switch for system.run containment. When true (default), system.run runs sandboxed and is denied if MXC is unavailable. When false, system.run runs on host like before.</summary>
+    public bool SystemRunSandboxEnabled { get; set; } = true;
+    /// <summary>When sandboxed, allow system.run commands to reach the public internet. Default false.</summary>
+    public bool SystemRunAllowOutbound { get; set; } = false;
+
+    // ── MXC sandbox: additional knobs (Sandbox page) ─────────────────
+    public SandboxClipboardMode SandboxClipboard { get; set; } = SandboxClipboardMode.None;
+    public SandboxFolderAccess? SandboxDocumentsAccess { get; set; }
+    public SandboxFolderAccess? SandboxDownloadsAccess { get; set; }
+    public SandboxFolderAccess? SandboxDesktopAccess { get; set; }
+    public List<SandboxCustomFolder> SandboxCustomFolders { get; set; } = new();
+    public int SandboxTimeoutMs { get; set; } = 30_000;
+    public long SandboxMaxOutputBytes { get; set; } = 4 * 1024 * 1024;
+
     public SettingsManager() : this(GetDefaultSettingsDirectory())
     {
     }
@@ -134,17 +160,19 @@ public class SettingsManager
 
     public void Load()
     {
+        LegacyToken = null;
+        LegacyBootstrapToken = null;
+
         try
         {
             if (File.Exists(_settingsFilePath))
             {
                 var json = File.ReadAllText(_settingsFilePath);
+                LoadLegacyGatewayCredentials(json);
                 var loaded = SettingsData.FromJson(json);
                 if (loaded != null)
                 {
                     GatewayUrl = loaded.GatewayUrl ?? GatewayUrl;
-                    Token = loaded.Token ?? Token;
-                    BootstrapToken = loaded.BootstrapToken ?? BootstrapToken;
                     UseSshTunnel = loaded.UseSshTunnel;
                     SshTunnelUser = loaded.SshTunnelUser ?? SshTunnelUser;
                     SshTunnelHost = loaded.SshTunnelHost ?? SshTunnelHost;
@@ -204,16 +232,129 @@ public class SettingsManager
                     PreferredGatewayId = loaded.PreferredGatewayId ?? PreferredGatewayId;
                     NotifyChatResponses = loaded.NotifyChatResponses;
                     PreferStructuredCategories = loaded.PreferStructuredCategories;
+                    UseLegacyWebChat = loaded.UseLegacyWebChat;
                     if (loaded.UserRules != null)
                         UserRules = loaded.UserRules;
+
+                    // MXC sandbox settings
+                    SystemRunSandboxEnabled = loaded.SystemRunSandboxEnabled;
+                    SystemRunAllowOutbound = loaded.SystemRunAllowOutbound;
+
+                    // MXC sandbox settings (Sandbox page)
+                    SandboxClipboard = loaded.SandboxClipboard;
+                    SandboxDocumentsAccess = loaded.SandboxDocumentsAccess;
+                    SandboxDownloadsAccess = loaded.SandboxDownloadsAccess;
+                    SandboxDesktopAccess = loaded.SandboxDesktopAccess;
+                    SandboxCustomFolders = loaded.SandboxCustomFolders ?? new();
+                    if (loaded.SandboxTimeoutMs > 0)
+                        SandboxTimeoutMs = loaded.SandboxTimeoutMs;
+                    if (loaded.SandboxMaxOutputBytes > 0)
+                        SandboxMaxOutputBytes = loaded.SandboxMaxOutputBytes;
                 }
             }
         }
         catch (Exception ex)
         {
             Logger.Warn($"Failed to load settings: {ex.Message}");
+            LegacyToken = null;
+            LegacyBootstrapToken = null;
         }
     }
+
+    private void LoadLegacyGatewayCredentials(string json)
+    {
+        LegacyToken = null;
+        LegacyBootstrapToken = null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            LegacyToken = ReadLegacyString(document.RootElement, "Token");
+            LegacyBootstrapToken = ReadLegacyString(document.RootElement, "BootstrapToken");
+        }
+        catch (JsonException)
+        {
+            // SettingsData.FromJson handles invalid settings by falling back to defaults.
+        }
+    }
+
+    private static string? ReadLegacyString(JsonElement root, string propertyName)
+    {
+        return root.TryGetProperty(propertyName, out var property) &&
+            property.ValueKind == JsonValueKind.String
+                ? property.GetString()
+                : null;
+    }
+
+    /// <summary>
+    /// Creates a snapshot of current settings as an immutable SettingsData record.
+    /// Used for settings change classification (no DPAPI protection applied).
+    /// </summary>
+    public SettingsData ToSettingsData() => new()
+    {
+        GatewayUrl = GatewayUrl,
+        // Token and BootstrapToken are no longer written — GatewayRegistry is the source of truth
+        UseSshTunnel = UseSshTunnel,
+        SshTunnelUser = SshTunnelUser,
+        SshTunnelHost = SshTunnelHost,
+        SshTunnelRemotePort = SshTunnelRemotePort,
+        SshTunnelLocalPort = SshTunnelLocalPort,
+        AutoStart = AutoStart,
+        GlobalHotkeyEnabled = GlobalHotkeyEnabled,
+        HasInjectedFirstRunBootstrap = HasInjectedFirstRunBootstrap,
+        ShowNotifications = ShowNotifications,
+        NotificationSound = NotificationSound,
+        NotifyHealth = NotifyHealth,
+        NotifyUrgent = NotifyUrgent,
+        NotifyReminder = NotifyReminder,
+        NotifyEmail = NotifyEmail,
+        NotifyCalendar = NotifyCalendar,
+        NotifyBuild = NotifyBuild,
+        NotifyStock = NotifyStock,
+        NotifyInfo = NotifyInfo,
+        EnableNodeMode = EnableNodeMode,
+        NodeCanvasEnabled = NodeCanvasEnabled,
+        NodeScreenEnabled = NodeScreenEnabled,
+        NodeCameraEnabled = NodeCameraEnabled,
+        ScreenRecordingConsentGiven = ScreenRecordingConsentGiven,
+        CameraRecordingConsentGiven = CameraRecordingConsentGiven,
+        NodeLocationEnabled = NodeLocationEnabled,
+        NodeBrowserProxyEnabled = NodeBrowserProxyEnabled,
+        NodeSttEnabled = NodeSttEnabled,
+        SttLanguage = SttLanguage,
+        SttModelName = SttModelName,
+        SttSilenceTimeout = SttSilenceTimeout,
+        VoiceTtsEnabled = VoiceTtsEnabled,
+        VoiceAudioFeedback = VoiceAudioFeedback,
+        NodeTtsEnabled = NodeTtsEnabled,
+        TtsProvider = TtsProvider,
+        TtsElevenLabsApiKey = TtsElevenLabsApiKey,
+        TtsElevenLabsModel = string.IsNullOrWhiteSpace(TtsElevenLabsModel) ? null : TtsElevenLabsModel,
+        TtsElevenLabsVoiceId = string.IsNullOrWhiteSpace(TtsElevenLabsVoiceId) ? null : TtsElevenLabsVoiceId,
+        TtsWindowsVoiceId = string.IsNullOrWhiteSpace(TtsWindowsVoiceId) ? null : TtsWindowsVoiceId,
+        HubNavPaneOpen = HubNavPaneOpen,
+        TtsPiperVoiceId = TtsPiperVoiceId,
+        EnableMcpServer = EnableMcpServer,
+        A2UIImageHosts = A2UIImageHosts.Count == 0 ? null : new List<string>(A2UIImageHosts),
+        HasSeenActivityStreamTip = HasSeenActivityStreamTip,
+        SkippedUpdateTag = string.IsNullOrWhiteSpace(SkippedUpdateTag) ? null : SkippedUpdateTag,
+        PreferredGatewayId = string.IsNullOrWhiteSpace(PreferredGatewayId) ? null : PreferredGatewayId,
+        NotifyChatResponses = NotifyChatResponses,
+        PreferStructuredCategories = PreferStructuredCategories,
+        UseLegacyWebChat = UseLegacyWebChat,
+        UserRules = UserRules,
+        // MXC sandbox settings
+        SystemRunSandboxEnabled = SystemRunSandboxEnabled,
+        SystemRunAllowOutbound = SystemRunAllowOutbound,
+        // MXC sandbox settings (Sandbox page)
+        SandboxClipboard = SandboxClipboard,
+        SandboxDocumentsAccess = SandboxDocumentsAccess,
+        SandboxDownloadsAccess = SandboxDownloadsAccess,
+        SandboxDesktopAccess = SandboxDesktopAccess,
+        SandboxCustomFolders = SandboxCustomFolders.Count == 0 ? null : new List<SandboxCustomFolder>(SandboxCustomFolders),
+        SandboxTimeoutMs = SandboxTimeoutMs,
+        SandboxMaxOutputBytes = SandboxMaxOutputBytes
+    };
 
     public void Save()
     {
@@ -228,61 +369,9 @@ public class SettingsManager
                 // running as the same user could otherwise read these freely.
                 OpenClaw.Shared.Mcp.McpAuthToken.TryRestrictDataDirectoryAcl(_settingsDirectory);
 
-                var data = new SettingsData
-                {
-                    GatewayUrl = GatewayUrl,
-                    Token = Token,
-                    BootstrapToken = string.IsNullOrWhiteSpace(BootstrapToken) ? null : BootstrapToken,
-                    UseSshTunnel = UseSshTunnel,
-                    SshTunnelUser = SshTunnelUser,
-                    SshTunnelHost = SshTunnelHost,
-                    SshTunnelRemotePort = SshTunnelRemotePort,
-                    SshTunnelLocalPort = SshTunnelLocalPort,
-                    AutoStart = AutoStart,
-                    GlobalHotkeyEnabled = GlobalHotkeyEnabled,
-                    HasInjectedFirstRunBootstrap = HasInjectedFirstRunBootstrap,
-                    ShowNotifications = ShowNotifications,
-                    NotificationSound = NotificationSound,
-                    NotifyHealth = NotifyHealth,
-                    NotifyUrgent = NotifyUrgent,
-                    NotifyReminder = NotifyReminder,
-                    NotifyEmail = NotifyEmail,
-                    NotifyCalendar = NotifyCalendar,
-                    NotifyBuild = NotifyBuild,
-                    NotifyStock = NotifyStock,
-                    NotifyInfo = NotifyInfo,
-                    EnableNodeMode = EnableNodeMode,
-                    NodeCanvasEnabled = NodeCanvasEnabled,
-                    NodeScreenEnabled = NodeScreenEnabled,
-                    NodeCameraEnabled = NodeCameraEnabled,
-                    ScreenRecordingConsentGiven = ScreenRecordingConsentGiven,
-                    CameraRecordingConsentGiven = CameraRecordingConsentGiven,
-                    NodeLocationEnabled = NodeLocationEnabled,
-                    NodeBrowserProxyEnabled = NodeBrowserProxyEnabled,
-                    NodeSttEnabled = NodeSttEnabled,
-                    SttLanguage = SttLanguage,
-                    SttModelName = SttModelName,
-                    SttSilenceTimeout = SttSilenceTimeout,
-                    VoiceTtsEnabled = VoiceTtsEnabled,
-                    VoiceAudioFeedback = VoiceAudioFeedback,
-                    NodeTtsEnabled = NodeTtsEnabled,
-                    TtsProvider = TtsProvider,
-                    TtsElevenLabsApiKey = ProtectSettingSecret(TtsElevenLabsApiKey),
-                    TtsElevenLabsModel = string.IsNullOrWhiteSpace(TtsElevenLabsModel) ? null : TtsElevenLabsModel,
-                    TtsElevenLabsVoiceId = string.IsNullOrWhiteSpace(TtsElevenLabsVoiceId) ? null : TtsElevenLabsVoiceId,
-                    TtsWindowsVoiceId = string.IsNullOrWhiteSpace(TtsWindowsVoiceId) ? null : TtsWindowsVoiceId,
-                    HubNavPaneOpen = HubNavPaneOpen,
-                    TtsPiperVoiceId = TtsPiperVoiceId,
-                    EnableMcpServer = EnableMcpServer,
-                    A2UIImageHosts = A2UIImageHosts.Count == 0 ? null : new List<string>(A2UIImageHosts),
-                    // McpOnlyMode is legacy — never written; remains null in serialized output.
-                    HasSeenActivityStreamTip = HasSeenActivityStreamTip,
-                    SkippedUpdateTag = string.IsNullOrWhiteSpace(SkippedUpdateTag) ? null : SkippedUpdateTag,
-                    PreferredGatewayId = string.IsNullOrWhiteSpace(PreferredGatewayId) ? null : PreferredGatewayId,
-                    NotifyChatResponses = NotifyChatResponses,
-                    PreferStructuredCategories = PreferStructuredCategories,
-                    UserRules = UserRules
-                };
+                var data = ToSettingsData();
+                // Apply DPAPI protection to the API key for on-disk storage only
+                data.TtsElevenLabsApiKey = ProtectSettingSecret(data.TtsElevenLabsApiKey);
 
                 var json = data.ToJson();
                 File.WriteAllText(_settingsFilePath, json);

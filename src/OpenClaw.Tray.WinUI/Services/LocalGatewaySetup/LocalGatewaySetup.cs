@@ -90,11 +90,9 @@ public sealed class ProcessLocalGatewaySetupEnvironment : ILocalGatewaySetupEnvi
 
 public sealed record LocalGatewaySetupRuntimeConfiguration(
     string? DistroName,
-    string? InstanceInstallLocation,
     bool AllowExistingDistro)
 {
     public const string DistroNameVariable = "OPENCLAW_WSL_DISTRO_NAME";
-    public const string InstanceInstallLocationVariable = "OPENCLAW_WSL_INSTALL_LOCATION";
     public const string AllowExistingDistroVariable = "OPENCLAW_WSL_ALLOW_EXISTING_DISTRO";
 
     public static LocalGatewaySetupRuntimeConfiguration FromEnvironment(ILocalGatewaySetupEnvironment? environment = null)
@@ -106,7 +104,6 @@ public sealed record LocalGatewaySetupRuntimeConfiguration(
 #else
             null,
 #endif
-            NullIfWhiteSpace(environment.GetVariable(InstanceInstallLocationVariable)),
             IsTruthy(environment.GetVariable(AllowExistingDistroVariable)));
     }
 
@@ -222,8 +219,18 @@ public sealed class LocalGatewaySetupStateStore : ILocalGatewaySetupStateStore
         if (!File.Exists(_statePath))
             return null;
 
-        await using var stream = File.OpenRead(_statePath);
-        return await JsonSerializer.DeserializeAsync<LocalGatewaySetupState>(stream, s_jsonOptions, cancellationToken);
+        try
+        {
+            await using var stream = File.OpenRead(_statePath);
+            return await JsonSerializer.DeserializeAsync<LocalGatewaySetupState>(stream, s_jsonOptions, cancellationToken);
+        }
+        catch (JsonException)
+        {
+            // Corrupt or incompatible state file — treat as fresh start
+            System.Diagnostics.Debug.WriteLine($"[SetupState] Corrupt setup-state.json at {_statePath}, deleting and starting fresh");
+            try { File.Delete(_statePath); } catch { }
+            return null;
+        }
     }
 
     public async Task SaveAsync(LocalGatewaySetupState state, CancellationToken cancellationToken = default)
@@ -401,6 +408,21 @@ public sealed class WslExeCommandRunner : IWslCommandRunner
             {
                 _logger.Warn($"[WSL] Failed to kill timed-out process: {ex.Message}");
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // Caller cancelled: kill wsl.exe and its descendants before propagating.
+            // Without this, the Linux-side process tree continues running after setup
+            // is aborted — issue #281 item #7.
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"[WSL] Failed to kill cancelled process: {ex.Message}");
+            }
+            throw;
         }
 
         // Drain stdout/stderr with a bounded post-exit timeout. wsl.exe routinely spawns
@@ -732,7 +754,10 @@ public sealed class WslStoreInstanceInstaller : IWslInstanceInstaller
         if (string.IsNullOrWhiteSpace(value))
             return string.Empty;
 
-        var sanitized = SecretRedactor.Redact(value).Replace("\0", string.Empty).Trim();
+        // Apply both passes: SecretRedactor catches key=value patterns (e.g. gateway-token=...),
+        // TokenSanitizer catches raw token formats (64-char hex, long base64url) that can appear
+        // in subprocess error output when a CLI tool echoes its own arguments.
+        var sanitized = TokenSanitizer.Sanitize(SecretRedactor.Redact(value)).Replace("\0", string.Empty).Trim();
         const int maxLength = 2000;
         return sanitized.Length <= maxLength ? sanitized : sanitized[..maxLength] + "...<truncated>";
     }
@@ -916,7 +941,65 @@ public sealed class OpenClawInstallCliLinuxInstaller : IOpenClawLinuxInstaller
             return new OpenClawLinuxInstallResult(false, events, "openclaw_cli_verify_failed", "The OpenClaw CLI was installed, but the installed binary could not be verified.", detail);
         }
 
+        // Best-effort: expose the openclaw CLI on the default PATH so engineers can run
+        // `openclaw ...` from any WSL shell (login or `wsl bash -c`) without typing the
+        // /opt/openclaw/bin/ prefix. /usr/local/bin is on every shell's default PATH and
+        // is the same pattern packaging/wsl-rootfs/.../prepare-rootfs.sh uses for `uv`.
+        // Failure here does not fail the install — tray/service code still uses the
+        // absolute path; only the human-facing convenience is lost.
+        var symlinkResult = await EnsureOpenClawOnPathAsync(options, cancellationToken);
+        if (symlinkResult.ExitCode != 0)
+        {
+#if !OPENCLAW_TRAY_TESTS
+            Logger.Warn($"Best-effort openclaw PATH symlink step failed (exit {symlinkResult.ExitCode}). User will need to use the full /opt/openclaw/bin/openclaw path inside WSL.");
+#endif
+        }
+
         return new OpenClawLinuxInstallResult(true, events);
+    }
+
+    private Task<WslCommandResult> EnsureOpenClawOnPathAsync(LocalGatewaySetupOptions options, CancellationToken cancellationToken)
+    {
+        var binaryPath = options.OpenClawInstallPrefix + "/bin/openclaw";
+        var binaryQ = ShellQuote(binaryPath);
+        // We deliberately only manage /usr/local/bin/openclaw when (a) it doesn't exist
+        // yet, (b) it's a broken symlink, or (c) it's already a symlink that points at
+        // the same binary. We do NOT clobber a regular file (a user may have hand-installed
+        // a different openclaw build there) and we do NOT redirect a symlink that points
+        // somewhere else (a developer may have aimed it at a debug build on purpose).
+        //
+        // IMPORTANT: every shell `$variable` reference in the script body is escaped as
+        // `\$variable`. wsl.exe performs Windows-style env-var substitution on its argument
+        // string before invoking bash, so an unescaped `$expected` would be replaced with
+        // the (empty) Windows env var of the same name and bash would never see the
+        // assignment. Backslash-escaping prevents wsl.exe substitution while still letting
+        // bash expand the variable normally. The same escape pattern is required in every
+        // multi-line script that shares variables across lines.
+        var script = string.Join("\n", new[]
+        {
+            "set +e",
+            "target=/usr/local/bin/openclaw",
+            "expected=" + binaryQ,
+            "if [ ! -x \"\\$expected\" ]; then exit 0; fi",
+            "if [ ! -e \"\\$target\" ] && [ ! -L \"\\$target\" ]; then",
+            "  ln -sf \"\\$expected\" \"\\$target\"",
+            "  exit \\$?",
+            "fi",
+            "if [ -L \"\\$target\" ]; then",
+            "  current=\\$(readlink -- \"\\$target\" 2>/dev/null)",
+            "  if [ \"\\$current\" = \"\\$expected\" ]; then exit 0; fi",
+            "  # Broken symlink — the resolved path doesn't exist. Safe to re-point.",
+            "  if [ ! -e \"\\$target\" ]; then",
+            "    ln -sf \"\\$expected\" \"\\$target\"",
+            "    exit \\$?",
+            "  fi",
+            "  # Symlink points to a different live target — leave it alone (user customization).",
+            "  exit 0",
+            "fi",
+            "# Regular file or other non-symlink — do not clobber.",
+            "exit 0"
+        });
+        return _wsl.RunAsync(["-d", options.DistroName, "-u", "root", "--", "bash", "-lc", script], cancellationToken);
     }
 
     public static IReadOnlyList<OpenClawLinuxInstallerEvent> ParseInstallerEvents(string output)
@@ -1039,6 +1122,19 @@ public sealed class OpenClawCliGatewayServiceManager : IGatewayServiceManager
 
     public async Task<GatewayServiceOperationResult> InstallAsync(LocalGatewaySetupOptions options, CancellationToken cancellationToken = default)
     {
+        // W2a: If something else is already bound to the gateway port inside WSL, surface
+        // an actionable error up front instead of letting `gateway install` or the 90s
+        // status poll fail with an opaque message.
+        var portConflict = await ProbePortConflictAsync(options, cancellationToken);
+        if (portConflict is not null)
+        {
+            return new GatewayServiceOperationResult(
+                false,
+                "gateway_port_in_use",
+                $"Local gateway port {options.GatewayPort} is already in use inside the {options.DistroName} distro.",
+                portConflict);
+        }
+
         await ResetFailedServiceStateAsync(options, cancellationToken);
         var result = await RunOpenClawAsync(options, ["gateway", "install", "--force", "--port", options.GatewayPort.ToString(CultureInfo.InvariantCulture)], cancellationToken);
         if (result.Success)
@@ -1062,9 +1158,27 @@ public sealed class OpenClawCliGatewayServiceManager : IGatewayServiceManager
 
     public async Task<GatewayServiceOperationResult> StartAsync(LocalGatewaySetupOptions options, CancellationToken cancellationToken = default)
     {
+        // W2b: fast-path — if the gateway is already responding on its URL, declare
+        // success without re-issuing `gateway start`. Stops a stale failure from a
+        // previous wizard attempt from gating progress when the gateway is in fact
+        // healthy. Wrap in a short timeout: the probe is a best-effort optimisation, so
+        // a hang on the inner socket connect must not block the start path. We fall
+        // back to the regular `gateway start` flow on timeout.
+        var earlyStatus = await TryEarlyStatusProbeAsync(options, cancellationToken);
+        if (earlyStatus is { Success: true })
+            return new GatewayServiceOperationResult(true);
+
         var start = await RunOpenClawAsync(options, ["gateway", "start"], cancellationToken);
         if (!start.Success)
-            return new GatewayServiceOperationResult(false, "gateway_service_start_failed", WslLogsHelp("Failed to start the upstream OpenClaw gateway service."));
+        {
+            // W2d: include start stderr/stdout + service journal so the user (and us in
+            // diagnostics) can see *why* the service refused to come up rather than the
+            // generic "Failed to start" wrapper.
+            var startDetail = DiagnosticFormatter.Build("gateway_service_start", start);
+            var journal = await CaptureServiceJournalAsync(options, cancellationToken);
+            var detail = string.IsNullOrWhiteSpace(journal) ? startDetail : startDetail + Environment.NewLine + journal;
+            return new GatewayServiceOperationResult(false, "gateway_service_start_failed", WslLogsHelp("Failed to start the upstream OpenClaw gateway service."), detail);
+        }
 
         WslCommandResult? lastStatus = null;
         var deadline = DateTimeOffset.UtcNow.AddSeconds(90);
@@ -1077,11 +1191,145 @@ public sealed class OpenClawCliGatewayServiceManager : IGatewayServiceManager
             await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
         }
 
+        // W2d: bubble up service status + recent journal lines on the timeout path too.
+        var statusDiagnostic = lastStatus is null ? null : DiagnosticFormatter.Build("gateway_service_status", lastStatus);
+        var timeoutJournal = await CaptureServiceJournalAsync(options, cancellationToken);
+        var detailParts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(statusDiagnostic)) detailParts.Add(statusDiagnostic!);
+        if (!string.IsNullOrWhiteSpace(timeoutJournal)) detailParts.Add(timeoutJournal);
+        var combinedDetail = detailParts.Count == 0 ? null : string.Join(Environment.NewLine, detailParts);
+
         return new GatewayServiceOperationResult(
             false,
             "gateway_service_status_failed",
             WslLogsHelp("The OpenClaw gateway service started, but did not report ready status."),
-            lastStatus is null ? null : DiagnosticFormatter.Build("gateway_service_status", lastStatus));
+            combinedDetail);
+    }
+
+    /// <summary>
+    /// Runs the W2b fast-path early-status probe with a short timeout so a hang in the
+    /// gateway status socket connect can't block the start path. Returns null on
+    /// timeout (caller treats this as "not healthy, proceed with regular start").
+    /// </summary>
+    private async Task<WslCommandResult?> TryEarlyStatusProbeAsync(LocalGatewaySetupOptions options, CancellationToken cancellationToken)
+    {
+        const int probeTimeoutSeconds = 5;
+        using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        probeCts.CancelAfter(TimeSpan.FromSeconds(probeTimeoutSeconds));
+        try
+        {
+            return await RunStatusWithTokenAsync(options, probeCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Probe timed out or outer ct cancelled. Re-throw only if the OUTER
+            // cancellation fired; otherwise swallow so StartAsync proceeds.
+            if (cancellationToken.IsCancellationRequested)
+                throw;
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Best-effort probe that returns a sanitized diagnostic when the gateway port is
+    /// bound by a process that is not the OpenClaw gateway service. Returns null when
+    /// the port is free, when only the gateway owns it, or when probing failed (so we
+    /// don't block install on probe noise).
+    /// </summary>
+    private async Task<string?> ProbePortConflictAsync(LocalGatewaySetupOptions options, CancellationToken cancellationToken)
+    {
+        var port = options.GatewayPort.ToString(CultureInfo.InvariantCulture);
+        // NOTE: shell `$variable` references in the script body must be escaped as `\$`
+        // because wsl.exe performs Windows-style env-var substitution on its argument
+        // string before bash receives it; an unescaped `$out` would be replaced with
+        // the (empty) Windows env var of the same name. See EnsureOpenClawOnPathAsync.
+        var script = string.Join("\n", new[]
+        {
+            "set +e",
+            // `ss -ltnp` lists listening TCP sockets with owning process names in the
+            // canonical form `users:(("PROGNAME",pid=PID,fd=FD))`. Filter to lines that
+            // actually have a `users:` info section (so blank/malformed lines don't fool
+            // the check), then require EVERY remaining line to be openclaw-owned — that
+            // way a mixed scenario where the gateway and a foreign process share the
+            // port (SO_REUSEPORT, separate v4/v6 listeners) is still flagged as a
+            // conflict.
+            "out=\\$(ss -H -ltnp 'sport = :" + port + "' 2>/dev/null)",
+            "if [ -z \"\\$out\" ]; then",
+            "  exit 0",
+            "fi",
+            // Strip lines that don't carry a users:(("...",pid=...)) section — ss omits
+            // it when running unprivileged or for kernel sockets, and a missing program
+            // name should be treated as a conflict for safety.
+            "with_users=\\$(printf '%s\\n' \"\\$out\" | grep -E 'users:\\(\\(' || true)",
+            "without_users=\\$(printf '%s\\n' \"\\$out\" | grep -vE 'users:\\(\\(' | grep -vE '^[[:space:]]*\\$' || true)",
+            "if [ -n \"\\$without_users\" ]; then",
+            "  printf '%s\\n' \"\\$out\"",
+            "  exit 2",
+            "fi",
+            // Among lines that do have users:(, the gateway is recognised by the quoted
+            // program name openclaw* — match users:(("openclaw" or users:(("openclaw-…
+            "non_openclaw=\\$(printf '%s\\n' \"\\$with_users\" | grep -vE 'users:\\(\\(\"openclaw[^\"]*\",' || true)",
+            "if [ -n \"\\$non_openclaw\" ]; then",
+            "  printf '%s\\n' \"\\$out\"",
+            "  exit 2",
+            "fi",
+            "exit 0"
+        });
+
+        var result = await _wsl.RunAsync(["-d", options.DistroName, "-u", "root", "--", "bash", "-lc", script], cancellationToken);
+        if (result.ExitCode == 0)
+            return null;
+        if (result.ExitCode != 2)
+        {
+            // Probe itself failed (locked-down distro, missing `ss`, etc.). Log so the
+            // observability gap is visible in tray logs, but don't block install — the
+            // existing 90 s status poll remains the safety net.
+#if !OPENCLAW_TRAY_TESTS
+            Logger.Debug($"[LocalGatewaySetup] Port-conflict probe degraded for port {options.GatewayPort} (exit {result.ExitCode}); continuing without explicit conflict detection.");
+#endif
+            return null;
+        }
+
+        var sanitized = TokenSanitizer.Sanitize(SecretRedactor.Redact(result.StandardOutput ?? string.Empty)).Trim();
+        return string.IsNullOrWhiteSpace(sanitized)
+            ? $"Port {options.GatewayPort} is in use by another process inside {options.DistroName}."
+            : $"Port {options.GatewayPort} is in use by another process inside {options.DistroName}. ss output: {sanitized}";
+    }
+
+    private async Task<string?> CaptureServiceJournalAsync(LocalGatewaySetupOptions options, CancellationToken cancellationToken)
+    {
+        const string serviceName = "openclaw-gateway.service";
+        const string truncationSuffix = "…<truncated>";
+        const int maxJournalChars = 8192;
+        // Wrap each diagnostic command in `timeout` so that a missing user systemd / D-Bus
+        // session (which is common when the distro hasn't fully booted) doesn't stall the
+        // failure path indefinitely. SIGKILL after 6 s is hard enough to break any hang.
+        var script = string.Join("\n", new[]
+        {
+            "set +e",
+            "echo '== systemctl status =='",
+            "timeout --signal=KILL 5 systemctl --user status " + serviceName + " --no-pager 2>&1 | tail -n 40",
+            "echo '== journalctl --user-unit -n 100 =='",
+            "timeout --signal=KILL 5 journalctl --user-unit " + serviceName + " --no-pager -n 100 2>&1",
+            "exit 0"
+        });
+
+        var result = await _wsl.RunAsync(["-d", options.DistroName, "-u", "openclaw", "--", "bash", "-lc", script], cancellationToken);
+        var sanitized = TokenSanitizer.Sanitize(SecretRedactor.Redact(result.StandardOutput ?? string.Empty)).Trim();
+        if (string.IsNullOrWhiteSpace(sanitized))
+            return null;
+        if (sanitized.Length > maxJournalChars)
+        {
+            // Reserve room for the truncation marker so the total stays <= maxJournalChars,
+            // and back off one code unit if the cut lands on a UTF-16 high surrogate so we
+            // don't emit an orphan surrogate (gateway logs can contain emoji in service
+            // names / file paths).
+            var cut = maxJournalChars - truncationSuffix.Length;
+            if (cut < 0) cut = 0;
+            if (cut > 0 && cut < sanitized.Length && char.IsHighSurrogate(sanitized[cut - 1])) cut -= 1;
+            sanitized = sanitized[..cut] + truncationSuffix;
+        }
+        return "gateway_service_journal=" + sanitized;
     }
 
     private Task<WslCommandResult> RunOpenClawAsync(LocalGatewaySetupOptions options, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
@@ -1164,7 +1412,10 @@ internal static class DiagnosticFormatter
         if (string.IsNullOrWhiteSpace(value))
             return string.Empty;
 
-        var sanitized = SecretRedactor.Redact(value).Replace("\0", string.Empty).Trim();
+        // Apply both passes: SecretRedactor catches key=value patterns (e.g. gateway-token=...),
+        // TokenSanitizer catches raw token formats (64-char hex, long base64url) that can appear
+        // in subprocess error output when a CLI tool echoes its own arguments.
+        var sanitized = TokenSanitizer.Sanitize(SecretRedactor.Redact(value)).Replace("\0", string.Empty).Trim();
         const int maxLength = 2000;
         return sanitized.Length <= maxLength ? sanitized : sanitized[..maxLength] + "...<truncated>";
     }
@@ -1325,18 +1576,42 @@ public interface ILocalGatewaySetupSettings
 public sealed class SettingsManagerLocalGatewaySetupSettings : ILocalGatewaySetupSettings
 {
     private readonly SettingsManager _settings;
+    private readonly OpenClawTray.Services.Connection.GatewayRegistry? _registry;
 
-    public SettingsManagerLocalGatewaySetupSettings(SettingsManager settings)
+    public SettingsManagerLocalGatewaySetupSettings(SettingsManager settings, OpenClawTray.Services.Connection.GatewayRegistry? registry = null)
     {
         _settings = settings;
+        _registry = registry;
     }
 
     public string GatewayUrl { get => _settings.GatewayUrl; set => _settings.GatewayUrl = value; }
-    public string Token { get => _settings.Token; set => _settings.Token = value; }
-    public string BootstrapToken { get => _settings.BootstrapToken; set => _settings.BootstrapToken = value; }
+    public string Token { get; set; } = "";
+    public string BootstrapToken { get; set; } = "";
     public bool UseSshTunnel { get => _settings.UseSshTunnel; set => _settings.UseSshTunnel = value; }
     public bool EnableNodeMode { get => _settings.EnableNodeMode; set => _settings.EnableNodeMode = value; }
-    public void Save() => _settings.Save();
+
+    public void Save()
+    {
+        _settings.Save();
+
+        // Sync credentials to GatewayRegistry (source of truth for connection architecture)
+        if (_registry != null && !string.IsNullOrWhiteSpace(GatewayUrl))
+        {
+            var existing = _registry.FindByUrl(GatewayUrl);
+            var recordId = existing?.Id ?? System.Guid.NewGuid().ToString();
+            var record = new OpenClawTray.Services.Connection.GatewayRecord
+            {
+                Id = recordId,
+                Url = GatewayUrl,
+                SharedGatewayToken = !string.IsNullOrWhiteSpace(Token) ? Token : existing?.SharedGatewayToken,
+                BootstrapToken = !string.IsNullOrWhiteSpace(BootstrapToken) ? BootstrapToken : existing?.BootstrapToken,
+                IsLocal = true,
+            };
+            _registry.AddOrUpdate(record);
+            _registry.SetActive(recordId);
+            _registry.Save();
+        }
+    }
 }
 
 public sealed class DeferredBootstrapTokenProvisioner : IBootstrapTokenProvisioner
@@ -2745,12 +3020,18 @@ public sealed class LocalGatewaySetupEngine
         }
         catch (OperationCanceledException)
         {
+            state.Status = LocalGatewaySetupStatus.Cancelled;
+            state.UserMessage = "Setup was cancelled.";
+            // Persist cancelled state so restarts don't resume from stale Running phase
+            try { await _stateStore.SaveAsync(state, CancellationToken.None); } catch { }
+            StateChanged?.Invoke(state);
             throw;
         }
         catch (Exception ex)
         {
             _logger.Error($"Local gateway setup phase {phase} failed.", ex);
-            state.Block($"{phase.ToString().ToLowerInvariant()}_failed", ex.Message, retryable: true, detail: SecretRedactor.Redact(ex.ToString()));
+            var retryable = ex is not (UnauthorizedAccessException or NotSupportedException or InvalidOperationException or ArgumentException);
+            state.Block($"{phase.ToString().ToLowerInvariant()}_failed", ex.Message, retryable: retryable, detail: SecretRedactor.Redact(ex.ToString()));
             await SaveAndPublishAsync(state, cancellationToken);
             return;
         }
@@ -2927,11 +3208,12 @@ public static class LocalGatewaySetupEngineFactory
         NodeService? nodeService = null,
 #endif
         string? distroName = null,
-        string? instanceInstallLocation = null,
         bool allowExistingDistro = false,
         bool replaceExistingConfigurationConfirmed = false,
         string? identityDataPath = null,
-        string? setupStatePath = null)
+        string? setupStatePath = null,
+        OpenClawTray.Services.Connection.GatewayRegistry? gatewayRegistry = null,
+        IGatewayOperatorConnector? operatorConnectorOverride = null)
     {
         // Defense-in-depth fail-closed: refuse to construct the engine if any of the
         // 6 sync existing-config predicates fire and the caller has not passed explicit
@@ -2964,8 +3246,7 @@ public static class LocalGatewaySetupEngineFactory
         {
             GatewayUrl = settings.GetEffectiveGatewayUrl(),
             DistroName = ResolveDistroName(runtime, distroName),
-            InstanceInstallLocation = string.IsNullOrWhiteSpace(instanceInstallLocation) ? runtime.InstanceInstallLocation : instanceInstallLocation,
-            AllowExistingDistro = allowExistingDistro || runtime.AllowExistingDistro,
+            AllowExistingDistro = allowExistingDistro || runtime.AllowExistingDistro || replaceExistingConfigurationConfirmed,
 #if OPENCLAW_TRAY_TESTS
             EnableWindowsTrayNodeByDefault = settings.EnableNodeMode
 #else
@@ -2973,9 +3254,22 @@ public static class LocalGatewaySetupEngineFactory
 #endif
         };
 
+        // When replacing existing configuration, clear persisted setup state
+        // so the engine starts from scratch instead of replaying a completed run.
+        var resolvedStatePath = setupStatePath ?? Path.Combine(
+            Environment.GetEnvironmentVariable("OPENCLAW_TRAY_LOCALAPPDATA_DIR")
+                ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "OpenClawTray",
+            "setup-state.json");
+        if (replaceExistingConfigurationConfirmed && File.Exists(resolvedStatePath))
+        {
+            try { File.Delete(resolvedStatePath); }
+            catch { /* best-effort — engine will overwrite on first save */ }
+        }
+
         var wsl = new WslExeCommandRunner(logger, TimeSpan.FromMinutes(30));
-        var settingsAdapter = new SettingsManagerLocalGatewaySetupSettings(settings);
-        var operatorConnector = new OpenClawGatewayOperatorConnector(logger);
+        var settingsAdapter = new SettingsManagerLocalGatewaySetupSettings(settings, gatewayRegistry);
+        var operatorConnector = operatorConnectorOverride ?? (IGatewayOperatorConnector)new OpenClawGatewayOperatorConnector(logger);
         var bootstrapTokenProvider = new WslGatewayCliBootstrapTokenProvider(wsl, options.OpenClawInstallPrefix + "/bin/openclaw");
         var sharedGatewayTokenProvider = new WslGatewayCliSharedGatewayTokenProvider(wsl);
         var gatewayConfigurationPreparer = new OpenClawCliGatewayConfigurationPreparer(wsl);

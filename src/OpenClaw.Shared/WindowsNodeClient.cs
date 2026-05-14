@@ -34,6 +34,8 @@ public class WindowsNodeClient : WebSocketClientBase
     // even after OnDisconnected clears _isPendingApproval.
     private volatile bool _pairingBlocked;
     private volatile bool _rateLimited;
+    private bool _useV2Signature; // true after v3 signature rejected by gateway
+    public bool UseV2Signature { get => _useV2Signature; set => _useV2Signature = value; }
     // Bug 3: source-side idempotency for PairingStatusChanged. HandleHelloOk runs on every
     // WS reconnect and re-fires PairingStatus.Paired even when nothing changed, causing a
     // toast storm in the tray UI. Track the last emitted status and only fire on transitions.
@@ -55,6 +57,10 @@ public class WindowsNodeClient : WebSocketClientBase
     public event EventHandler<PairingStatusEventArgs>? PairingStatusChanged;
     public event EventHandler<JsonElement>? HealthReceived;
     public event EventHandler<GatewaySelfInfo>? GatewaySelfUpdated;
+    /// <summary>Raised when a device token is received from the gateway during hello-ok handshake.</summary>
+    public event EventHandler<DeviceTokenReceivedEventArgs>? DeviceTokenReceived;
+    /// <summary>Raised when the hello-ok handshake completes successfully.</summary>
+    public event EventHandler? HandshakeSucceeded;
     
     public new bool IsConnected => _isConnected;
     public string? NodeId => _nodeId;
@@ -153,7 +159,10 @@ public class WindowsNodeClient : WebSocketClientBase
     /// </summary>
     public void RegisterCapability(INodeCapability capability)
     {
-        _capabilities.Add(capability);
+        if (!_capabilities.Contains(capability))
+        {
+            _capabilities.Add(capability);
+        }
         
         // Update registration
         if (!_registration.Capabilities.Contains(capability.Category))
@@ -503,8 +512,6 @@ public class WindowsNodeClient : WebSocketClientBase
     
     private async Task HandleConnectChallengeAsync(JsonElement root)
     {
-        _logger.Info("Received connect challenge, sending node registration...");
-        
         string? nonce = null;
         long ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         
@@ -519,6 +526,8 @@ public class WindowsNodeClient : WebSocketClientBase
                 ts = tsProp.GetInt64();
             }
         }
+
+        _logger.Info($"[HANDSHAKE] Received connect.challenge: nonce={nonce}, ts={ts}");
         
         _pendingNonce = nonce;
         await SendNodeConnectAsync(nonce, ts);
@@ -530,11 +539,19 @@ public class WindowsNodeClient : WebSocketClientBase
     {
         var isPaired = !string.IsNullOrEmpty(_deviceIdentity.NodeDeviceToken);
         var usingBootstrap = !isPaired && !string.IsNullOrEmpty(_bootstrapToken);
+        var (auth, tokenForSig) = BuildConnectAuth();
+        var authType = auth.ContainsKey("deviceToken") ? "deviceToken"
+            : auth.ContainsKey("bootstrapToken") ? "bootstrapToken" : "token";
 
-        _logger.Info($"Connecting with Ed25519 device identity (paired: {isPaired}, bootstrap: {usingBootstrap})");
+        _logger.Info($"[HANDSHAKE] → Sending connect:");
+        _logger.Info($"[HANDSHAKE]   role=node, clientId={ClientId}, mode=node");
+        _logger.Info($"[HANDSHAKE]   isBootstrap={usingBootstrap}, hasNodeDeviceToken={isPaired}");
+        _logger.Info($"[HANDSHAKE]   deviceId={_deviceIdentity.DeviceId[..Math.Min(16, _deviceIdentity.DeviceId.Length)]}...");
+        _logger.Info($"[HANDSHAKE]   nonce={nonce?[..Math.Min(15, nonce?.Length ?? 0)]}...");
+        _logger.Info($"[HANDSHAKE]   signature format={(_useV2Signature ? "v2" : "v3")}, platform=windows, family=desktop");
+        _logger.Info($"[HANDSHAKE]   auth: {{{authType}}}");
 
         await SendRawAsync(BuildNodeConnectMessage(nonce, ts));
-        _logger.Info($"Sent node registration with device ID: {_deviceIdentity.DeviceId[..16]}..., paired: {isPaired}");
     }
 
     private string BuildNodeConnectMessage(string? nonce, long ts)
@@ -548,7 +565,14 @@ public class WindowsNodeClient : WebSocketClientBase
         {
             try
             {
-                signature = _deviceIdentity.SignPayload(nonce, signedAt, ClientId, tokenForSignature);
+                signature = _useV2Signature
+                    ? _deviceIdentity.SignConnectPayloadV2(
+                        nonce, signedAt, ClientId, "node", "node",
+                        Array.Empty<string>(), tokenForSignature)
+                    : _deviceIdentity.SignConnectPayloadV3(
+                        nonce, signedAt, ClientId, "node", "node",
+                        Array.Empty<string>(), tokenForSignature,
+                        "windows", "desktop");
             }
             catch (Exception ex)
             {
@@ -629,6 +653,7 @@ public class WindowsNodeClient : WebSocketClientBase
         // Handle hello-ok (successful registration)
         if (payload.TryGetProperty("type", out var t) && t.GetString() == "hello-ok")
         {
+            _logger.Info("[HANDSHAKE] Received hello-ok!");
             PublishGatewaySelf(GatewaySelfInfo.FromHelloOk(payload));
             var reconnectingAfterApproval = _pairingApprovedAwaitingReconnect;
             _isConnected = true;
@@ -658,6 +683,7 @@ public class WindowsNodeClient : WebSocketClientBase
                     _pairingApprovedAwaitingReconnect = false;
                     _logger.Info("Received device token - we are now paired!");
                     _deviceIdentity.StoreDeviceTokenForRole("node", deviceToken, TryGetAuthScopes(authPayload));
+                    DeviceTokenReceived?.Invoke(this, new DeviceTokenReceivedEventArgs(deviceToken, TryGetAuthScopes(authPayload), "node"));
                     EmitPairingStatusOnTransition(new PairingStatusEventArgs(
                         PairingStatus.Paired,
                         _deviceIdentity.DeviceId,
@@ -706,6 +732,7 @@ public class WindowsNodeClient : WebSocketClientBase
             }
             
             RaiseStatusChanged(ConnectionStatus.Connected);
+            HandshakeSucceeded?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -755,6 +782,8 @@ public class WindowsNodeClient : WebSocketClientBase
             }
         }
 
+        _logger.Info($"[HANDSHAKE] Connect error: message=\"{error}\", code={errorCode}");
+
         if (string.Equals(errorCode, "NOT_PAIRED", StringComparison.OrdinalIgnoreCase))
         {
             if (_isPendingApproval)
@@ -775,7 +804,8 @@ public class WindowsNodeClient : WebSocketClientBase
             EmitPairingStatusOnTransition(new PairingStatusEventArgs(
                 PairingStatus.Pending,
                 _deviceIdentity.DeviceId,
-                detail));
+                detail,
+                requestId: pairingRequestId));
             return;
         }
 
@@ -789,6 +819,17 @@ public class WindowsNodeClient : WebSocketClientBase
             _logger.Warn($"[NODE] Terminal auth error; stopping reconnect. Error: {TokenSanitizer.Sanitize(error)}");
             RaiseStatusChanged(ConnectionStatus.Error);
             return;
+        }
+
+        // v3 signature rejected — fall back to v2 for this session
+        if (error.Contains("device signature invalid", StringComparison.OrdinalIgnoreCase) ||
+            errorCode == "DEVICE_AUTH_SIGNATURE_INVALID")
+        {
+            if (!_useV2Signature)
+            {
+                _useV2Signature = true;
+                _logger.Warn("[NODE] v3 signature rejected, will use v2 on reconnect");
+            }
         }
 
         _logger.Error($"Node registration failed: {TokenSanitizer.Sanitize(error)} (code: {errorCode})");
@@ -1084,14 +1125,22 @@ public class WindowsNodeClient : WebSocketClientBase
     protected override void OnDisconnected()
     {
         _isConnected = false;
-        _isPendingApproval = false;
-        _isPaired = false;
+        // Don't reset pairing state when disconnected due to pairing — gateway
+        // closes the socket after PAIRING_REQUIRED but we're still waiting for approval
+        if (!_pairingBlocked)
+        {
+            _isPendingApproval = false;
+            _isPaired = false;
+        }
     }
 
     protected override void OnError(Exception ex)
     {
         _isConnected = false;
-        _isPendingApproval = false;
-        _isPaired = false;
+        if (!_pairingBlocked)
+        {
+            _isPendingApproval = false;
+            _isPaired = false;
+        }
     }
 }

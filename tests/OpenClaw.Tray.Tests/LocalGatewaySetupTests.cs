@@ -70,14 +70,12 @@ public class LocalGatewaySetupTests
         var environment = new FakeSetupEnvironment(new Dictionary<string, string?>
         {
             [LocalGatewaySetupRuntimeConfiguration.DistroNameVariable] = "OpenClawGatewayE2E",
-            [LocalGatewaySetupRuntimeConfiguration.InstanceInstallLocationVariable] = @"C:\openclaw\wsl",
             [LocalGatewaySetupRuntimeConfiguration.AllowExistingDistroVariable] = "1"
         });
 
         var config = LocalGatewaySetupRuntimeConfiguration.FromEnvironment(environment);
 
         Assert.Equal("OpenClawGatewayE2E", config.DistroName);
-        Assert.Equal(@"C:\openclaw\wsl", config.InstanceInstallLocation);
         Assert.True(config.AllowExistingDistro);
     }
 
@@ -549,33 +547,16 @@ public class LocalGatewaySetupTests
     }
 
     [Fact]
-    public void CreateLocalOnly_ThrowsInvalidOperation_WhenTokenExistsAndNotConfirmed()
+    public void CreateLocalOnly_Succeeds_WhenExistingConfigAndConfirmed()
     {
         using var temp = new TempDirectory();
-        var settings = new OpenClawTray.Services.SettingsManager(temp.Path) { Token = "existing-token" };
+        var settings = new OpenClawTray.Services.SettingsManager(temp.Path) { GatewayUrl = "ws://remote:9000" };
 
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            LocalGatewaySetupEngineFactory.CreateLocalOnly(
-                settings,
-                identityDataPath: temp.Path,
-                replaceExistingConfigurationConfirmed: false));
+        var engine = LocalGatewaySetupEngineFactory.CreateLocalOnly(
+            settings,
+            replaceExistingConfigurationConfirmed: true);
 
-        Assert.Contains("existing_config_replacement_not_confirmed", ex.Message);
-    }
-
-    [Fact]
-    public void CreateLocalOnly_ThrowsInvalidOperation_WhenBootstrapTokenExistsAndNotConfirmed()
-    {
-        using var temp = new TempDirectory();
-        var settings = new OpenClawTray.Services.SettingsManager(temp.Path) { BootstrapToken = "bootstrap-abc" };
-
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            LocalGatewaySetupEngineFactory.CreateLocalOnly(
-                settings,
-                identityDataPath: temp.Path,
-                replaceExistingConfigurationConfirmed: false));
-
-        Assert.Contains("existing_config_replacement_not_confirmed", ex.Message);
+        Assert.NotNull(engine);
     }
 
     [Fact]
@@ -645,19 +626,6 @@ public class LocalGatewaySetupTests
                 replaceExistingConfigurationConfirmed: false));
 
         Assert.Contains("existing_config_replacement_not_confirmed", ex.Message);
-    }
-
-    [Fact]
-    public void CreateLocalOnly_Succeeds_WhenTokenExistsAndConfirmed()
-    {
-        using var temp = new TempDirectory();
-        var settings = new OpenClawTray.Services.SettingsManager(temp.Path) { Token = "existing-token" };
-
-        var engine = LocalGatewaySetupEngineFactory.CreateLocalOnly(
-            settings,
-            replaceExistingConfigurationConfirmed: true);
-
-        Assert.NotNull(engine);
     }
 
     internal sealed class FakeWslCommandRunner : IWslCommandRunner
@@ -889,5 +857,141 @@ public class LocalGatewaySetupTests
                 // Test cleanup best effort.
             }
         }
+    }
+}
+
+/// <summary>
+/// Tests for LocalGatewaySetup.SecretRedactor — verifies that the key-value regex
+/// redacts sensitive terms found in subprocess output and log strings.
+/// </summary>
+public class LocalGatewaySetupSecretRedactorTests
+{
+    [Theory]
+    [InlineData("gateway-token=abc123def456", "gateway-token=<redacted>")]
+    [InlineData("gateway_token: abc123def456", "gateway_token: <redacted>")]
+    [InlineData("bootstrap-token=tok789", "bootstrap-token=<redacted>")]
+    [InlineData("bootstrap_token = tok789", "bootstrap_token = <redacted>")]
+    [InlineData("device-token: dev-abc", "device-token: <redacted>")]
+    [InlineData("auth-token=\"xyz\"", "auth-token=\"<redacted>\"")]
+    [InlineData("setup-code=ABCD-1234", "setup-code=<redacted>")]
+    [InlineData("setup_code='ABCD-1234'", "setup_code='<redacted>'")]
+    [InlineData("secret: mysecretvalue", "secret: <redacted>")]
+    [InlineData("private-key=MIIB...", "private-key=<redacted>")]
+    [InlineData("private_key: MIIB...", "private_key: <redacted>")]
+    public void Redact_SecretKeyValuePattern_IsRedacted(string input, string expected)
+    {
+        Assert.Equal(expected, SecretRedactor.Redact(input));
+    }
+
+    [Theory]
+    [InlineData("exit code 1")]
+    [InlineData("Error: connection refused")]
+    [InlineData("username: alice")]
+    [InlineData("url: https://gateway.example.com")]
+    public void Redact_NonSecretText_IsUnchanged(string input)
+    {
+        Assert.Equal(input, SecretRedactor.Redact(input));
+    }
+
+    [Fact]
+    public void Redact_EmptyString_ReturnsEmpty()
+    {
+        Assert.Equal(string.Empty, SecretRedactor.Redact(string.Empty));
+    }
+
+    [Fact]
+    public void Redact_CaseInsensitive_RedactsUpperAndMixedCase()
+    {
+        Assert.Contains("<redacted>", SecretRedactor.Redact("GATEWAY-TOKEN=abc123"));
+        Assert.Contains("<redacted>", SecretRedactor.Redact("Bootstrap_Token: abc123"));
+    }
+}
+
+/// <summary>
+/// Tests for LocalGatewaySetup.DiagnosticFormatter — verifies that subprocess
+/// stdout/stderr is sanitized through both SecretRedactor (key-value patterns)
+/// and TokenSanitizer (raw token formats) before being included in diagnostics.
+/// </summary>
+public class LocalGatewaySetupDiagnosticFormatterTests
+{
+    private static WslCommandResult Result(string stdout = "", string stderr = "") =>
+        new(ExitCode: 1, StandardOutput: stdout, StandardError: stderr);
+
+    [Fact]
+    public void Build_IncludesExitCode()
+    {
+        var result = new WslCommandResult(ExitCode: 42, StandardOutput: "", StandardError: "");
+        var output = DiagnosticFormatter.Build("install", result);
+        Assert.Contains("install_exit_code=42", output);
+    }
+
+    [Fact]
+    public void Build_IncludesStdoutAndStderr()
+    {
+        var result = Result(stdout: "ok", stderr: "warn");
+        var output = DiagnosticFormatter.Build("step", result);
+        Assert.Contains("step_stdout=ok", output);
+        Assert.Contains("step_stderr=warn", output);
+    }
+
+    [Fact]
+    public void Build_OmitsEmptyStdoutAndStderr()
+    {
+        var result = Result(stdout: "", stderr: "");
+        var output = DiagnosticFormatter.Build("step", result);
+        Assert.DoesNotContain("stdout", output);
+        Assert.DoesNotContain("stderr", output);
+    }
+
+    [Fact]
+    public void Build_RedactsGatewayTokenKeyValueInStdout()
+    {
+        var result = Result(stdout: "Config loaded: gateway-token=abc123secretvalue");
+        var output = DiagnosticFormatter.Build("configure", result);
+        Assert.DoesNotContain("abc123secretvalue", output);
+        Assert.Contains("<redacted>", output);
+    }
+
+    [Fact]
+    public void Build_RedactsRawHexGatewayTokenInStderr()
+    {
+        // 64-char hex token as would appear if a CLI tool echoes arguments in an error message.
+        // TokenSanitizer.BareGatewayHexTokenPattern catches this even without a key= prefix.
+        var rawToken = new string('a', 64);
+        var result = Result(stderr: $"Error: failed to authenticate with token {rawToken}");
+        var output = DiagnosticFormatter.Build("auth", result);
+        Assert.DoesNotContain(rawToken, output);
+        Assert.Contains("[REDACTED_TOKEN]", output);
+    }
+
+    [Fact]
+    public void Build_RedactsMixedCaseRawHexGatewayTokenInStderr()
+    {
+        const string rawToken = "0123456789ABCDEF0123456789abcdef0123456789ABCDEF0123456789abcdef";
+        var result = Result(stderr: $"Error: failed to authenticate with token {rawToken}");
+
+        var output = DiagnosticFormatter.Build("auth", result);
+
+        Assert.DoesNotContain(rawToken, output);
+        Assert.Contains("[REDACTED_TOKEN]", output);
+    }
+
+    [Fact]
+    public void Build_TruncatesLongOutput()
+    {
+        var longValue = new string('x', 3000);
+        var result = Result(stdout: longValue);
+        var output = DiagnosticFormatter.Build("step", result);
+        Assert.Contains("...<truncated>", output);
+        Assert.DoesNotContain(longValue, output);
+    }
+
+    [Fact]
+    public void Build_StripsNullBytes()
+    {
+        var result = Result(stdout: "data\0with\0nulls");
+        var output = DiagnosticFormatter.Build("step", result);
+        Assert.DoesNotContain('\0', output);
+        Assert.Contains("datawith", output);
     }
 }

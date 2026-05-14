@@ -13,7 +13,7 @@ public class LocalSetupProgressGuardTests
     public void DefenseInDepthGuard_ShouldBlock_WhenExistingConfigAndNotConfirmed()
     {
         using var temp = new TempDir();
-        var settings = new SettingsManager(temp.Path) { Token = "existing-token" };
+        var settings = new SettingsManager(temp.Path) { GatewayUrl = "ws://remote:9000" };
         var guard = new OnboardingExistingConfigGuard(settings, temp.Path, temp.StatePath);
         var state = new OnboardingState(settings);
         state.ExistingConfigGuard = guard;
@@ -30,7 +30,7 @@ public class LocalSetupProgressGuardTests
     public void DefenseInDepthGuard_ShouldAllow_WhenExistingConfigAndConfirmed()
     {
         using var temp = new TempDir();
-        var settings = new SettingsManager(temp.Path) { Token = "existing-token" };
+        var settings = new SettingsManager(temp.Path) { GatewayUrl = "ws://remote:9000" };
         var guard = new OnboardingExistingConfigGuard(settings, temp.Path, temp.StatePath);
         var state = new OnboardingState(settings);
         state.ExistingConfigGuard = guard;

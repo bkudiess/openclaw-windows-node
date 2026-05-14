@@ -74,8 +74,8 @@ public sealed class SetupWizardWindow : WindowEx
     {
         _existingSettings = settings;
         _draftGatewayUrl = settings.GatewayUrl;
-        _draftToken = settings.Token;
-        _draftBootstrapToken = settings.BootstrapToken;
+        _draftToken = "";
+        _draftBootstrapToken = "";
         _draftEnableNodeMode = settings.EnableNodeMode;
 
         Title = LocalizationHelper.GetString("Setup_Title");
@@ -833,12 +833,7 @@ public sealed class SetupWizardWindow : WindowEx
         Logger.Info($"[Setup] Saving settings: gateway={GatewayUrlHelper.SanitizeForDisplay(_draftGatewayUrl)}, nodeMode={_draftEnableNodeMode}");
 
         _existingSettings.GatewayUrl = _draftGatewayUrl;
-        _existingSettings.Token = _draftToken;
         _existingSettings.EnableNodeMode = _draftEnableNodeMode;
-        _existingSettings.BootstrapToken =
-            _draftEnableNodeMode && string.IsNullOrWhiteSpace(_draftToken)
-                ? _draftBootstrapToken
-                : "";
         _existingSettings.Save();
 
         Completed = true;
@@ -924,9 +919,7 @@ public sealed class SetupWizardWindow : WindowEx
             var fullId = _copyDeviceIdButton.Tag?.ToString();
             if (string.IsNullOrEmpty(fullId)) return;
 
-            var dataPackage = new global::Windows.ApplicationModel.DataTransfer.DataPackage();
-            dataPackage.SetText(fullId);
-            global::Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
+            ClipboardHelper.CopyText(fullId);
             _copyDeviceIdButton.Content = LocalizationHelper.GetString("Setup_DeviceIdCopied");
             Logger.Info("[Setup] Device ID copied to clipboard");
 

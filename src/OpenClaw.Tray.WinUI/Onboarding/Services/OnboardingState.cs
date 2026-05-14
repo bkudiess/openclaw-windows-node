@@ -95,7 +95,7 @@ public sealed class OnboardingState : IDisposable
     /// Available for the Wizard page to make RPC calls (wizard.start/wizard.next).
     /// Null until connection is successfully tested.
     /// </summary>
-    public OpenClawGatewayClient? GatewayClient { get; set; }
+    public IOperatorGatewayClient? GatewayClient { get; set; }
 
     // ── Wizard session state (persisted across page navigations) ──
 

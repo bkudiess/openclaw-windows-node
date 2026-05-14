@@ -1,4 +1,5 @@
 using OpenClawTray.Services;
+using System.Text.Json;
 
 namespace OpenClaw.Tray.Tests;
 
@@ -47,7 +48,52 @@ public sealed class SettingsManagerIsolationTests
             Environment.SetEnvironmentVariable("OPENCLAW_TRAY_DATA_DIR", previousOverride);
             if (Directory.Exists(isolatedDirectory))
             {
-                Directory.Delete(isolatedDirectory, recursive: true);
+                try { Directory.Delete(isolatedDirectory, recursive: true); } catch { /* best effort */ }
+            }
+        }
+    }
+
+    [Fact]
+    public void LegacyGatewayCredentialsLoadForMigrationButAreNotSaved()
+    {
+        var previousOverride = Environment.GetEnvironmentVariable("OPENCLAW_TRAY_DATA_DIR");
+        var isolatedDirectory = Path.Combine(Path.GetTempPath(), "OpenClawTray.Tests", Guid.NewGuid().ToString("N"));
+        var isolatedSettingsPath = Path.Combine(isolatedDirectory, "settings.json");
+
+        try
+        {
+            Directory.CreateDirectory(isolatedDirectory);
+            File.WriteAllText(
+                isolatedSettingsPath,
+                """
+                {
+                  "GatewayUrl": "ws://legacy.example.invalid",
+                  "Token": "legacy-shared-token",
+                  "BootstrapToken": "legacy-bootstrap-token",
+                  "EnableMcpServer": true
+                }
+                """);
+
+            Environment.SetEnvironmentVariable("OPENCLAW_TRAY_DATA_DIR", isolatedDirectory);
+
+            var settings = new SettingsManager();
+
+            Assert.Equal("legacy-shared-token", settings.LegacyToken);
+            Assert.Equal("legacy-bootstrap-token", settings.LegacyBootstrapToken);
+            Assert.True(settings.HasLegacyGatewayCredentials);
+
+            settings.Save();
+
+            using var saved = JsonDocument.Parse(File.ReadAllText(isolatedSettingsPath));
+            Assert.False(saved.RootElement.TryGetProperty("Token", out _));
+            Assert.False(saved.RootElement.TryGetProperty("BootstrapToken", out _));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("OPENCLAW_TRAY_DATA_DIR", previousOverride);
+            if (Directory.Exists(isolatedDirectory))
+            {
+                try { Directory.Delete(isolatedDirectory, recursive: true); } catch { /* best effort */ }
             }
         }
     }

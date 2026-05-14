@@ -101,6 +101,54 @@
                 </StackPanel>
             </Expander>
 
+            <!-- Debug Overrides — process-wide, per-surface chat UI override.
+                 Lets engineers compare the legacy WebView and the native
+                 native chat surfaces side-by-side without flipping the
+                 user-facing "Use standard Gateway Chat interface" setting. -->
+            <Expander x:Name="OverridesExpander" IsExpanded="True"
+                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                <Expander.Header>
+                    <TextBlock x:Uid="DebugPage_TextBlock_OverridesHeader" Text="Debug Overrides" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                </Expander.Header>
+                <StackPanel Spacing="12" Padding="4">
+                    <TextBlock x:Uid="DebugPage_TextBlock_OverridesCaption"
+                               Text="Override the global 'Use standard Gateway Chat interface' setting per chat container. Resets when the app restarts."
+                               Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               TextWrapping="Wrap"/>
+                    <Grid ColumnSpacing="12" RowSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition/>
+                            <RowDefinition/>
+                        </Grid.RowDefinitions>
+                        <TextBlock x:Uid="DebugPage_TextBlock_HubChatLabel" Grid.Row="0" Grid.Column="0" Text="Hub Chat tab UI:"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Row="0" Grid.Column="1" x:Name="HubChatOverrideCombo"
+                                  HorizontalAlignment="Stretch"
+                                  AutomationProperties.AutomationId="DebugPageHubChatOverride"
+                                  SelectionChanged="OnHubChatOverrideChanged">
+                            <ComboBoxItem x:Uid="DebugPage_ChatOverride_NoOverride_Hub" Content="No override" Tag="NoOverride"/>
+                            <ComboBoxItem x:Uid="DebugPage_ChatOverride_ForceLegacy_Hub" Content="Force Gateway Chat UI" Tag="ForceLegacy"/>
+                            <ComboBoxItem x:Uid="DebugPage_ChatOverride_ForceNative_Hub" Content="Force Companion Chat UI" Tag="ForceNative"/>
+                        </ComboBox>
+                        <TextBlock x:Uid="DebugPage_TextBlock_TrayChatLabel" Grid.Row="1" Grid.Column="0" Text="Tray Chat popup UI:"
+                                   VerticalAlignment="Center"/>
+                        <ComboBox Grid.Row="1" Grid.Column="1" x:Name="TrayChatOverrideCombo"
+                                  HorizontalAlignment="Stretch"
+                                  AutomationProperties.AutomationId="DebugPageTrayChatOverride"
+                                  SelectionChanged="OnTrayChatOverrideChanged">
+                            <ComboBoxItem x:Uid="DebugPage_ChatOverride_NoOverride_Tray" Content="No override" Tag="NoOverride"/>
+                            <ComboBoxItem x:Uid="DebugPage_ChatOverride_ForceLegacy_Tray" Content="Force Gateway Chat UI" Tag="ForceLegacy"/>
+                            <ComboBoxItem x:Uid="DebugPage_ChatOverride_ForceNative_Tray" Content="Force Companion Chat UI" Tag="ForceNative"/>
+                        </ComboBox>
+                    </Grid>
+                </StackPanel>
+            </Expander>
+
             <!-- Debug Actions -->
             <Expander x:Name="ActionsExpander" IsExpanded="True"
                       HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
@@ -111,9 +159,12 @@
                     <Button x:Uid="DebugPage_Button_111" Content="📄 Open Log File" Click="OnOpenLogFile" HorizontalAlignment="Stretch"/>
                     <Button x:Uid="DebugPage_Button_112" Content="📁 Open Config Folder" Click="OnOpenConfigFolder" HorizontalAlignment="Stretch"/>
                     <Button x:Uid="DebugPage_Button_113" Content="📁 Open Diagnostics Folder" Click="OnOpenDiagnosticsFolder" HorizontalAlignment="Stretch"/>
+                    <Button Content="🔌 Connection Status Window" Click="OnOpenConnectionStatus" HorizontalAlignment="Stretch"/>
                     <Button x:Uid="DebugPage_Button_114" Content="📋 Copy Support Context" Click="OnCopySupportContext"
                             Style="{ThemeResource AccentButtonStyle}" HorizontalAlignment="Stretch"/>
                     <Button Content="🔄 Relaunch First-Run Setup" Click="OnRelaunchOnboarding" HorizontalAlignment="Stretch"/>
+                    <Button Content="🎨 Open Chat Explorations" Click="OnOpenChatExplorations" HorizontalAlignment="Stretch"
+                            AutomationProperties.AutomationId="DebugPageOpenChatExplorations"/>
                 </StackPanel>
             </Expander>
 

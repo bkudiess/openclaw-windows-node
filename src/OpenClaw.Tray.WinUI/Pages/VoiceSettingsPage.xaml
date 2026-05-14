@@ -5,7 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel Padding="24" Spacing="16" HorizontalAlignment="Stretch" MaxWidth="600">
+        <StackPanel Padding="24" Spacing="16" HorizontalAlignment="Stretch">
 
             <TextBlock x:Uid="VoiceSettingsPage_PageTitle" x:Name="PageTitleText" Text="🎙️ Voice &amp; Audio" Style="{StaticResource TitleTextBlockStyle}"/>
             <TextBlock x:Uid="VoiceSettingsPage_PageDescription" x:Name="PageDescriptionText"
@@ -59,6 +59,14 @@
 
                     <ProgressBar x:Name="DownloadProgress" Visibility="Collapsed"
                                  Minimum="0" Maximum="100"/>
+
+                    <Button x:Name="TestVoiceButton" Click="OnTestVoiceClick"
+                            Visibility="Collapsed">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE720;" FontSize="14"/>
+                            <TextBlock x:Uid="VoiceSettingsPage_TestVoiceButtonText" x:Name="TestVoiceButtonText" Text="Test Voice Input"/>
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
             </Border>
 

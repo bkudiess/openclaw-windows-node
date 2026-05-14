@@ -57,7 +57,7 @@ public static class DeepLinkHandler
         if (result == null)
             return;
 
-        var path = result.Path;
+        var path = result.Path?.TrimEnd('/') ?? string.Empty;
 
         Logger.Info($"Handling deep link: {path}");
 
@@ -276,6 +276,7 @@ public class DeepLinkActions
     public Action? OpenLogFolder { get; set; }
     public Action? OpenConfigFolder { get; set; }
     public Action? OpenDiagnosticsFolder { get; set; }
+    public Action? OpenConnectionStatus { get; set; }
     public Action? CopySupportContext { get; set; }
     public Action? CopyDebugBundle { get; set; }
     public Action? CopyBrowserSetupGuidance { get; set; }

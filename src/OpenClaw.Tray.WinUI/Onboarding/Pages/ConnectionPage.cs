@@ -82,7 +82,7 @@ public sealed class ConnectionPage : Component<OnboardingState>
             Props.Settings.SshTunnelLocalPort,
             GetDetectedLocalUrl);
         var (url, setUrl) = UseState(initialUrl);
-        var (token, setToken) = UseState(Props.Settings.Token);
+        var (token, setToken) = UseState("");
         var (nodeMode, setNodeMode) = UseState(Props.Settings.EnableNodeMode);
         var (setupCode, setSetupCode) = UseState("");
 
@@ -161,9 +161,7 @@ public sealed class ConnectionPage : Component<OnboardingState>
             if (result.Token != null)
             {
                 setToken(result.Token);
-                // Bootstrap token goes to BootstrapToken only — it's single-use for pairing.
-                // Don't save as Settings.Token (causes reconnect storms on restart).
-                Props.Settings.BootstrapToken = result.Token;
+                // Bootstrap token stored in GatewayRegistry via ApplySetupCodeAsync
             }
             setStatusMsg($"✅ {LocalizationHelper.GetString("Onboarding_Connection_StatusDecoded")}");
         }
@@ -179,8 +177,6 @@ public sealed class ConnectionPage : Component<OnboardingState>
         void OnTokenChanged(string v)
         {
             setToken(v);
-            Props.Settings.Token = v;
-            Props.Settings.BootstrapToken = "";
             Props.ConnectionTested = false;
             setStatusMsg("");
         }
@@ -208,13 +204,6 @@ public sealed class ConnectionPage : Component<OnboardingState>
         async void TestConnection()
         {
             Props.Settings.GatewayUrl = url;
-            // Only save to Settings.Token if the user entered a manual token,
-            // not a decoded bootstrap token (which belongs in BootstrapToken only).
-            if (string.IsNullOrWhiteSpace(Props.Settings.BootstrapToken) ||
-                !string.Equals(token, Props.Settings.BootstrapToken, StringComparison.Ordinal))
-            {
-                Props.Settings.Token = token;
-            }
 
             // When SSH mode, start the managed tunnel before health-checking the local URL.
             if (mode == ConnectionMode.Ssh)
@@ -285,28 +274,43 @@ public sealed class ConnectionPage : Component<OnboardingState>
                     return;
                 }
 
-                // Phase 2: Use App's PERSISTENT client (matching Mac app architecture)
+                // Phase 2: Connect via GatewayConnectionManager (same as Direct Connect flow)
                 setStatusMsg($"🔄 {LocalizationHelper.GetString("Onboarding_Connection_StatusAuthenticating")}");
                 Props.Settings.Save();
 
                 var app = (App)Microsoft.UI.Xaml.Application.Current;
+                var manager = app.ConnectionManager;
+                var registry = app.Registry;
 
-                // Reuse existing client if it already has a result, otherwise (re)initialize
-                var existingClient = app.GatewayClient;
-                if (existingClient == null ||
-                    (!existingClient.IsConnectedToGateway && !existingClient.IsPairingRequired && !existingClient.IsAuthFailed))
+                if (manager != null && registry != null)
                 {
-                    var useBootstrapHandoffAuth =
-                        !string.IsNullOrWhiteSpace(Props.Settings.BootstrapToken) &&
-                        string.Equals(token, Props.Settings.BootstrapToken, StringComparison.Ordinal);
-                    app.ReinitializeGatewayClient(useBootstrapHandoffAuth);
+                    await manager.DisconnectAsync();
+
+                    // Create/update GatewayRecord with shared token
+                    var normalizedUrl = GatewayUrlHelper.NormalizeForWebSocket(url);
+                    var existing = registry.FindByUrl(normalizedUrl);
+                    var recordId = existing?.Id ?? System.Guid.NewGuid().ToString();
+                    var sshConfig = useSshTunnel
+                        ? new OpenClawTray.Services.Connection.SshTunnelConfig(sshUser, sshHost, sshRemotePort, sshLocalPort)
+                        : null;
+                    var record = new OpenClawTray.Services.Connection.GatewayRecord
+                    {
+                        Id = recordId,
+                        Url = normalizedUrl,
+                        SharedGatewayToken = !string.IsNullOrWhiteSpace(token) ? token : null,
+                        SshTunnel = sshConfig,
+                    };
+                    registry.AddOrUpdate(record);
+                    registry.SetActive(recordId);
+                    registry.Save();
+
+                    await manager.ConnectAsync(recordId);
                 }
 
-                // Set Props.GatewayClient IMMEDIATELY so WizardPage can access it
-                // even if still connecting (WizardPage will poll for Connected status)
+                // Set Props.GatewayClient from app for WizardPage compat
                 Props.GatewayClient = app.GatewayClient;
 
-                // Poll for definitive auth result (V3→V2 fallback takes ~8s)
+                // Poll manager state for definitive result
                 bool connected = false;
                 bool pairingRequired = false;
                 bool authFailed = false;
@@ -314,13 +318,17 @@ public sealed class ConnectionPage : Component<OnboardingState>
                 for (int attempt = 0; attempt < 30; attempt++)
                 {
                     await Task.Delay(1000);
-                    var client = app.GatewayClient;
-                    Props.GatewayClient = client; // Keep in sync
+                    Props.GatewayClient = app.GatewayClient; // Keep in sync
 
-                    if (client == null) continue;
-                    if (client.IsConnectedToGateway) { connected = true; break; }
-                    if (client.IsPairingRequired) { pairingRequired = true; break; }
-                    if (client.IsAuthFailed) { authFailed = true; break; }
+                    var snapshot = app.ConnectionManager?.CurrentSnapshot;
+                    if (snapshot == null) continue;
+                    if (snapshot.OverallState is OpenClawTray.Services.Connection.OverallConnectionState.Connected
+                        or OpenClawTray.Services.Connection.OverallConnectionState.Ready)
+                    { connected = true; break; }
+                    if (snapshot.OverallState == OpenClawTray.Services.Connection.OverallConnectionState.PairingRequired)
+                    { pairingRequired = true; break; }
+                    if (snapshot.OverallState == OpenClawTray.Services.Connection.OverallConnectionState.Error)
+                    { authFailed = true; break; }
                 }
 
                 if (connected)
