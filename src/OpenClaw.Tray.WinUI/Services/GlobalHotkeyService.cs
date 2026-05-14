@@ -261,7 +261,7 @@ public class GlobalHotkeyService : IDisposable
 
             // Settings hotkey: Win+; — opens Companion Settings.
             if (RegisterHotKey(hWnd, HOTKEY_ID_SETTINGS,
-                MOD_WIN | MOD_NOREPEAT,
+                MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,
                 VK_OEM_1))
             {
                 Logger.Info("Settings hotkey registered: Win+;");

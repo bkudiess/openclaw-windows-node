@@ -1531,7 +1531,7 @@ public partial class App : Application
             "Companion Settings...",
             FluentIconCatalog.Build(FluentIconCatalog.Settings),
             "companion",
-            "Win+;");
+            "Ctrl+Alt+;");
         menu.AddMenuItem("About", FluentIconCatalog.Build(FluentIconCatalog.About), "about");
         menu.AddMenuItem("Close", FluentIconCatalog.Build(FluentIconCatalog.Exit), "exit");
     }
