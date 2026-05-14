@@ -3297,45 +3297,20 @@ public partial class App : Application
         _trayIcon.Tooltip = tooltip;
     }
 
-    private string BuildTrayTooltip()
+    private string BuildTrayTooltip() =>
+        new TrayTooltipBuilder(CaptureTraySnapshot()).Build();
+
+    private TrayStateSnapshot CaptureTraySnapshot() => new TrayStateSnapshot
     {
-        var topology = GatewayTopologyClassifier.Classify(
-            _settings?.GatewayUrl,
-            _settings?.UseSshTunnel == true,
-            _settings?.SshTunnelHost,
-            _settings?.SshTunnelLocalPort ?? 0,
-            _settings?.SshTunnelRemotePort ?? 0);
-        var channelReady = _lastChannels.Count(c => ChannelHealth.IsHealthyStatus(c.Status));
-        var nodeOnline = _lastNodes.Count(n => n.IsOnline);
-        var nodeTotal = _lastNodes.Length;
-        if (nodeTotal == 0 && _nodeService?.GetLocalNodeInfo() is { } localNode)
-        {
-            nodeTotal = 1;
-            nodeOnline = localNode.IsOnline ? 1 : 0;
-        }
-
-        var warningCount = 0;
-        if (_currentStatus != ConnectionStatus.Connected)
-            warningCount++;
-        if (_authFailureMessage != null)
-            warningCount++;
-        if (_lastChannels.Length == 0 && _currentStatus == ConnectionStatus.Connected)
-            warningCount++;
-
-        var tooltip = $"OpenClaw Tray - {_currentStatus}; " +
-            $"{topology.DisplayName}; " +
-            $"Channels {channelReady}/{_lastChannels.Length}; " +
-            $"Nodes {nodeOnline}/{nodeTotal}; " +
-            $"Warnings {warningCount}; " +
-            $"Last {_lastCheckTime:HH:mm:ss}";
-
-        if (_currentActivity != null && !string.IsNullOrEmpty(_currentActivity.DisplayText))
-        {
-            tooltip = $"OpenClaw Tray - {_currentActivity.DisplayText}; {_currentStatus}";
-        }
-
-        return TrayTooltipFormatter.FitShellTooltip(tooltip);
-    }
+        Status = _currentStatus,
+        CurrentActivity = _currentActivity,
+        Channels = _lastChannels,
+        Nodes = _lastNodes,
+        LocalNodeFallback = _nodeService?.GetLocalNodeInfo(),
+        AuthFailureMessage = _authFailureMessage,
+        LastCheckTime = _lastCheckTime,
+        Settings = _settings
+    };
 
     #endregion
 
