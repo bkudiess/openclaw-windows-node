@@ -201,6 +201,39 @@ public sealed class TrayMenuPopupCompositionTests
         Assert.DoesNotContain("Build compact toggle button grid (3 columns)", src);
     }
 
+    /// <summary>
+    /// Regression guard: every static action emitted by the tray menu's
+    /// top-level entries (Gateway header, Permissions, Setup, QuickSend, etc.)
+    /// must have an explicit case in <c>OnTrayMenuItemClicked</c>. The default
+    /// fall-through to <c>ShowHub(action)</c> is convenient but easy to break
+    /// silently — these specific actions are user-visible entry points and
+    /// should be wired explicitly.
+    /// </summary>
+    [Fact]
+    public void BuildTrayMenuPopup_TopLevelActions_AllHaveExplicitHandlers()
+    {
+        var src = ReadAppXaml();
+        string[] requiredActions =
+        {
+            "connection",   // gateway card
+            "disconnect",   // brand-header button (when connected)
+            "reconnect",    // brand-header button (when disconnected)
+            "permissions",  // permissions row
+            "setup",        // setup/reconfigure row
+            "quicksend",    // quicksend row
+            "companion",    // footer
+            "about",        // footer
+            "exit",         // footer
+        };
+
+        foreach (var action in requiredActions)
+        {
+            Assert.True(
+                src.Contains($"case \"{action}\":", StringComparison.Ordinal),
+                $"OnTrayMenuItemClicked must explicitly handle case \"{action}\"");
+        }
+    }
+
     private static string GetRepositoryRoot()
     {
         var env = Environment.GetEnvironmentVariable("OPENCLAW_REPO_ROOT");

@@ -985,6 +985,8 @@ public partial class App : Application
                 UpdateTrayIcon();
                 _hubWindow?.UpdateStatus(ConnectionStatus.Disconnected);
                 break;
+            case "connection": ShowHub("connection"); break;
+            case "permissions": ShowHub("permissions"); break;
             case "dashboard": OpenDashboard(); break;
             case "canvas": ShowCanvasWindow(); break;
             case "openchat": ShowChatWindow(); break;
@@ -1316,21 +1318,7 @@ public partial class App : Application
         ToolTipService.SetToolTip(brandBtn, isConnected ? "Disconnect from gateway" : "Connect to gateway");
         brandBtn.Click += (s, ev) =>
         {
-            if (isConnected)
-            {
-                _ = _connectionManager?.DisconnectAsync();
-                _lastSessions = Array.Empty<SessionInfo>();
-                _lastNodePairList = null;
-                _lastDevicePairList = null;
-                _lastModelsList = null;
-                _agentEventsCache.Clear();
-                UpdateTrayIcon();
-                _hubWindow?.UpdateStatus(ConnectionStatus.Disconnected);
-            }
-            else
-            {
-                _ = _connectionManager?.ReconnectAsync();
-            }
+            OnTrayMenuItemClicked(this, isConnected ? "disconnect" : "reconnect");
             _trayMenuWindow?.HideCascade();
         };
         Grid.SetColumn(brandBtn, 2);
@@ -1525,6 +1513,19 @@ public partial class App : Application
         menu.AddMenuItem("Chat", FluentIconCatalog.Build(FluentIconCatalog.Chat), "openchat");
         menu.AddMenuItem("Canvas", FluentIconCatalog.Build(FluentIconCatalog.CanvasAct), "canvas");
         menu.AddMenuItem("Voice", FluentIconCatalog.Build(FluentIconCatalog.VoiceAct), "voice");
+        menu.AddMenuItem(
+            LocalizationHelper.GetString("Menu_QuickSend"),
+            FluentIconCatalog.Build(FluentIconCatalog.QuickSend),
+            "quicksend");
+
+        // Setup Guide / Reconfigure entry — label flips based on whether prior
+        // configuration exists; routes to the existing "setup" action handler.
+        var setupMenuLabel = _settings != null
+            && new OpenClawTray.Onboarding.Services.OnboardingExistingConfigGuard(_settings, IdentityDataPath)
+                .HasExistingConfiguration()
+            ? LocalizationHelper.GetString("Menu_Reconfigure")
+            : LocalizationHelper.GetString("Menu_SetupGuide");
+        menu.AddMenuItem(setupMenuLabel, FluentIconCatalog.Build(FluentIconCatalog.Setup), "setup");
 
         // ── Footer ──
         menu.AddSeparator();
