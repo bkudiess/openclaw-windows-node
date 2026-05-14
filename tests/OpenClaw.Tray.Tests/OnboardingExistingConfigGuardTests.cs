@@ -69,6 +69,24 @@ public class OnboardingExistingConfigGuardTests
     }
 
     [Fact]
+    public void HasExistingConfiguration_ReturnsTrue_WhenNodeTokenStoredOnlyInPerGatewayDir()
+    {
+        using var temp = new TempDir();
+        var perGatewayDir = Path.Combine(temp.Path, "gateways", "gw-node");
+        Directory.CreateDirectory(perGatewayDir);
+        var identity = new DeviceIdentity(perGatewayDir);
+        identity.Initialize();
+        identity.StoreDeviceTokenForRole("node", "per-gateway-node-token");
+        var settings = new SettingsManager(temp.Path);
+        var guard = new OnboardingExistingConfigGuard(settings, temp.Path, temp.StatePath);
+
+        var summary = guard.GetSummary();
+        Assert.True(summary.HasNodeDeviceToken);
+        Assert.True(summary.HasAny);
+        Assert.True(guard.HasExistingConfiguration());
+    }
+
+    [Fact]
     public void HasExistingConfiguration_ReturnsTrue_WhenGatewayUrlIsNonDefault()
     {
         using var temp = new TempDir();

@@ -17,6 +17,19 @@ public class StartupSetupStateTests
     }
 
     [Fact]
+    public void RequiresSetup_ReturnsFalse_WhenNodeTokenStoredOnlyInPerGatewayDir()
+    {
+        using var temp = TempSettings.Create();
+        var perGatewayDir = Path.Combine(temp.Path, "gateways", "gw-node");
+        Directory.CreateDirectory(perGatewayDir);
+        StoreNodeDeviceToken(perGatewayDir);
+        var settings = new SettingsManager(temp.Path) { EnableNodeMode = true };
+
+        Assert.False(StartupSetupState.RequiresSetup(settings, temp.Path));
+        Assert.True(StartupSetupState.CanStartNodeGateway(settings, temp.Path));
+    }
+
+    [Fact]
     public void RequiresSetup_ReturnsTrue_WhenOnlyOperatorTokenExistsForNodeMode()
     {
         using var temp = TempSettings.Create();
