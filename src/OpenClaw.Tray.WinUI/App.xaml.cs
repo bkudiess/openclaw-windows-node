@@ -1518,7 +1518,8 @@ public partial class App : Application
             menu.AddFlyoutMenuItem(
                 "Permissions",
                 FluentIconCatalog.Build(FluentIconCatalog.Permissions),
-                BuildPermissionsFlyoutItems(_settings));
+                BuildPermissionsFlyoutItems(_settings),
+                action: "permissions");
         }
         menu.AddMenuItem("Dashboard", FluentIconCatalog.Build(FluentIconCatalog.Dashboard), "dashboard");
         menu.AddMenuItem("Chat", FluentIconCatalog.Build(FluentIconCatalog.Chat), "openchat");
@@ -1548,21 +1549,21 @@ public partial class App : Application
             new() { Text = "Permissions", IsHeader = true },
         };
 
-        AddPermToggle(items, "Enable Windows node", FluentIconCatalog.System,
+        AddPermToggle(items, "Windows node", FluentIconCatalog.System,
             () => settings.EnableNodeMode, v => settings.EnableNodeMode = v);
-        AddPermToggle(items, "Allow browser control", FluentIconCatalog.Browser,
+        AddPermToggle(items, "Browser control", FluentIconCatalog.Browser,
             () => settings.NodeBrowserProxyEnabled, v => settings.NodeBrowserProxyEnabled = v);
-        AddPermToggle(items, "Allow camera", FluentIconCatalog.Camera,
+        AddPermToggle(items, "Camera", FluentIconCatalog.Camera,
             () => settings.NodeCameraEnabled, v => settings.NodeCameraEnabled = v);
-        AddPermToggle(items, "Allow canvas", FluentIconCatalog.Canvas,
+        AddPermToggle(items, "Canvas", FluentIconCatalog.Canvas,
             () => settings.NodeCanvasEnabled, v => settings.NodeCanvasEnabled = v);
-        AddPermToggle(items, "Allow screen capture", FluentIconCatalog.Screen,
+        AddPermToggle(items, "Screen capture", FluentIconCatalog.Screen,
             () => settings.NodeScreenEnabled, v => settings.NodeScreenEnabled = v);
-        AddPermToggle(items, "Allow location", FluentIconCatalog.Location,
+        AddPermToggle(items, "Location", FluentIconCatalog.Location,
             () => settings.NodeLocationEnabled, v => settings.NodeLocationEnabled = v);
-        AddPermToggle(items, "Allow voice (TTS)", FluentIconCatalog.Voice,
+        AddPermToggle(items, "Voice (TTS)", FluentIconCatalog.Voice,
             () => settings.NodeTtsEnabled, v => settings.NodeTtsEnabled = v);
-        AddPermToggle(items, "Allow speech-to-text (STT)", FluentIconCatalog.Voice,
+        AddPermToggle(items, "Speech-to-text (STT)", FluentIconCatalog.Speech,
             () => settings.NodeSttEnabled, v => settings.NodeSttEnabled = v);
 
         return items;
@@ -1667,7 +1668,7 @@ public partial class App : Application
         ["browser"] = FluentIconCatalog.Browser,
         ["clipboard"] = "\uE77F",     // PasteAsText
         ["tts"] = FluentIconCatalog.Voice,
-        ["stt"] = FluentIconCatalog.Voice,
+        ["stt"] = FluentIconCatalog.Speech,
         ["location"] = FluentIconCatalog.Location,
         ["canvas"] = FluentIconCatalog.Canvas,
         ["system"] = FluentIconCatalog.System,

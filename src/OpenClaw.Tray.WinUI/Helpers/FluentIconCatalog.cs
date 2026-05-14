@@ -33,7 +33,8 @@ public static class FluentIconCatalog
     public const string Canvas = "\uE70F";         // Edit
     public const string Screen = "\uE7F4";         // TVMonitor
     public const string Location = "\uE707";       // MapPin (Globe2 alt)
-    public const string Voice = "\uE720";          // Microphone
+    public const string Voice = "\uE767";          // Volume (speaker, for TTS)
+    public const string Speech = "\uF12E";         // Dictate (speech-to-text)
     public const string System = "\uE713";         // Settings (Enable node toggle)
 
     // ── Actions ────────────────────────────────────────────────────
