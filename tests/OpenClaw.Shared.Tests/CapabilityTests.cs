@@ -1813,7 +1813,7 @@ public class DeviceCapabilityTests
         Assert.True(res.Ok);
         var battery = GetPayload(res).GetProperty("battery");
         Assert.NotEqual(JsonValueKind.Undefined, battery.GetProperty("error").ValueKind);
-        Assert.Contains("No battery hardware", battery.GetProperty("error").GetString());
+        Assert.Equal("collection failed", battery.GetProperty("error").GetString());
         // Legacy fields must still be present for backward compat
         Assert.True(battery.TryGetProperty("level", out _), "battery.level missing on failure path");
         Assert.Equal("unknown", battery.GetProperty("state").GetString());

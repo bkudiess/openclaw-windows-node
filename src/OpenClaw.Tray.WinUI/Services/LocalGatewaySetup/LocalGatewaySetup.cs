@@ -802,6 +802,7 @@ public sealed class WslFirstBootConfigurator : IWslInstanceConfigurator
             "",
             "[automount]",
             "enabled=false",
+            "mountFsTab=false",
             "",
             "[interop]",
             "enabled=false",
@@ -809,6 +810,9 @@ public sealed class WslFirstBootConfigurator : IWslInstanceConfigurator
             "",
             "[user]",
             "default=openclaw",
+            "",
+            "[time]",
+            "useWindowsTimezone=true",
             "EOF",
             "cat >/etc/wsl-distribution.conf <<'EOF'",
             "[oobe]",
@@ -847,16 +851,27 @@ public sealed class WslFirstBootConfigurator : IWslInstanceConfigurator
 
     private async Task<bool> IsAlreadyConfiguredAsync(LocalGatewaySetupOptions options, CancellationToken cancellationToken)
     {
+        // The awk probe is section-aware: it verifies each setting is present in the correct
+        // section, and checks all seven expected keys (including the two added in the wsl.conf
+        // template update: mountFsTab=false and [time] useWindowsTimezone=true).
+        // A distro configured with the old template (missing these keys) returns exit 1,
+        // triggering a full reconfigure.
         var script = string.Join("\n", new[]
         {
             "set -euo pipefail",
             "id -u openclaw >/dev/null",
             "test -d /home/openclaw/.openclaw",
             "test -d " + ShellQuote(options.OpenClawInstallPrefix),
-            "grep -q '^systemd=true$' /etc/wsl.conf",
-            "grep -q '^enabled=false$' /etc/wsl.conf",
-            "grep -q '^appendWindowsPath=false$' /etc/wsl.conf",
-            "grep -q '^default=openclaw$' /etc/wsl.conf"
+            "awk 'BEGIN{sec=\"\"}" +
+                " /^\\[/{sec=substr($0,2,index($0,\"]\")-2)}" +
+                " sec==\"boot\"&&$0==\"systemd=true\"{b=1}" +
+                " sec==\"automount\"&&$0==\"enabled=false\"{ae=1}" +
+                " sec==\"automount\"&&$0==\"mountFsTab=false\"{af=1}" +
+                " sec==\"interop\"&&$0==\"enabled=false\"{ie=1}" +
+                " sec==\"interop\"&&$0==\"appendWindowsPath=false\"{ip=1}" +
+                " sec==\"user\"&&$0==\"default=openclaw\"{u=1}" +
+                " sec==\"time\"&&$0==\"useWindowsTimezone=true\"{t=1}" +
+                " END{exit !(b&&ae&&af&&ie&&ip&&u&&t)}' /etc/wsl.conf"
         });
 
         var probe = await _wsl.RunAsync(["-d", options.DistroName, "-u", "root", "--", "bash", "-lc", script], cancellationToken);
