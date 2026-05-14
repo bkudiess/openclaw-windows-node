@@ -1265,13 +1265,20 @@ public partial class App : Application
         var captionStyle = (Style)resources["CaptionTextBlockStyle"];
         var controlSecondaryFill = (Microsoft.UI.Xaml.Media.Brush)resources["ControlFillColorSecondaryBrush"];
 
-        // ── Brand Header (non-interactive) — VarB: horizontal block,
-        //     emoji 28 + "OpenClaw" SemiBold 18, padding 14,10,14,8.
-        menu.AddCustomElement(new StackPanel
+        // ── Brand Header with Disconnect/Connect on the right ──
+        var brandGrid = new Grid
+        {
+            Padding = new Thickness(14, 10, 14, 8),
+            ColumnSpacing = 8
+        };
+        brandGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        brandGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        brandGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var brandRow = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 8,
-            Padding = new Thickness(14, 10, 14, 8),
             VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
@@ -1291,7 +1298,56 @@ public partial class App : Application
                     IsTextSelectionEnabled = false
                 }
             }
-        });
+        };
+        Grid.SetColumn(brandRow, 0);
+        brandGrid.Children.Add(brandRow);
+
+        var brandBtn = new Button
+        {
+            Content = isConnected ? "Disconnect" : "Connect",
+            VerticalAlignment = VerticalAlignment.Center,
+            Padding = new Thickness(12, 4, 12, 4),
+            MinHeight = 0,
+            MinWidth = 0,
+            FontSize = 12
+        };
+        AutomationProperties.SetName(brandBtn, isConnected ? "Disconnect from gateway" : "Connect to gateway");
+        ToolTipService.SetToolTip(brandBtn, isConnected ? "Disconnect from gateway" : "Connect to gateway");
+        brandBtn.Click += (s, ev) =>
+        {
+            if (isConnected)
+            {
+                _ = _connectionManager?.DisconnectAsync();
+                _lastSessions = Array.Empty<SessionInfo>();
+                _lastNodePairList = null;
+                _lastDevicePairList = null;
+                _lastModelsList = null;
+                _agentEventsCache.Clear();
+                UpdateTrayIcon();
+                _hubWindow?.UpdateStatus(ConnectionStatus.Disconnected);
+            }
+            else
+            {
+                _ = _connectionManager?.ReconnectAsync();
+            }
+            _trayMenuWindow?.HideCascade();
+        };
+        Grid.SetColumn(brandBtn, 2);
+        brandGrid.Children.Add(brandBtn);
+
+        menu.AddCustomElement(brandGrid);
+
+        // ── Pairing approval pending (high-priority action above Gateway) ──
+        var nodePendingCount = _lastNodePairList?.Pending.Count ?? 0;
+        var devicePendingCount = _lastDevicePairList?.Pending.Count ?? 0;
+        if (nodePendingCount + devicePendingCount > 0)
+        {
+            var total = nodePendingCount + devicePendingCount;
+            menu.AddMenuItem(
+                $"Pairing approval pending ({total})",
+                FluentIconCatalog.Build(FluentIconCatalog.Approvals),
+                "hub");
+        }
 
         // ── Gateway Section ──
         // (device-card format)
@@ -1333,15 +1389,7 @@ public partial class App : Application
         Grid.SetColumn(gwNameRow, 0);
         gwLine1.Children.Add(gwNameRow);
 
-        // Right-side: optional chip + Disconnect/Connect button on the header line
-        var gwRight = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 6,
-            VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Right
-        };
-
+        // Right-side: optional chip on the header line (Disconnect lives in brand header)
         string? chipText = null;
         var gwUrl = _settings?.GetEffectiveGatewayUrl();
         Uri? gwUri = null;
@@ -1355,12 +1403,13 @@ public partial class App : Application
         }
         if (chipText != null)
         {
-            gwRight.Children.Add(new Border
+            var chip = new Border
             {
                 CornerRadius = new CornerRadius(4),
                 Padding = new Thickness(6, 1, 6, 1),
                 Background = controlSecondaryFill,
                 VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Right,
                 Child = new TextBlock
                 {
                     Text = chipText,
@@ -1368,43 +1417,10 @@ public partial class App : Application
                     Foreground = secondaryText,
                     IsTextSelectionEnabled = false
                 }
-            });
+            };
+            Grid.SetColumn(chip, 2);
+            gwLine1.Children.Add(chip);
         }
-
-        var gwBtn = new Button
-        {
-            Content = isConnected ? "Disconnect" : "Connect",
-            VerticalAlignment = VerticalAlignment.Center,
-            Padding = new Thickness(10, 2, 10, 2),
-            MinHeight = 0,
-            MinWidth = 0,
-            FontSize = 11
-        };
-        AutomationProperties.SetName(gwBtn, isConnected ? "Disconnect from gateway" : "Connect to gateway");
-        ToolTipService.SetToolTip(gwBtn, isConnected ? "Disconnect from gateway" : "Connect to gateway");
-        gwBtn.Click += (s, ev) =>
-        {
-            if (isConnected)
-            {
-                _ = _connectionManager?.DisconnectAsync();
-                _lastSessions = Array.Empty<SessionInfo>();
-                _lastNodePairList = null;
-                _lastDevicePairList = null;
-                _lastModelsList = null;
-                _agentEventsCache.Clear();
-                UpdateTrayIcon();
-                _hubWindow?.UpdateStatus(ConnectionStatus.Disconnected);
-            }
-            else
-            {
-                _ = _connectionManager?.ReconnectAsync();
-            }
-            _trayMenuWindow?.HideCascade();
-        };
-        gwRight.Children.Add(gwBtn);
-
-        Grid.SetColumn(gwRight, 2);
-        gwLine1.Children.Add(gwRight);
         gwOuter.Children.Add(gwLine1);
 
         // ── Line 2: secondary details ──
@@ -1453,15 +1469,11 @@ public partial class App : Application
         menu.AddCustomElement(gwOuter);
 
         // ── Connected Devices (moved above Sessions) ──
+        // Devices flow directly after the Gateway block without a divider
+        // or section header — they share the gateway visual format.
         var connectedNodes = _lastNodes.Where(n => n.IsOnline).ToArray();
         if (connectedNodes.Length > 0)
         {
-            menu.AddSeparator();
-
-            var totalCaps = connectedNodes.Sum(n => n.CapabilityCount);
-            var deviceSummaryRight = $"{connectedNodes.Length} online · {totalCaps} caps";
-            menu.AddCustomElement(BuildSectionHeader("Devices", deviceSummaryRight));
-
             foreach (var node in connectedNodes.Take(5))
             {
                 var card = BuildDeviceCard(node, successBrush, neutralBrush, secondaryText);
@@ -1492,18 +1504,6 @@ public partial class App : Application
             var usageRow = BuildUsageRow(secondaryText);
             var usageFlyout = BuildUsageFlyoutItems(secondaryText);
             menu.AddFlyoutCustomItem(usageRow, usageFlyout, action: "usage");
-        }
-
-        // ── Pairing approval pending ──
-        var nodePendingCount = _lastNodePairList?.Pending.Count ?? 0;
-        var devicePendingCount = _lastDevicePairList?.Pending.Count ?? 0;
-        if (nodePendingCount + devicePendingCount > 0)
-        {
-            var total = nodePendingCount + devicePendingCount;
-            menu.AddMenuItem(
-                $"Pairing approval pending ({total})",
-                FluentIconCatalog.Build(FluentIconCatalog.Approvals),
-                "hub");
         }
 
         // ── Actions ──
@@ -1771,7 +1771,6 @@ public partial class App : Application
             items.Add(new() { CustomContent = card });
         }
 
-        items.Add(new() { Text = "Open Sessions →", Action = "sessions" });
         return items;
     }
 
@@ -2119,7 +2118,6 @@ public partial class App : Application
             }
         }
 
-        items.Add(new() { Text = "Open detailed usage →", Action = "usage" });
         return items;
     }
 

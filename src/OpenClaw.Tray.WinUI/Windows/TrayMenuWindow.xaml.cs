@@ -554,6 +554,25 @@ public sealed partial class TrayMenuWindow : WindowEx
         Grid.SetColumn(labelStack, 1);
         grid.Children.Add(labelStack);
 
+        var trailing = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var stateLabel = new TextBlock
+        {
+            Text = isOn ? "On" : "Off",
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+            IsTextSelectionEnabled = false,
+            MinWidth = 22,
+            TextAlignment = TextAlignment.Right
+        };
+        AutomationProperties.SetAccessibilityView(stateLabel, AccessibilityView.Raw);
+        trailing.Children.Add(stateLabel);
+
         var toggle = new ToggleSwitch
         {
             IsOn = isOn,
@@ -565,11 +584,14 @@ public sealed partial class TrayMenuWindow : WindowEx
         AutomationProperties.SetName(toggle, title);
         toggle.Toggled += (s, e) =>
         {
+            stateLabel.Text = toggle.IsOn ? "On" : "Off";
             if (!string.IsNullOrEmpty(action))
                 MenuItemClicked?.Invoke(this, action);
         };
-        Grid.SetColumn(toggle, 2);
-        grid.Children.Add(toggle);
+        trailing.Children.Add(toggle);
+
+        Grid.SetColumn(trailing, 2);
+        grid.Children.Add(trailing);
 
         grid.PointerEntered += (s, e) => HideActiveFlyout();
         MenuPanel.Children.Add(grid);
