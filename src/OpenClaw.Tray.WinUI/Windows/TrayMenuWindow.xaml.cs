@@ -1,13 +1,16 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using OpenClaw.Shared;
 using OpenClawTray.Helpers;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
+using Windows.System;
 using WinUIEx;
 
 namespace OpenClawTray.Windows;
@@ -112,9 +115,31 @@ public sealed partial class TrayMenuWindow : WindowEx
     private Button? _activeFlyoutOwner;
     private string? _activeFlyoutKey;
     private bool _isShown;
+    /// <summary>True while the menu window is visible. App can use this to
+    /// trigger an in-place rebuild when backing state changes mid-display.</summary>
+    public bool IsShown => _isShown;
     private global::Windows.Graphics.RectInt32? _lastMoveAndResizeRect;
     private uint _lastMeasureDpi;
     private double _lastMeasureRasterizationScale;
+    private int _updateDepth;
+
+    // Cached theme brushes resolved lazily on first use, then reused for the
+    // lifetime of the window. The previous implementation looked up every
+    // brush via Application.Current.Resources for every row in the menu,
+    // which showed up as a visible hitch on right-click. The cache also
+    // collapses Microsoft.UI.Colors.Transparent allocations.
+    private Brush? _subtleHoverBrush;
+    private Brush? _dividerBrush;
+    private Brush? _secondaryTextBrush;
+    private static readonly Brush s_transparentBrush =
+        new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+
+    private Brush SubtleHoverBrush =>
+        _subtleHoverBrush ??= (Brush)Application.Current.Resources["SubtleFillColorSecondaryBrush"];
+    private Brush DividerBrush =>
+        _dividerBrush ??= (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"];
+    private Brush SecondaryTextBrush =>
+        _secondaryTextBrush ??= (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
 
     public TrayMenuWindow() : this(ownerMenu: null)
     {
@@ -141,6 +166,15 @@ public sealed partial class TrayMenuWindow : WindowEx
         
         // Hide when focus lost
         Activated += OnActivated;
+
+        // Keyboard navigation across menu items. We intentionally do NOT
+        // attach per-Button KeyboardAccelerator instances — those crash
+        // inside this WindowEx popup because their scope falls outside
+        // the XamlRoot (see commit 08bce3a on the abandoned settings
+        // branch). A single KeyDown handler on MenuPanel sidesteps the
+        // accelerator scope entirely.
+        MenuPanel.KeyDown += OnMenuPanelKeyDown;
+        MenuPanel.IsTabStop = false;
     }
 
     private void OnActivated(object sender, WindowActivatedEventArgs args)
@@ -281,47 +315,52 @@ public sealed partial class TrayMenuWindow : WindowEx
 
     public void AddMenuItem(string text, string? icon, string action, bool isEnabled = true, bool indent = false)
     {
-        var content = new TextBlock
-        {
-            Text = string.IsNullOrEmpty(icon) ? text : $"{icon}  {text}",
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            IsTextSelectionEnabled = false
-        };
+        var iconElement = ResolveIcon(icon);
+        AddMenuItem(text, iconElement, action, isEnabled, indent);
+    }
 
-        var leftPadding = indent ? 28 : 12;
+    /// <summary>
+    /// Overload that takes a prebuilt <see cref="IconElement"/> (preferred for
+    /// PUA Segoe Fluent glyphs). Lays the row out as a 3-column grid:
+    /// [24-px icon] [stretching label] [auto chevron/accelerator hint].
+    /// </summary>
+    public void AddMenuItem(string text, IconElement? icon, string action, bool isEnabled = true, bool indent = false, IconElement? trailing = null)
+    {
+        var row = BuildItemRow(text, icon, trailing, indent, out var label);
+
         var button = new Button
         {
-            Content = content,
+            Content = row,
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Left,
-            Padding = new Thickness(leftPadding, 8, 12, 8),
-            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Padding = new Thickness(0, 8, 0, 8),
+            Background = s_transparentBrush,
             BorderThickness = new Thickness(0),
             IsEnabled = isEnabled,
             Tag = action,
             CornerRadius = new CornerRadius(4)
         };
         AutomationProperties.SetAutomationId(button, BuildMenuItemAutomationId(action, text));
+        AutomationProperties.SetName(button, text);
 
         if (!isEnabled)
-            content.Opacity = 0.5;
+            label.Opacity = 0.5;
 
         button.Click += (s, e) =>
         {
             MenuItemClicked?.Invoke(this, action);
-            HideCascade(); // Hide instead of close - window is reused
+            HideCascade();
         };
 
-        // Hover effect
         button.PointerEntered += (s, e) =>
         {
             HideActiveFlyout();
             if (button.IsEnabled)
-                button.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SubtleFillColorSecondaryBrush"];
+                button.Background = SubtleHoverBrush;
         };
         button.PointerExited += (s, e) =>
         {
-            button.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            button.Background = s_transparentBrush;
         };
 
         MenuPanel.Children.Add(button);
@@ -342,35 +381,40 @@ public sealed partial class TrayMenuWindow : WindowEx
 
     public void AddFlyoutMenuItem(string text, string? icon, IEnumerable<TrayMenuFlyoutItem> items, bool indent = false, string? action = null)
     {
-        var content = new TextBlock
-        {
-            Text = string.IsNullOrEmpty(icon) ? $"{text}  ›" : $"{icon}  {text}  ›",
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            IsTextSelectionEnabled = false
-        };
+        AddFlyoutMenuItem(text, ResolveIcon(icon), items, indent, action);
+    }
 
+    public void AddFlyoutMenuItem(string text, IconElement? icon, IEnumerable<TrayMenuFlyoutItem> items, bool indent = false, string? action = null)
+    {
         var flyoutItems = items.ToArray();
 
-        var leftPadding = indent ? 28 : 12;
+        var chevron = FluentIconCatalog.Build(FluentIconCatalog.ChevronR, 12);
+        chevron.Opacity = 0.6;
+        AutomationProperties.SetAccessibilityView(chevron, AccessibilityView.Raw);
+
+        var row = BuildItemRow(text, icon, chevron, indent, out _);
+
         var button = new Button
         {
-            Content = content,
+            Content = row,
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Left,
-            Padding = new Thickness(leftPadding, 8, 12, 8),
-            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Padding = new Thickness(0, 8, 0, 8),
+            Background = s_transparentBrush,
             BorderThickness = new Thickness(0),
             CornerRadius = new CornerRadius(4)
         };
+        AutomationProperties.SetName(button, text + " submenu");
+        AutomationProperties.SetAutomationId(button, BuildMenuItemAutomationId(action ?? text, text));
 
         button.PointerEntered += (s, e) =>
         {
-            button.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SubtleFillColorSecondaryBrush"];
+            button.Background = SubtleHoverBrush;
             ShowCascadingFlyout(button, flyoutItems);
         };
         button.PointerExited += (s, e) =>
         {
-            button.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            button.Background = s_transparentBrush;
         };
         button.Click += (s, e) =>
         {
@@ -395,8 +439,9 @@ public sealed partial class TrayMenuWindow : WindowEx
         {
             Height = 1,
             Margin = new Thickness(8, 6, 8, 6),
-            Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"]
+            Background = DividerBrush
         };
+        AutomationProperties.SetAccessibilityView(sep, AccessibilityView.Raw);
         sep.PointerEntered += (s, e) => HideActiveFlyout();
         MenuPanel.Children.Add(sep);
         _separatorCount++;
@@ -425,6 +470,8 @@ public sealed partial class TrayMenuWindow : WindowEx
             VerticalAlignment = VerticalAlignment.Center
         });
 
+        AutomationProperties.SetName(panel, text);
+        AutomationProperties.SetHeadingLevel(panel, AutomationHeadingLevel.Level1);
         MenuPanel.Children.Add(panel);
         _headerCount += 2; // Counts as larger
     }
@@ -438,6 +485,8 @@ public sealed partial class TrayMenuWindow : WindowEx
             Padding = new Thickness(12, 10, 12, 4),
             Opacity = 0.7
         };
+        AutomationProperties.SetHeadingLevel(tb, AutomationHeadingLevel.Level2);
+        AutomationProperties.SetName(tb, text);
         tb.PointerEntered += (s, e) => HideActiveFlyout();
         MenuPanel.Children.Add(tb);
         _headerCount++;
@@ -451,6 +500,203 @@ public sealed partial class TrayMenuWindow : WindowEx
     }
 
     /// <summary>
+    /// Adds a row with [icon] [title (+ optional description)] [WinUI ToggleSwitch].
+    /// Toggling the switch fires MenuItemClicked with the supplied action id.
+    /// Used by the Permissions flyout to mirror the in-app PermissionsPage.
+    /// </summary>
+    public void AddToggleItem(string title, string? icon, string? description, bool isOn, string action)
+    {
+        var grid = new Grid
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Padding = new Thickness(12, 6, 12, 6),
+            ColumnSpacing = 8
+        };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var iconElement = ResolveIcon(icon);
+        if (iconElement != null)
+        {
+            AutomationProperties.SetAccessibilityView(iconElement, AccessibilityView.Raw);
+            if (iconElement is FrameworkElement ife)
+            {
+                ife.HorizontalAlignment = HorizontalAlignment.Center;
+                ife.VerticalAlignment = VerticalAlignment.Center;
+            }
+            Grid.SetColumn(iconElement, 0);
+            grid.Children.Add(iconElement);
+        }
+
+        var labelStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 1 };
+        labelStack.Children.Add(new TextBlock
+        {
+            Text = title,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            FontSize = 13,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            IsTextSelectionEnabled = false
+        });
+        if (!string.IsNullOrEmpty(description))
+        {
+            labelStack.Children.Add(new TextBlock
+            {
+                Text = description!,
+                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+                Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                FontSize = 11,
+                TextWrapping = TextWrapping.Wrap,
+                IsTextSelectionEnabled = false,
+                MaxWidth = 280
+            });
+        }
+        Grid.SetColumn(labelStack, 1);
+        grid.Children.Add(labelStack);
+
+        var trailing = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var stateLabel = new TextBlock
+        {
+            Text = isOn ? "On" : "Off",
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+            IsTextSelectionEnabled = false,
+            MinWidth = 22,
+            TextAlignment = TextAlignment.Right
+        };
+        AutomationProperties.SetAccessibilityView(stateLabel, AccessibilityView.Raw);
+        trailing.Children.Add(stateLabel);
+
+        var toggle = new ToggleSwitch
+        {
+            IsOn = isOn,
+            OnContent = null,
+            OffContent = null,
+            MinWidth = 0,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        AutomationProperties.SetName(toggle, title);
+        toggle.Toggled += (s, e) =>
+        {
+            stateLabel.Text = toggle.IsOn ? "On" : "Off";
+            if (!string.IsNullOrEmpty(action))
+                MenuItemClicked?.Invoke(this, action);
+        };
+        trailing.Children.Add(toggle);
+
+        Grid.SetColumn(trailing, 2);
+        grid.Children.Add(trailing);
+
+        grid.PointerEntered += (s, e) => HideActiveFlyout();
+        MenuPanel.Children.Add(grid);
+        _itemCount++;
+    }
+
+    /// <summary>
+    /// Adds a standard menu item with a right-aligned secondary text hint
+    /// (used for keyboard-shortcut display like "Win+;").
+    /// </summary>
+    public void AddMenuItemWithHint(string text, IconElement? icon, string action, string hint, bool indent = false)
+    {
+        var hintBlock = new TextBlock
+        {
+            Text = hint,
+            FontSize = 11,
+            Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+            VerticalAlignment = VerticalAlignment.Center,
+            IsTextSelectionEnabled = false
+        };
+        AutomationProperties.SetAccessibilityView(hintBlock, AccessibilityView.Raw);
+        AddMenuItemWithTrailingElement(text, icon, action, hintBlock, indent);
+    }
+
+    private void AddMenuItemWithTrailingElement(string text, IconElement? icon, string action, FrameworkElement trailing, bool indent)
+    {
+        var row = BuildItemRowWithTrailing(text, icon, trailing, indent, out var label);
+        var button = new Button
+        {
+            Content = row,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Padding = new Thickness(0, 8, 0, 8),
+            Background = s_transparentBrush,
+            BorderThickness = new Thickness(0),
+            Tag = action,
+            CornerRadius = new CornerRadius(4)
+        };
+        AutomationProperties.SetAutomationId(button, BuildMenuItemAutomationId(action, text));
+        AutomationProperties.SetName(button, text);
+        button.Click += (s, e) =>
+        {
+            MenuItemClicked?.Invoke(this, action);
+            HideCascade();
+        };
+        button.PointerEntered += (s, e) =>
+        {
+            HideActiveFlyout();
+            button.Background = SubtleHoverBrush;
+        };
+        button.PointerExited += (s, e) =>
+        {
+            button.Background = s_transparentBrush;
+        };
+        MenuPanel.Children.Add(button);
+        _itemCount++;
+    }
+
+    private static Grid BuildItemRowWithTrailing(string text, IconElement? icon, FrameworkElement? trailing, bool indent, out TextBlock label)
+    {
+        var grid = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch };
+        var leftPad = indent ? 28 : 12;
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(leftPad + 24) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var iconSlot = new Border
+        {
+            Width = 24,
+            Margin = new Thickness(leftPad, 0, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        if (icon != null)
+        {
+            AutomationProperties.SetAccessibilityView(icon, AccessibilityView.Raw);
+            if (icon is FrameworkElement fe)
+            {
+                fe.HorizontalAlignment = HorizontalAlignment.Center;
+                fe.VerticalAlignment = VerticalAlignment.Center;
+            }
+            iconSlot.Child = icon;
+        }
+        Grid.SetColumn(iconSlot, 0);
+        grid.Children.Add(iconSlot);
+        label = new TextBlock
+        {
+            Text = text,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            IsTextSelectionEnabled = false,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 8, 0)
+        };
+        Grid.SetColumn(label, 1);
+        grid.Children.Add(label);
+        if (trailing != null)
+        {
+            trailing.Margin = new Thickness(0, 0, 12, 0);
+            trailing.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(trailing, 2);
+            grid.Children.Add(trailing);
+        }
+        return grid;
+    }
+
+    /// <summary>
     /// Adds a custom UIElement as a flyout-enabled menu item with hover/click behavior.
     /// Same behavior as AddFlyoutMenuItem but accepts any UIElement instead of text.
     /// </summary>
@@ -458,25 +704,45 @@ public sealed partial class TrayMenuWindow : WindowEx
     {
         var flyoutItems = items.ToArray();
 
+        // Wrap content in a 3-col grid so chevron is right-aligned and the
+        // tappable area extends across the full row.
+        var grid = new Grid
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        Grid.SetColumn((FrameworkElement)content, 0);
+        grid.Children.Add(content);
+
+        var chevron = FluentIconCatalog.Build(FluentIconCatalog.ChevronR, 12);
+        chevron.Opacity = 0.6;
+        chevron.Margin = new Thickness(0, 0, 12, 0);
+        chevron.VerticalAlignment = VerticalAlignment.Center;
+        AutomationProperties.SetAccessibilityView(chevron, AccessibilityView.Raw);
+        Grid.SetColumn(chevron, 1);
+        grid.Children.Add(chevron);
+
         var button = new Button
         {
-            Content = content,
+            Content = grid,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(0),
-            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Background = s_transparentBrush,
             BorderThickness = new Thickness(0),
             CornerRadius = new CornerRadius(6)
         };
 
         button.PointerEntered += (s, e) =>
         {
-            button.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SubtleFillColorSecondaryBrush"];
+            button.Background = SubtleHoverBrush;
             ShowCascadingFlyout(button, flyoutItems);
         };
         button.PointerExited += (s, e) =>
         {
-            button.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            button.Background = s_transparentBrush;
         };
         button.Click += (s, e) =>
         {
@@ -494,6 +760,110 @@ public sealed partial class TrayMenuWindow : WindowEx
 
         MenuPanel.Children.Add(button);
         _itemCount++;
+    }
+
+    /// <summary>
+    /// Builds the standard 3-column row layout used by AddMenuItem and
+    /// AddFlyoutMenuItem: [24-px icon] [label] [trailing].
+    /// </summary>
+    private static Grid BuildItemRow(string text, IconElement? icon, IconElement? trailing, bool indent, out TextBlock label)
+    {
+        var grid = new Grid
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        var leftPad = indent ? 28 : 12;
+        // Column 0 holds the left padding + a 24-px icon slot. The previous
+        // version had column 0 = 24 px while the icon Border also took a
+        // leftPad margin → glyphs were clipped at the column boundary.
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(leftPad + 24) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var iconSlot = new Border
+        {
+            Width = 24,
+            Margin = new Thickness(leftPad, 0, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        if (icon != null)
+        {
+            AutomationProperties.SetAccessibilityView(icon, AccessibilityView.Raw);
+            if (icon is FrameworkElement fe)
+            {
+                fe.HorizontalAlignment = HorizontalAlignment.Center;
+                fe.VerticalAlignment = VerticalAlignment.Center;
+            }
+            iconSlot.Child = icon;
+        }
+        Grid.SetColumn(iconSlot, 0);
+        grid.Children.Add(iconSlot);
+
+        label = new TextBlock
+        {
+            Text = text,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            IsTextSelectionEnabled = false,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 8, 0)
+        };
+        Grid.SetColumn(label, 1);
+        grid.Children.Add(label);
+
+        if (trailing != null)
+        {
+            if (trailing is FrameworkElement tfe)
+            {
+                tfe.Margin = new Thickness(0, 0, 12, 0);
+                tfe.VerticalAlignment = VerticalAlignment.Center;
+            }
+            Grid.SetColumn(trailing, 2);
+            grid.Children.Add(trailing);
+        }
+
+        return grid;
+    }
+
+    /// <summary>
+    /// Resolves a legacy string icon argument: a single PUA character maps to
+    /// a FontIcon via <see cref="FluentIconCatalog"/>; anything else (emoji,
+    /// multi-char) renders as a plain TextBlock so existing call sites keep
+    /// working while the rest of the UI migrates.
+    /// </summary>
+    private static IconElement? ResolveIcon(string? icon)
+    {
+        if (string.IsNullOrEmpty(icon))
+            return null;
+        if (FluentIconCatalog.IsPuaGlyph(icon))
+            return FluentIconCatalog.Build(icon!);
+        // Wrap emoji in a PathIcon-shaped surrogate via FontIcon so the row
+        // layout is consistent. FontIcon happily renders non-PUA characters
+        // using the default font family fallback.
+        return new FontIcon
+        {
+            Glyph = icon!,
+            FontSize = 14
+        };
+    }
+
+    /// <summary>
+    /// Suppresses layout passes while a batch of Add* calls runs. Pair every
+    /// call with <see cref="EndUpdate"/>. Nested begin/end pairs are honored.
+    /// </summary>
+    public void BeginUpdate()
+    {
+        _updateDepth++;
+    }
+
+    public void EndUpdate()
+    {
+        if (_updateDepth > 0)
+            _updateDepth--;
+        if (_updateDepth == 0)
+        {
+            MenuPanel.InvalidateMeasure();
+        }
     }
 
     /// <summary>
@@ -700,6 +1070,14 @@ public sealed partial class TrayMenuWindow : WindowEx
                 {
                     flyoutWindow.AddHeader(item.Text);
                 }
+                else if (item.CustomContent != null)
+                {
+                    flyoutWindow.AddCustomElement(item.CustomContent);
+                }
+                else if (item.IsToggle)
+                {
+                    flyoutWindow.AddToggleItem(item.Text, item.Icon, item.Description, item.IsOn, item.Action);
+                }
                 else if (string.IsNullOrEmpty(item.Action))
                 {
                     // Non-interactive detail line — compact padding
@@ -786,6 +1164,54 @@ public sealed partial class TrayMenuWindow : WindowEx
         return Math.Max(1, (int)Math.Ceiling(viewUnits * dpi / 96.0));
     }
 
+    private void OnMenuPanelKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        var buttons = MenuPanel.Children
+            .OfType<Button>()
+            .Where(b => b.IsEnabled && b.Visibility == Visibility.Visible)
+            .ToList();
+        if (buttons.Count == 0)
+            return;
+
+        var focused = FocusManager.GetFocusedElement(MenuPanel.XamlRoot) as Button;
+        var idx = focused == null ? -1 : buttons.IndexOf(focused);
+
+        switch (e.Key)
+        {
+            case VirtualKey.Down:
+                buttons[(idx + 1 + buttons.Count) % buttons.Count].Focus(FocusState.Keyboard);
+                e.Handled = true;
+                break;
+            case VirtualKey.Up:
+                buttons[(idx - 1 + buttons.Count) % buttons.Count].Focus(FocusState.Keyboard);
+                e.Handled = true;
+                break;
+            case VirtualKey.Right:
+                if (focused != null && ReferenceEquals(focused, _activeFlyoutOwner) && _activeFlyoutWindow != null)
+                {
+                    // Already open — push focus into the child flyout.
+                    var firstChild = _activeFlyoutWindow.MenuPanel.Children
+                        .OfType<Button>().FirstOrDefault();
+                    firstChild?.Focus(FocusState.Keyboard);
+                    e.Handled = true;
+                }
+                break;
+            case VirtualKey.Left:
+            case VirtualKey.Escape:
+                if (_activeFlyoutWindow != null)
+                {
+                    HideActiveFlyout();
+                }
+                else
+                {
+                    HideCascade();
+                    _ownerMenu?.HideCascade();
+                }
+                e.Handled = true;
+                break;
+        }
+    }
+
     private void HideCascadeIfFocusLeavesMenu()
     {
         var timer = DispatcherQueue.CreateTimer();
@@ -824,4 +1250,16 @@ public sealed class TrayMenuFlyoutItem
     public string? Icon { get; set; }
     public string Action { get; set; } = "";
     public bool IsHeader { get; set; }
+
+    // Renders the row with a WinUI ToggleSwitch on the right. When toggled
+    // the flyout fires MenuItemClicked with Action.
+    public bool IsToggle { get; set; }
+    public bool IsOn { get; set; }
+
+    // Optional secondary description text shown below the title (for ToggleSwitch rows).
+    public string? Description { get; set; }
+
+    // Free-form content: when set, the renderer drops the row in via
+    // AddCustomElement and ignores Text/Icon/Action.
+    public UIElement? CustomContent { get; set; }
 }
