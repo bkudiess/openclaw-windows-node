@@ -597,6 +597,12 @@ public class SystemCapabilityTests
     [InlineData(@"D:/tools/run.exe")]
     [InlineData(@"\\server\share\tool.exe")]
     [InlineData(@"\\?\C:\evil.exe")]
+    [InlineData(@"""C:\Users\Public\evil.exe""")]
+    [InlineData(@"'C:\Users\Public\evil.exe'")]
+    [InlineData(@"""\\server\share\tool.exe""")]
+    [InlineData(@"""\\?\C:\evil.exe""")]
+    [InlineData(@"//server/share/tool.exe")]
+    [InlineData(@"//?/C:/evil.exe")]
     public async Task ExecApprovalsSet_RejectsAbsolutePathAllowRules(string pattern)
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -607,12 +613,12 @@ public class SystemCapabilityTests
             var policy = new ExecApprovalPolicy(tempDir, NullLogger.Instance);
             cap.SetApprovalPolicy(policy);
 
-            var escapedPattern = pattern.Replace(@"\", @"\\");
+            var jsonPattern = System.Text.Json.JsonSerializer.Serialize(pattern)[1..^1];
             var req = new NodeInvokeRequest
             {
                 Id = "ea-path-allow",
                 Command = "system.execApprovals.set",
-                Args = Parse($$"""{"baseHash":"{{policy.GetPolicyHash()}}","rules":[{"pattern":"{{escapedPattern}}","action":"allow","enabled":true}],"defaultAction":"deny"}""")
+                Args = Parse($$"""{"baseHash":"{{policy.GetPolicyHash()}}","rules":[{"pattern":"{{jsonPattern}}","action":"allow","enabled":true}],"defaultAction":"deny"}""")
             };
 
             var res = await cap.ExecuteAsync(req);

@@ -647,11 +647,20 @@ public class SystemCapability : NodeCapabilityBase
             // A remote .set call should never be able to whitelist a specific binary
             // by path — that would be a two-step EoP (compromise MCP token → whitelist
             // attacker binary → invoke it). Legitimate rules name commands, not paths.
-            // Covers: drive-rooted paths (C:\, D:/), UNC paths (\\server\), and the
-            // Windows long-path namespace prefix (\\?\).
-            if (normalized.Length >= 3 &&
-                ((char.IsLetter(normalized[0]) && normalized[1] == ':' && (normalized[2] == '\\' || normalized[2] == '/')) ||
-                 normalized.StartsWith(@"\\", StringComparison.Ordinal)))
+            // Strip one layer of matching surrounding quotes first so quoted forms
+            // ("C:\evil.exe", 'C:\evil.exe') are caught alongside bare paths.
+            // Covers: drive-rooted paths (C:\, C:/), UNC/long-path (\\, //), and
+            // forward-slash UNC namespace forms (//server/share, //?/C:/evil.exe).
+            var unquoted = normalized;
+            if (normalized.Length >= 2 &&
+                ((normalized[0] == '"' && normalized[^1] == '"') ||
+                 (normalized[0] == '\'' && normalized[^1] == '\'')))
+                unquoted = normalized[1..^1];
+
+            if (unquoted.Length >= 3 &&
+                ((char.IsLetter(unquoted[0]) && unquoted[1] == ':' && (unquoted[2] == '\\' || unquoted[2] == '/')) ||
+                 unquoted.StartsWith(@"\\", StringComparison.Ordinal) ||
+                 unquoted.StartsWith("//", StringComparison.Ordinal)))
                 return $"Absolute path allow rule is not permitted: {pattern}";
 
             foreach (var dangerous in DangerousAllowPatternFragments)
