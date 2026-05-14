@@ -31,11 +31,11 @@ public static class FluentIconCatalog
     public const string Browser = "\uE774";        // Globe
     public const string Camera = "\uE722";         // Camera
     public const string Canvas = "\uE70F";         // Edit
-    public const string Screen = "\uE7F4";         // TVMonitor
+    public const string Screen = "\uEB91";         // ScreenTime (screen capture/recording)
     public const string Location = "\uE707";       // MapPin (Globe2 alt)
     public const string Voice = "\uE767";          // Volume (speaker, for TTS)
     public const string Speech = "\uF12E";         // Dictate (speech-to-text)
-    public const string System = "\uE713";         // Settings (Enable node toggle)
+    public const string System = "\uE7F4";         // TVMonitor (Windows node = this desktop)
 
     // ── Actions ────────────────────────────────────────────────────
     public const string Dashboard = "\uE774";      // Globe
