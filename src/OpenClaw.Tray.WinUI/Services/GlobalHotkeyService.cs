@@ -259,16 +259,17 @@ public class GlobalHotkeyService : IDisposable
                 Logger.Warn("Failed to register voice hotkey Ctrl+Alt+Shift+V");
             }
 
-            // Settings hotkey: Win+; — opens Companion Settings.
+            // Settings hotkey: Ctrl+Alt+; — opens Companion Settings.
+            // (Win+; is reserved by Windows for the emoji panel.)
             if (RegisterHotKey(hWnd, HOTKEY_ID_SETTINGS,
                 MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,
                 VK_OEM_1))
             {
-                Logger.Info("Settings hotkey registered: Win+;");
+                Logger.Info("Settings hotkey registered: Ctrl+Alt+;");
             }
             else
             {
-                Logger.Warn("Failed to register settings hotkey Win+;");
+                Logger.Warn("Failed to register settings hotkey Ctrl+Alt+;");
             }
 
             _opCompleted.Set();
@@ -311,7 +312,7 @@ public class GlobalHotkeyService : IDisposable
         }
         else if (msg == WM_HOTKEY && wParam.ToInt32() == HOTKEY_ID_SETTINGS)
         {
-            Logger.Info("Settings hotkey pressed: Win+;");
+            Logger.Info("Settings hotkey pressed: Ctrl+Alt+;");
             SettingsHotkeyPressed?.Invoke(this, EventArgs.Empty);
         }
         return DefWindowProc(hWnd, msg, wParam, lParam);
