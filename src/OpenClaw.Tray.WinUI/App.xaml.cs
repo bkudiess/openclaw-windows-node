@@ -1605,6 +1605,61 @@ public partial class App : Application
         return n.ToString();
     }
 
+    /// <summary>
+    /// Mini progress bar built from Borders inside a Grid (two Star columns:
+    /// pct and 100-pct). Avoids the default WinUI ProgressBar template which
+    /// renders 0-height inside dynamic-width flyout layouts.
+    /// </summary>
+    private static FrameworkElement BuildMiniBar(double percent)
+    {
+        var p = Math.Min(100.0, Math.Max(0.0, percent));
+        var resources = Application.Current.Resources;
+        var accent = (Microsoft.UI.Xaml.Media.Brush)resources["AccentFillColorDefaultBrush"];
+        var track = (Microsoft.UI.Xaml.Media.Brush)resources["ControlStrongFillColorDefaultBrush"];
+
+        var grid = new Grid
+        {
+            Height = 6,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Center,
+            MinWidth = 80
+        };
+        // 1e-6 guard so an empty (0%) bar still renders the track column at
+        // full width; a 0/0 star pair would collapse.
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.0001, p), GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.0001, 100.0 - p), GridUnitType.Star) });
+
+        var filled = new Microsoft.UI.Xaml.Controls.Border
+        {
+            Background = accent,
+            CornerRadius = new CornerRadius(3, 0, 0, 3),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch
+        };
+        if (p <= 0)
+        {
+            filled.Opacity = 0; // hide accent stub at exactly 0% but keep slot
+        }
+        Grid.SetColumn(filled, 0);
+        grid.Children.Add(filled);
+
+        var rest = new Microsoft.UI.Xaml.Controls.Border
+        {
+            Background = track,
+            CornerRadius = p >= 100 ? new CornerRadius(0, 3, 3, 0) : new CornerRadius(0, 3, 3, 0),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch
+        };
+        if (p <= 0)
+        {
+            rest.CornerRadius = new CornerRadius(3);
+        }
+        Grid.SetColumn(rest, 1);
+        grid.Children.Add(rest);
+
+        return grid;
+    }
+
     // ── Rich card builder helpers for tray menu ──
 
     private static readonly FrozenDictionary<string, string> CapabilityIcons = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -1669,15 +1724,8 @@ public partial class App : Application
             HorizontalAlignment = HorizontalAlignment.Stretch,
             ColumnSpacing = 8
         };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        var icon = FluentIconCatalog.Build(FluentIconCatalog.Sessions);
-        icon.HorizontalAlignment = HorizontalAlignment.Center;
-        icon.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumn(icon, 0);
-        grid.Children.Add(icon);
 
         var title = new TextBlock
         {
@@ -1687,7 +1735,7 @@ public partial class App : Application
             VerticalAlignment = VerticalAlignment.Center,
             IsTextSelectionEnabled = false
         };
-        Grid.SetColumn(title, 1);
+        Grid.SetColumn(title, 0);
         grid.Children.Add(title);
 
         var summary = new TextBlock
@@ -1699,7 +1747,7 @@ public partial class App : Application
             VerticalAlignment = VerticalAlignment.Center,
             IsTextSelectionEnabled = false
         };
-        Grid.SetColumn(summary, 2);
+        Grid.SetColumn(summary, 1);
         grid.Children.Add(summary);
 
         return grid;
@@ -1816,16 +1864,7 @@ public partial class App : Application
         Grid.SetColumn(model, 0);
         line2.Children.Add(model);
 
-        var bar = new ProgressBar
-        {
-            Minimum = 0, Maximum = 100, Value = pct,
-            Height = 6,
-            IsIndeterminate = false,
-            VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            CornerRadius = new CornerRadius(3),
-            MinWidth = 80
-        };
+        var bar = BuildMiniBar(pct);
         Grid.SetColumn(bar, 1);
         line2.Children.Add(bar);
 
@@ -1856,15 +1895,8 @@ public partial class App : Application
             HorizontalAlignment = HorizontalAlignment.Stretch,
             ColumnSpacing = 8
         };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        var icon = FluentIconCatalog.Build(FluentIconCatalog.Dashboard);
-        icon.HorizontalAlignment = HorizontalAlignment.Center;
-        icon.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumn(icon, 0);
-        grid.Children.Add(icon);
 
         var title = new TextBlock
         {
@@ -1874,19 +1906,27 @@ public partial class App : Application
             VerticalAlignment = VerticalAlignment.Center,
             IsTextSelectionEnabled = false
         };
-        Grid.SetColumn(title, 1);
+        Grid.SetColumn(title, 0);
         grid.Children.Add(title);
 
-        // Right-side summary: $X.XX · Y tokens (from gateway _lastUsage, fallback to session aggregation)
+        // Right-side summary: $X.XX · Y tokens (always include both when any data present)
         var totalTokens = _lastUsage?.TotalTokens
             ?? _lastSessions.Sum(s => s.InputTokens + s.OutputTokens);
         var cost = _lastUsage?.CostUsd
             ?? _lastUsageCost?.Totals.TotalCost
             ?? 0.0;
-        var summaryParts = new List<string>();
-        if (cost > 0) summaryParts.Add($"${cost.ToString("F2", CultureInfo.InvariantCulture)}");
-        if (totalTokens > 0) summaryParts.Add($"{FormatTokenCount(totalTokens)} tokens");
-        var summaryText = summaryParts.Count > 0 ? string.Join(" · ", summaryParts) : "no data";
+        string summaryText;
+        if (cost <= 0 && totalTokens <= 0)
+        {
+            summaryText = "no data";
+        }
+        else
+        {
+            // Always show both, formatted as "$X.XX · Y tokens" even when one is 0.
+            var costStr = "$" + cost.ToString("F2", CultureInfo.InvariantCulture);
+            var tokStr = $"{FormatTokenCount(totalTokens)} tokens";
+            summaryText = $"{costStr} · {tokStr}";
+        }
 
         var summary = new TextBlock
         {
@@ -1896,7 +1936,7 @@ public partial class App : Application
             VerticalAlignment = VerticalAlignment.Center,
             IsTextSelectionEnabled = false
         };
-        Grid.SetColumn(summary, 2);
+        Grid.SetColumn(summary, 1);
         grid.Children.Add(summary);
 
         return grid;
@@ -2018,17 +2058,7 @@ public partial class App : Application
                     Grid.SetColumn(label, 0);
                     winRow.Children.Add(label);
 
-                    var bar = new ProgressBar
-                    {
-                        Minimum = 0, Maximum = 100,
-                        Value = Math.Min(100.0, Math.Max(0.0, win.UsedPercent)),
-                        Height = 6,
-                        IsIndeterminate = false,
-                        VerticalAlignment = VerticalAlignment.Center,
-                        HorizontalAlignment = HorizontalAlignment.Stretch,
-                        CornerRadius = new CornerRadius(3),
-                        MinWidth = 80
-                    };
+                    var bar = BuildMiniBar(Math.Min(100.0, Math.Max(0.0, win.UsedPercent)));
                     Grid.SetColumn(bar, 1);
                     winRow.Children.Add(bar);
 
