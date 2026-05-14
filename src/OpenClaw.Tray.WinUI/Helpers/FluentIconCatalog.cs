@@ -25,7 +25,7 @@ public static class FluentIconCatalog
     public const string Sessions = "\uE8BD";       // Message
     public const string Approvals = "\uE7BA";      // Warning (re-use)
     public const string Devices = "\uE772";        // Devices
-    public const string Permissions = "\uE72E";    // Permissions
+    public const string Permissions = "\uEA18";    // Shield
 
     // ── Capabilities (per-permission glyphs) ───────────────────────
     public const string Browser = "\uE774";        // Globe

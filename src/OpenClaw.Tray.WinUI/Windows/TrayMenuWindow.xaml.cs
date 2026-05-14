@@ -509,8 +509,8 @@ public sealed partial class TrayMenuWindow : WindowEx
         var grid = new Grid
         {
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            Padding = new Thickness(12, 6, 12, 6),
-            ColumnSpacing = 8
+            Padding = new Thickness(16, 10, 16, 10),
+            ColumnSpacing = 14
         };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -520,6 +520,10 @@ public sealed partial class TrayMenuWindow : WindowEx
         if (iconElement != null)
         {
             AutomationProperties.SetAccessibilityView(iconElement, AccessibilityView.Raw);
+            if (iconElement is FontIcon fi)
+            {
+                fi.FontSize = 18;
+            }
             if (iconElement is FrameworkElement ife)
             {
                 ife.HorizontalAlignment = HorizontalAlignment.Center;
@@ -529,12 +533,12 @@ public sealed partial class TrayMenuWindow : WindowEx
             grid.Children.Add(iconElement);
         }
 
-        var labelStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 1 };
+        var labelStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2 };
         labelStack.Children.Add(new TextBlock
         {
             Text = title,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            FontSize = 13,
+            FontSize = 14,
+            FontWeight = Microsoft.UI.Text.FontWeights.Normal,
             TextTrimming = TextTrimming.CharacterEllipsis,
             IsTextSelectionEnabled = false
         });
@@ -543,12 +547,11 @@ public sealed partial class TrayMenuWindow : WindowEx
             labelStack.Children.Add(new TextBlock
             {
                 Text = description!,
-                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
                 Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-                FontSize = 11,
+                FontSize = 12,
                 TextWrapping = TextWrapping.Wrap,
                 IsTextSelectionEnabled = false,
-                MaxWidth = 280
+                MaxWidth = 260
             });
         }
         Grid.SetColumn(labelStack, 1);
@@ -557,13 +560,13 @@ public sealed partial class TrayMenuWindow : WindowEx
         var trailing = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 8,
+            Spacing = 10,
             VerticalAlignment = VerticalAlignment.Center
         };
         var stateLabel = new TextBlock
         {
             Text = isOn ? "On" : "Off",
-            FontSize = 12,
+            FontSize = 13,
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
             IsTextSelectionEnabled = false,
@@ -908,7 +911,7 @@ public sealed partial class TrayMenuWindow : WindowEx
         var desiredHeight = MenuPanel.DesiredSize.Height;
         
         // Add border chrome (1px border top+bottom = 2px, plus small rounding buffer)
-        var contentHeight = (int)Math.Ceiling(desiredHeight) + 4;
+        var contentHeight = (int)Math.Ceiling(desiredHeight) + 2;
         _menuHeight = Math.Max(contentHeight, 100);
 
         if (workAreaHeightPx > 0)
@@ -1055,7 +1058,13 @@ public sealed partial class TrayMenuWindow : WindowEx
             flyoutWindow.MenuItemClicked += (_, action) =>
             {
                 MenuItemClicked?.Invoke(this, action);
-                HideCascade();
+                // Toggle actions inside a sub-flyout should not close the
+                // cascade — the user often wants to flip several toggles
+                // before dismissing the panel.
+                if (!action.StartsWith("perm-toggle|", StringComparison.Ordinal))
+                {
+                    HideCascade();
+                }
             };
 
             _activeFlyoutWindow = flyoutWindow;
