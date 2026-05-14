@@ -1,5 +1,6 @@
 using Microsoft.Toolkit.Uwp.Notifications;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using OpenClaw.Shared;
@@ -1011,8 +1012,14 @@ public partial class App : Application
             case "copydeviceid": CopyDeviceIdToClipboard(); break;
             case "copynodesummary": CopyNodeSummaryToClipboard(); break;
             case "exit": ExitApplication(); break;
+            case "about": ShowHub("about"); break;
             default:
-                if (action.StartsWith("session-reset|", StringComparison.Ordinal))
+                if (action.StartsWith("perm-toggle|", StringComparison.Ordinal)
+                    && _permToggleActions.TryGetValue(action, out var permAction))
+                {
+                    permAction();
+                }
+                else if (action.StartsWith("session-reset|", StringComparison.Ordinal))
                     _ = ExecuteSessionActionAsync("reset", action["session-reset|".Length..]);
                 else if (action.StartsWith("session-compact|", StringComparison.Ordinal))
                     _ = ExecuteSessionActionAsync("compact", action["session-compact|".Length..]);
@@ -1210,8 +1217,40 @@ public partial class App : Application
 
     private void BuildTrayMenuPopup(TrayMenuWindow menu)
     {
+        // Render the whole menu inside a single update batch so layout
+        // measures only once instead of once-per-row. Pair with EndUpdate
+        // in finally so an exception mid-build doesn't wedge layout.
+        menu.BeginUpdate();
+        try
+        {
+            BuildTrayMenuPopupCore(menu);
+        }
+        finally
+        {
+            menu.EndUpdate();
+        }
+    }
+
+    private void BuildTrayMenuPopupCore(TrayMenuWindow menu)
+    {
+        // Stale closures from the previous build hold references to old
+        // ToggleAction delegates; recreate the lookup each rebuild.
+        _permToggleActions.Clear();
+
         var isConnected = _currentStatus == ConnectionStatus.Connected;
         var statusText = LocalizationHelper.GetConnectionStatusText(_currentStatus);
+
+        // Cache theme brushes once per build so cells don't each do a
+        // resource lookup. The previous implementation looked up
+        // SystemFill/Text brushes per row, which contributed to the
+        // visible right-click hitch.
+        var resources = Application.Current.Resources;
+        var successBrush = (Microsoft.UI.Xaml.Media.Brush)resources["SystemFillColorSuccessBrush"];
+        var cautionBrush = (Microsoft.UI.Xaml.Media.Brush)resources["SystemFillColorCautionBrush"];
+        var neutralBrush = (Microsoft.UI.Xaml.Media.Brush)resources["SystemFillColorNeutralBrush"];
+        var criticalBrush = (Microsoft.UI.Xaml.Media.Brush)resources["SystemFillColorCriticalBrush"];
+        var secondaryText = (Microsoft.UI.Xaml.Media.Brush)resources["TextFillColorSecondaryBrush"];
+        var captionStyle = (Style)resources["CaptionTextBlockStyle"];
 
         // ── Brand Header (non-interactive) ──
         menu.AddCustomElement(new StackPanel
@@ -1221,7 +1260,7 @@ public partial class App : Application
             {
                 new TextBlock
                 {
-                    Text = "🦞 OpenClaw",
+                    Text = $"{FluentIconCatalog.Brand} OpenClaw",
                     FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                     FontSize = 14
                 }
@@ -1248,15 +1287,14 @@ public partial class App : Application
         {
             Width = 8, Height = 8,
             VerticalAlignment = VerticalAlignment.Center,
-            Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(
-                isConnected ? Microsoft.UI.Colors.LimeGreen
-                : _currentStatus == ConnectionStatus.Connecting ? Microsoft.UI.Colors.Orange
-                : Microsoft.UI.Colors.Gray)
+            Fill = isConnected ? successBrush
+                : _currentStatus == ConnectionStatus.Connecting ? cautionBrush
+                : neutralBrush
         });
         gwStatusRow.Children.Add(new TextBlock
         {
             Text = $"Gateway · {statusText}",
-            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            Style = captionStyle,
             FontSize = 12,
             VerticalAlignment = VerticalAlignment.Center
         });
@@ -1278,8 +1316,8 @@ public partial class App : Application
                 gwInfo.Children.Add(new TextBlock
                 {
                     Text = string.Join(" · ", detailParts),
-                    Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
-                    Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                    Style = captionStyle,
+                    Foreground = secondaryText,
                     FontSize = 11
                 });
             }
@@ -1297,8 +1335,8 @@ public partial class App : Application
                 gwInfo.Children.Add(new TextBlock
                 {
                     Text = nodeText,
-                    Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
-                    Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                    Style = captionStyle,
+                    Foreground = secondaryText,
                     FontSize = 11
                 });
             }
@@ -1310,8 +1348,8 @@ public partial class App : Application
             gwInfo.Children.Add(new TextBlock
             {
                 Text = $"⚠️ {_authFailureMessage}",
-                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
-                Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.OrangeRed),
+                Style = captionStyle,
+                Foreground = criticalBrush,
                 FontSize = 11,
                 TextWrapping = TextWrapping.Wrap,
                 MaxWidth = 240
@@ -1333,6 +1371,7 @@ public partial class App : Application
             MinWidth = 0,
             FontSize = 11
         };
+        AutomationProperties.SetName(connectBtn, isConnected ? "Disconnect from gateway" : "Connect to gateway");
         ToolTipService.SetToolTip(connectBtn, isConnected ? "Click to disconnect from gateway" : "Click to connect to gateway");
         connectBtn.Click += (s, ev) =>
         {
@@ -1366,42 +1405,10 @@ public partial class App : Application
         {
             ShowHub("connection");
         };
+        AutomationProperties.SetName(gwInfo, $"Gateway {statusText}. Activate to open connection settings.");
         menu.AddCustomElement(gwGrid);
 
-        // ── Sessions ──
-        if (_lastSessions.Length > 0)
-        {
-            menu.AddSeparator();
-
-            // Section header: "Sessions  3 active · 45K tokens"
-            var sessionCount = _lastSessions.Length;
-            var activeCount = _lastSessions.Count(s => string.Equals(s.Status, "active", StringComparison.OrdinalIgnoreCase));
-            var totalTokensAll = _lastSessions.Sum(s => s.InputTokens + s.OutputTokens);
-            var sessionSummaryRight = $"{activeCount} active · {FormatTokenCount(totalTokensAll)} tokens";
-            menu.AddCustomElement(BuildSectionHeader("Sessions", sessionSummaryRight));
-
-            // Individual session cards
-            foreach (var session in _lastSessions.Take(5))
-            {
-                var card = BuildSessionCard(session);
-                var flyoutItems = BuildSessionFlyoutItems(session);
-                menu.AddFlyoutCustomItem(card, flyoutItems, action: "sessions");
-            }
-        }
-
-        // ── Pairing Pending ──
-        var nodePendingCount = _lastNodePairList?.Pending.Count ?? 0;
-        var devicePendingCount = _lastDevicePairList?.Pending.Count ?? 0;
-        if (nodePendingCount + devicePendingCount > 0)
-        {
-            var total = nodePendingCount + devicePendingCount;
-            menu.AddMenuItem($"⚠️ Pairing approval pending ({total})", "🔗", "hub");
-        }
-
-        // ── Connected Devices with inline permission toggles ──
-        // Only show currently-connected nodes; offline/stale paired nodes
-        // remain visible on the full Nodes page where they can be renamed
-        // or forgotten.
+        // ── Connected Devices (moved above Sessions) ──
         var connectedNodes = _lastNodes.Where(n => n.IsOnline).ToArray();
         if (connectedNodes.Length > 0)
         {
@@ -1415,109 +1422,145 @@ public partial class App : Application
 
             foreach (var node in connectedNodes.Take(5))
             {
-                var card = BuildDeviceCard(node);
+                var card = BuildDeviceCard(node, successBrush, neutralBrush, secondaryText);
                 var flyoutItems = BuildDeviceFlyoutItems(node);
                 menu.AddFlyoutCustomItem(card, flyoutItems, action: "nodes");
 
-                // If this node is the local machine, show capability toggles underneath
+                // If this node is the local machine, surface a Permissions
+                // submenu directly beneath it. The 3-column inline toggle
+                // grid that used to live here was too dense and shipped with
+                // emoji icons; the flyout collapses to a single row and
+                // routes through FluentIconCatalog.
                 bool isLocal = node.DisplayName?.Contains(currentHost, StringComparison.OrdinalIgnoreCase) == true
                     || node.NodeId?.Contains(currentHost, StringComparison.OrdinalIgnoreCase) == true;
                 if (isLocal && _settings != null)
                 {
-                    // Build compact toggle button grid (3 columns)
-                    var capToggles = new Dictionary<string, (Func<bool> Get, Action<bool> Set)>(StringComparer.OrdinalIgnoreCase)
-                    {
-                        ["browser"] = (() => _settings.NodeBrowserProxyEnabled, v => _settings.NodeBrowserProxyEnabled = v),
-                        ["camera"] = (() => _settings.NodeCameraEnabled, v => _settings.NodeCameraEnabled = v),
-                        ["canvas"] = (() => _settings.NodeCanvasEnabled, v => _settings.NodeCanvasEnabled = v),
-                        ["screen"] = (() => _settings.NodeScreenEnabled, v => _settings.NodeScreenEnabled = v),
-                        ["location"] = (() => _settings.NodeLocationEnabled, v => _settings.NodeLocationEnabled = v),
-                        ["tts"] = (() => _settings.NodeTtsEnabled, v => _settings.NodeTtsEnabled = v),
-                        ["system"] = (() => _settings.EnableNodeMode, v => _settings.EnableNodeMode = v),
-                    };
-
-                    // Show ALL possible capability toggles (not just gateway-reported ones)
-                    // so disabled capabilities like TTS appear as "off" buttons
-                    var allCaps = capToggles.Keys.ToList();
-
-                    if (allCaps.Count > 0)
-                    {
-                        var columns = 3;
-                        var grid = new Grid
-                        {
-                            Margin = new Thickness(28, 4, 14, 4),
-                            ColumnSpacing = 4,
-                            RowSpacing = 4,
-                            HorizontalAlignment = HorizontalAlignment.Stretch
-                        };
-                        for (int c = 0; c < columns; c++)
-                            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                        var rowCount = (allCaps.Count + columns - 1) / columns;
-                        for (int r = 0; r < rowCount; r++)
-                            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-                        for (int i = 0; i < allCaps.Count; i++)
-                        {
-                            var cap = allCaps[i];
-                            var capToggle = capToggles[cap];
-                            var icon = CapabilityIcons.TryGetValue(cap, out var emoji) ? emoji : "▪";
-                            var label = char.ToUpper(cap[0]) + cap[1..];
-                            var isOn = capToggle.Get();
-
-                            var btn = new ToggleButton
-                            {
-                                IsChecked = isOn,
-                                HorizontalAlignment = HorizontalAlignment.Stretch,
-                                HorizontalContentAlignment = HorizontalAlignment.Center,
-                                Padding = new Thickness(6, 5, 6, 5),
-                                MinHeight = 0,
-                                MinWidth = 0,
-                                Content = new TextBlock
-                                {
-                                    Text = $"{icon} {label}",
-                                    FontSize = 11,
-                                    TextTrimming = TextTrimming.CharacterEllipsis
-                                }
-                            };
-                            var capRef = capToggle; // capture for lambda
-                            btn.Click += (s, ev) =>
-                            {
-                                var on = ((ToggleButton)s!).IsChecked == true;
-                                capRef.Set(on); _settings.Save(); _ = _connectionManager?.ReconnectAsync();
-                            };
-                            Grid.SetRow(btn, i / columns);
-                            Grid.SetColumn(btn, i % columns);
-                            grid.Children.Add(btn);
-                        }
-                        menu.AddCustomElement(grid);
-                    }
+                    var permIcon = FluentIconCatalog.Build(FluentIconCatalog.Permissions);
+                    menu.AddFlyoutMenuItem(
+                        "Permissions",
+                        permIcon,
+                        BuildPermissionsFlyoutItems(_settings),
+                        indent: true);
                 }
             }
         }
 
+        // ── Sessions (now below Devices) ──
+        if (_lastSessions.Length > 0)
+        {
+            menu.AddSeparator();
+
+            var sessionCount = _lastSessions.Length;
+            var activeCount = _lastSessions.Count(s => string.Equals(s.Status, "active", StringComparison.OrdinalIgnoreCase));
+            var totalTokensAll = _lastSessions.Sum(s => s.InputTokens + s.OutputTokens);
+            var sessionSummaryRight = $"{activeCount} active · {FormatTokenCount(totalTokensAll)} tokens";
+            menu.AddCustomElement(BuildSectionHeader("Sessions", sessionSummaryRight));
+
+            foreach (var session in _lastSessions.Take(5))
+            {
+                var card = BuildSessionCard(session, successBrush, cautionBrush, neutralBrush, criticalBrush, secondaryText);
+                var flyoutItems = BuildSessionFlyoutItems(session);
+                menu.AddFlyoutCustomItem(card, flyoutItems, action: "sessions");
+            }
+        }
+
+        // ── Pairing approval pending (closest analogue to the spec's
+        // "exec approvals" row in current code) ──
+        var nodePendingCount = _lastNodePairList?.Pending.Count ?? 0;
+        var devicePendingCount = _lastDevicePairList?.Pending.Count ?? 0;
+        if (nodePendingCount + devicePendingCount > 0)
+        {
+            var total = nodePendingCount + devicePendingCount;
+            menu.AddMenuItem(
+                $"Pairing approval pending ({total})",
+                FluentIconCatalog.Build(FluentIconCatalog.Approvals),
+                "hub");
+        }
+
         // ── Actions ──
         menu.AddSeparator();
-        menu.AddMenuItem("Dashboard", "🌐", "dashboard");
-        menu.AddMenuItem("Chat", "💬", "openchat");
-        menu.AddMenuItem("Canvas", "🎨", "canvas");
-        menu.AddMenuItem("Voice", "🎙️", "voice");
-        menu.AddMenuItem("Companion Settings...", "🦞", "companion");
-        menu.AddMenuItem(LocalizationHelper.GetString("Menu_QuickSend"), "📤", "quicksend");
+        menu.AddMenuItem("Dashboard", FluentIconCatalog.Build(FluentIconCatalog.Dashboard), "dashboard");
+        menu.AddMenuItem("Chat", FluentIconCatalog.Build(FluentIconCatalog.Chat), "openchat");
+        menu.AddMenuItem("Canvas", FluentIconCatalog.Build(FluentIconCatalog.CanvasAct), "canvas");
+        menu.AddMenuItem("Voice", FluentIconCatalog.Build(FluentIconCatalog.VoiceAct), "voice");
+        menu.AddMenuItem("Companion Settings...", FluentIconCatalog.Build(FluentIconCatalog.Settings), "companion");
+        menu.AddMenuItem(LocalizationHelper.GetString("Menu_QuickSend"), FluentIconCatalog.Build(FluentIconCatalog.QuickSend), "quicksend");
 
         // Setup Guide / Reconfigure entry (PR #274 must-fix #6) — label flips
-        // based on whether prior config exists. Click dispatches "setup" which
-        // invokes the existing ShowOnboardingAsync handler (case in OnTrayMenuAction).
+        // based on whether prior config exists.
         var setupMenuLabel = _settings != null
             && new OpenClawTray.Onboarding.Services.OnboardingExistingConfigGuard(_settings, IdentityDataPath)
                 .HasExistingConfiguration()
             ? LocalizationHelper.GetString("Menu_Reconfigure")
             : LocalizationHelper.GetString("Menu_SetupGuide");
-        menu.AddMenuItem(setupMenuLabel, "🧭", "setup");
+        menu.AddMenuItem(setupMenuLabel, FluentIconCatalog.Build(FluentIconCatalog.Setup), "setup");
 
-        // ── Exit ──
+        // ── Footer ──
         menu.AddSeparator();
-        menu.AddMenuItem(LocalizationHelper.GetString("Menu_Exit"), "❌", "exit");
+        menu.AddMenuItem("About", FluentIconCatalog.Build(FluentIconCatalog.About), "about");
+        menu.AddMenuItem(LocalizationHelper.GetString("Menu_Exit"), FluentIconCatalog.Build(FluentIconCatalog.Exit), "exit");
     }
+
+    /// <summary>
+    /// Flyout items for the local-node Permissions row: one check-toggle per
+    /// capability flag in <see cref="SettingsData"/>. Toggling saves the
+    /// setting and reconnects so the gateway picks up the new capability set.
+    /// </summary>
+    private List<TrayMenuFlyoutItem> BuildPermissionsFlyoutItems(SettingsManager settings)
+    {
+        var items = new List<TrayMenuFlyoutItem>
+        {
+            new() { Text = "Permissions", IsHeader = true },
+        };
+
+        AddPermToggle(items, "Enable Windows node", FluentIconCatalog.System,
+            () => settings.EnableNodeMode, v => settings.EnableNodeMode = v);
+        AddPermToggle(items, "Allow browser control", FluentIconCatalog.Browser,
+            () => settings.NodeBrowserProxyEnabled, v => settings.NodeBrowserProxyEnabled = v);
+        AddPermToggle(items, "Allow camera", FluentIconCatalog.Camera,
+            () => settings.NodeCameraEnabled, v => settings.NodeCameraEnabled = v);
+        AddPermToggle(items, "Allow canvas", FluentIconCatalog.Canvas,
+            () => settings.NodeCanvasEnabled, v => settings.NodeCanvasEnabled = v);
+        AddPermToggle(items, "Allow screen capture", FluentIconCatalog.Screen,
+            () => settings.NodeScreenEnabled, v => settings.NodeScreenEnabled = v);
+        AddPermToggle(items, "Allow location", FluentIconCatalog.Location,
+            () => settings.NodeLocationEnabled, v => settings.NodeLocationEnabled = v);
+        AddPermToggle(items, "Allow voice (TTS)", FluentIconCatalog.Voice,
+            () => settings.NodeTtsEnabled, v => settings.NodeTtsEnabled = v);
+
+        return items;
+    }
+
+    private void AddPermToggle(List<TrayMenuFlyoutItem> items, string label, string iconGlyph, Func<bool> get, Action<bool> set)
+    {
+        // Encode current state in the visible glyph: a check prefix when on,
+        // the capability glyph alone when off. The action id round-trips
+        // through OnTrayMenuItemClicked which calls back into the toggler.
+        var on = get();
+        var prefix = on ? FluentIconCatalog.Check : iconGlyph;
+        var actionId = $"perm-toggle|{label}";
+        items.Add(new TrayMenuFlyoutItem
+        {
+            Text = (on ? "✓  " : "    ") + label,
+            Icon = prefix,
+            Action = actionId,
+        });
+        _permToggleActions[actionId] = () =>
+        {
+            set(!get());
+            _settings?.Save();
+            _ = _connectionManager?.ReconnectAsync();
+            // Repaint the menu so the check mark reflects new state.
+            if (_trayMenuWindow != null && _trayMenuWindow.IsShown)
+            {
+                _trayMenuWindow.ClearItems();
+                BuildTrayMenuPopup(_trayMenuWindow);
+            }
+        };
+    }
+
+    private readonly Dictionary<string, Action> _permToggleActions = new(StringComparer.Ordinal);
+
 
     private static string FormatTokenCount(long n)
     {
@@ -1567,7 +1610,13 @@ public partial class App : Application
         return grid;
     }
 
-    private static UIElement BuildSessionCard(SessionInfo session)
+    private static UIElement BuildSessionCard(
+        SessionInfo session,
+        Microsoft.UI.Xaml.Media.Brush successBrush,
+        Microsoft.UI.Xaml.Media.Brush cautionBrush,
+        Microsoft.UI.Xaml.Media.Brush neutralBrush,
+        Microsoft.UI.Xaml.Media.Brush criticalBrush,
+        Microsoft.UI.Xaml.Media.Brush secondaryText)
     {
         var usedTokens = session.InputTokens + session.OutputTokens;
         var contextTokens = session.ContextTokens > 0 ? session.ContextTokens : 200_000;
@@ -1595,10 +1644,9 @@ public partial class App : Application
         {
             Width = 8, Height = 8,
             VerticalAlignment = VerticalAlignment.Center,
-            Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(
-                isActive ? Microsoft.UI.Colors.LimeGreen
-                : isIdle ? Microsoft.UI.Colors.Orange
-                : Microsoft.UI.Colors.Gray)
+            Fill = isActive ? successBrush
+                : isIdle ? cautionBrush
+                : neutralBrush
         };
         Grid.SetRow(dot, 0);
         Grid.SetColumn(dot, 0);
@@ -1656,7 +1704,7 @@ public partial class App : Application
             {
                 Text = tokenText,
                 FontSize = 11,
-                Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                Foreground = secondaryText,
                 VerticalAlignment = VerticalAlignment.Center,
                 IsTextSelectionEnabled = false
             });
@@ -1674,7 +1722,7 @@ public partial class App : Application
         {
             Text = statusText,
             FontSize = 11,
-            Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+            Foreground = secondaryText,
             VerticalAlignment = VerticalAlignment.Center,
             IsTextSelectionEnabled = false
         });
@@ -1694,10 +1742,9 @@ public partial class App : Application
                 Height = 3,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 CornerRadius = new CornerRadius(1.5),
-                Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(
-                    pct > 80 ? Microsoft.UI.Colors.Red
-                    : pct > 50 ? Microsoft.UI.Colors.Orange
-                    : Microsoft.UI.Colors.LimeGreen)
+                Foreground = pct > 80 ? criticalBrush
+                    : pct > 50 ? cautionBrush
+                    : successBrush
             };
             Grid.SetRow(bar, 2);
             Grid.SetColumn(bar, 0);
@@ -1770,7 +1817,11 @@ public partial class App : Application
         return items;
     }
 
-    private static UIElement BuildDeviceCard(GatewayNodeInfo node)
+    private static UIElement BuildDeviceCard(
+        GatewayNodeInfo node,
+        Microsoft.UI.Xaml.Media.Brush successBrush,
+        Microsoft.UI.Xaml.Media.Brush neutralBrush,
+        Microsoft.UI.Xaml.Media.Brush secondaryText)
     {
         var nodeName = !string.IsNullOrWhiteSpace(node.DisplayName) ? node.DisplayName : node.ShortId;
 
@@ -1793,8 +1844,7 @@ public partial class App : Application
         {
             Width = 8, Height = 8,
             VerticalAlignment = VerticalAlignment.Center,
-            Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(
-                node.IsOnline ? Microsoft.UI.Colors.LimeGreen : Microsoft.UI.Colors.Gray)
+            Fill = node.IsOnline ? successBrush : neutralBrush
         };
         Grid.SetRow(dot, 0);
         Grid.SetColumn(dot, 0);
@@ -1864,7 +1914,7 @@ public partial class App : Application
         {
             Text = row1Text,
             FontSize = 11,
-            Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+            Foreground = secondaryText,
             VerticalAlignment = VerticalAlignment.Center,
             IsTextSelectionEnabled = false
         });
