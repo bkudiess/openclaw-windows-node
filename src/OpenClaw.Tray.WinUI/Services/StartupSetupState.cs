@@ -13,48 +13,13 @@ internal static class StartupSetupState
     /// AND a configured gateway target (non-default <c>GatewayUrl</c> or an SSH tunnel
     /// host). Both signals together indicate a working operator config — guards
     /// against orphan tokens and against tokens-without-target stale state.
+    /// Token detection delegates to
+    /// <see cref="OnboardingExistingConfigGuard.HasAnyOperatorDeviceToken"/> so the
+    /// startup decision and the in-wizard guard agree on what counts as paired.
     /// </summary>
     public static bool HasUsableOperatorConfiguration(SettingsManager settings, string dataPath) =>
-        HasAnyOperatorDeviceToken(dataPath) && HasAnyConfiguredGatewayTarget(settings);
-
-    /// <summary>
-    /// Scans the legacy root identity AND per-gateway identity directories for an
-    /// operator device token. Modern pairings (post-GatewayRegistry) write tokens
-    /// to <c>&lt;dataPath&gt;/gateways/&lt;gatewayId&gt;/device-key-ed25519.json</c>
-    /// via <c>DeviceIdentityStore</c>; the legacy root file is kept by migration
-    /// but is NOT created by fresh pairings.
-    /// </summary>
-    internal static bool HasAnyOperatorDeviceToken(string dataPath)
-    {
-        if (DeviceIdentity.HasStoredDeviceToken(dataPath, NullLogger.Instance))
-        {
-            return true;
-        }
-
-        var gatewaysDir = Path.Combine(dataPath, "gateways");
-        if (!Directory.Exists(gatewaysDir))
-        {
-            return false;
-        }
-
-        try
-        {
-            foreach (var dir in Directory.EnumerateDirectories(gatewaysDir))
-            {
-                if (DeviceIdentity.HasStoredDeviceToken(dir, NullLogger.Instance))
-                {
-                    return true;
-                }
-            }
-        }
-        catch (Exception)
-        {
-            // Best-effort scan — IO/permission failure should not silently allow
-            // the wizard to be skipped, so fall through to "no usable token".
-        }
-
-        return false;
-    }
+        OnboardingExistingConfigGuard.HasAnyOperatorDeviceToken(dataPath)
+        && HasAnyConfiguredGatewayTarget(settings);
 
     /// <summary>
     /// True when the user has configured an actual gateway target — either a

@@ -24,13 +24,19 @@ public sealed class OnboardingState : IDisposable
 
     /// <summary>
     /// Raises <see cref="Dismissed"/>. Called by pages that offer a "keep my existing
-    /// setup and exit the wizard" option.
+    /// setup and exit the wizard" option. Idempotent — subsequent calls are no-ops
+    /// so a double-click or repeated handler invocation cannot fire the lifecycle
+    /// signal twice.
     /// </summary>
     public void Dismiss()
     {
+        if (_dismissed) return;
+        _dismissed = true;
         OpenClawTray.Services.Logger.Info("[OnboardingState] Dismiss invoked (user chose to keep existing setup)");
         Dismissed?.Invoke(this, EventArgs.Empty);
     }
+
+    private bool _dismissed;
 
     /// <summary>
     /// The currently displayed route. Updated by OnboardingApp on navigation.

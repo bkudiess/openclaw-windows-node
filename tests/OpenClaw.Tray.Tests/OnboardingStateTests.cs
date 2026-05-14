@@ -339,6 +339,22 @@ public class OnboardingStateTests
     }
 
     [Fact]
+    public void Dismiss_IsIdempotent_FiresDismissedAtMostOnce()
+    {
+        // Hardening: lifecycle signal must not fire twice if a page accidentally
+        // calls Dismiss again (e.g., double-click or repeated handler invocation).
+        var state = CreateState();
+        var count = 0;
+        state.Dismissed += (_, _) => count++;
+
+        state.Dismiss();
+        state.Dismiss();
+        state.Dismiss();
+
+        Assert.Equal(1, count);
+    }
+
+    [Fact]
     public void Dismiss_DoesNotFireFinishedEvent()
     {
         // "Keep my setup" must NOT route through the completion pipeline —
