@@ -2680,7 +2680,16 @@ public partial class App : Application
     }
 
     private void OnNodeToastRequested(object? sender, Microsoft.Toolkit.Uwp.Notifications.ToastContentBuilder builder)
-        => ShowToast(builder);
+    {
+        try
+        {
+            ShowToast(builder);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Failed to show node toast: {ex.Message}");
+        }
+    }
 
     private void OnNodeInvokeCompleted(object? sender, NodeInvokeCompletedEventArgs args)
     {
