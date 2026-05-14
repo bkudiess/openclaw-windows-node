@@ -1333,7 +1333,15 @@ public partial class App : Application
         Grid.SetColumn(gwNameRow, 0);
         gwLine1.Children.Add(gwNameRow);
 
-        // Right-side chip: "Local" when connected to localhost, else version chip when available
+        // Right-side: optional chip + Disconnect/Connect button on the header line
+        var gwRight = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Right
+        };
+
         string? chipText = null;
         var gwUrl = _settings?.GetEffectiveGatewayUrl();
         Uri? gwUri = null;
@@ -1347,7 +1355,7 @@ public partial class App : Application
         }
         if (chipText != null)
         {
-            var chip = new Border
+            gwRight.Children.Add(new Border
             {
                 CornerRadius = new CornerRadius(4),
                 Padding = new Thickness(6, 1, 6, 1),
@@ -1360,10 +1368,43 @@ public partial class App : Application
                     Foreground = secondaryText,
                     IsTextSelectionEnabled = false
                 }
-            };
-            Grid.SetColumn(chip, 2);
-            gwLine1.Children.Add(chip);
+            });
         }
+
+        var gwBtn = new Button
+        {
+            Content = isConnected ? "Disconnect" : "Connect",
+            VerticalAlignment = VerticalAlignment.Center,
+            Padding = new Thickness(10, 2, 10, 2),
+            MinHeight = 0,
+            MinWidth = 0,
+            FontSize = 11
+        };
+        AutomationProperties.SetName(gwBtn, isConnected ? "Disconnect from gateway" : "Connect to gateway");
+        ToolTipService.SetToolTip(gwBtn, isConnected ? "Disconnect from gateway" : "Connect to gateway");
+        gwBtn.Click += (s, ev) =>
+        {
+            if (isConnected)
+            {
+                _ = _connectionManager?.DisconnectAsync();
+                _lastSessions = Array.Empty<SessionInfo>();
+                _lastNodePairList = null;
+                _lastDevicePairList = null;
+                _lastModelsList = null;
+                _agentEventsCache.Clear();
+                UpdateTrayIcon();
+                _hubWindow?.UpdateStatus(ConnectionStatus.Disconnected);
+            }
+            else
+            {
+                _ = _connectionManager?.ReconnectAsync();
+            }
+            _trayMenuWindow?.HideCascade();
+        };
+        gwRight.Children.Add(gwBtn);
+
+        Grid.SetColumn(gwRight, 2);
+        gwLine1.Children.Add(gwRight);
         gwOuter.Children.Add(gwLine1);
 
         // ── Line 2: secondary details ──
@@ -1403,61 +1444,13 @@ public partial class App : Application
             });
         }
 
-        // Wrap the 2-line content in a Grid with a visible Disconnect/Connect
-        // button on the right side. The info area is clickable to open
-        // connection settings; the button is its own click target.
-        var gwHost = new Grid
-        {
-            Padding = new Thickness(14, 6, 14, 8),
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            ColumnSpacing = 8
-        };
-        gwHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        gwHost.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        // Move gwOuter padding to the host Grid since gwOuter is now nested.
-        gwOuter.Padding = new Thickness(0);
+        // Tap the gateway block to open connection settings (button has its own click handler)
+        gwOuter.Padding = new Thickness(14, 6, 14, 8);
         gwOuter.Tapped += (s, ev) => ShowHub("connection");
-        Grid.SetColumn(gwOuter, 0);
-        gwHost.Children.Add(gwOuter);
-
-        var gwBtn = new Button
-        {
-            Content = isConnected ? "Disconnect" : "Connect",
-            VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Padding = new Thickness(12, 4, 12, 4),
-            MinHeight = 0,
-            MinWidth = 0,
-            FontSize = 11
-        };
-        AutomationProperties.SetName(gwBtn, isConnected ? "Disconnect from gateway" : "Connect to gateway");
-        ToolTipService.SetToolTip(gwBtn, isConnected ? "Disconnect from gateway" : "Connect to gateway");
-        gwBtn.Click += (s, ev) =>
-        {
-            if (isConnected)
-            {
-                _ = _connectionManager?.DisconnectAsync();
-                _lastSessions = Array.Empty<SessionInfo>();
-                _lastNodePairList = null;
-                _lastDevicePairList = null;
-                _lastModelsList = null;
-                _agentEventsCache.Clear();
-                UpdateTrayIcon();
-                _hubWindow?.UpdateStatus(ConnectionStatus.Disconnected);
-            }
-            else
-            {
-                _ = _connectionManager?.ReconnectAsync();
-            }
-            _trayMenuWindow?.HideCascade();
-        };
-        Grid.SetColumn(gwBtn, 1);
-        gwHost.Children.Add(gwBtn);
 
         AutomationProperties.SetName(gwOuter,
             $"Gateway {statusText}. Activate to open connection settings.");
-        menu.AddCustomElement(gwHost);
+        menu.AddCustomElement(gwOuter);
 
         // ── Connected Devices (moved above Sessions) ──
         var connectedNodes = _lastNodes.Where(n => n.IsOnline).ToArray();
@@ -1664,15 +1657,17 @@ public partial class App : Application
 
     private static readonly FrozenDictionary<string, string> CapabilityIcons = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
-        ["screen"] = "🖥",
-        ["camera"] = "📷",
-        ["browser"] = "🌐",
-        ["clipboard"] = "📋",
-        ["tts"] = "🔊",
-        ["location"] = "📍",
-        ["canvas"] = "🎨",
-        ["system"] = "⚙",
-        ["device"] = "📱",
+        ["screen"] = FluentIconCatalog.Screen,
+        ["camera"] = FluentIconCatalog.Camera,
+        ["browser"] = FluentIconCatalog.Browser,
+        ["clipboard"] = "\uE77F",     // PasteAsText
+        ["tts"] = FluentIconCatalog.Voice,
+        ["stt"] = FluentIconCatalog.Voice,
+        ["location"] = FluentIconCatalog.Location,
+        ["canvas"] = FluentIconCatalog.Canvas,
+        ["system"] = FluentIconCatalog.System,
+        ["device"] = FluentIconCatalog.Devices,
+        ["app"] = "\uECAA",           // AppIconDefault
     }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     private static Grid BuildSectionHeader(string title, string summary)
@@ -2251,15 +2246,44 @@ public partial class App : Application
             new() { Text = nodeName, IsHeader = true },
         };
 
-        // Status + platform + mode on one line
-        var statusIcon = node.IsOnline ? "🟢" : "⚪";
-        var statusText = node.IsOnline ? "Online" : "Offline";
-        var infoParts = new List<string> { $"{statusIcon} {statusText}" };
-        if (!string.IsNullOrEmpty(node.Platform)) infoParts.Add(node.Platform);
-        if (!string.IsNullOrEmpty(node.Mode)) infoParts.Add(node.Mode);
-        items.Add(new() { Text = string.Join(" · ", infoParts) });
+        // Status card: ● Online · windows · node
+        //              Last seen 4m ago
+        var resources = Application.Current.Resources;
+        var captionStyle = (Style)resources["CaptionTextBlockStyle"];
+        var secondaryText = (Microsoft.UI.Xaml.Media.Brush)resources["TextFillColorSecondaryBrush"];
+        var successBrush = (Microsoft.UI.Xaml.Media.Brush)resources["SystemFillColorSuccessBrush"];
+        var neutralBrush = (Microsoft.UI.Xaml.Media.Brush)resources["SystemFillColorNeutralBrush"];
 
-        // Last seen
+        var statusCard = new StackPanel
+        {
+            Padding = new Thickness(12, 2, 12, 6),
+            Spacing = 2,
+            MinWidth = 260
+        };
+        var statusLine = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        statusLine.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse
+        {
+            Width = 8, Height = 8,
+            VerticalAlignment = VerticalAlignment.Center,
+            Fill = node.IsOnline ? successBrush : neutralBrush
+        });
+        var statusParts = new List<string> { node.IsOnline ? "Online" : "Offline" };
+        if (!string.IsNullOrEmpty(node.Platform)) statusParts.Add(node.Platform);
+        if (!string.IsNullOrEmpty(node.Mode)) statusParts.Add(node.Mode);
+        statusLine.Children.Add(new TextBlock
+        {
+            Text = string.Join(" · ", statusParts),
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsTextSelectionEnabled = false
+        });
+        statusCard.Children.Add(statusLine);
+
         if (node.LastSeen.HasValue)
         {
             var age = DateTime.UtcNow - node.LastSeen.Value;
@@ -2267,10 +2291,17 @@ public partial class App : Application
                 : age.TotalHours < 1 ? $"{(int)age.TotalMinutes}m ago"
                 : age.TotalDays < 1 ? $"{(int)age.TotalHours}h ago"
                 : $"{(int)age.TotalDays}d ago";
-            items.Add(new() { Text = $"Last seen {seenText}" });
+            statusCard.Children.Add(new TextBlock
+            {
+                Text = $"Last seen {seenText}",
+                Style = captionStyle, FontSize = 11,
+                Foreground = secondaryText,
+                IsTextSelectionEnabled = false
+            });
         }
+        items.Add(new() { CustomContent = statusCard });
 
-        // Capabilities + Commands merged — capability as header, commands as details
+        // Capabilities + Commands
         if (node.Capabilities.Count > 0 || node.Commands.Count > 0)
         {
             items.Add(new() { Text = $"Capabilities ({node.CapabilityCount}) · Commands ({node.CommandCount})", IsHeader = true });
@@ -2279,33 +2310,67 @@ public partial class App : Application
                 .GroupBy(c => c.Contains('.') ? c[..c.IndexOf('.')] : c, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.Select(c => c.Contains('.') ? c[(c.IndexOf('.') + 1)..] : c).ToList(), StringComparer.OrdinalIgnoreCase);
 
-            // Show each capability with its commands on separate lines
             var shownGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var cap in node.Capabilities)
             {
-                var icon = CapabilityIcons.TryGetValue(cap, out var emoji) ? emoji : "▪";
-                if (cmdGroups.TryGetValue(cap, out var cmds) && cmds.Count > 0)
-                {
-                    items.Add(new() { Text = $"{icon} {cap}" });
-                    items.Add(new() { Text = $"    {string.Join(", ", cmds)}" });
-                    shownGroups.Add(cap);
-                }
-                else
-                {
-                    items.Add(new() { Text = $"{icon} {cap}" });
-                    shownGroups.Add(cap);
-                }
+                cmdGroups.TryGetValue(cap, out var cmds);
+                items.Add(new() { CustomContent = BuildCapabilityRow(cap, cmds, secondaryText, captionStyle) });
+                shownGroups.Add(cap);
             }
 
-            // Show any command groups not covered by a capability
+            // Command groups without a matching capability entry
             foreach (var group in cmdGroups.Where(g => !shownGroups.Contains(g.Key)).OrderBy(g => g.Key))
             {
-                items.Add(new() { Text = $"▸ {group.Key}" });
-                items.Add(new() { Text = $"    {string.Join(", ", group.Value)}" });
+                items.Add(new() { CustomContent = BuildCapabilityRow(group.Key, group.Value, secondaryText, captionStyle) });
             }
         }
 
         return items;
+    }
+
+    private static UIElement BuildCapabilityRow(string cap, List<string>? commands, Microsoft.UI.Xaml.Media.Brush secondaryText, Style captionStyle)
+    {
+        var grid = new Grid
+        {
+            Padding = new Thickness(12, 4, 12, 4),
+            ColumnSpacing = 10,
+            MinWidth = 260
+        };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var glyph = CapabilityIcons.TryGetValue(cap, out var pua) ? pua : "\uE7C3"; // Page (fallback)
+        var icon = FluentIconCatalog.Build(glyph);
+        icon.HorizontalAlignment = HorizontalAlignment.Center;
+        icon.VerticalAlignment = VerticalAlignment.Top;
+        icon.Margin = new Thickness(0, 2, 0, 0);
+        Grid.SetColumn(icon, 0);
+        grid.Children.Add(icon);
+
+        var stack = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
+        stack.Children.Add(new TextBlock
+        {
+            Text = cap,
+            FontSize = 13,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            IsTextSelectionEnabled = false
+        });
+        if (commands != null && commands.Count > 0)
+        {
+            stack.Children.Add(new TextBlock
+            {
+                Text = string.Join(", ", commands),
+                Style = captionStyle, FontSize = 11,
+                Foreground = secondaryText,
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 240,
+                IsTextSelectionEnabled = false
+            });
+        }
+        Grid.SetColumn(stack, 1);
+        grid.Children.Add(stack);
+
+        return grid;
     }
 
     private static Border BuildBadge(string text)
