@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using OpenClaw.Connection;
 using OpenClaw.Shared;
 using OpenClawTray.FunctionalUI;
 using OpenClawTray.FunctionalUI.Core;
@@ -291,9 +292,9 @@ public sealed class ConnectionPage : Component<OnboardingState>
                     var existing = registry.FindByUrl(normalizedUrl);
                     var recordId = existing?.Id ?? System.Guid.NewGuid().ToString();
                     var sshConfig = useSshTunnel
-                        ? new OpenClawTray.Services.Connection.SshTunnelConfig(sshUser, sshHost, sshRemotePort, sshLocalPort)
+                        ? new OpenClaw.Connection.SshTunnelConfig(sshUser, sshHost, sshRemotePort, sshLocalPort)
                         : null;
-                    var record = new OpenClawTray.Services.Connection.GatewayRecord
+                    var record = new OpenClaw.Connection.GatewayRecord
                     {
                         Id = recordId,
                         Url = normalizedUrl,
@@ -322,12 +323,12 @@ public sealed class ConnectionPage : Component<OnboardingState>
 
                     var snapshot = app.ConnectionManager?.CurrentSnapshot;
                     if (snapshot == null) continue;
-                    if (snapshot.OverallState is OpenClawTray.Services.Connection.OverallConnectionState.Connected
-                        or OpenClawTray.Services.Connection.OverallConnectionState.Ready)
+                    if (snapshot.OverallState is OpenClaw.Connection.OverallConnectionState.Connected
+                        or OpenClaw.Connection.OverallConnectionState.Ready)
                     { connected = true; break; }
-                    if (snapshot.OverallState == OpenClawTray.Services.Connection.OverallConnectionState.PairingRequired)
+                    if (snapshot.OverallState == OpenClaw.Connection.OverallConnectionState.PairingRequired)
                     { pairingRequired = true; break; }
-                    if (snapshot.OverallState == OpenClawTray.Services.Connection.OverallConnectionState.Error)
+                    if (snapshot.OverallState == OpenClaw.Connection.OverallConnectionState.Error)
                     { authFailed = true; break; }
                 }
 

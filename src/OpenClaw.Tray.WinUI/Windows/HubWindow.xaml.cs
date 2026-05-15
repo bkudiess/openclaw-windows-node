@@ -48,8 +48,8 @@ public sealed partial class HubWindow : WindowEx
     public Action? OpenSetupAction { get; set; }
     public Action? OpenConnectionStatusAction { get; set; }
     public Action? OpenVoiceAction { get; set; }
-    public OpenClawTray.Services.Connection.IGatewayConnectionManager? ConnectionManager { get; set; }
-    public OpenClawTray.Services.Connection.GatewayRegistry? GatewayRegistry { get; set; }
+    public OpenClaw.Connection.IGatewayConnectionManager? ConnectionManager { get; set; }
+    public OpenClaw.Connection.GatewayRegistry? GatewayRegistry { get; set; }
 
     // Node service state (set by App.xaml.cs in ShowHub)
     public bool NodeIsConnected { get; set; }
@@ -106,6 +106,11 @@ public sealed partial class HubWindow : WindowEx
 
         double desired = e.NewSize.Width * ratio;
         NavView.OpenPaneLength = Math.Clamp(desired, minPane, maxPane);
+    }
+
+    private void OnTitleBarStatusTapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
+    {
+        NavigateTo("connection");
     }
 
     /// <summary>
@@ -200,18 +205,42 @@ public sealed partial class HubWindow : WindowEx
         };
 
         TitleStatusDot.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
-        TitleStatusText.Text = text;
 
-        // Add gateway version if available
-        if (status == ConnectionStatus.Connected && GatewayClient != null)
+        // Build status text with version when connected
+        if (status == ConnectionStatus.Connected && _lastGatewaySelf is { ServerVersion: { Length: > 0 } ver })
+            TitleStatusText.Text = $"v{ver}";
+        else
+            TitleStatusText.Text = text;
+
+        // Update role indicator dots
+        var snapshot = ConnectionManager?.CurrentSnapshot;
+        if (snapshot != null)
         {
-            var self = _lastGatewaySelf;
-            if (self != null && !string.IsNullOrEmpty(self.ServerVersion))
-                TitleStatusText.Text = $"Connected · v{self.ServerVersion}";
-            if (self?.PresenceCount is > 0)
-                TitleStatusText.Text += $" · {self.PresenceCount} clients";
+            TitleOpDot.Fill = RoleDotBrush(snapshot.OperatorState);
+            TitleNodeDot.Fill = RoleDotBrush(snapshot.NodeState);
+        }
+        else
+        {
+            var gray = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Gray);
+            TitleOpDot.Fill = gray;
+            TitleNodeDot.Fill = gray;
         }
     }
+
+    private static Microsoft.UI.Xaml.Media.SolidColorBrush RoleDotBrush(OpenClaw.Connection.RoleConnectionState state) => state switch
+    {
+        OpenClaw.Connection.RoleConnectionState.Connected =>
+            new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.LimeGreen),
+        OpenClaw.Connection.RoleConnectionState.Connecting =>
+            new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Orange),
+        OpenClaw.Connection.RoleConnectionState.PairingRequired =>
+            new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Orange),
+        OpenClaw.Connection.RoleConnectionState.Error or
+        OpenClaw.Connection.RoleConnectionState.PairingRejected or
+        OpenClaw.Connection.RoleConnectionState.RateLimited =>
+            new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Red),
+        _ => new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Gray),
+    };
 
     private GatewaySelfInfo? _lastGatewaySelf;
     public GatewaySelfInfo? LastGatewaySelf => _lastGatewaySelf;
@@ -654,6 +683,7 @@ public sealed partial class HubWindow : WindowEx
                 break;
             case ConnectionPage connection:
                 connection.Initialize(this);
+                if (LastNodePairList != null) connection.UpdatePairingRequests(LastNodePairList);
                 if (LastDevicePairList != null) connection.UpdateDevicePairingRequests(LastDevicePairList);
                 if (LastNodePairList != null) connection.UpdatePairingRequests(LastNodePairList);
                 break;

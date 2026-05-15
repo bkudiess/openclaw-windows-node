@@ -10,7 +10,7 @@ using OpenClawTray.Helpers;
 using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using OpenClawTray.Onboarding;
-using OpenClawTray.Services.Connection;
+using OpenClaw.Connection;
 using OpenClawTray.Services.LocalGatewaySetup;
 using System;
 using System.Collections.Frozen;
@@ -78,7 +78,32 @@ public partial class App : Application
     /// Ensures the managed SSH tunnel is started using the current settings.
     /// Used by the onboarding ConnectionPage when the user picks the SSH topology.
     /// </summary>
-    public void EnsureSshTunnelStarted() => _sshTunnelService?.EnsureStarted(_settings);
+    public void EnsureSshTunnelStarted()
+    {
+        if (_sshTunnelService == null || _settings == null)
+            return;
+
+        if (!_settings.UseSshTunnel)
+        {
+            _sshTunnelService.ResetNotConfigured();
+            return;
+        }
+
+        var includeBrowserProxyForward =
+            _settings.NodeBrowserProxyEnabled &&
+            SshTunnelCommandLine.CanForwardBrowserProxyPort(_settings.SshTunnelRemotePort, _settings.SshTunnelLocalPort);
+        if (_settings.NodeBrowserProxyEnabled && !includeBrowserProxyForward)
+        {
+            Logger.Warn("SSH tunnel browser proxy forward disabled because the derived port would be invalid");
+        }
+
+        _sshTunnelService.EnsureStarted(
+            _settings.SshTunnelUser,
+            _settings.SshTunnelHost,
+            _settings.SshTunnelRemotePort,
+            _settings.SshTunnelLocalPort,
+            includeBrowserProxyForward);
+    }
 
     /// <summary>
     /// Creates the WSL local gateway setup engine using the current tray settings.
@@ -147,7 +172,7 @@ public partial class App : Application
             : IntPtr.Zero;
 
     private SettingsManager? _settings;
-    private SettingsData? _previousSettingsSnapshot;
+    private ConnectionSettingsSnapshot? _previousSettingsSnapshot;
     private SshTunnelService? _sshTunnelService;
     private GlobalHotkeyService? _globalHotkey;
     private Mutex? _mutex;
@@ -594,7 +619,7 @@ public partial class App : Application
 
         // Initialize settings before update check so skip selections can be remembered.
         _settings = new SettingsManager();
-        _previousSettingsSnapshot = _settings.ToSettingsData();
+        _previousSettingsSnapshot = _settings.ToSettingsData().ToConnectionSnapshot();
         _chatCoordinator = new OpenClawTray.Chat.OpenClawChatCoordinator(
             _settings,
             () => _nodeService,
@@ -693,17 +718,14 @@ public partial class App : Application
                 diagnostics.Record("node", $"ClientCreated handler THREW: {ex.Message}");
             }
         };
-        // Wrap the SSH tunnel service so the connection manager can start/stop the tunnel
-        var tunnelManager = _sshTunnelService != null
-            ? new SshTunnelManager(_sshTunnelService, appLogger)
-            : null;
+        // SshTunnelService implements ISshTunnelManager directly — no shim needed
         _connectionManager = new GatewayConnectionManager(
             credentialResolver, clientFactory, _gatewayRegistry, appLogger,
             identityStore: new DeviceIdentityFileStore(appLogger),
             nodeConnector: nodeConnector,
             isNodeEnabled: ShouldInitializeNodeService,
             diagnostics: diagnostics,
-            tunnelManager: tunnelManager,
+            tunnelManager: _sshTunnelService,
             shouldStartNodeConnection: ShouldInitializeNodeService);
         _connectionManager.OperatorClientChanged += OnOperatorClientChanged;
         _connectionManager.StateChanged += OnManagerStateChanged;
@@ -2784,7 +2806,7 @@ public partial class App : Application
         return true;
     }
 
-    private OpenClawTray.Services.Connection.GatewayCredential? ResolveStartupOperatorCredential(GatewayRecord record)
+    private OpenClaw.Connection.GatewayCredential? ResolveStartupOperatorCredential(GatewayRecord record)
     {
         if (_gatewayRegistry == null)
             return null;
@@ -2936,7 +2958,10 @@ public partial class App : Application
             client.AgentFilesListUpdated += OnAgentFilesListUpdated;
             client.AgentFileContentUpdated += OnAgentFileContentUpdated;
 
-            _chatCoordinator?.SetOperatorClient(client);
+            var concreteClient = client as OpenClawGatewayClient;
+            if (concreteClient == null)
+                Logger.Warn("[ConnMgr] NewClient is not OpenClawGatewayClient — chat coordinator disabled");
+            _chatCoordinator?.SetOperatorClient(concreteClient);
         }
         else
         {
@@ -4134,7 +4159,7 @@ public partial class App : Application
 
     private void OnSettingsSaved(object? sender, EventArgs e)
     {
-        var currentSnapshot = _settings?.ToSettingsData();
+        var currentSnapshot = _settings?.ToSettingsData()?.ToConnectionSnapshot();
         var impact = SettingsChangeClassifier.Classify(_previousSettingsSnapshot, currentSnapshot);
         _previousSettingsSnapshot = currentSnapshot;
         Logger.Info($"[SETTINGS] Change impact: {impact}");
@@ -4381,7 +4406,7 @@ public partial class App : Application
         LastUpdateInfo = _lastUpdateInfo,
         Settings = _settings,
         NodeService = _nodeService,
-        SshTunnelService = _sshTunnelService,
+        SshTunnelSnapshot = _sshTunnelService?.CreateSnapshot(),
         HasGatewayClient = _connectionManager?.OperatorClient != null
     };
 
@@ -4565,10 +4590,12 @@ public partial class App : Application
             return false;
 
         if (!InteractiveGatewayCredentialResolver.TryResolve(
-            _settings,
             _gatewayRegistry,
             SettingsManager.SettingsDirectoryPath,
             DeviceIdentityFileReader.Instance,
+            _settings.GetEffectiveGatewayUrl(),
+            _settings.LegacyToken,
+            _settings.LegacyBootstrapToken,
             out var credential) ||
             credential == null)
         {
@@ -4588,8 +4615,16 @@ public partial class App : Application
     {
         if (_settings == null) return;
         if (!EnsureSshTunnelConfigured()) return;
-        
-        var baseUrl = _settings.GetEffectiveGatewayUrl()
+
+        if (!TryResolveChatCredentials(out var gatewayUrl, out var token, out var credentialSource, out var isBootstrapToken))
+        {
+            ShowConnectionSettingsForPairingIssue(
+                "Dashboard",
+                "Gateway URL or credential is not configured");
+            return;
+        }
+
+        var baseUrl = gatewayUrl
             .Replace("ws://", "http://")
             .Replace("wss://", "https://")
             .TrimEnd('/');
@@ -4598,11 +4633,12 @@ public partial class App : Application
             ? baseUrl
             : $"{baseUrl}/{path.TrimStart('/')}";
 
-        var activeToken = _gatewayRegistry?.GetActive()?.SharedGatewayToken;
-        if (!string.IsNullOrEmpty(activeToken))
+        if (!isBootstrapToken &&
+            credentialSource == CredentialResolver.SourceSharedGatewayToken &&
+            !string.IsNullOrEmpty(token))
         {
             var separator = url.Contains('?') ? "&" : "?";
-            url = $"{url}{separator}token={Uri.EscapeDataString(activeToken)}";
+            url = $"{url}{separator}token={Uri.EscapeDataString(token)}";
         }
 
         try
@@ -5215,7 +5251,15 @@ public partial class App : Application
             try
             {
                 _sshTunnelService ??= new SshTunnelService(new AppLogger());
-                _sshTunnelService.EnsureStarted(_settings);
+                var includeBrowserProxy =
+                    _settings.NodeBrowserProxyEnabled &&
+                    SshTunnelCommandLine.CanForwardBrowserProxyPort(_settings.SshTunnelRemotePort, _settings.SshTunnelLocalPort);
+                _sshTunnelService.EnsureStarted(
+                    _settings.SshTunnelUser,
+                    _settings.SshTunnelHost,
+                    _settings.SshTunnelRemotePort,
+                    _settings.SshTunnelLocalPort,
+                    includeBrowserProxy);
                 DiagnosticsJsonlService.Write("tunnel.ensure_started", new
                 {
                     status = _sshTunnelService.Status.ToString(),
@@ -5259,7 +5303,15 @@ public partial class App : Application
         {
             try
             {
-                _sshTunnelService.EnsureStarted(_settings);
+                var restartBrowserProxy =
+                    _settings.NodeBrowserProxyEnabled &&
+                    SshTunnelCommandLine.CanForwardBrowserProxyPort(_settings.SshTunnelRemotePort, _settings.SshTunnelLocalPort);
+                _sshTunnelService.EnsureStarted(
+                    _settings.SshTunnelUser,
+                    _settings.SshTunnelHost,
+                    _settings.SshTunnelRemotePort,
+                    _settings.SshTunnelLocalPort,
+                    restartBrowserProxy);
                 Logger.Info("SSH tunnel restarted successfully");
                 DiagnosticsJsonlService.Write("tunnel.restart_succeeded", new
                 {

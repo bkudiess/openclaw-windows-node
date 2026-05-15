@@ -11,6 +11,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using OpenClaw.Connection;
 using OpenClaw.Shared;
 using OpenClawTray.Onboarding.Services;
 #if !OPENCLAW_TRAY_TESTS
@@ -1576,9 +1577,9 @@ public interface ILocalGatewaySetupSettings
 public sealed class SettingsManagerLocalGatewaySetupSettings : ILocalGatewaySetupSettings
 {
     private readonly SettingsManager _settings;
-    private readonly OpenClawTray.Services.Connection.GatewayRegistry? _registry;
+    private readonly OpenClaw.Connection.GatewayRegistry? _registry;
 
-    public SettingsManagerLocalGatewaySetupSettings(SettingsManager settings, OpenClawTray.Services.Connection.GatewayRegistry? registry = null)
+    public SettingsManagerLocalGatewaySetupSettings(SettingsManager settings, OpenClaw.Connection.GatewayRegistry? registry = null)
     {
         _settings = settings;
         _registry = registry;
@@ -1599,7 +1600,7 @@ public sealed class SettingsManagerLocalGatewaySetupSettings : ILocalGatewaySetu
         {
             var existing = _registry.FindByUrl(GatewayUrl);
             var recordId = existing?.Id ?? System.Guid.NewGuid().ToString();
-            var record = new OpenClawTray.Services.Connection.GatewayRecord
+            var record = new OpenClaw.Connection.GatewayRecord
             {
                 Id = recordId,
                 Url = GatewayUrl,
@@ -3212,7 +3213,7 @@ public static class LocalGatewaySetupEngineFactory
         bool replaceExistingConfigurationConfirmed = false,
         string? identityDataPath = null,
         string? setupStatePath = null,
-        OpenClawTray.Services.Connection.GatewayRegistry? gatewayRegistry = null,
+        OpenClaw.Connection.GatewayRegistry? gatewayRegistry = null,
         IGatewayOperatorConnector? operatorConnectorOverride = null)
     {
         // Defense-in-depth fail-closed: refuse to construct the engine if any of the
