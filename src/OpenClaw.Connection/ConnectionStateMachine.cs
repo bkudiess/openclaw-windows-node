@@ -280,6 +280,9 @@ internal sealed class ConnectionStateMachine
                 ? Current.OperatorPairingRequestId : null,
             NodeState = _nodeState,
             NodeError = _nodeError,
+            // Clear requestId when no longer in PairingRequired to prevent stale reads
+            NodePairingRequestId = _nodeState == RoleConnectionState.PairingRequired
+                ? Current.NodePairingRequestId : null,
             NodePairingStatus = _nodeState switch
             {
                 RoleConnectionState.PairingRequired => OpenClaw.Shared.PairingStatus.Pending,

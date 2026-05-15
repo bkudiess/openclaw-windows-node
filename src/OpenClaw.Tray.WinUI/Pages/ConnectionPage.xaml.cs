@@ -229,27 +229,24 @@ public sealed partial class ConnectionPage : Page
 
     private void UpdatePairingGuidance(GatewayConnectionSnapshot snapshot)
     {
-        // The approval command uses the pairing request ID (UUID), not the device ID (hex key hash).
-        // Fall back to device ID if request ID is unavailable.
-        string? approvalId = null;
-
         if (snapshot.OperatorState == RoleConnectionState.PairingRequired)
         {
-            approvalId = snapshot.OperatorPairingRequestId;
+            // Prefer requestId (UUID); fall back to deviceId for older gateways
+            var approvalId = snapshot.OperatorPairingRequestId ?? snapshot.OperatorDeviceId;
             PairingGuidanceCard.Visibility = Visibility.Visible;
             PairingGuidanceText.Text = "🔐 Operator: Awaiting approval from gateway";
             PairingApproveCommandText.Text = !string.IsNullOrEmpty(approvalId)
                 ? $"openclaw devices approve {approvalId}"
-                : "openclaw devices approve <requestId>";
+                : "openclaw devices approve <deviceId>";
         }
         else if (snapshot.NodeState == RoleConnectionState.PairingRequired)
         {
-            approvalId = snapshot.NodePairingRequestId;
+            var approvalId = snapshot.NodePairingRequestId ?? snapshot.NodeDeviceId;
             PairingGuidanceCard.Visibility = Visibility.Visible;
             PairingGuidanceText.Text = "🔐 Node: Awaiting approval from gateway";
             PairingApproveCommandText.Text = !string.IsNullOrEmpty(approvalId)
                 ? $"openclaw devices approve {approvalId}"
-                : "openclaw devices approve <requestId>";
+                : "openclaw devices approve <deviceId>";
         }
         else
         {
