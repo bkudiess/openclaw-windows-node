@@ -8,7 +8,7 @@
         <StackPanel Padding="24" Spacing="16" HorizontalAlignment="Stretch">
 
             <TextBlock x:Uid="ConnectionPage_TextBlock_10" Text="🔗 Connection" Style="{StaticResource TitleTextBlockStyle}"/>
-            <TextBlock x:Uid="ConnectionPage_TextBlock_11" Text="Gateway endpoint used by both the operator client and node service."
+            <TextBlock x:Uid="ConnectionPage_TextBlock_11" Text="Manage your gateway connection."
                        Style="{StaticResource CaptionTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,0,0,8"/>
 
@@ -64,7 +64,7 @@
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Text="🖥️" FontSize="16" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                <TextBlock Grid.Column="1" Text="Operator" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                <TextBlock Grid.Column="1" Text="Operator" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,12,0" Width="60"/>
                                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="0,0,8,0">
                                     <Ellipse x:Name="OperatorStatusDot" Width="10" Height="10" VerticalAlignment="Center" Fill="Gray"/>
                                     <TextBlock x:Name="OperatorStatusLabel" Text="Off" FontSize="12" VerticalAlignment="Center"/>
@@ -161,7 +161,7 @@
             <!-- ═══ Connection Methods (Tabbed) ═══ -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="16,8,16,16">
+                    BorderThickness="1" CornerRadius="8" Padding="16,8,16,8">
             <Pivot x:Name="ConnectionPivot">
                 <PivotItem>
                     <PivotItem.Header>
