@@ -1,6 +1,6 @@
 using OpenClaw.Shared;
 using OpenClawTray.Onboarding.Services;
-using OpenClawTray.Services.Connection;
+using OpenClaw.Connection;
 
 namespace OpenClawTray.Services;
 

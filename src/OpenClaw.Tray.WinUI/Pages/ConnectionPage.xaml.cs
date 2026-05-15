@@ -42,7 +42,6 @@ public sealed partial class ConnectionPage : Page
         // Populate manual connection fields
         GatewayUrlTextBox.Text = settings.GatewayUrl ?? "";
         SshToggle.IsOn = settings.UseSshTunnel;
-        SshDetailsPanel.Visibility = settings.UseSshTunnel ? Visibility.Visible : Visibility.Collapsed;
         LocalWslSetupCard.Visibility = hub.OpenSetupAction is null ? Visibility.Collapsed : Visibility.Visible;
         SshUserBox.Text = settings.SshTunnelUser ?? "";
         SshHostBox.Text = settings.SshTunnelHost ?? "";

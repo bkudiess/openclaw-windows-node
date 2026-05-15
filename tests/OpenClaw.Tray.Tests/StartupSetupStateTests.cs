@@ -1,6 +1,6 @@
 using OpenClaw.Shared;
 using OpenClawTray.Services;
-using OpenClawTray.Services.Connection;
+using OpenClaw.Connection;
 using OpenClawTray.Services.LocalGatewaySetup;
 
 namespace OpenClaw.Tray.Tests;
