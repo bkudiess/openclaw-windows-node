@@ -3283,6 +3283,19 @@ public partial class App : Application
                 return;
             }
 
+            // If a reconnect is already in flight (e.g. the user clicked Finish while
+            // the gateway was mid-restart from a V2 GatewayWelcome wizard config save —
+            // the gateway emits a `shutdown` event with reason="gateway restarting" when
+            // provider/model config changes), let the existing auto-reconnect timer
+            // finish rather than canceling it and starting a fresh one. Canceling adds
+            // a visible ~5s churn (cancel + new connect attempt against a still-warming
+            // gateway + retry) on top of the gateway's own ~1.5s restart window.
+            if (_connectionManager?.CurrentSnapshot.OperatorState == RoleConnectionState.Connecting)
+            {
+                Logger.Info("Gateway client reconnect already in flight — keeping");
+                return;
+            }
+
             // Reconnect only if there's an active gateway with credentials —
             // don't blindly reconnect a pre-setup gateway the user may be replacing.
             var activeRecord = _gatewayRegistry?.GetActive();

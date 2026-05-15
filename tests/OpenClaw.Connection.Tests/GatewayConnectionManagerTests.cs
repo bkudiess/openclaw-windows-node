@@ -71,6 +71,29 @@ public class GatewayConnectionManagerTests : IDisposable
         Assert.Equal("gw-1", _manager.CurrentSnapshot.GatewayId);
     }
 
+    /// <summary>
+    /// Regression guard for the post-onboarding "don't cancel an in-flight reconnect"
+    /// path in App.OnboardingCompleted. When the V2 GatewayWelcome wizard saves a new
+    /// provider/model config the gateway emits a 1012 shutdown and clients enter the
+    /// Connecting state via the auto-reconnect timer. The App handler must see
+    /// OperatorState == Connecting from CurrentSnapshot (without poking OperatorClient
+    /// internals) so it can skip the redundant reconnect call.
+    /// </summary>
+    [Fact]
+    public async Task CurrentSnapshot_OperatorState_IsConnecting_WhileConnectInFlight()
+    {
+        SetupGateway("gw-1", "wss://test");
+        _resolver.OperatorCredential = new GatewayCredential("tok", false, "test");
+
+        await _manager.ConnectAsync("gw-1");
+
+        // Mid-connect (handshake not yet succeeded): operator role-state should be Connecting,
+        // and the overall snapshot mirrors it. This is the signal App.OnboardingCompleted
+        // uses to avoid canceling an in-flight reconnect from a gateway-restart event.
+        Assert.Equal(RoleConnectionState.Connecting, _manager.CurrentSnapshot.OperatorState);
+        Assert.Equal(OverallConnectionState.Connecting, _manager.CurrentSnapshot.OverallState);
+    }
+
     [Fact]
     public async Task ConnectAsync_CreatesClient()
     {
