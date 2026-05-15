@@ -592,6 +592,88 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
 
     // ─── Node Connection ───
 
+    /// <summary>
+    /// Drive the node connection for the active gateway and await its terminal state.
+    /// See <see cref="IGatewayConnectionManager.EnsureNodeConnectedAsync"/> for contract.
+    /// </summary>
+    public async Task EnsureNodeConnectedAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+
+        if (_nodeConnector == null)
+            throw new InvalidOperationException("No node connector is configured on the manager.");
+
+        var snapshot = _stateMachine.Current;
+        if (snapshot.OperatorState != RoleConnectionState.Connected)
+        {
+            throw new InvalidOperationException(
+                $"Operator must be Connected before EnsureNodeConnectedAsync (current: {snapshot.OperatorState}).");
+        }
+
+        if (_activeGatewayRecordId == null || _activeIdentityPath == null)
+            throw new InvalidOperationException("No active gateway is configured.");
+
+        // Already paired? short-circuit. (Idempotent — safe to call repeatedly.)
+        if (snapshot.NodeState == RoleConnectionState.Connected
+            && snapshot.NodePairingStatus == PairingStatus.Paired)
+        {
+            return;
+        }
+
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        void Handler(object? _, GatewayConnectionSnapshot s)
+        {
+            switch (s.NodeState)
+            {
+                case RoleConnectionState.Connected
+                    when s.NodePairingStatus == PairingStatus.Paired:
+                    tcs.TrySetResult(true);
+                    break;
+                case RoleConnectionState.PairingRejected:
+                    tcs.TrySetException(new InvalidOperationException(
+                        s.NodeError ?? "Node pairing was rejected by the gateway."));
+                    break;
+                case RoleConnectionState.Error:
+                    tcs.TrySetException(new InvalidOperationException(
+                        s.NodeError ?? "Node connection failed."));
+                    break;
+                // PairingRequired / Connecting / Idle — keep waiting; the manager's
+                // existing auto-approve flow (OnNodePairingStatusChanged) handles the
+                // node.pair.approve case when operator has admin/pairing scope. The
+                // role-upgrade pending-device-pair case surfaces as a timeout (the
+                // gateway parks the connect without responding) — caller catches and
+                // runs the WSL CLI device-approver before retrying.
+            }
+        }
+
+        StateChanged += Handler;
+        try
+        {
+            await StartNodeConnectionAsync();
+
+            // Re-evaluate state in case the connector reached terminal state synchronously
+            // (test connectors may; production NodeConnector is async).
+            Handler(this, _stateMachine.Current);
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(35));
+
+            try
+            {
+                await tcs.Task.WaitAsync(cts.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new TimeoutException("Timed out waiting for the node to connect and pair with the gateway.");
+            }
+        }
+        finally
+        {
+            StateChanged -= Handler;
+        }
+    }
+
     private bool ShouldStartNodeConnection()
     {
         if (_activeGatewayRecordId == null || _activeIdentityPath == null)
