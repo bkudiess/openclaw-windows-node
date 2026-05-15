@@ -115,6 +115,14 @@ public partial class App : Application
     public LocalGatewaySetupEngine CreateLocalGatewaySetupEngine(
         bool replaceExistingConfigurationConfirmed = false)
     {
+        if (_connectionManager == null || _gatewayRegistry == null)
+        {
+            throw new InvalidOperationException(
+                "GatewayConnectionManager / GatewayRegistry must be initialized before " +
+                "CreateLocalGatewaySetupEngine. App.OnLaunched initializes them before " +
+                "ShowOnboardingAsync — if you reach here, the init order has regressed.");
+        }
+
         var settings = _settings ?? new SettingsManager();
         // NodeService is still required for capability registration on the manager's
         // WindowsNodeClient (via App.xaml.cs ClientCreated → AttachClient bridge).
@@ -129,23 +137,18 @@ public partial class App : Application
             // Use the manager-backed connectors so all handshake/pairing events appear
             // in the diagnostics window and reuse the manager's v2/v3 signature fallback,
             // credential resolution, per-gateway identity store, and device token persistence.
-            IGatewayOperatorConnector? operatorConnector = null;
-            IWindowsNodeConnector? windowsNodeConnector = null;
-            if (_connectionManager != null && _gatewayRegistry != null)
-            {
-                operatorConnector = new ConnectionManagerOperatorConnector(
-                    _connectionManager, _gatewayRegistry, new AppLogger());
-                windowsNodeConnector = new ConnectionManagerWindowsNodeConnector(
-                    _connectionManager, _gatewayRegistry, new AppLogger());
-            }
+            var operatorConnector = new ConnectionManagerOperatorConnector(
+                _connectionManager, _gatewayRegistry, new AppLogger());
+            var windowsNodeConnector = new ConnectionManagerWindowsNodeConnector(
+                _connectionManager, _gatewayRegistry, new AppLogger());
             var engine = LocalGatewaySetupEngineFactory.CreateLocalOnly(
                 settings,
+                operatorConnector,
+                windowsNodeConnector,
                 new AppLogger(),
                 nodeService,
                 replaceExistingConfigurationConfirmed: replaceExistingConfigurationConfirmed,
-                gatewayRegistry: _gatewayRegistry,
-                operatorConnectorOverride: operatorConnector,
-                windowsNodeConnectorOverride: windowsNodeConnector);
+                gatewayRegistry: _gatewayRegistry);
             // Clear suppress flag when engine completes so normal node connections resume.
             // Only clear if this engine is still the active one (prevents stale engine #1
             // from clearing the flag while engine #2 is running).

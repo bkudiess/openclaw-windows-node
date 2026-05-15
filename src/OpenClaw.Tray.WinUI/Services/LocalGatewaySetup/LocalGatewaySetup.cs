@@ -1682,37 +1682,10 @@ public interface IWindowsNodeConnector
     Task ConnectAsync(string gatewayUrl, string token, string? bootstrapToken, CancellationToken cancellationToken = default);
 }
 
-#if !OPENCLAW_TRAY_TESTS
-[Obsolete("Use ConnectionManagerWindowsNodeConnector instead — drives node connection through GatewayConnectionManager. Will be removed in phase 5.")]
-public sealed class NodeServiceWindowsNodeConnector : IWindowsNodeConnector
-{
-    private readonly NodeService _nodeService;
-
-    public NodeServiceWindowsNodeConnector(NodeService nodeService)
-    {
-        _nodeService = nodeService;
-    }
-
-    public async Task ConnectAsync(string gatewayUrl, string token, string? bootstrapToken, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-#pragma warning disable CS0618 // legacy fallback path — phase 5 removes both this connector and NodeService.ConnectAsync
-        await _nodeService.ConnectAsync(gatewayUrl, token, bootstrapToken);
-#pragma warning restore CS0618
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(35);
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (_nodeService.IsConnected && _nodeService.IsPaired)
-                return;
-
-            await Task.Delay(250, cancellationToken);
-        }
-
-        throw new TimeoutException("Timed out waiting for the Windows tray node to pair with the gateway.");
-    }
-}
-#endif
+// NodeServiceWindowsNodeConnector (direct NodeService.ConnectAsync delegate, no
+// diagnostics tee) has been removed — all node pairing now flows through
+// ConnectionManagerWindowsNodeConnector → GatewayConnectionManager.EnsureNodeConnectedAsync.
+// See docs/node-connection-architecture.md and easy-button-gateway-comms-audit.md.
 
 public static class WslDistroKeepAlive
 {
@@ -1803,72 +1776,10 @@ public interface IGatewayOperatorConnector
     Task<GatewayOperatorConnectionResult> ConnectWithStoredDeviceTokenAsync(string gatewayUrl, CancellationToken cancellationToken = default);
 }
 
-public sealed class OpenClawGatewayOperatorConnector : IGatewayOperatorConnector
-{
-    private readonly IOpenClawLogger _logger;
-    private readonly TimeSpan _timeout;
-
-    public OpenClawGatewayOperatorConnector(IOpenClawLogger? logger = null, TimeSpan? timeout = null)
-    {
-        _logger = logger ?? NullLogger.Instance;
-        _timeout = timeout ?? TimeSpan.FromSeconds(35);
-    }
-
-    public async Task<GatewayOperatorConnectionResult> ConnectAsync(string gatewayUrl, string token, bool tokenIsBootstrapToken = false, CancellationToken cancellationToken = default)
-    {
-        using var client = new OpenClawGatewayClient(gatewayUrl, token, _logger, tokenIsBootstrapToken, bootstrapPairAsNode: false);
-        var completion = new TaskCompletionSource<GatewayOperatorConnectionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        client.StatusChanged += (_, status) =>
-        {
-            if (status == ConnectionStatus.Connected)
-                completion.TrySetResult(new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.Connected));
-            else if (status == ConnectionStatus.Error)
-            {
-                if (client.IsPairingRequired)
-                    completion.TrySetResult(new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.PairingRequired, "Gateway requires pairing approval.", client.PairingRequiredRequestId));
-                else if (client.IsAuthFailed)
-                    completion.TrySetResult(new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.AuthFailed, "Gateway rejected operator authentication."));
-            }
-        };
-
-        try
-        {
-            await client.ConnectAsync();
-            var completed = await Task.WhenAny(completion.Task, Task.Delay(_timeout, cancellationToken));
-            return completed == completion.Task
-                ? await completion.Task
-                : new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.Timeout, "Timed out waiting for operator handshake.");
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            return new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.Failed, ex.Message);
-        }
-        finally
-        {
-            await client.DisconnectAsync();
-        }
-    }
-
-    public async Task<GatewayOperatorConnectionResult> ConnectWithStoredDeviceTokenAsync(string gatewayUrl, CancellationToken cancellationToken = default)
-    {
-        var dataPath = Path.Combine(
-            Environment.GetEnvironmentVariable("OPENCLAW_TRAY_APPDATA_DIR")
-                ?? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "OpenClawTray");
-        var identity = new DeviceIdentity(dataPath, _logger);
-        identity.Initialize();
-
-        if (string.IsNullOrWhiteSpace(identity.DeviceToken))
-            return new GatewayOperatorConnectionResult(GatewayOperatorConnectionStatus.AuthFailed, "Gateway did not return a stored device token after bootstrap pairing.");
-
-        return await ConnectAsync(gatewayUrl, identity.DeviceToken, tokenIsBootstrapToken: false, cancellationToken);
-    }
-}
+// OpenClawGatewayOperatorConnector (direct OpenClawGatewayClient instantiation, no
+// diagnostics tee) has been removed — all operator pairing now flows through
+// ConnectionManagerOperatorConnector → GatewayConnectionManager. See
+// docs/node-connection-architecture.md and easy-button-gateway-comms-audit.md.
 
 public sealed class WslGatewayCliSharedGatewayTokenProvider : ISharedGatewayTokenProvider
 {
@@ -3285,6 +3196,8 @@ public static class LocalGatewaySetupEngineFactory
 {
     public static LocalGatewaySetupEngine CreateLocalOnly(
         SettingsManager settings,
+        IGatewayOperatorConnector operatorConnector,
+        IWindowsNodeConnector windowsNodeConnector,
         IOpenClawLogger? logger = null,
 #if !OPENCLAW_TRAY_TESTS
         NodeService? nodeService = null,
@@ -3294,10 +3207,11 @@ public static class LocalGatewaySetupEngineFactory
         bool replaceExistingConfigurationConfirmed = false,
         string? identityDataPath = null,
         string? setupStatePath = null,
-        OpenClaw.Connection.GatewayRegistry? gatewayRegistry = null,
-        IGatewayOperatorConnector? operatorConnectorOverride = null,
-        IWindowsNodeConnector? windowsNodeConnectorOverride = null)
+        OpenClaw.Connection.GatewayRegistry? gatewayRegistry = null)
     {
+        ArgumentNullException.ThrowIfNull(operatorConnector);
+        ArgumentNullException.ThrowIfNull(windowsNodeConnector);
+
         // Defense-in-depth fail-closed: refuse to construct the engine if any of the
         // 6 sync existing-config predicates fire and the caller has not passed explicit
         // confirmation. Predicates checked: Token, BootstrapToken, GatewayUrl (non-default),
@@ -3352,24 +3266,10 @@ public static class LocalGatewaySetupEngineFactory
 
         var wsl = new WslExeCommandRunner(logger, TimeSpan.FromMinutes(30));
         var settingsAdapter = new SettingsManagerLocalGatewaySetupSettings(settings, gatewayRegistry);
-        var operatorConnector = operatorConnectorOverride ?? (IGatewayOperatorConnector)new OpenClawGatewayOperatorConnector(logger);
         var bootstrapTokenProvider = new WslGatewayCliBootstrapTokenProvider(wsl, options.OpenClawInstallPrefix + "/bin/openclaw");
         var sharedGatewayTokenProvider = new WslGatewayCliSharedGatewayTokenProvider(wsl);
         var gatewayConfigurationPreparer = new OpenClawCliGatewayConfigurationPreparer(wsl);
         var pendingDeviceApprover = new WslGatewayCliPendingDeviceApprover(wsl, options.OpenClawInstallPrefix + "/bin/openclaw");
-#if OPENCLAW_TRAY_TESTS
-        IWindowsNodeConnector? windowsNodeConnector = windowsNodeConnectorOverride;
-#else
-        // Prefer caller-supplied override (production: ConnectionManagerWindowsNodeConnector
-        // — drives node connection through GatewayConnectionManager so all node handshake
-        // events flow through the manager's diagnostics + per-gateway identity store).
-        // Fall back to the legacy NodeService-driven path only if neither is available
-        // (kept for any test or call site that hasn't been migrated yet).
-#pragma warning disable CS0618 // NodeServiceWindowsNodeConnector is the legacy path; phase 5 removes both
-        IWindowsNodeConnector? windowsNodeConnector = windowsNodeConnectorOverride
-            ?? (nodeService == null ? null : new NodeServiceWindowsNodeConnector(nodeService));
-#pragma warning restore CS0618
-#endif
 
         return new LocalGatewaySetupEngine(
             options,

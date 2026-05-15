@@ -190,19 +190,11 @@ public sealed class NodeService : IDisposable
         _cameraCaptureService = new CameraCaptureService(logger);
     }
     
-    /// <summary>
-    /// Obsolete — node lifecycle is owned by <see cref="OpenClawTray.Services.Connection.GatewayConnectionManager"/>.
-    /// Call <see cref="OpenClawTray.Services.Connection.GatewayConnectionManager.EnsureNodeConnectedAsync(System.Threading.CancellationToken)"/>
-    /// (or <see cref="ConnectionManagerWindowsNodeConnector"/> from the easy-button setup engine).
-    /// Will be removed in phase 5 of the connection-unification rollout.
-    /// </summary>
-    [Obsolete("Node lifecycle is owned by GatewayConnectionManager. Use EnsureNodeConnectedAsync or ConnectionManagerWindowsNodeConnector. Will be removed in phase 5.")]
-    public Task ConnectAsync(string gatewayUrl, string token, string? bootstrapToken = null)
-    {
-        throw new InvalidOperationException(
-            "NodeService.ConnectAsync is removed. Node lifecycle is now owned by GatewayConnectionManager — " +
-            "call manager.EnsureNodeConnectedAsync (or ConnectionManagerWindowsNodeConnector for the easy-button setup engine).");
-    }
+    // NodeService.ConnectAsync (gateway-connecting variant) was removed in
+    // phase 5 of the connection-unification rollout. Node lifecycle is owned by
+    // GatewayConnectionManager — call manager.EnsureNodeConnectedAsync (or
+    // ConnectionManagerWindowsNodeConnector for the easy-button setup engine).
+    // StartLocalOnlyAsync (MCP-only mode, no gateway) is unchanged.
 
     /// <summary>
     /// Bring up node capabilities and the local MCP server without opening a
