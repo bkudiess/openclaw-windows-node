@@ -134,11 +134,12 @@
                             </StackPanel>
                         </StackPanel>
                     </Border>
-                    <!-- Row 5: Connection attempts (shown when connecting) -->
+                    <!-- Connection attempts (shown when connecting, fixed height to avoid layout shift) -->
                     <TextBlock x:Name="ConnectionAttemptsText"
                                Style="{StaticResource CaptionTextBlockStyle}"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                               Visibility="Collapsed"/>
+                               MinHeight="16"
+                               Opacity="0"/>
                 </StackPanel>
             </Border>
 

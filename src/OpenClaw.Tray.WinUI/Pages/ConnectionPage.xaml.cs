@@ -88,21 +88,42 @@ public sealed partial class ConnectionPage : Page
         UpdateFromSnapshot(snapshot);
     }
 
+    private OverallConnectionState _lastDisplayedOverallState;
+
     private void UpdateFromSnapshot(GatewayConnectionSnapshot snapshot)
     {
-        // Overall status
-        var (color, text) = snapshot.OverallState switch
-        {
-            OverallConnectionState.Connected or OverallConnectionState.Ready => (Microsoft.UI.Colors.LimeGreen, "Connected"),
-            OverallConnectionState.Degraded => (Microsoft.UI.Colors.Orange, "Degraded"),
-            OverallConnectionState.Connecting => (Microsoft.UI.Colors.Orange, "Connecting…"),
-            OverallConnectionState.PairingRequired => (Microsoft.UI.Colors.Orange, "Awaiting Approval"),
-            OverallConnectionState.Error => (Microsoft.UI.Colors.Red, "Error"),
-            _ => (Microsoft.UI.Colors.Gray, "Disconnected")
-        };
+        // Debounce: skip transient flicker if overall state bounces back
+        // within the same dispatch cycle (e.g. Connected→Connecting→Connected)
+        var overallChanged = snapshot.OverallState != _lastDisplayedOverallState;
 
-        StatusDot.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
-        StatusText.Text = text;
+        // Overall status — only update text/dot/tint when state actually changes
+        if (overallChanged)
+        {
+            _lastDisplayedOverallState = snapshot.OverallState;
+
+            var (color, text) = snapshot.OverallState switch
+            {
+                OverallConnectionState.Connected or OverallConnectionState.Ready => (Microsoft.UI.Colors.LimeGreen, "Connected"),
+                OverallConnectionState.Degraded => (Microsoft.UI.Colors.Orange, "Degraded"),
+                OverallConnectionState.Connecting => (Microsoft.UI.Colors.Orange, "Connecting…"),
+                OverallConnectionState.PairingRequired => (Microsoft.UI.Colors.Orange, "Awaiting Approval"),
+                OverallConnectionState.Error => (Microsoft.UI.Colors.Red, "Error"),
+                _ => (Microsoft.UI.Colors.Gray, "Disconnected")
+            };
+
+            StatusDot.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
+            StatusText.Text = text;
+
+            // Status card accent tint — only tint for states that need attention
+            StatusCard.Background = snapshot.OverallState switch
+            {
+                OverallConnectionState.Error =>
+                    (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCriticalBackgroundBrush"],
+                OverallConnectionState.PairingRequired =>
+                    (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCautionBackgroundBrush"],
+                _ => (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"]
+            };
+        }
 
         var isConnected = snapshot.OverallState is OverallConnectionState.Connected or OverallConnectionState.Ready or OverallConnectionState.Degraded;
         var isPairing = snapshot.OverallState == OverallConnectionState.PairingRequired;
@@ -111,26 +132,16 @@ public sealed partial class ConnectionPage : Page
         ReconnectButton.Visibility = isConnected ? Visibility.Collapsed : Visibility.Visible;
         DisconnectButton.Visibility = isConnected ? Visibility.Visible : Visibility.Collapsed;
 
-        // Status card accent tint — only tint for states that need attention
-        StatusCard.Background = snapshot.OverallState switch
-        {
-            OverallConnectionState.Error =>
-                (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCriticalBackgroundBrush"],
-            OverallConnectionState.PairingRequired =>
-                (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCautionBackgroundBrush"],
-            _ => (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"]
-        };
-
         if (isConnecting)
         {
             _connectionAttempts++;
             ConnectionAttemptsText.Text = $"Connection attempt {_connectionAttempts}…";
-            ConnectionAttemptsText.Visibility = Visibility.Visible;
+            ConnectionAttemptsText.Opacity = 1;
         }
         else
         {
             if (isConnected || isPairing) _connectionAttempts = 0;
-            ConnectionAttemptsText.Visibility = Visibility.Collapsed;
+            ConnectionAttemptsText.Opacity = 0;
         }
 
         // Gateway details
