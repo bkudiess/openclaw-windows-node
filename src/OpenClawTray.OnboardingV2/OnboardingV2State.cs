@@ -101,13 +101,14 @@ public sealed class OnboardingV2State
     /// </summary>
     public enum LocalSetupStage
     {
-        CheckSystem = 0,
-        InstallingUbuntu = 1,
-        ConfiguringInstance = 2,
-        InstallingOpenClaw = 3,
-        PreparingGateway = 4,
-        StartingGateway = 5,
-        GeneratingSetupCode = 6,
+        RemovingExistingGateway = 0,
+        CheckSystem = 1,
+        InstallingUbuntu = 2,
+        ConfiguringInstance = 3,
+        InstallingOpenClaw = 4,
+        PreparingGateway = 5,
+        StartingGateway = 6,
+        GeneratingSetupCode = 7,
     }
 
     public enum LocalSetupRowState
@@ -224,6 +225,32 @@ public sealed class OnboardingV2State
     /// <summary>Pre-existing configuration snapshot. Null when no probe ran.</summary>
     public ExistingConfigSnapshot? ExistingConfig { get; set; }
 
+    public enum ExistingGatewayKind
+    {
+        None = 0,
+        AppOwnedLocalWsl = 1,
+        ExternalOnly = 2,
+    }
+
+    private ExistingGatewayKind _existingGatewayKind;
+    /// <summary>
+    /// Host-provided classification used by Welcome to choose the CTA and
+    /// warning copy. AppOwnedLocalWsl is set when the host finds the
+    /// dedicated OpenClawGateway WSL distro.
+    /// </summary>
+    public ExistingGatewayKind ExistingGateway
+    {
+        get => _existingGatewayKind;
+        set
+        {
+            if (_existingGatewayKind != value)
+            {
+                _existingGatewayKind = value;
+                NotifyChanged();
+            }
+        }
+    }
+
     /// <summary>
     /// True once the user has explicitly confirmed they want to replace
     /// existing configuration (V2 Welcome's "Replace my setup" button).
@@ -286,6 +313,9 @@ public sealed class OnboardingV2State
     /// <summary>Raised by a page that wants to advance to the next route.</summary>
     public event EventHandler? AdvanceRequested;
 
+    /// <summary>Raised by Welcome when the primary setup CTA may require a host confirmation dialog.</summary>
+    public event EventHandler? PrimarySetupRequested;
+
     /// <summary>Raised by a page that wants to go back to the previous route.</summary>
     public event EventHandler? BackRequested;
 
@@ -303,7 +333,7 @@ public sealed class OnboardingV2State
     /// </summary>
     public event EventHandler? Dismissed;
 
-    /// <summary>Raised by Welcome's "Advanced setup" link — host routes to the legacy Connection page.</summary>
+    /// <summary>Raised by Welcome's "Advanced setup" link — host exits setup and opens Connections.</summary>
     public event EventHandler? AdvancedSetupRequested;
 
     /// <summary>Raised by Permissions' "Refresh status" button — host re-runs PermissionChecker.</summary>
@@ -312,6 +342,7 @@ public sealed class OnboardingV2State
     /// <summary>Raised by LocalSetupProgress's "Try again" button after a retryable engine failure — host resets engine state and re-runs the local setup.</summary>
     public event EventHandler? RetryRequested;
 
+    public void RequestPrimarySetup() => PrimarySetupRequested?.Invoke(this, EventArgs.Empty);
     public void RequestAdvance() => AdvanceRequested?.Invoke(this, EventArgs.Empty);
     public void RequestBack() => BackRequested?.Invoke(this, EventArgs.Empty);
     public void RaiseFinished() => Finished?.Invoke(this, EventArgs.Empty);

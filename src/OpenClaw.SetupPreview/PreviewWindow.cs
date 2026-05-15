@@ -441,6 +441,13 @@ internal sealed class PreviewWindow : WindowEx
                 nodeMode.Equals("true", StringComparison.OrdinalIgnoreCase);
         }
 
+        var existingGateway = Environment.GetEnvironmentVariable("OPENCLAW_PREVIEW_EXISTING_GATEWAY_KIND");
+        if (!string.IsNullOrWhiteSpace(existingGateway) &&
+            Enum.TryParse<OnboardingV2State.ExistingGatewayKind>(existingGateway, ignoreCase: true, out var gatewayKind))
+        {
+            state.ExistingGateway = gatewayKind;
+        }
+
         // OPENCLAW_PREVIEW_PROGRESS_FROZEN_STAGE freezes the LocalSetupProgress
         // page on a specific stage: every stage strictly before this one is
         // marked Done, the named stage is Running (spinner), and every stage

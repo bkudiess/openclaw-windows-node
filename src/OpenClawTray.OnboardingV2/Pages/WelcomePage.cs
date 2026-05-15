@@ -32,8 +32,7 @@ public sealed class WelcomePage : Component<OnboardingV2State>
     public override Element Render()
     {
         var theme = Props.EffectiveTheme;
-        var hasExisting = Props.ExistingConfig is { HasAny: true };
-        var (confirmingReplace, setConfirmingReplace) = UseState(hasExisting && !Props.ReplaceExistingConfigurationConfirmed);
+        var existingGateway = Props.ExistingGateway;
 
         var infoCard = Grid(
             new[] { "auto", "*" },
@@ -117,84 +116,23 @@ public sealed class WelcomePage : Component<OnboardingV2State>
                 });
         }
 
-        Element bottomCluster;
-        if (confirmingReplace)
+        var primaryLabel = existingGateway == OnboardingV2State.ExistingGatewayKind.AppOwnedLocalWsl
+            ? V2Strings.Get("V2_Welcome_PrimaryButton_InstallNewWslGateway")
+            : V2Strings.Get("V2_Welcome_PrimaryButton");
+        var primaryAutomationId = existingGateway == OnboardingV2State.ExistingGatewayKind.AppOwnedLocalWsl
+            ? "V2_Welcome_InstallNewWslGateway"
+            : "V2_Welcome_SetUpLocally";
+
+        void StartSetup()
         {
-            // Existing-config warn-and-confirm: matches the legacy
-            // SetupWarningPage UX but rendered with V2 theme + spacing.
-            var lost = new List<string>();
-            if (Props.ExistingConfig is { } ec)
-            {
-                if (ec.HasToken) lost.Add("gateway token");
-                if (ec.HasOperatorDeviceToken || ec.HasNodeDeviceToken) lost.Add("device pairing");
-                if (ec.HasNonDefaultGatewayUrl) lost.Add("current gateway URL");
-                if (ec.HasBootstrapToken) lost.Add("bootstrap token");
-            }
-            var body = V2Strings.Get("V2_Welcome_Replace_Body");
-            if (lost.Count > 0)
-            {
-                body += $" This will overwrite: {string.Join(", ", lost)}.";
-            }
-
-            var warnCard = new BorderElement(
-                VStack(8,
-                    TextBlock(V2Strings.Get("V2_Welcome_Replace_Heading"))
-                        .FontSize(16)
-                        .SemiBold()
-                        .HAlign(HorizontalAlignment.Center)
-                        .TextWrapping()
-                        .Set(t => t.Foreground = V2Theme.WarningCardForeground(theme)),
-                    TextBlock(body)
-                        .FontSize(13)
-                        .HAlign(HorizontalAlignment.Center)
-                        .TextWrapping()
-                        .Set(t =>
-                        {
-                            t.Foreground = V2Theme.WarningCardForeground(theme);
-                            t.TextAlignment = TextAlignment.Center;
-                        })
-                )
-            )
-            .Background(V2Theme.WarningCardBackground(theme))
-            .Padding(20, 18, 20, 18)
-            .Set(b => b.CornerRadius = new CornerRadius(8));
-
-            void ConfirmReplace()
-            {
-                Props.ReplaceExistingConfigurationConfirmed = true;
-                setConfirmingReplace(false);
-                Props.RequestAdvance();
-            }
-
-            void KeepSetup()
-            {
-                // "Keep my setup" — the user has existing configuration and wants
-                // to keep it. Dismiss the V2 wizard entirely (which closes the
-                // onboarding window without firing Finished or running the
-                // completion pipeline) so existing settings and gateway
-                // connection are preserved untouched. Mirrors the legacy
-                // SetupWarningPage CancelReplace handler post-PR-#340.
-                // Deliberately do NOT setConfirmingReplace(false) first —
-                // the window is about to close and the redundant state change
-                // would briefly re-render the "Set up locally" button.
-                Props.Dismiss();
-            }
-
-            bottomCluster = VStack(12,
-                warnCard,
-                BuildAccentButton(V2Strings.Get("V2_Welcome_Replace_Confirm"), ConfirmReplace, "V2_Welcome_ReplaceConfirm"),
-                BuildLinkButton(V2Strings.Get("V2_Welcome_Replace_Keep"), KeepSetup, "V2_Welcome_ReplaceKeep"),
-                BuildLinkButton(V2Strings.Get("V2_Welcome_AdvancedLink"), () => Props.RequestAdvancedSetup(), "V2_Welcome_AdvancedSetup")
-            );
+            Props.RequestPrimarySetup();
         }
-        else
-        {
-            bottomCluster = VStack(16,
-                infoCardWrap,
-                BuildAccentButton(V2Strings.Get("V2_Welcome_PrimaryButton"), () => Props.RequestAdvance(), "V2_Welcome_SetUpLocally"),
-                BuildLinkButton(V2Strings.Get("V2_Welcome_AdvancedLink"), () => Props.RequestAdvancedSetup(), "V2_Welcome_AdvancedSetup")
-            );
-        }
+
+        var bottomCluster = VStack(16,
+            infoCardWrap,
+            BuildAccentButton(primaryLabel, StartSetup, primaryAutomationId),
+            BuildLinkButton(V2Strings.Get("V2_Welcome_AdvancedLink"), () => Props.RequestAdvancedSetup(), "V2_Welcome_AdvancedSetup")
+        );
 
         // Outer Grid: rows are [hero spacer | hero/title/body | flex spacer | bottom cluster]
         // pushes the hero into the upper third and the CTAs into the lower third,

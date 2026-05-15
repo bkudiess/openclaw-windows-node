@@ -35,6 +35,7 @@ public sealed class OnboardingV2Bridge : IDisposable
     private readonly SettingsManager _settings;
     private readonly DispatcherQueue _dispatcher;
     private readonly Func<bool, LocalGatewaySetupEngine> _engineFactory;
+    private readonly Func<CancellationToken, Task<LocalGatewayUninstallResult>>? _freshLocalGatewayUninstall;
 
     private LocalGatewaySetupEngine? _engine;
     private Task<LocalGatewaySetupState>? _runTask;
@@ -45,6 +46,8 @@ public sealed class OnboardingV2Bridge : IDisposable
     private global::Windows.UI.ViewManagement.UISettings? _uiSettings;
     private bool _disposed;
     private bool _engineStarted;
+    private bool _freshLocalReplacementCompleted;
+    private CancellationTokenSource? _freshLocalReplacementCts;
 
     /// <summary>
     /// Monotonically incremented every time the engine bookkeeping is reset
@@ -59,11 +62,12 @@ public sealed class OnboardingV2Bridge : IDisposable
     private int _engineGeneration;
 
     /// <summary>
-    /// Raised when the V2 Welcome page asks for the legacy "Advanced setup"
-    /// flow. The host should close the V2 window and surface
-    /// <see cref="OnboardingWindow"/> with start route = Connection.
+    /// Raised when the V2 Welcome page asks for "Advanced setup". The host
+    /// closes setup and opens the tray app Connections tab.
     /// </summary>
     public event EventHandler? AdvancedSetupRequested;
+
+    public event EventHandler? PrimarySetupRequested;
 
     /// <summary>
     /// Raised when the V2 AllSet page's Finish button fires. The host should
@@ -85,12 +89,14 @@ public sealed class OnboardingV2Bridge : IDisposable
         OnboardingV2State state,
         SettingsManager settings,
         DispatcherQueue dispatcher,
-        Func<bool, LocalGatewaySetupEngine> engineFactory)
+        Func<bool, LocalGatewaySetupEngine> engineFactory,
+        Func<CancellationToken, Task<LocalGatewayUninstallResult>>? freshLocalGatewayUninstall = null)
     {
         _state = state ?? throw new ArgumentNullException(nameof(state));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _engineFactory = engineFactory ?? throw new ArgumentNullException(nameof(engineFactory));
+        _freshLocalGatewayUninstall = freshLocalGatewayUninstall;
 
         // Initial state pull from settings.
         _state.GatewayUrl = NormalizeGatewayUrl(_settings.GetEffectiveGatewayUrl());
@@ -119,6 +125,7 @@ public sealed class OnboardingV2Bridge : IDisposable
 
         // Two-way bindings: V2 → tray.
         _state.LaunchAtStartupChanged += OnLaunchAtStartupChanged;
+        _state.PrimarySetupRequested += OnPrimarySetupRequested;
         _state.AdvancedSetupRequested += OnAdvancedSetupRequested;
         _state.Finished += OnFinished;
         _state.Dismissed += OnDismissed;
@@ -182,7 +189,12 @@ public sealed class OnboardingV2Bridge : IDisposable
         {
             _state.LocalSetupErrorMessage = null;
             _state.LocalSetupCanRetry = false;
-            MarkAllStagesIdle();
+            var rows = AllRowsIdle();
+            if (_freshLocalReplacementCompleted)
+            {
+                rows[V2Stage.RemovingExistingGateway] = V2RowState.Done;
+            }
+            _state.LocalSetupRows = rows;
         });
         EnsureEngineStarted();
     }
@@ -219,6 +231,11 @@ public sealed class OnboardingV2Bridge : IDisposable
     private void OnAdvancedSetupRequested(object? sender, EventArgs e)
     {
         AdvancedSetupRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnPrimarySetupRequested(object? sender, EventArgs e)
+    {
+        PrimarySetupRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnFinished(object? sender, EventArgs e)
@@ -284,7 +301,7 @@ public sealed class OnboardingV2Bridge : IDisposable
             DispatchToUi(() =>
             {
                 MarkAllStagesIdle();
-                _state.LocalSetupErrorMessage = "Existing configuration detected. Use Advanced Setup to reconnect, or confirm replacement on the previous page.";
+                _state.LocalSetupErrorMessage = "Existing configuration detected. Open Connections to reconnect, or confirm replacement on the previous page.";
                 // The block is recoverable: if the user backs up to Welcome,
                 // confirms replace, and Sets up locally again, the second
                 // EnsureEngineStarted() call should reach the engine factory.
@@ -293,6 +310,16 @@ public sealed class OnboardingV2Bridge : IDisposable
                 // EnsureEngineStarted again with the new flag).
                 _state.LocalSetupCanRetry = true;
             });
+            return;
+        }
+
+        if (_state.ExistingGateway == OnboardingV2State.ExistingGatewayKind.AppOwnedLocalWsl
+            && _state.ReplaceExistingConfigurationConfirmed
+            && !_freshLocalReplacementCompleted)
+        {
+            _engineStarted = true;
+            var capturedGeneration = _engineGeneration;
+            _ = RunFreshLocalReplacementAsync(capturedGeneration);
             return;
         }
 
@@ -424,6 +451,7 @@ public sealed class OnboardingV2Bridge : IDisposable
         _lastRunningPhase = lastRunningPhase;
 
         var rows = MapToV2Rows(phase, status, lastRunningPhase);
+        ApplyFreshLocalReplacementRow(rows);
         Logger.Info($"[V2Bridge] OnEngineStateChanged: phase={phase} status={status} lastRunning={lastRunningPhase}");
 
         DispatchToUi(() =>
@@ -611,7 +639,7 @@ public sealed class OnboardingV2Bridge : IDisposable
         V2Stage.GeneratingSetupCode,
     };
 
-    private static IReadOnlyDictionary<V2Stage, V2RowState> MapToV2Rows(
+    private static Dictionary<V2Stage, V2RowState> MapToV2Rows(
         LocalGatewaySetupPhase phase,
         LocalGatewaySetupStatus status,
         LocalGatewaySetupPhase lastRunningPhase)
@@ -642,13 +670,129 @@ public sealed class OnboardingV2Bridge : IDisposable
         return rows;
     }
 
-    private void MarkAllStagesIdle()
+    private async Task RunFreshLocalReplacementAsync(int capturedGeneration)
+    {
+        if (_freshLocalGatewayUninstall is null)
+        {
+            DispatchFreshLocalReplacementFailure(
+                "Local gateway replacement is not available in this setup host.",
+                capturedGeneration);
+            return;
+        }
+
+        Logger.Info($"[V2Bridge] Removing existing app-owned OpenClaw WSL gateway before fresh install (generation={capturedGeneration})");
+        DispatchToUi(() =>
+        {
+            var rows = AllRowsIdle();
+            rows[V2Stage.RemovingExistingGateway] = V2RowState.Running;
+            _state.LocalSetupRows = rows;
+            _state.LocalSetupErrorMessage = null;
+            _state.LocalSetupCanRetry = false;
+        });
+
+        var cts = new CancellationTokenSource();
+        var priorCts = Interlocked.Exchange(ref _freshLocalReplacementCts, cts);
+        try { priorCts?.Cancel(); } catch { /* ignore */ }
+        priorCts?.Dispose();
+
+        try
+        {
+            var result = await _freshLocalGatewayUninstall(cts.Token).ConfigureAwait(false);
+            if (capturedGeneration != _engineGeneration || _disposed)
+            {
+                Logger.Info($"[V2Bridge] Fresh replacement result ignored (captured gen={capturedGeneration}, current gen={_engineGeneration}, disposed={_disposed})");
+                return;
+            }
+
+            if (!result.Success)
+            {
+                var message = result.Errors.Count > 0
+                    ? string.Join(Environment.NewLine, result.Errors)
+                    : "Failed to remove the existing OpenClaw WSL gateway.";
+                DispatchFreshLocalReplacementFailure(message, capturedGeneration);
+                return;
+            }
+
+            DispatchToUi(() =>
+            {
+                var rows = AllRowsIdle();
+                rows[V2Stage.RemovingExistingGateway] = V2RowState.Done;
+                _state.LocalSetupRows = rows;
+                _state.LocalSetupErrorMessage = null;
+                _state.LocalSetupCanRetry = false;
+            });
+
+            _freshLocalReplacementCompleted = true;
+            _engineStarted = false;
+            EnsureEngineStarted();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            DispatchFreshLocalReplacementFailure(ex.Message, capturedGeneration);
+        }
+        catch (OperationCanceledException)
+        {
+            if (capturedGeneration != _engineGeneration || _disposed)
+            {
+                Logger.Info($"[V2Bridge] Fresh replacement cancelled (captured gen={capturedGeneration}, current gen={_engineGeneration}, disposed={_disposed})");
+                return;
+            }
+
+            DispatchFreshLocalReplacementFailure("Local gateway removal was cancelled.", capturedGeneration);
+        }
+        finally
+        {
+            var current = Interlocked.CompareExchange(ref _freshLocalReplacementCts, null, cts);
+            if (current == cts)
+            {
+                cts.Dispose();
+            }
+        }
+    }
+
+    private void DispatchFreshLocalReplacementFailure(string message, int capturedGeneration)
+    {
+        if (capturedGeneration != _engineGeneration || _disposed)
+        {
+            return;
+        }
+
+        _engineStarted = false;
+        DispatchToUi(() =>
+        {
+            var rows = AllRowsIdle();
+            rows[V2Stage.RemovingExistingGateway] = V2RowState.Failed;
+            _state.LocalSetupRows = rows;
+            _state.LocalSetupErrorMessage = message;
+            _state.LocalSetupCanRetry = true;
+        });
+    }
+
+    private void ApplyFreshLocalReplacementRow(Dictionary<V2Stage, V2RowState> rows)
+    {
+        if (_state.ExistingGateway == OnboardingV2State.ExistingGatewayKind.AppOwnedLocalWsl
+            && _state.ReplaceExistingConfigurationConfirmed)
+        {
+            rows[V2Stage.RemovingExistingGateway] = _freshLocalReplacementCompleted
+                ? V2RowState.Done
+                : V2RowState.Idle;
+        }
+    }
+
+    private static Dictionary<V2Stage, V2RowState> AllRowsIdle()
     {
         var rows = new Dictionary<V2Stage, V2RowState>();
         foreach (var s in Enum.GetValues<V2Stage>())
         {
             rows[s] = V2RowState.Idle;
         }
+
+        return rows;
+    }
+
+    private void MarkAllStagesIdle()
+    {
+        var rows = AllRowsIdle();
         _state.LocalSetupRows = rows;
     }
 
@@ -759,6 +903,7 @@ public sealed class OnboardingV2Bridge : IDisposable
         _disposed = true;
 
         _state.LaunchAtStartupChanged -= OnLaunchAtStartupChanged;
+        _state.PrimarySetupRequested -= OnPrimarySetupRequested;
         _state.AdvancedSetupRequested -= OnAdvancedSetupRequested;
         _state.Finished -= OnFinished;
         _state.Dismissed -= OnDismissed;
@@ -783,5 +928,9 @@ public sealed class OnboardingV2Bridge : IDisposable
         var cts = Interlocked.Exchange(ref _permissionsRefreshCts, null);
         cts?.Cancel();
         cts?.Dispose();
+
+        var replacementCts = Interlocked.Exchange(ref _freshLocalReplacementCts, null);
+        replacementCts?.Cancel();
+        replacementCts?.Dispose();
     }
 }

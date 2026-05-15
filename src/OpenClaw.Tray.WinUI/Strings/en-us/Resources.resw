@@ -3223,14 +3223,38 @@ On your gateway host (Mac/Linux), run:
   <data name="V2_Welcome_PrimaryButton" xml:space="preserve">
     <value>Set up locally</value>
   </data>
+  <data name="V2_Welcome_PrimaryButton_InstallNewWslGateway" xml:space="preserve">
+    <value>Install new WSL Gateway</value>
+  </data>
   <data name="V2_Welcome_AdvancedLink" xml:space="preserve">
     <value>Advanced setup</value>
+  </data>
+  <data name="V2_Welcome_LocalReplaceDialog_Title" xml:space="preserve">
+    <value>Install a new WSL gateway?</value>
+  </data>
+  <data name="V2_Welcome_LocalReplaceDialog_Body" xml:space="preserve">
+    <value>Your current OpenClaw WSL gateway and its OpenClawGateway distro will be deleted. Setup will then install and connect to a new local WSL gateway.</value>
+  </data>
+  <data name="V2_Welcome_ExternalDialog_Title" xml:space="preserve">
+    <value>Install a local WSL gateway?</value>
+  </data>
+  <data name="V2_Welcome_ExternalDialog_Body" xml:space="preserve">
+    <value>Setup will install and connect to a new local WSL gateway. Your existing external gateway connection will stay available from the Connections page.</value>
+  </data>
+  <data name="V2_Welcome_SetupWarning_Confirm" xml:space="preserve">
+    <value>Continue</value>
+  </data>
+  <data name="V2_Welcome_SetupWarning_Cancel" xml:space="preserve">
+    <value>Cancel</value>
   </data>
   <data name="V2_Progress_Title" xml:space="preserve">
     <value>Setting up locally</value>
   </data>
   <data name="V2_Progress_Subtitle" xml:space="preserve">
     <value>Creating OpenClaw Gateway WSL instance</value>
+  </data>
+  <data name="V2_Progress_Stage_RemovingExistingGateway" xml:space="preserve">
+    <value>Removing existing gateway</value>
   </data>
   <data name="V2_Progress_Stage_CheckSystem" xml:space="preserve">
     <value>Check system</value>

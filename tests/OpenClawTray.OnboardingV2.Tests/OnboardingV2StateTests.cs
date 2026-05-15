@@ -99,4 +99,29 @@ public class OnboardingV2StateTests
 
         Assert.Equal(0, changed);
     }
+
+    [Fact]
+    public void ExistingGateway_SetChanged_FiresStateChanged()
+    {
+        var state = new OnboardingV2State();
+        var changed = 0;
+        state.StateChanged += (_, _) => changed++;
+
+        state.ExistingGateway = OnboardingV2State.ExistingGatewayKind.AppOwnedLocalWsl;
+
+        Assert.Equal(1, changed);
+        Assert.Equal(OnboardingV2State.ExistingGatewayKind.AppOwnedLocalWsl, state.ExistingGateway);
+    }
+
+    [Fact]
+    public void RequestPrimarySetup_FiresPrimarySetupRequested()
+    {
+        var state = new OnboardingV2State();
+        var fired = false;
+        state.PrimarySetupRequested += (_, _) => fired = true;
+
+        state.RequestPrimarySetup();
+
+        Assert.True(fired);
+    }
 }

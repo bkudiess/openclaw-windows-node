@@ -668,6 +668,9 @@ public partial class App : Application
         OpenClawTray.Chat.Explorations.ChatExplorationPresetStore.ApplyDefaultIfPresent();
         ShowSurfaceImprovementsTipIfNeeded();
 
+        _gatewayRegistry = new GatewayRegistry(SettingsManager.SettingsDirectoryPath);
+        _gatewayRegistry.Load();
+
         // First-run check (also supports forced onboarding for testing).
         // Wrapped in try/catch so a wizard construction failure cannot tear
         // down the tray; user can retry via the Setup Guide menu item.
@@ -685,8 +688,6 @@ public partial class App : Application
         }
 
         // Initialize connection manager (north star architecture)
-        _gatewayRegistry = new GatewayRegistry(SettingsManager.SettingsDirectoryPath);
-        _gatewayRegistry.Load();
         var credentialResolver = new CredentialResolver(DeviceIdentityFileReader.Instance);
         var clientFactory = new GatewayClientFactory();
         var appLogger = new AppLogger();
@@ -3187,9 +3188,9 @@ public partial class App : Application
         };
     }
 
-    private static bool RequiresSetup(SettingsManager settings)
+    private bool RequiresSetup(SettingsManager settings)
     {
-        return StartupSetupState.RequiresSetup(settings, IdentityDataPath);
+        return StartupSetupState.RequiresSetup(settings, IdentityDataPath, _gatewayRegistry);
     }
 
     private bool ShouldInitializeNodeService()

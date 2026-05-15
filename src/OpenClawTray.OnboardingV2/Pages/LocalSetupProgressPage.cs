@@ -33,6 +33,7 @@ public sealed class LocalSetupProgressPage : Component<OnboardingV2State>
 {
     private static readonly (Stage Stage, string LabelKey)[] StageLabels =
     {
+        (Stage.RemovingExistingGateway, "V2_Progress_Stage_RemovingExistingGateway"),
         (Stage.CheckSystem, "V2_Progress_Stage_CheckSystem"),
         (Stage.InstallingUbuntu, "V2_Progress_Stage_InstallingUbuntu"),
         (Stage.ConfiguringInstance, "V2_Progress_Stage_ConfiguringInstance"),
@@ -48,6 +49,12 @@ public sealed class LocalSetupProgressPage : Component<OnboardingV2State>
         var rowChildren = new List<Element>();
         foreach (var (stage, labelKey) in StageLabels)
         {
+            if (stage == Stage.RemovingExistingGateway
+                && Props.ExistingGateway != OnboardingV2State.ExistingGatewayKind.AppOwnedLocalWsl)
+            {
+                continue;
+            }
+
             var rowState = Props.LocalSetupRows.TryGetValue(stage, out var s)
                 ? s
                 : RowState.Idle;

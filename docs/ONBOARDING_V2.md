@@ -1,8 +1,8 @@
 # OpenClaw Setup — V2 (redesigned onboarding flow)
 
-Status: **mounted in the app + service-wired**. Light / dark / system theme
-support landed. Remaining items (Wizard provider/model fold; legacy page
-deletion; real translations) are itemised below as the follow-up backlog.
+Status: **the only setup UI shell in the app**. Setup is now scoped to
+installing a new app-owned local WSL gateway. Existing and remote gateway
+management lives in the tray app's Connections tab.
 
 ## Where the V2 code lives
 
@@ -42,12 +42,13 @@ Page scenarios baked into `PAGES` in `tools/v2_visual_diff.py`:
 | `allset` | AllSet (node-mode active) | `Dialog-4.png` — amber Node-Mode card + Launch toggle. |
 | `allset-no-node` | AllSet (node-mode off) | Variant — no amber card. |
 
-## Cutover (this PR)
+## Cutover
 
-The V2 flow is mounted in the live app via `OnboardingWindow`. Setting
-`OPENCLAW_USE_V2_SETUP=0` (or starting at `OnboardingRoute.Connection`
-through the existing env-var override) falls back to the legacy flow as
-a kill-switch for one release cycle.
+The V2 flow is mounted in the live app via `OnboardingWindow`. The old
+standalone/fallback v1 setup shell is no longer exposed. The legacy
+`WizardPage` is still embedded inside V2's `GatewayWelcomePage` so the
+provider/model setup experience from PR 381 remains available while that
+step is redesigned.
 
 Service wiring is centralised in
 [`OnboardingV2Bridge`](../src/OpenClaw.Tray.WinUI/Onboarding/V2/OnboardingV2Bridge.cs):
@@ -59,6 +60,7 @@ Service wiring is centralised in
 | `SettingsManager.GetEffectiveGatewayUrl` | `GatewayUrl` | Flips `ws://` → `http://` for the browser-launch link. |
 | `SettingsManager.AutoStart` ↔ `LaunchAtStartup` | `LaunchAtStartup` | Two-way: initial value from settings; toggle change calls `_settings.Save()`. |
 | `Settings.EnableNodeMode` | `NodeModeActive` | Seeded once at construction (the legacy app doesn't mutate it post-onboarding). |
+| `GatewayRegistry` + WSL distro probe | `ExistingGateway` | Drives Welcome CTA/warning behavior for none, app-owned local WSL, and external-only connections. |
 
 Threading: every cross-thread mutation marshals through
 `DispatcherQueue.TryEnqueue`. The V2 state's `StateChanged` event fires
@@ -74,48 +76,37 @@ persisting `Settings.AutoStart` via `AutoStartManager`, firing
 setup is complete.
 
 Advanced setup: Welcome's "Advanced setup" link raises
-`OnboardingV2State.AdvancedSetupRequested`; `OnboardingWindow` catches
-it via the bridge and **re-mounts the same `FunctionalHostControl`** onto
-the legacy `OnboardingApp` at `OnboardingRoute.Connection`. No second
-window is opened. The legacy `OnboardingState` object was constructed
-up-front so it's available for this swap.
+`OnboardingV2State.AdvancedSetupRequested`; `OnboardingWindow` closes setup
+without completing it and opens `HubWindow` on the Connections tab. Users
+connect to existing, remote, or manual gateways there.
+
+Existing connections: first-run setup no longer opens automatically when
+there is any usable saved gateway connection. Users can intentionally start
+local setup from the Connections tab via **Install new WSL Gateway**.
+
+Welcome CTA/warnings:
+
+1. No existing gateway: primary CTA stays **Set up locally**.
+2. Existing app-owned WSL gateway: primary CTA becomes **Install new WSL Gateway**; confirmation warns that the current OpenClaw WSL gateway and `OpenClawGateway` distro will be deleted before a fresh install.
+3. External-only gateway: primary CTA stays **Set up locally**; confirmation says a new local WSL gateway will be installed and connected, while the external gateway remains available in Connections.
 
 ## Follow-up backlog
 
 The cutover deliberately scopes down to the items below to keep this PR
 reviewable. None are blocking — V2 works end-to-end without them.
 
-1. **Fold the legacy `WizardPage` (provider/model picker) into V2
-   `GatewayWelcomePage`.** Today V2 Gateway shows the welcome card +
-   "Open localhost:18789 in browser" link, which routes the user to the
-   real gateway web UI for provider setup. The legacy `WizardPage`
-   in-process picker (612 lines of RPC-driven UI) is currently
-   unreachable from V2; a follow-up should either port it as a V2
-   component or surface it via a "Configure providers" CTA that hosts
-   the legacy page inside the V2 Gateway card.
+1. **Port the embedded legacy `WizardPage` provider/model picker to native
+   V2 UI.** It remains embedded in V2 for now to preserve the working PR 381
+   setup experience.
 2. **Real translations for V2_* keys.** `tools/seed_v2_resw.py` seeds
    every V2_* key into all five `.resw` locales with the English value
    and the `Resources_AreTranslatedAllOrNoneAcrossNonEnglishLocales`
    test is taught (via a `key.StartsWith("V2_")` predicate) that they
    are intentionally English-only at first ship. Translations land in
    a follow-up by replacing each non-en-us value.
-3. **Delete unused legacy pages.** With V2 mounted by default, these
-   pages are only reachable via the kill-switch:
-   `Welcome.cs`, `SetupWarning.cs`, `WizardPage.cs`,
-   `LocalSetupProgressPage.cs`, `PermissionsPage.cs`, `Ready.cs`,
-   `ChatPage.cs`. `ConnectionPage` stays (Advanced flow target).
-   Deleting them requires test refactoring (e.g.,
-   `OnboardingWizardPage_*` test files reference the legacy
-   component). Scope as its own PR.
-4. **Replace the kill-switch with a real removal.** Once #3 lands and
-   we've shipped one release cycle on V2, drop the
-   `OPENCLAW_USE_V2_SETUP=0` branch and the legacy
-   `OnboardingApp` mount path.
-5. **Welcome page's `RequestAdvancedSetup` should round-trip back to
-   V2 when the legacy Connection page completes.** Today the user is
-   left in legacy after Advanced; we should bridge `OnboardingState`
-   completion back into `V2State.Finished` so the AllSet page can
-   still display.
+3. **Delete unused legacy page files once approved.** The standalone v1 shell
+   is no longer reachable, but physical file deletion is tracked separately
+   so the embedded `WizardPage` dependencies can be preserved deliberately.
 
 ## Cutover plan (historical — superseded by "Cutover (this PR)" above)
 
@@ -170,9 +161,8 @@ defined inside the page. Cutover should:
 
 ### 4. Wire "Advanced setup" link
 
-The Welcome page's `Advanced setup` link is currently a no-op. Cutover
-should route it to the legacy Connection page (or its V2 equivalent if
-one is added).
+The Welcome page's `Advanced setup` link now exits setup and opens the
+tray app Connections tab.
 
 ### 5. Re-map completion
 

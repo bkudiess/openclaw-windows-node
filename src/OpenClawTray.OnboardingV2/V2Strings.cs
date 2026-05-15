@@ -79,15 +79,25 @@ public static class V2Strings
         ["V2_Welcome_InfoCard"] =
             "This local setup installs a small WSL Linux instance dedicated to OpenClaw. If you'd rather connect to an existing or remote gateway, choose Advanced setup.",
         ["V2_Welcome_PrimaryButton"] = "Set up locally",
+        ["V2_Welcome_PrimaryButton_InstallNewWslGateway"] = "Install new WSL Gateway",
         ["V2_Welcome_AdvancedLink"] = "Advanced setup",
         ["V2_Welcome_Replace_Heading"] = "Existing setup detected",
         ["V2_Welcome_Replace_Body"] = "Setting up locally will overwrite your existing OpenClaw configuration.",
         ["V2_Welcome_Replace_Confirm"] = "Replace my setup",
         ["V2_Welcome_Replace_Keep"] = "Keep my setup",
+        ["V2_Welcome_LocalReplaceDialog_Title"] = "Install a new WSL gateway?",
+        ["V2_Welcome_LocalReplaceDialog_Body"] =
+            "Your current OpenClaw WSL gateway and its OpenClawGateway distro will be deleted. Setup will then install and connect to a new local WSL gateway.",
+        ["V2_Welcome_ExternalDialog_Title"] = "Install a local WSL gateway?",
+        ["V2_Welcome_ExternalDialog_Body"] =
+            "Setup will install and connect to a new local WSL gateway. Your existing external gateway connection will stay available from the Connections page.",
+        ["V2_Welcome_SetupWarning_Confirm"] = "Continue",
+        ["V2_Welcome_SetupWarning_Cancel"] = "Cancel",
 
         // ---- LocalSetupProgress page ----
         ["V2_Progress_Title"] = "Setting up locally",
         ["V2_Progress_Subtitle"] = "Creating OpenClaw Gateway WSL instance",
+        ["V2_Progress_Stage_RemovingExistingGateway"] = "Removing existing gateway",
         ["V2_Progress_Stage_CheckSystem"] = "Check system",
         ["V2_Progress_Stage_InstallingUbuntu"] = "Installing Ubuntu",
         ["V2_Progress_Stage_ConfiguringInstance"] = "Configuring instance",
