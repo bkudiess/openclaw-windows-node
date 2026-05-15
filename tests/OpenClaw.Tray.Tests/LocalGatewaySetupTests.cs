@@ -174,7 +174,10 @@ public class LocalGatewaySetupTests
         Assert.Contains("cat >/etc/wsl.conf", command[7]);
         Assert.Contains("[automount]", command[7]);
         Assert.Contains("enabled=false", command[7]);
+        Assert.Contains("mountFsTab=false", command[7]);
         Assert.Contains("appendWindowsPath=false", command[7]);
+        Assert.Contains("[time]", command[7]);
+        Assert.Contains("useWindowsTimezone=true", command[7]);
         Assert.Contains("cat >/etc/wsl-distribution.conf", command[7]);
         Assert.Contains("loginctl enable-linger openclaw", command[7]);
         Assert.DoesNotContain("machine-id", command[7], StringComparison.OrdinalIgnoreCase);
@@ -182,6 +185,49 @@ public class LocalGatewaySetupTests
         Assert.DoesNotContain(@"\\wsl", command[7], StringComparison.OrdinalIgnoreCase);
         Assert.Contains(wsl.Commands, command => command.SequenceEqual(["--manage", "OpenClawGateway", "--set-default-user", "openclaw"]));
         Assert.Contains(wsl.Commands, command => command.SequenceEqual(["--terminate", "OpenClawGateway"]));
+    }
+
+    [Fact]
+    public async Task WslFirstBootConfigurator_SkipsConfiguration_WhenAlreadyConfigured()
+    {
+        var wsl = new FakeWslCommandRunner();
+        var configurator = new WslFirstBootConfigurator(wsl);
+
+        var result = await configurator.ConfigureAsync(new LocalGatewaySetupOptions { AllowExistingDistro = true });
+
+        Assert.True(result.Success);
+        Assert.Contains("wsl_instance_already_configured", result.Warnings ?? []);
+        Assert.DoesNotContain(wsl.Commands, command => command.Count == 8 && command[5] == "bash" && command[6] == "-lc" && command[7].Contains("cat >/etc/wsl.conf"));
+    }
+
+    [Fact]
+    public async Task WslFirstBootConfigurator_Reconfigures_WhenProbeFails_AlreadyConfiguredPath()
+    {
+        var wsl = new FakeWslCommandRunner { CommandExitCodeByContains = { ["awk"] = 1 } };
+        var configurator = new WslFirstBootConfigurator(wsl);
+
+        var result = await configurator.ConfigureAsync(new LocalGatewaySetupOptions { AllowExistingDistro = true });
+
+        Assert.True(result.Success);
+        Assert.DoesNotContain("wsl_instance_already_configured", result.Warnings ?? []);
+        Assert.Contains(wsl.Commands, command => command.Count == 8 && command[5] == "bash" && command[6] == "-lc" && command[7].Contains("cat >/etc/wsl.conf"));
+    }
+
+    [Fact]
+    public async Task WslFirstBootConfigurator_ProbeScript_ContainsSectionAwareAwkCheck()
+    {
+        var wsl = new FakeWslCommandRunner { CommandExitCodeByContains = { ["awk"] = 1 } };
+        var configurator = new WslFirstBootConfigurator(wsl);
+
+        await configurator.ConfigureAsync(new LocalGatewaySetupOptions { AllowExistingDistro = true });
+
+        var probeCommand = Assert.Single(wsl.Commands, command =>
+            command.Count == 8 && command[5] == "bash" && command[6] == "-lc" && command[7].Contains("awk"));
+        var script = probeCommand[7];
+        Assert.Contains("sec==\"automount\"&&$0==\"enabled=false\"", script);
+        Assert.Contains("sec==\"automount\"&&$0==\"mountFsTab=false\"", script);
+        Assert.Contains("sec==\"interop\"&&$0==\"enabled=false\"", script);
+        Assert.Contains("sec==\"time\"&&$0==\"useWindowsTimezone=true\"", script);
     }
 
     [Fact]
@@ -593,6 +639,7 @@ public class LocalGatewaySetupTests
         public string RunInDistroOutput { get; set; } = "";
         public int InstallExitCode { get; set; }
         public Dictionary<string, string> CommandOutputByContains { get; } = new();
+        public Dictionary<string, int> CommandExitCodeByContains { get; } = new();
 
         public Task<WslCommandResult> RunAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken = default, IReadOnlyDictionary<string, string>? environment = null)
         {
@@ -606,6 +653,11 @@ public class LocalGatewaySetupTests
                 return Task.FromResult(new WslCommandResult(InstallExitCode, "", InstallExitCode == 0 ? "" : "install failed"));
 
             var joined = string.Join(" ", arguments);
+            foreach (var pair in CommandExitCodeByContains)
+            {
+                if (joined.Contains(pair.Key, StringComparison.Ordinal))
+                    return Task.FromResult(new WslCommandResult(pair.Value, "", ""));
+            }
             foreach (var pair in CommandOutputByContains)
             {
                 if (joined.Contains(pair.Key, StringComparison.Ordinal))

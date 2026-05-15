@@ -75,6 +75,22 @@ public sealed class WizardPage : Component<OnboardingState>
             // Check for completion
             if (payload.TryGetProperty("done", out var doneProp) && doneProp.GetBoolean())
             {
+                var statusStr = payload.TryGetProperty("status", out var st) ? st.ToString() : "";
+                if (string.Equals(statusStr, "error", StringComparison.OrdinalIgnoreCase))
+                {
+                    var errMsg = payload.TryGetProperty("error", out var ep) ? ep.ToString() : "";
+                    if (string.IsNullOrWhiteSpace(errMsg))
+                        errMsg = LocalizationHelper.GetString("Onboarding_Wizard_StepError");
+                    else
+                        errMsg = TokenSanitizer.Sanitize(errMsg);
+                    if (errMsg == "Onboarding_Wizard_StepError")
+                        errMsg = "An error occurred processing this step";
+                    setErrorMsg(errMsg);
+                    setWizardState("error");
+                    SaveState("error", errMsg);
+                    return;
+                }
+
                 setWizardState("complete");
                 SaveState("complete");
                 return;
@@ -317,10 +333,14 @@ public sealed class WizardPage : Component<OnboardingState>
             }
             catch (Exception ex)
             {
-                // SECURITY: Log full exception, show only generic error type to user
+                // SECURITY: Log full exception, show a sanitized version of the gateway
+                // error in the UI so the user can act on it (previously we hid every
+                // failure behind a generic message which made bugs like the channel-pairing
+                // reset (PR #274) impossible to triage without log files).
                 Logger.Error($"[Wizard] Step '{stepId}' ({stepType}) failed: {ex}");
-                var msg = LocalizationHelper.GetString("Onboarding_Wizard_StepError");
-                if (msg == "Onboarding_Wizard_StepError") msg = "An error occurred processing this step";
+                var fallback = LocalizationHelper.GetString("Onboarding_Wizard_StepError");
+                if (fallback == "Onboarding_Wizard_StepError") fallback = WizardErrorFormatter.GenericFallbackMessage;
+                var msg = WizardErrorFormatter.FormatStepError(ex, stepId, fallback);
                 setErrorMsg(msg);
                 setWizardState("error");
                 SaveState("error", msg);
@@ -375,8 +395,9 @@ public sealed class WizardPage : Component<OnboardingState>
             catch (Exception ex)
             {
                 Logger.Error($"[Wizard] Skip step failed: {ex}");
-                var msg = LocalizationHelper.GetString("Onboarding_Wizard_StepError");
-                if (msg == "Onboarding_Wizard_StepError") msg = "An error occurred processing this step";
+                var fallback = LocalizationHelper.GetString("Onboarding_Wizard_StepError");
+                if (fallback == "Onboarding_Wizard_StepError") fallback = WizardErrorFormatter.GenericFallbackMessage;
+                var msg = WizardErrorFormatter.FormatStepError(ex, stepId, fallback);
                 setErrorMsg(msg);
                 setWizardState("error");
                 SaveState("error", msg);
@@ -567,9 +588,7 @@ public sealed class WizardPage : Component<OnboardingState>
                         {
                             try
                             {
-                                var dp = new global::Windows.ApplicationModel.DataTransfer.DataPackage();
-                                dp.SetText(code);
-                                global::Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dp);
+                                ClipboardHelper.CopyText(code);
                             }
                             catch { }
                         }).VAlign(VerticalAlignment.Center)

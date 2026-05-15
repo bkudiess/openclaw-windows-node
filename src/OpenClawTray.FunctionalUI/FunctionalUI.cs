@@ -946,12 +946,35 @@ internal sealed class UiRenderer(Action requestRender)
             ScrollViewElement e => ConfigureScrollView(GetOrCreate<ScrollViewer>(path), e, path, effects),
             ExpanderElement e => ConfigureExpander(GetOrCreate<Expander>(path), e, path, effects),
             ComponentElement e => RenderComponent(e, path, effects),
-            INavigationHostElement e => RenderElement(e.RenderCurrentRoute(), path + ".route", effects),
+            INavigationHostElement e => RenderNavigationHost(e, path, effects),
             _ => throw new NotSupportedException($"Unsupported functional UI element: {element.GetType().Name}")
         };
 
         QueueMount(control, element, path, effects);
         return control;
+    }
+
+    /// <summary>
+    /// Renders a navigation host into a STABLE Border wrapper at <paramref name="path"/>
+    /// whose Child is swapped to the current route's content on every render. This
+    /// prevents stale route UIElements from leaking into the parent panel — previously
+    /// the navigation host returned the inner content directly to its parent's
+    /// SyncChildren, which made route transitions correct only as a side effect of the
+    /// parent's clear-and-re-add loop and could leave the previous page's UI visible
+    /// alongside the new page in some re-render orderings (see the LocalSetupProgress →
+    /// Wizard overlap bug).
+    /// </summary>
+    private UIElement RenderNavigationHost(INavigationHostElement element, string path, List<Action> effects)
+    {
+        var wrapper = GetOrCreate<Border>(path);
+        var child = RenderElement(element.RenderCurrentRoute(), path + ".route", effects);
+        SetChild(wrapper, child);
+        if (element is Element e)
+        {
+            ApplyModifiers(wrapper, e);
+            ApplySetters(wrapper, e);
+        }
+        return wrapper;
     }
 
     private T GetOrCreate<T>(string path) where T : UIElement, new()
