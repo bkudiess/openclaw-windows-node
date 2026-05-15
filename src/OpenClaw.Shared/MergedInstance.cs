@@ -56,7 +56,13 @@ public sealed class MergedInstance
     public bool IsThisInstance { get; init; }
 
     /// <summary>True when a Manage expander (rename/forget/caps/etc.) should be available.</summary>
-    public bool IsManaged => Node != null;
+    public bool IsManaged => CanManageNode;
+
+    /// <summary>
+    /// True when node management actions are safe for this row. Weak host/display-name
+    /// matches may carry node data for display enrichment, but must not expose Rename/Forget.
+    /// </summary>
+    public bool CanManageNode { get; init; }
 
     public string DisplayName { get; init; } = "";
     public string? Ip { get; init; }

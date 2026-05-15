@@ -128,6 +128,7 @@ public sealed partial class HubWindow : WindowEx
         // Map legacy tags
         if (tag == "general") tag = "home";
         if (tag == "about") tag = "info";
+        if (tag == "nodes") tag = "instances";
         // Map legacy agent-scoped workspace/cron tags
         if (tag == "cron") tag = $"agent:{_currentAgentId}:cron";
         if (tag == "workspace") tag = $"agent:{_currentAgentId}:workspace";

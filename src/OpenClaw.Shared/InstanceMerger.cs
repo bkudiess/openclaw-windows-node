@@ -43,6 +43,7 @@ public static class InstanceMerger
         // entry with a strong DeviceId match for the same node would miss it
         // and render presence-only, losing the Rename/Forget surface.
         var matchByPresenceIndex = new GatewayNodeInfo?[presenceList.Count];
+        var strongMatchByPresenceIndex = new bool[presenceList.Count];
 
         for (int i = 0; i < presenceList.Count; i++)
         {
@@ -52,6 +53,7 @@ public static class InstanceMerger
                 unmatchedNodes.Remove(matched);
                 RemoveNodeFromIndexes(matched, nodeByIdKey, nodeByDisplayName);
                 matchByPresenceIndex[i] = matched;
+                strongMatchByPresenceIndex[i] = true;
             }
         }
 
@@ -69,7 +71,12 @@ public static class InstanceMerger
 
         for (int i = 0; i < presenceList.Count; i++)
         {
-            rows.Add(BuildFromPresence(presenceList[i], matchByPresenceIndex[i], nowUtc, options));
+            rows.Add(BuildFromPresence(
+                presenceList[i],
+                matchByPresenceIndex[i],
+                strongMatchByPresenceIndex[i],
+                nowUtc,
+                options));
         }
 
         foreach (var orphan in unmatchedNodes)
@@ -218,6 +225,7 @@ public static class InstanceMerger
     private static MergedInstance BuildFromPresence(
         PresenceEntry p,
         GatewayNodeInfo? node,
+        bool isStrongNodeMatch,
         DateTime nowUtc,
         InstanceMergeOptions options)
     {
@@ -231,6 +239,7 @@ public static class InstanceMerger
             Key = key,
             Presence = p,
             Node = node,
+            CanManageNode = node is not null && isStrongNodeMatch,
             Status = status,
             IsGateway = isGateway,
             IsThisInstance = !isGateway && IsLocalIdentity(node, p, options),
@@ -264,6 +273,7 @@ public static class InstanceMerger
             Key = key,
             Presence = null,
             Node = node,
+            CanManageNode = true,
             Status = PresenceStatus.Offline,
             IsGateway = false,
             IsThisInstance = IsLocalIdentity(node, presence: null, options),

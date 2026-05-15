@@ -122,7 +122,7 @@ public class InstanceMergerTests
         var result = InstanceMerger.Merge(new[] { n }, new[] { p }, Options());
 
         Assert.Same(n, result[0].Node);
-        Assert.True(result[0].IsManaged);
+        Assert.False(result[0].IsManaged);
     }
 
     [Fact]

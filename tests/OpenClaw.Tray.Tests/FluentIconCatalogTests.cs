@@ -127,6 +127,14 @@ public sealed class TrayMenuPopupCompositionTests
         return File.ReadAllText(path);
     }
 
+    private static string ReadHubWindowXaml()
+    {
+        var path = Path.Combine(
+            GetRepositoryRoot(),
+            "src", "OpenClaw.Tray.WinUI", "Windows", "HubWindow.xaml.cs");
+        return File.ReadAllText(path);
+    }
+
     [Fact]
     public void BuildTrayMenuPopup_NoHardcodedColors()
     {
@@ -232,6 +240,21 @@ public sealed class TrayMenuPopupCompositionTests
                 src.Contains($"case \"{action}\":", StringComparison.Ordinal),
                 $"OnTrayMenuItemClicked must explicitly handle case \"{action}\"");
         }
+    }
+
+    [Fact]
+    public void HubWindow_NavigateTo_Normalizes_LegacyNodesTag_BeforeSelectingNavItem()
+    {
+        var src = ReadHubWindowXaml();
+
+        var aliasIndex = src.IndexOf("if (tag == \"nodes\") tag = \"instances\";", StringComparison.Ordinal);
+        var selectIndex = src.IndexOf("FindAndSelectNavItem(NavView.MenuItems, tag)", StringComparison.Ordinal);
+
+        Assert.True(aliasIndex >= 0, "NavigateTo must keep legacy nodes deep links working.");
+        Assert.True(selectIndex >= 0, "NavigateTo must select a nav item before falling back to direct navigation.");
+        Assert.True(
+            aliasIndex < selectIndex,
+            "Legacy nodes tag must be normalized before nav item selection so the Instances item is highlighted.");
     }
 
     private static string GetRepositoryRoot()
