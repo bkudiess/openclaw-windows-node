@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using OpenClaw.Shared;
 using OpenClawTray.Onboarding.Services;
 using OpenClawTray.Onboarding.V2;
 using OpenClawTray.Services;
@@ -35,6 +36,8 @@ public sealed class OnboardingV2Bridge : IDisposable
     private readonly SettingsManager _settings;
     private readonly DispatcherQueue _dispatcher;
     private readonly Func<bool, LocalGatewaySetupEngine> _engineFactory;
+    private readonly Func<bool>? _hasExistingConfiguration;
+    private readonly Action<IOperatorGatewayClient?>? _seedGatewayWizardClient;
     private readonly Func<CancellationToken, Task<LocalGatewayUninstallResult>>? _freshLocalGatewayUninstall;
 
     private LocalGatewaySetupEngine? _engine;
@@ -71,7 +74,7 @@ public sealed class OnboardingV2Bridge : IDisposable
 
     /// <summary>
     /// Raised when the V2 AllSet page's Finish button fires. The host should
-    /// run the same completion logic as the legacy flow (persist AutoStart,
+    /// run the same completion logic as the setup flow (persist AutoStart,
     /// dispatch OnboardingCompleted, close the window).
     /// </summary>
     public event EventHandler? Finished;
@@ -81,7 +84,7 @@ public sealed class OnboardingV2Bridge : IDisposable
     /// (existing-config warn-and-confirm flow). The host should close the
     /// V2 window without firing <see cref="Finished"/> or running the
     /// completion pipeline so existing settings + gateway connection are
-    /// preserved untouched. Mirrors legacy <c>OnboardingState.Dismissed</c>.
+    /// preserved untouched.
     /// </summary>
     public event EventHandler? Dismissed;
 
@@ -90,12 +93,16 @@ public sealed class OnboardingV2Bridge : IDisposable
         SettingsManager settings,
         DispatcherQueue dispatcher,
         Func<bool, LocalGatewaySetupEngine> engineFactory,
+        Func<bool>? hasExistingConfiguration = null,
+        Action<IOperatorGatewayClient?>? seedGatewayWizardClient = null,
         Func<CancellationToken, Task<LocalGatewayUninstallResult>>? freshLocalGatewayUninstall = null)
     {
         _state = state ?? throw new ArgumentNullException(nameof(state));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _engineFactory = engineFactory ?? throw new ArgumentNullException(nameof(engineFactory));
+        _hasExistingConfiguration = hasExistingConfiguration;
+        _seedGatewayWizardClient = seedGatewayWizardClient;
         _freshLocalGatewayUninstall = freshLocalGatewayUninstall;
 
         // Initial state pull from settings.
@@ -152,7 +159,7 @@ public sealed class OnboardingV2Bridge : IDisposable
     /// "Try again" handler from the LocalSetupProgress error card. Resets
     /// the engine bookkeeping (so EnsureEngineStarted() is allowed to
     /// construct a fresh engine), clears the V2 error message, and
-    /// re-runs the engine. Mirrors v1's retry-via-setRetryCount path.
+    /// re-runs the engine.
     /// </summary>
     private void OnRetryRequested(object? sender, EventArgs e)
     {
@@ -260,19 +267,9 @@ public sealed class OnboardingV2Bridge : IDisposable
         // The V2 shell handles page-to-page navigation itself. The bridge
         // only piggy-backs on this event to (a) kick off the engine the
         // first time the user moves past the Welcome page (i.e., when they
-        // click "Set up locally") and (b) forward the V2 Welcome page's
-        // "Replace my setup" confirmation back into the legacy state so
-        // the LocalGatewaySetupEngine guard accepts the run.
+        // click "Set up locally").
         if (_state.CurrentRoute == V2Route.Welcome)
         {
-            // Forward the V2 replace-confirmed flag to legacy OnboardingState
-            // (when the host wired one) so the engine's existing-config
-            // guard knows the user explicitly approved overwriting their
-            // previous setup. Without this, the engine refuses to run.
-            if (_state.ReplaceExistingConfigurationConfirmed && _state.LegacyState is OpenClawTray.Onboarding.Services.OnboardingState legacy)
-            {
-                legacy.ReplaceExistingConfigurationConfirmed = true;
-            }
             EnsureEngineStarted();
         }
     }
@@ -281,7 +278,7 @@ public sealed class OnboardingV2Bridge : IDisposable
     {
         if (_engineStarted) return;
 
-        // Defense-in-depth (parity with legacy LocalSetupProgressPage): if
+        // Defense-in-depth: if
         // existing configuration is detected and the user did not explicitly
         // confirm replacement via the V2 Welcome warn-and-confirm flow,
         // surface a synthetic Block state instead of starting the engine.
@@ -294,8 +291,7 @@ public sealed class OnboardingV2Bridge : IDisposable
         // `if (_engineStarted) return;` line and never construct the engine,
         // permanently locking the user out of the local setup path.
         if (!_state.ReplaceExistingConfigurationConfirmed
-            && _state.LegacyState is OpenClawTray.Onboarding.Services.OnboardingState legacyForGuard
-            && legacyForGuard.ExistingConfigGuard?.HasExistingConfiguration() == true)
+            && _hasExistingConfiguration?.Invoke() == true)
         {
             Logger.Warn("[V2Bridge] Existing configuration detected without replace-confirm; blocking setup (engine NOT marked started so retry/confirm path can recover)");
             DispatchToUi(() =>
@@ -328,17 +324,10 @@ public sealed class OnboardingV2Bridge : IDisposable
         // the bridge in a recoverable state.
         _engineStarted = true;
 
-        // Forward V2 replace-confirmed flag to legacy state (the engine
-        // factory reads it via App, which holds the legacy OnboardingState).
-        if (_state.LegacyState is OpenClawTray.Onboarding.Services.OnboardingState legacyForFlag)
-        {
-            legacyForFlag.ReplaceExistingConfigurationConfirmed = _state.ReplaceExistingConfigurationConfirmed;
-        }
-
         try
         {
             // Pass through the user's actual replace-confirm choice rather
-            // than hard-coding true (matches v1 LocalSetupProgressPage).
+            // than hard-coding true.
             _engine = _engineFactory(_state.ReplaceExistingConfigurationConfirmed);
         }
         catch (Exception ex)
@@ -348,8 +337,7 @@ public sealed class OnboardingV2Bridge : IDisposable
             // resource issue). Reset _engineStarted so a retry can try again.
             _engineStarted = false;
             // Surface engine_construct_failed as a user-facing error on the
-            // V2 progress page (parity with v1: legacy renders a synthetic
-            // Block state with this code so the Try-again button is offered).
+            // V2 progress page as a retryable synthetic block.
             DispatchToUi(() =>
             {
                 MarkAllStagesIdle();
@@ -424,7 +412,7 @@ public sealed class OnboardingV2Bridge : IDisposable
         // (e.g. confirm replace, grant admin) before a retry would succeed.
         var canRetry = status == LocalGatewaySetupStatus.FailedRetryable;
 
-        // Parity with v1 Capture: lastRunningPhase is reconstructed from
+        // Preserve the previous stage-capture semantics: lastRunningPhase is reconstructed from
         // History (most recent non-Failed/Cancelled/NotStarted phase) so
         // the failure stage marker pins to the right row even after the
         // engine has rolled Phase to Failed. While running, the current
@@ -474,18 +462,17 @@ public sealed class OnboardingV2Bridge : IDisposable
     }
 
     /// <summary>
-    /// Parity with v1 LocalSetupProgressPage Status=Complete handler:
+    /// Completion handler for the local setup stage:
     ///
     /// 1. Eagerly (re)initialize the operator gateway client. PairAsync
     ///    flips <see cref="SettingsManager.EnableNodeMode"/> to true mid-
     ///    onboarding (LocalGatewaySetup.cs:2147), and App startup only
     ///    initializes <c>App.GatewayClient</c> when EnableNodeMode==false.
-    ///    Without this re-init the WizardPage would sit in "loading" for
+    ///    Without this re-init the gateway wizard would sit in "loading" for
     ///    30s then save an "offline" state.
-    /// 2. Seed legacy <c>OnboardingState.GatewayClient</c> from
-    ///    <c>App.GatewayClient</c> so the embedded WizardPage finds it.
-    /// 3. 1-second pause for visual settling before advancing (Mike's UX
-    ///    decision in v1).
+    /// 2. Seed the host-owned gateway wizard state from <c>App.GatewayClient</c>
+    ///    so the embedded wizard can use it as a fallback.
+    /// 3. 1-second pause for visual settling before advancing.
     /// 4. Guard the advance on still being on LocalSetupProgress so a user
     ///    who clicked through doesn't get over-advanced past their current
     ///    page.
@@ -535,7 +522,7 @@ public sealed class OnboardingV2Bridge : IDisposable
                             // Race / dispose guards (Hanselman pass-3 #1, #2):
                             //  - Bail if the bridge has been disposed (window
                             //    closed) — touching _state would mutate a
-                            //    disposed OnboardingState whose GatewayClient
+                            //    disposed gateway wizard state whose GatewayClient
                             //    setter disposes the previous value, leaking
                             //    the new client and possibly double-disposing.
                             //  - Bail if the engine generation has been bumped
@@ -543,21 +530,21 @@ public sealed class OnboardingV2Bridge : IDisposable
                             //    later ScheduleAdvanceAfterCompletion will own
                             //    the post-reseed for the new run; this stale
                             //    one must NOT race the new one to write
-                            //    legacy.GatewayClient.
+                            //    gateway wizard state.
                             if (_disposed)
                             {
-                                Logger.Info($"[V2Bridge] Post-reseed: bridge disposed, skipping legacy.GatewayClient seed (generation={capturedGeneration})");
+                                Logger.Info($"[V2Bridge] Post-reseed: bridge disposed, skipping gateway wizard client seed (generation={capturedGeneration})");
                                 return;
                             }
                             if (capturedGeneration != _engineGeneration)
                             {
-                                Logger.Info($"[V2Bridge] Post-reseed: stale (captured={capturedGeneration}, current={_engineGeneration}); skipping legacy.GatewayClient seed");
+                                Logger.Info($"[V2Bridge] Post-reseed: stale (captured={capturedGeneration}, current={_engineGeneration}); skipping gateway wizard client seed");
                                 return;
                             }
 
                             var post = app.GatewayClient;
                             Logger.Info($"[V2Bridge] Post-reseed: GatewayClient={(post is null ? "<null>" : "present")}, IsConnectedToGateway={(post is null ? "n/a" : post.IsConnectedToGateway.ToString())}");
-                            // Re-seed the legacy state object after the
+                            // Re-seed the gateway wizard state after the
                             // reconnect has materialized the new operator
                             // client. The wizard's 30s poll watches
                             // App.GatewayClient directly, so this is belt-
@@ -570,10 +557,7 @@ public sealed class OnboardingV2Bridge : IDisposable
                                 // dispose/retry too.
                                 if (_disposed) return;
                                 if (capturedGeneration != _engineGeneration) return;
-                                if (_state.LegacyState is OpenClawTray.Onboarding.Services.OnboardingState legacy)
-                                {
-                                    legacy.GatewayClient = app.GatewayClient;
-                                }
+                                _seedGatewayWizardClient?.Invoke(app.GatewayClient);
                             });
                         }
                         catch (Exception ex)
@@ -588,13 +572,13 @@ public sealed class OnboardingV2Bridge : IDisposable
                 }
 
                 // NOTE (Hanselman pass-3 #5): we deliberately do NOT seed
-                // legacy.GatewayClient with the current (pre-reconnect) value.
+                // gateway wizard state with the current (pre-reconnect) value.
                 // The pre-reconnect value is exactly the zombie pairing client
                 // whose socket is about to die — seeding it just gives non-V2
                 // consumers the same broken client we're trying to replace.
                 // The post-reseed dispatcher continuation above is the single
-                // point where legacy.GatewayClient gets the fresh manager-
-                // owned operator client.
+                // point where the wizard state gets the fresh manager-owned
+                // operator client.
             }
         }
         catch (Exception ex)

@@ -7,16 +7,16 @@ namespace OpenClawTray.Onboarding.V2.Pages;
 
 /// <summary>
 /// Gateway welcome page (Dialog-2). Conceptually equivalent to the
-/// legacy Wizard step — picks the AI provider / gateway settings.
+/// gateway wizard step — picks the AI provider / gateway settings.
 ///
 /// Status: the designer's "Welcome to OpenClaw gateway" intro card has
-/// been temporarily removed so the embedded legacy WizardPage gets the
-/// full vertical space and its own nav buttons are reachable. The intro
-/// card will return in a follow-up PR once the wizard itself is
-/// redesigned to share the V2 card chrome.
+/// been temporarily removed so the embedded gateway wizard gets the full
+/// vertical space and its own nav buttons are reachable. The intro card will
+/// return in a follow-up PR once the wizard itself is redesigned to share the
+/// V2 card chrome.
 ///
 /// Until then, this page is just the V2 title bar (from
-/// <see cref="OnboardingV2App"/>) plus the legacy wizard component
+/// <see cref="OnboardingV2App"/>) plus the host-owned wizard component
 /// rendered via <see cref="OnboardingV2State.GatewayWizardChildFactory"/>.
 /// </summary>
 public sealed class GatewayWelcomePage : Component<OnboardingV2State>
@@ -41,7 +41,7 @@ public sealed class GatewayWelcomePage : Component<OnboardingV2State>
             new BorderElement(null).Height(20),
         };
 
-        // Embed the legacy WizardPage (provider/model RPC picker). The host
+        // Embed the gateway wizard (provider/model RPC picker). The host
         // populates GatewayWizardChildFactory at mount time. In the
         // standalone preview (no host) this is null and the page renders
         // the heading only.

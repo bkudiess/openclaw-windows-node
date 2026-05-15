@@ -3224,7 +3224,7 @@ public static class LocalGatewaySetupEngineFactory
         // factory is a synchronous constructor path, and the WSL distro check is async-only.
         // Forcing it async would cascade to all callers. The page-level gate
         // (LocalSetupProgressPage) performs the full 7-predicate check including the WSL probe.
-        // Default is false (safe). Pass true only from the confirmed SetupWarningPage flow.
+        // Default is false (safe). Pass true only after the V2 setup warning is confirmed.
         if (!replaceExistingConfigurationConfirmed)
         {
             var resolvedIdentityDataPath = identityDataPath ?? Path.Combine(

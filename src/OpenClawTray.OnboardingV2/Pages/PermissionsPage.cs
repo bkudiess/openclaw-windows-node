@@ -237,9 +237,7 @@ public sealed class PermissionsPage : Component<OnboardingV2State>
 
     /// <summary>
     /// Launch a permission's settings URI via Windows Launcher. Restricted
-    /// to ms-settings:// URIs to avoid arbitrary protocol launches (matches
-    /// the legacy <c>OnboardingTray.Onboarding.Pages.PermissionsPage</c>
-    /// security gate).
+    /// to ms-settings:// URIs to avoid arbitrary protocol launches.
     /// </summary>
     private static async System.Threading.Tasks.Task LaunchSettingsUriAsync(Uri uri)
     {

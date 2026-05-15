@@ -188,29 +188,19 @@ public sealed class OnboardingV2State
     }
 
     /// <summary>
-    /// Opaque reference to the legacy <c>OnboardingState</c> object owned by
-    /// the host. The V2 Gateway page reads this to embed the legacy
-    /// WizardPage component (provider/model RPC picker) inside the V2
-    /// chrome until the wizard step is itself redesigned. Pages should
-    /// treat the type as <c>object?</c> — only the legacy host knows the
-    /// concrete type.
-    /// </summary>
-    public object? LegacyState { get; set; }
-
-    /// <summary>
-    /// Optional factory that produces the legacy provider/model wizard as
+    /// Optional factory that produces the host-owned provider/model wizard as
     /// a FunctionalUI <see cref="OpenClawTray.FunctionalUI.Core.Element"/>.
     /// V2 GatewayWelcomePage calls this (when non-null) to embed the
-    /// legacy <c>WizardPage</c> component inside the V2 chrome — the host
-    /// project is the only place that can construct it (avoids a circular
-    /// project reference from OnboardingV2 -> Tray.WinUI).
+    /// gateway wizard inside the V2 chrome. The host project is the only
+    /// place that can construct it (avoids a circular project reference from
+    /// OnboardingV2 -> Tray.WinUI).
     /// </summary>
     public Func<OpenClawTray.FunctionalUI.Core.Element>? GatewayWizardChildFactory { get; set; }
 
     /// <summary>
     /// Snapshot of pre-existing OpenClaw configuration on this host, so the
     /// V2 Welcome page can render a "replace existing setup?" warn-and-confirm
-    /// UI matching the legacy SetupWarningPage. The host populates this from
+    /// UI. The host populates this from
     /// <c>OnboardingExistingConfigGuard.GetSummary()</c> at mount time; pages
     /// read it but never mutate.
     /// </summary>
@@ -254,8 +244,7 @@ public sealed class OnboardingV2State
     /// <summary>
     /// True once the user has explicitly confirmed they want to replace
     /// existing configuration (V2 Welcome's "Replace my setup" button).
-    /// The bridge forwards this to legacy
-    /// <c>OnboardingState.ReplaceExistingConfigurationConfirmed</c>.
+    /// The bridge passes this through to the local setup engine.
     /// </summary>
     public bool ReplaceExistingConfigurationConfirmed { get; set; }
 
@@ -328,8 +317,7 @@ public sealed class OnboardingV2State
     /// page when existing configuration is detected). The host closes
     /// the window without firing <see cref="Finished"/> or running the
     /// completion pipeline — existing settings and gateway connection
-    /// are preserved untouched. Mirrors legacy
-    /// <c>OnboardingState.Dismissed</c>.
+    /// are preserved untouched.
     /// </summary>
     public event EventHandler? Dismissed;
 
@@ -354,8 +342,7 @@ public sealed class OnboardingV2State
     /// <summary>
     /// Raises <see cref="Dismissed"/>. Idempotent — subsequent calls are
     /// no-ops so a double-click or repeated handler invocation cannot
-    /// fire the lifecycle signal twice. Mirrors legacy
-    /// <c>OnboardingState.Dismiss</c>.
+    /// fire the lifecycle signal twice.
     /// </summary>
     public void Dismiss()
     {

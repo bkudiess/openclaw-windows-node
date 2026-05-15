@@ -3,7 +3,7 @@ using OpenClawTray.Onboarding.V2;
 namespace OpenClawTray.OnboardingV2.Tests;
 
 /// <summary>
-/// Mirrors <c>OnboardingStateTests.Dismiss_*</c> for the V2 state surface.
+/// Locks down V2 state dismissal behavior.
 /// The V2 implementation copies the legacy idempotent-flag pattern; these
 /// tests guarantee the symmetric contract continues to hold.
 /// </summary>

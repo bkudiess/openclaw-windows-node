@@ -76,7 +76,7 @@ public partial class App : Application
 
     /// <summary>
     /// Ensures the managed SSH tunnel is started using the current settings.
-    /// Used by the onboarding ConnectionPage when the user picks the SSH topology.
+    /// Used by connection settings when the user picks the SSH topology.
     /// </summary>
     public void EnsureSshTunnelStarted()
     {
@@ -107,7 +107,7 @@ public partial class App : Application
 
     /// <summary>
     /// Creates the WSL local gateway setup engine using the current tray settings.
-    /// Onboarding pages (Phase 5) call this to drive the local-WSL setup flow;
+    /// The V2 setup bridge calls this to drive the local-WSL setup flow;
     /// the engine pairs the operator + Windows tray node into the gateway it
     /// installs, so we eagerly materialize the NodeService when needed.
     /// </summary>

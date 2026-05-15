@@ -10,7 +10,7 @@ The V2 setup flow walks users through:
 
 1. **Welcome** — Greeting and introduction
 2. **Local setup progress** — App-owned `OpenClawGateway` WSL installation
-3. **Gateway setup** — Gateway-driven provider/model configuration, currently hosted via the embedded legacy `WizardPage`
+3. **Gateway setup** — Gateway-driven provider/model configuration hosted by `GatewayWizardPage`
 4. **Permissions** — Windows system permission review
 5. **All set** — Feature summary and completion
 
@@ -84,8 +84,8 @@ Use a temp settings directory for tests that construct `SettingsManager`, or set
 | `Onboarding/OnboardingWindow.cs` | Host window for the V2 setup shell |
 | `src/OpenClawTray.OnboardingV2/OnboardingV2App.cs` | V2 Functional UI root component and page navigation |
 | `src/OpenClawTray.OnboardingV2/OnboardingV2State.cs` | V2 shared setup state |
-| `Onboarding/Services/OnboardingState.cs` | Legacy state retained for the embedded `WizardPage` |
-| `Onboarding/Pages/WizardPage.cs` | Embedded provider/model setup page inside V2 |
+| `Onboarding/GatewayWizard/GatewayWizardState.cs` | Host-owned state for the embedded gateway wizard |
+| `Onboarding/GatewayWizard/GatewayWizardPage.cs` | Embedded provider/model setup page inside V2 |
 | `Services/LocalGatewaySetup/SetupCodeDecoder.cs` | Base64url setup code parsing used from Connections |
 | `Onboarding/Services/InputValidator.cs` | Security input validation |
 | `Onboarding/Services/WizardStepParser.cs` | Wizard JSON step parsing |
