@@ -611,14 +611,32 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
             await SendTrackedRequestAsync("skills.status");
     }
 
-    public Task<bool> InstallSkillAsync(string skillId)
+    public Task<bool> InstallSkillAsync(string skillName, string installId)
     {
-        return TrySendTrackedRequestAsync("skills.install", new { id = skillId });
+        // Gateway contract per src/gateway/server-methods/skills.ts: skills.install accepts
+        // { name, installId, dangerouslyForceUnsafeInstall?, timeoutMs? } for the local-install
+        // path. Older callers used { id: <name> } which silently no-ops on the current gateway —
+        // both params must be sent so the dispatcher can pick the right install option.
+        return TrySendTrackedRequestAsync("skills.install", new { name = skillName, installId });
     }
 
     public Task<bool> SetSkillEnabledAsync(string skillKey, bool enabled)
     {
         return TrySendTrackedRequestAsync("skills.update", new { skillKey, enabled });
+    }
+
+    public Task<bool> SetSkillApiKeyAsync(string skillKey, string apiKey)
+    {
+        // skills.update accepts an optional `apiKey` which the gateway writes to the skill's
+        // primaryEnv slot in openclaw.json (skills.entries.<skillKey>.env.<primaryEnv>).
+        return TrySendTrackedRequestAsync("skills.update", new { skillKey, apiKey });
+    }
+
+    public Task<bool> SetSkillEnvAsync(string skillKey, IReadOnlyDictionary<string, string> env)
+    {
+        // skills.update accepts an optional `env` map merged into skills.entries.<skillKey>.env.
+        // Used for setting non-primary env vars (multi-env skills like outlook-graph).
+        return TrySendTrackedRequestAsync("skills.update", new { skillKey, env });
     }
 
     // Gateway config management

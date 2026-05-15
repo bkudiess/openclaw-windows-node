@@ -18,9 +18,17 @@
                            Style="{StaticResource CaptionTextBlockStyle}"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
             </StackPanel>
-            <ComboBox x:Uid="AgentFilterCombo" x:Name="AgentFilterCombo" Header="Agent" MinWidth="200">
-                <ComboBoxItem Content="All Agents" Tag="" IsSelected="True"/>
-            </ComboBox>
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <ComboBox x:Uid="AgentFilterCombo" x:Name="AgentFilterCombo" Header="Agent" MinWidth="200">
+                    <ComboBoxItem Content="All Agents" Tag="" IsSelected="True"/>
+                </ComboBox>
+                <ComboBox x:Name="StatusFilterCombo" Header="Show" MinWidth="160">
+                    <ComboBoxItem Content="All"          Tag="All" IsSelected="True"/>
+                    <ComboBoxItem Content="Ready"        Tag="Ready"/>
+                    <ComboBoxItem Content="Needs Setup"  Tag="NeedsSetup"/>
+                    <ComboBoxItem Content="Disabled"     Tag="Disabled"/>
+                </ComboBox>
+            </StackPanel>
         </StackPanel>
 
         <!-- Skills Groups -->

@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using OpenClawTray.Windows;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
@@ -13,26 +14,15 @@ namespace OpenClawTray.Pages;
 public sealed partial class SkillsPage : Page
 {
     private HubWindow? _hub;
-    private List<SkillData> _allSkills = new();
+    private IReadOnlyList<SkillStatusRow> _allRows = Array.Empty<SkillStatusRow>();
+    private SkillsFilter _filter = SkillsFilter.All;
 
     public string? CurrentAgentId => GetSelectedAgentId();
 
     public SkillsPage()
     {
         InitializeComponent();
-        EnabledHeaderBtn.Click += (s, e) =>
-        {
-            _enabledExpanded = !_enabledExpanded;
-            EnabledChevron.Glyph = _enabledExpanded ? "\uE70E" : "\uE70D";
-            EnabledPanel.Visibility = _enabledExpanded ? Visibility.Visible : Visibility.Collapsed;
-            if (!_enabledExpanded) SkillsScroller.ChangeView(null, 0, null, disableAnimation: false);
-        };
-        DisabledHeaderBtn.Click += (s, e) =>
-        {
-            _disabledExpanded = !_disabledExpanded;
-            DisabledChevron.Glyph = _disabledExpanded ? "\uE70E" : "\uE70D";
-            DisabledPanel.Visibility = _disabledExpanded ? Visibility.Visible : Visibility.Collapsed;
-        };
+        StatusFilterCombo.SelectionChanged += OnStatusFilterChanged;
     }
 
     public void Initialize(HubWindow hub)
@@ -73,124 +63,70 @@ public sealed partial class SkillsPage : Page
             _ = client.RequestSkillsStatusAsync(GetSelectedAgentId());
     }
 
-    private async void OnToggleSkillClick(object sender, RoutedEventArgs e)
+    private void OnStatusFilterChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (sender is not Button btn || btn.Tag is not string skillKey) return;
-        if (_hub?.GatewayClient == null) return;
-
-        var skill = _allSkills.FirstOrDefault(s => s.SkillKey == skillKey);
-        if (skill == null) return;
-
-        bool newState = !skill.IsEnabled;
-        btn.IsEnabled = false;
-        var success = await _hub.GatewayClient.SetSkillEnabledAsync(skillKey, newState);
-        btn.IsEnabled = true;
-
-        if (success)
+        if (StatusFilterCombo.SelectedItem is ComboBoxItem item &&
+            item.Tag is string tag &&
+            Enum.TryParse<SkillsFilter>(tag, out var parsed))
         {
-            // Re-lookup after await — _allSkills may have been replaced by UpdateFromGateway
-            var current = _allSkills.FirstOrDefault(s => s.SkillKey == skillKey);
-            if (current != null)
-            {
-                current.IsEnabled = newState;
-                RebuildCards();
-            }
+            _filter = parsed;
+            RebuildCards();
         }
     }
 
     public void UpdateFromGateway(JsonElement data)
     {
         OpenClawTray.Services.Logger.Info("[SkillsPage] Received gateway skills data");
-
-        JsonElement skillsArray;
-        if (data.TryGetProperty("skills", out var inner))
-            skillsArray = inner;
-        else if (data.TryGetProperty("payload", out var payload))
-        {
-            if (payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("skills", out var nested))
-                skillsArray = nested;
-            else if (payload.ValueKind == JsonValueKind.Array)
-                skillsArray = payload;
-            else
-                return;
-        }
-        else if (data.ValueKind == JsonValueKind.Array)
-            skillsArray = data;
-        else
-            return;
-
-        var skills = new List<SkillData>();
-
-        foreach (var item in skillsArray.EnumerateArray())
-        {
-            var s = new SkillData();
-
-            if (item.TryGetProperty("name", out var nameEl))
-            {
-                s.Name = nameEl.GetString() ?? "";
-                s.Id = s.Name;
-            }
-            if (item.TryGetProperty("id", out var idEl))
-                s.Id = idEl.GetString() ?? s.Id;
-            if (item.TryGetProperty("emoji", out var emojiEl))
-            {
-                var emoji = emojiEl.GetString() ?? "";
-                if (!string.IsNullOrEmpty(emoji))
-                    s.Name = $"{emoji} {s.Name}";
-            }
-            if (item.TryGetProperty("description", out var descEl))
-                s.Description = descEl.GetString() ?? "";
-            if (item.TryGetProperty("source", out var srcEl))
-                s.Source = srcEl.GetString() ?? "";
-            if (item.TryGetProperty("skillKey", out var keyEl))
-                s.SkillKey = keyEl.GetString() ?? s.Id;
-            else
-                s.SkillKey = s.Id;
-
-            if (item.TryGetProperty("disabled", out var disabledEl))
-                s.IsEnabled = disabledEl.ValueKind != JsonValueKind.True;
-            else if (item.TryGetProperty("enabled", out var enabledEl))
-                s.IsEnabled = enabledEl.ValueKind == JsonValueKind.True;
-            else
-                s.IsEnabled = item.TryGetProperty("eligible", out var eligibleEl) && eligibleEl.ValueKind == JsonValueKind.True;
-
-            skills.Add(s);
-        }
-
-        // Sort alphabetically
-        skills.Sort((a, b) => string.Compare(a.Name, b.Name, System.StringComparison.OrdinalIgnoreCase));
-
+        var rows = SkillStatusPresenter.Parse(data);
         DispatcherQueue?.TryEnqueue(() =>
         {
-            _allSkills = skills;
+            _allRows = rows;
             RebuildCards();
         });
     }
 
-    private bool _enabledExpanded = true;
+    // ---- Card rendering -------------------------------------------------------------------
+
+    private bool _readyExpanded = true;
     private bool _disabledExpanded = true;
 
     private void RebuildCards()
     {
-        var enabled = _allSkills.Where(s => s.IsEnabled).ToList();
-        var disabled = _allSkills.Where(s => !s.IsEnabled).ToList();
+        var filtered = SkillStatusPresenter.Filter(_allRows, _filter);
+        var byState = filtered.GroupBy(r => r.State).ToDictionary(g => g.Key, g => g.ToList());
+
+        var readyRows        = byState.GetValueOrDefault(SkillRowState.Ready)        ?? new();
+        var needsInstallRows = byState.GetValueOrDefault(SkillRowState.NeedsInstall) ?? new();
+        var needsEnvRows     = byState.GetValueOrDefault(SkillRowState.NeedsEnv)     ?? new();
+        var needsSetupRows   = byState.GetValueOrDefault(SkillRowState.NeedsSetup)   ?? new();
+        var disabledRows     = byState.GetValueOrDefault(SkillRowState.Disabled)     ?? new();
+
+        // "Needs Setup" in the UI groups all unready-but-not-admin-disabled states together,
+        // mirroring how Mac's SkillsFilter.needsSetup is computed.
+        var setupGroup = needsInstallRows.Concat(needsEnvRows).Concat(needsSetupRows)
+            .OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         EnabledPanel.Children.Clear();
         DisabledPanel.Children.Clear();
 
-        foreach (var s in enabled)
-            EnabledPanel.Children.Add(BuildCard(s));
-        foreach (var s in disabled)
-            DisabledPanel.Children.Add(BuildCard(s));
+        foreach (var r in readyRows)    EnabledPanel.Children.Add(BuildCard(r));
+        foreach (var r in setupGroup)   EnabledPanel.Children.Add(BuildCard(r));
+        foreach (var r in disabledRows) DisabledPanel.Children.Add(BuildCard(r));
 
-        EnabledHeaderText.Text = $"Enabled ({enabled.Count})";
-        DisabledHeaderText.Text = $"Disabled ({disabled.Count})";
-        DisabledHeaderBtn.Visibility = disabled.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        EnabledHeaderText.Text = setupGroup.Count > 0
+            ? $"Ready ({readyRows.Count}) · Needs setup ({setupGroup.Count})"
+            : $"Ready ({readyRows.Count})";
+        DisabledHeaderText.Text = $"Disabled ({disabledRows.Count})";
+        DisabledHeaderBtn.Visibility = disabledRows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         DisabledPanel.Visibility = _disabledExpanded ? Visibility.Visible : Visibility.Collapsed;
-        EnabledPanel.Visibility = _enabledExpanded ? Visibility.Visible : Visibility.Collapsed;
+        EnabledPanel.Visibility = _readyExpanded ? Visibility.Visible : Visibility.Collapsed;
 
-        var total = _allSkills.Count;
-        CountText.Text = total > 0 ? $"({enabled.Count}/{total} enabled)" : "";
+        var total = _allRows.Count;
+        var shown = filtered.Count;
+        CountText.Text = total > 0
+            ? (shown == total ? $"({readyRows.Count}/{total} ready)" : $"({shown}/{total} shown)")
+            : "";
 
         if (total > 0)
         {
@@ -204,94 +140,323 @@ public sealed partial class SkillsPage : Page
         }
     }
 
-    private Grid BuildCard(SkillData s)
+    private Grid BuildCard(SkillStatusRow r)
     {
         var card = new Grid
         {
             Padding = new Thickness(16, 10, 16, 12),
             Margin = new Thickness(0, 2, 0, 0),
             CornerRadius = new CornerRadius(6),
-            Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"]
+            Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
         };
         card.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         card.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        card.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        card.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        card.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         card.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         card.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        double contentOpacity = s.IsEnabled ? 1.0 : 0.5;
+        var opacity = (r.State == SkillRowState.Disabled) ? 0.5 : 1.0;
 
-        // Row 0, Col 0: Name + badge
-        var nameRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Opacity = contentOpacity };
-        nameRow.Children.Add(new TextBlock { Text = s.Name, FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
-
-        var badgeBg = s.IsEnabled
-            ? new SolidColorBrush(Color.FromArgb(40, 76, 175, 80))
-            : new SolidColorBrush(Color.FromArgb(40, 230, 168, 23));
-        var badgeFg = s.IsEnabled
-            ? new SolidColorBrush(Colors.LimeGreen)
-            : new SolidColorBrush(Color.FromArgb(255, 230, 168, 23));
-        var badge = new Border
+        // Row 0 col 0: name + source + state badges
+        var titleRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Opacity = opacity };
+        titleRow.Children.Add(new TextBlock
         {
-            CornerRadius = new CornerRadius(4), Padding = new Thickness(6, 2, 6, 2),
-            Background = badgeBg, VerticalAlignment = VerticalAlignment.Center
-        };
-        badge.Child = new TextBlock { Text = s.IsEnabled ? "enabled" : "disabled", FontSize = 10, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = badgeFg, VerticalAlignment = VerticalAlignment.Center };
-        nameRow.Children.Add(badge);
-        Grid.SetRow(nameRow, 0);
-        Grid.SetColumn(nameRow, 0);
-        card.Children.Add(nameRow);
+            Text = r.DisplayName,
+            FontSize = 13,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        titleRow.Children.Add(BuildSourceBadge(r));
+        titleRow.Children.Add(BuildStateBadge(r));
+        Grid.SetRow(titleRow, 0);
+        Grid.SetColumn(titleRow, 0);
+        card.Children.Add(titleRow);
 
-        // Row 0, Col 1: Source
-        var source = new TextBlock
-        {
-            Text = s.Source, FontSize = 11, FontFamily = new FontFamily("Consolas"),
-            Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
-            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 8, 0),
-            Opacity = contentOpacity
-        };
-        Grid.SetRow(source, 0);
-        Grid.SetColumn(source, 1);
-        card.Children.Add(source);
+        // Row 0 col 1: trailing actions (install / set-env / toggle)
+        var trailing = BuildTrailingActions(r);
+        Grid.SetRow(trailing, 0);
+        Grid.SetColumn(trailing, 1);
+        Grid.SetRowSpan(trailing, 2);
+        card.Children.Add(trailing);
 
-        // Row 0, Col 2: Toggle button
-        var toggleBtn = new Button
-        {
-            Tag = s.SkillKey,
-            Padding = new Thickness(6, 4, 6, 4), MinWidth = 0, MinHeight = 0
-        };
-        ToolTipService.SetToolTip(toggleBtn, s.IsEnabled ? "Disable" : "Enable");
-        toggleBtn.Content = new FontIcon { Glyph = s.IsEnabled ? "\uE769" : "\uE768", FontSize = 12 };
-        toggleBtn.Click += OnToggleSkillClick;
-        Grid.SetRow(toggleBtn, 0);
-        Grid.SetColumn(toggleBtn, 2);
-        card.Children.Add(toggleBtn);
-
-        // Row 1: Description
-        if (!string.IsNullOrEmpty(s.Description))
+        // Row 1: description
+        if (!string.IsNullOrEmpty(r.Description))
         {
             var desc = new TextBlock
             {
-                Text = s.Description, FontSize = 12, TextWrapping = TextWrapping.Wrap, MaxLines = 2,
+                Text = r.Description,
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                MaxLines = 2,
                 Margin = new Thickness(0, 4, 0, 0),
                 Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-                Opacity = contentOpacity
+                Opacity = opacity,
             };
             Grid.SetRow(desc, 1);
-            Grid.SetColumnSpan(desc, 3);
+            Grid.SetColumn(desc, 0);
             card.Children.Add(desc);
+        }
+
+        // Row 2: missing summary (only when not directly addressed by a trailing action)
+        var summary = BuildMissingSummary(r);
+        if (summary != null)
+        {
+            Grid.SetRow(summary, 2);
+            Grid.SetColumn(summary, 0);
+            Grid.SetColumnSpan(summary, 2);
+            card.Children.Add(summary);
+        }
+
+        // Row 3: config checks
+        if (r.ConfigChecks.Count > 0)
+        {
+            var checks = BuildConfigChecks(r);
+            Grid.SetRow(checks, 3);
+            Grid.SetColumn(checks, 0);
+            Grid.SetColumnSpan(checks, 2);
+            card.Children.Add(checks);
         }
 
         return card;
     }
 
-    private class SkillData
+    private static Border BuildSourceBadge(SkillStatusRow r)
     {
-        public string Id { get; set; } = "";
-        public string SkillKey { get; set; } = "";
-        public string Name { get; set; } = "";
-        public string Description { get; set; } = "";
-        public string Source { get; set; } = "";
-        public bool IsEnabled { get; set; } = true;
+        return new Border
+        {
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(6, 2, 6, 2),
+            Background = new SolidColorBrush(Color.FromArgb(40, 128, 128, 128)),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = new TextBlock
+            {
+                Text = r.SourceLabel,
+                FontSize = 10,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromArgb(255, 180, 180, 180)),
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+    }
+
+    private static Border BuildStateBadge(SkillStatusRow r)
+    {
+        var (label, fg, bg) = r.State switch
+        {
+            SkillRowState.Ready        => ("ready", Colors.LimeGreen, Color.FromArgb(40, 76, 175, 80)),
+            SkillRowState.NeedsInstall => ("needs install", Color.FromArgb(255, 230, 168, 23), Color.FromArgb(40, 230, 168, 23)),
+            SkillRowState.NeedsEnv     => ("needs key", Color.FromArgb(255, 230, 168, 23), Color.FromArgb(40, 230, 168, 23)),
+            SkillRowState.NeedsSetup   => ("needs setup", Color.FromArgb(255, 230, 168, 23), Color.FromArgb(40, 230, 168, 23)),
+            SkillRowState.Disabled     => ("disabled", Color.FromArgb(255, 170, 170, 170), Color.FromArgb(40, 170, 170, 170)),
+            _ => ("unknown", Colors.Gray, Color.FromArgb(40, 128, 128, 128)),
+        };
+        return new Border
+        {
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(6, 2, 6, 2),
+            Background = new SolidColorBrush(bg),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = new TextBlock
+            {
+                Text = label,
+                FontSize = 10,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(fg),
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+    }
+
+    private StackPanel BuildTrailingActions(SkillStatusRow r)
+    {
+        var panel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        switch (r.State)
+        {
+            case SkillRowState.NeedsInstall:
+                foreach (var opt in r.InstallOptionsForMissingBins)
+                {
+                    panel.Children.Add(BuildInstallButton(r, opt));
+                }
+                break;
+
+            case SkillRowState.NeedsEnv:
+                foreach (var envKey in r.MissingEnv)
+                {
+                    panel.Children.Add(BuildEnvButton(r, envKey));
+                }
+                break;
+
+            case SkillRowState.Ready:
+            case SkillRowState.Disabled:
+                panel.Children.Add(BuildToggleButton(r));
+                break;
+
+            case SkillRowState.NeedsSetup:
+                // No actionable button — diagnostic-only state (e.g. missing bin with no install
+                // recipe). The missing-summary row below explains what's wrong.
+                break;
+        }
+
+        return panel;
+    }
+
+    private Button BuildInstallButton(SkillStatusRow r, SkillInstallOption opt)
+    {
+        var label = string.IsNullOrEmpty(opt.Label) ? $"Install ({opt.Kind})" : opt.Label;
+        var btn = new Button
+        {
+            Content = label,
+            Tag = (r.Name, opt.Id),
+            Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+        };
+        ToolTipService.SetToolTip(btn, $"Run {opt.Kind} install for {string.Join(", ", opt.Bins)}");
+        btn.Click += async (s, e) =>
+        {
+            if (_hub?.GatewayClient == null) return;
+            btn.IsEnabled = false;
+            btn.Content = "Installing…";
+            var ok = await _hub.GatewayClient.InstallSkillAsync(r.Name, opt.Id);
+            btn.Content = label;
+            btn.IsEnabled = true;
+            if (ok)
+            {
+                _ = _hub.GatewayClient.RequestSkillsStatusAsync(GetSelectedAgentId());
+            }
+        };
+        return btn;
+    }
+
+    private Button BuildEnvButton(SkillStatusRow r, string envKey)
+    {
+        var isPrimary = !string.IsNullOrEmpty(r.PrimaryEnv) &&
+                        string.Equals(r.PrimaryEnv, envKey, StringComparison.Ordinal);
+        var label = isPrimary ? "Set API Key" : $"Set {envKey}";
+        var btn = new Button { Content = label };
+        btn.Click += async (s, e) =>
+        {
+            if (_hub?.GatewayClient == null) return;
+            var dialog = new Dialogs.SkillEnvDialog(r.Name, envKey, r.Homepage)
+            {
+                XamlRoot = this.XamlRoot,
+            };
+            var result = await dialog.ShowAsync();
+            if (result != ContentDialogResult.Primary) return;
+            var value = dialog.EnteredValue;
+            if (string.IsNullOrEmpty(value)) return;
+
+            btn.IsEnabled = false;
+            var ok = isPrimary
+                ? await _hub.GatewayClient.SetSkillApiKeyAsync(r.SkillKey, value)
+                : await _hub.GatewayClient.SetSkillEnvAsync(
+                    r.SkillKey,
+                    new Dictionary<string, string> { [envKey] = value });
+            btn.IsEnabled = true;
+            if (ok)
+            {
+                _ = _hub.GatewayClient.RequestSkillsStatusAsync(GetSelectedAgentId());
+            }
+        };
+        return btn;
+    }
+
+    private Button BuildToggleButton(SkillStatusRow r)
+    {
+        var isEnabled = !r.Disabled;
+        var btn = new Button
+        {
+            Tag = r.SkillKey,
+            Padding = new Thickness(6, 4, 6, 4),
+            MinWidth = 0,
+            MinHeight = 0,
+        };
+        ToolTipService.SetToolTip(btn, isEnabled ? "Disable" : "Enable");
+        btn.Content = new FontIcon { Glyph = isEnabled ? "\uE769" : "\uE768", FontSize = 12 };
+        btn.Click += async (s, e) =>
+        {
+            if (_hub?.GatewayClient == null) return;
+            btn.IsEnabled = false;
+            var ok = await _hub.GatewayClient.SetSkillEnabledAsync(r.SkillKey, !isEnabled);
+            btn.IsEnabled = true;
+            if (ok)
+            {
+                _ = _hub.GatewayClient.RequestSkillsStatusAsync(GetSelectedAgentId());
+            }
+        };
+        return btn;
+    }
+
+    private static StackPanel? BuildMissingSummary(SkillStatusRow r)
+    {
+        // For NeedsInstall / NeedsEnv the trailing action already names what's missing — don't
+        // duplicate. Only show the diagnostic block when no actionable button covered the gap
+        // or when missing-config is present (no action exists for that yet).
+        var showBins = r.MissingBins.Count > 0 && r.State == SkillRowState.NeedsSetup;
+        var showEnv  = r.MissingEnv.Count > 0 && r.State != SkillRowState.NeedsEnv;
+        var showCfg  = r.MissingConfig.Count > 0;
+        if (!showBins && !showEnv && !showCfg) return null;
+
+        var panel = new StackPanel { Orientation = Orientation.Vertical, Spacing = 2, Margin = new Thickness(0, 4, 0, 0) };
+        if (showBins)
+        {
+            panel.Children.Add(BuildCaption($"Missing binaries: {string.Join(", ", r.MissingBins)}"));
+        }
+        if (showEnv)
+        {
+            panel.Children.Add(BuildCaption($"Missing env: {string.Join(", ", r.MissingEnv)}"));
+        }
+        if (showCfg)
+        {
+            panel.Children.Add(BuildCaption($"Requires config: {string.Join(", ", r.MissingConfig)}"));
+        }
+        return panel;
+    }
+
+    private static TextBlock BuildCaption(string text)
+    {
+        return new TextBlock
+        {
+            Text = text,
+            FontSize = 11,
+            Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
+        };
+    }
+
+    private static StackPanel BuildConfigChecks(SkillStatusRow r)
+    {
+        var panel = new StackPanel { Orientation = Orientation.Vertical, Spacing = 2, Margin = new Thickness(0, 4, 0, 0) };
+        foreach (var check in r.ConfigChecks)
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+            row.Children.Add(new FontIcon
+            {
+                Glyph = check.Satisfied ? "\uE73E" : "\uE711",
+                FontSize = 12,
+                Foreground = new SolidColorBrush(check.Satisfied ? Colors.LimeGreen : Color.FromArgb(255, 230, 168, 23)),
+            });
+            row.Children.Add(new TextBlock
+            {
+                Text = check.Path,
+                FontSize = 11,
+                Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+            });
+            if (!string.IsNullOrEmpty(check.ValueDisplay))
+            {
+                row.Children.Add(new TextBlock
+                {
+                    Text = check.ValueDisplay,
+                    FontSize = 11,
+                    Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
+                });
+            }
+            panel.Children.Add(row);
+        }
+        return panel;
     }
 }

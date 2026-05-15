@@ -1,5 +1,6 @@
 using OpenClaw.Shared;
 using OpenClawTray.Services;
+using System.Collections.Generic;
 using System.Text.Json;
 
 namespace OpenClaw.Tray.Tests;
@@ -168,8 +169,10 @@ public sealed class OnboardingChatBootstrapperTests : IDisposable
         public Task<bool> UpdateCronJobAsync(string id, object patch) => Task.FromResult(false);
         public Task RequestCronRunsAsync(string? id = null, int limit = 20, int offset = 0) => Task.CompletedTask;
         public Task RequestSkillsStatusAsync(string? agentId = null) => Task.CompletedTask;
-        public Task<bool> InstallSkillAsync(string skillId) => Task.FromResult(false);
+        public Task<bool> InstallSkillAsync(string skillName, string installId) => Task.FromResult(false);
         public Task<bool> SetSkillEnabledAsync(string skillKey, bool enabled) => Task.FromResult(false);
+        public Task<bool> SetSkillApiKeyAsync(string skillKey, string apiKey) => Task.FromResult(false);
+        public Task<bool> SetSkillEnvAsync(string skillKey, IReadOnlyDictionary<string, string> env) => Task.FromResult(false);
         public Task<bool> UpdateSkillAsync(string skillId) => Task.FromResult(false);
         public Task RequestConfigAsync() => Task.CompletedTask;
         public Task RequestConfigSchemaAsync() => Task.CompletedTask;

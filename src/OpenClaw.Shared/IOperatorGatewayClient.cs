@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.Json;
 
 namespace OpenClaw.Shared;
@@ -74,8 +75,10 @@ public interface IOperatorGatewayClient
     Task<bool> UpdateCronJobAsync(string id, object patch);
     Task RequestCronRunsAsync(string? id = null, int limit = 20, int offset = 0);
     Task RequestSkillsStatusAsync(string? agentId = null);
-    Task<bool> InstallSkillAsync(string skillId);
+    Task<bool> InstallSkillAsync(string skillName, string installId);
     Task<bool> SetSkillEnabledAsync(string skillKey, bool enabled);
+    Task<bool> SetSkillApiKeyAsync(string skillKey, string apiKey);
+    Task<bool> SetSkillEnvAsync(string skillKey, IReadOnlyDictionary<string, string> env);
     Task RequestConfigAsync();
     Task RequestConfigSchemaAsync();
     Task<bool> SetConfigAsync(string path, object value);
