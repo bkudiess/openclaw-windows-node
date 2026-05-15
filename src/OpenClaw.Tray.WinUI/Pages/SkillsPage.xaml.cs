@@ -14,6 +14,7 @@ public sealed partial class SkillsPage : Page
 {
     private HubWindow? _hub;
     private List<SkillData> _allSkills = new();
+    private List<SkillData>? _localSkillsCache;
 
     public string? CurrentAgentId => GetSelectedAgentId();
 
@@ -39,10 +40,75 @@ public sealed partial class SkillsPage : Page
     {
         _hub = hub;
         PopulateAgentFilter(hub);
+
+        // Render bundled-in-node skills immediately so the page isn't empty before the
+        // gateway responds (gateway data merges in via UpdateFromGateway below).
+        var local = GetLocalSkills();
+        if (local.Count > 0)
+        {
+            _allSkills = MergeWithLocal(new List<SkillData>(), local);
+            RebuildCards();
+        }
+
         if (hub.GatewayClient != null)
         {
             _ = hub.GatewayClient.RequestSkillsStatusAsync(GetSelectedAgentId());
         }
+    }
+
+    private IReadOnlyList<SkillData> GetLocalSkills()
+    {
+        if (_localSkillsCache != null) return _localSkillsCache;
+        var loaded = OpenClawTray.Services.LocalSkillLoader.Load();
+        var list = new List<SkillData>(loaded.Count);
+        foreach (var l in loaded)
+        {
+            // Respect os filter; on a non-win32 host (e.g. CI) skip os-locked skills.
+            if (l.Os.Count > 0 && !l.Os.Contains("win32", System.StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            var displayName = string.IsNullOrEmpty(l.Emoji) ? l.Name : $"{l.Emoji} {l.Name}";
+            list.Add(new SkillData
+            {
+                Id = l.Id,
+                SkillKey = l.Id,
+                Name = displayName,
+                Description = l.Description,
+                Source = "windows-node",
+                IsEnabled = true,
+                IsLocal = true,
+            });
+        }
+        _localSkillsCache = list;
+        return list;
+    }
+
+    /// <summary>
+    /// Merges local node skills with gateway-reported skills. Gateway entries win on
+    /// duplicate id/skillKey collisions — the gateway may carry policy/enable state we
+    /// can't replicate locally.
+    /// </summary>
+    private List<SkillData> MergeWithLocal(List<SkillData> gatewaySkills, IReadOnlyList<SkillData> localSkills)
+    {
+        var byKey = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+        foreach (var g in gatewaySkills)
+        {
+            if (!string.IsNullOrEmpty(g.SkillKey)) byKey.Add(g.SkillKey);
+            if (!string.IsNullOrEmpty(g.Id)) byKey.Add(g.Id);
+        }
+        var combined = new List<SkillData>(gatewaySkills);
+        foreach (var l in localSkills)
+        {
+            if ((l.SkillKey != null && byKey.Contains(l.SkillKey)) ||
+                (l.Id != null && byKey.Contains(l.Id)))
+            {
+                continue;
+            }
+            combined.Add(l);
+        }
+        combined.Sort((a, b) => string.Compare(a.Name, b.Name, System.StringComparison.OrdinalIgnoreCase));
+        return combined;
     }
 
     private void PopulateAgentFilter(HubWindow hub)
@@ -80,6 +146,10 @@ public sealed partial class SkillsPage : Page
 
         var skill = _allSkills.FirstOrDefault(s => s.SkillKey == skillKey);
         if (skill == null) return;
+
+        // Local (node-bundled) skills aren't toggleable — they ship as docs, not as gateway-managed
+        // capabilities. No-op the click; the UI hides the button for local skills anyway.
+        if (skill.IsLocal) return;
 
         bool newState = !skill.IsEnabled;
         btn.IsEnabled = false;
@@ -160,9 +230,12 @@ public sealed partial class SkillsPage : Page
         // Sort alphabetically
         skills.Sort((a, b) => string.Compare(a.Name, b.Name, System.StringComparison.OrdinalIgnoreCase));
 
+        var local = GetLocalSkills();
+        var merged = local.Count > 0 ? MergeWithLocal(skills, local) : skills;
+
         DispatcherQueue?.TryEnqueue(() =>
         {
-            _allSkills = skills;
+            _allSkills = merged;
             RebuildCards();
         });
     }
@@ -254,18 +327,21 @@ public sealed partial class SkillsPage : Page
         Grid.SetColumn(source, 1);
         card.Children.Add(source);
 
-        // Row 0, Col 2: Toggle button
-        var toggleBtn = new Button
+        // Row 0, Col 2: Toggle button — hidden for node-local skills (they aren't gateway-managed).
+        if (!s.IsLocal)
         {
-            Tag = s.SkillKey,
-            Padding = new Thickness(6, 4, 6, 4), MinWidth = 0, MinHeight = 0
-        };
-        ToolTipService.SetToolTip(toggleBtn, s.IsEnabled ? "Disable" : "Enable");
-        toggleBtn.Content = new FontIcon { Glyph = s.IsEnabled ? "\uE769" : "\uE768", FontSize = 12 };
-        toggleBtn.Click += OnToggleSkillClick;
-        Grid.SetRow(toggleBtn, 0);
-        Grid.SetColumn(toggleBtn, 2);
-        card.Children.Add(toggleBtn);
+            var toggleBtn = new Button
+            {
+                Tag = s.SkillKey,
+                Padding = new Thickness(6, 4, 6, 4), MinWidth = 0, MinHeight = 0
+            };
+            ToolTipService.SetToolTip(toggleBtn, s.IsEnabled ? "Disable" : "Enable");
+            toggleBtn.Content = new FontIcon { Glyph = s.IsEnabled ? "\uE769" : "\uE768", FontSize = 12 };
+            toggleBtn.Click += OnToggleSkillClick;
+            Grid.SetRow(toggleBtn, 0);
+            Grid.SetColumn(toggleBtn, 2);
+            card.Children.Add(toggleBtn);
+        }
 
         // Row 1: Description
         if (!string.IsNullOrEmpty(s.Description))
@@ -293,5 +369,6 @@ public sealed partial class SkillsPage : Page
         public string Description { get; set; } = "";
         public string Source { get; set; } = "";
         public bool IsEnabled { get; set; } = true;
+        public bool IsLocal { get; set; }
     }
 }
