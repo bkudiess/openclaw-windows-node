@@ -136,8 +136,6 @@ public sealed partial class ConnectionPage : Page
             if (!string.IsNullOrWhiteSpace(self.ServerVersion))
                 parts.Add($"v{self.ServerVersion}");
             parts.Add($"Up {self.UptimeText}");
-            if (self.PresenceCount is > 0)
-                parts.Add($"{self.PresenceCount} clients");
             GatewayDetailText.Text = string.Join(" · ", parts);
             var authLabel = string.IsNullOrWhiteSpace(self.AuthMode) ? "" : $" · {self.AuthMode} auth";
             GatewayUrlDetail.Text = $"{SanitizeUrl(effectiveUrl)}{authLabel}";
