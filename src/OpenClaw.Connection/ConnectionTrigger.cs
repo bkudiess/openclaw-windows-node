@@ -3,7 +3,7 @@ namespace OpenClaw.Connection;
 /// <summary>
 /// Triggers that drive operator and node sub-FSM transitions.
 /// </summary>
-public enum ConnectionTrigger
+internal enum ConnectionTrigger
 {
     // ─── Operator lifecycle ───
     ConnectRequested,

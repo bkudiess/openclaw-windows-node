@@ -3,7 +3,7 @@ namespace OpenClaw.Connection;
 /// <summary>
 /// Retry/backoff policy per error category.
 /// </summary>
-public static class RetryPolicy
+internal static class RetryPolicy
 {
     public static readonly int[] StandardBackoffMs = [1000, 2000, 4000, 8000, 15000, 30000, 60000];
     public static readonly int[] RateLimitBackoffMs = [30000, 60000, 120000, 300000];
