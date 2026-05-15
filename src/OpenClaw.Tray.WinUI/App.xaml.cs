@@ -1260,6 +1260,8 @@ public partial class App : Application
         // ToggleAction delegates; recreate the lookup each rebuild.
         _permToggleActions.Clear();
 
+        ApplyTrayMenuPreviewDataIfRequested();
+
         var isConnected = _currentStatus == ConnectionStatus.Connected;
         var statusText = LocalizationHelper.GetConnectionStatusText(_currentStatus);
 
@@ -1326,8 +1328,8 @@ public partial class App : Application
         ToolTipService.SetToolTip(brandBtn, isConnected ? "Disconnect from gateway" : "Connect to gateway");
         brandBtn.Click += (s, ev) =>
         {
-            OnTrayMenuItemClicked(this, isConnected ? "disconnect" : "reconnect");
             _trayMenuWindow?.HideCascade();
+            OnTrayMenuItemClicked(this, isConnected ? "disconnect" : "reconnect");
         };
         Grid.SetColumn(brandBtn, 2);
         brandGrid.Children.Add(brandBtn);
@@ -1547,6 +1549,92 @@ public partial class App : Application
     }
 
     /// <summary>
+    /// Opt-in design preview: when the <c>OPENCLAW_TRAY_PREVIEW_DATA</c>
+    /// environment variable is set to <c>1</c>, populate the session/usage
+    /// caches with synthetic values so the Sessions and Usage flyouts render
+    /// meaningful progress bars and provider data without a live gateway.
+    /// Real data takes precedence — preview values are only written when the
+    /// corresponding cache is empty/null, so attaching to a real gateway
+    /// after launch immediately replaces the preview.
+    /// </summary>
+    private void ApplyTrayMenuPreviewDataIfRequested()
+    {
+        var flag = Environment.GetEnvironmentVariable("OPENCLAW_TRAY_PREVIEW_DATA");
+        if (string.IsNullOrEmpty(flag) || flag == "0") return;
+
+        {
+            var now = DateTime.UtcNow;
+            _lastSessions = new[]
+            {
+                new SessionInfo
+                {
+                    Key = "preview:main", IsMain = true, Status = "active",
+                    Model = "claude-opus-4.7", DisplayName = "Main · preview",
+                    InputTokens = 124_000, OutputTokens = 36_000,
+                    ContextTokens = 200_000,
+                    UpdatedAt = now.AddMinutes(-2), LastSeen = now,
+                },
+                new SessionInfo
+                {
+                    Key = "preview:dashboard", IsMain = false, Status = "idle",
+                    Model = "gpt-5.4", DisplayName = "agent:main:dashboard",
+                    InputTokens = 58_000, OutputTokens = 12_000,
+                    ContextTokens = 128_000,
+                    UpdatedAt = now.AddHours(-1), LastSeen = now,
+                },
+                new SessionInfo
+                {
+                    Key = "preview:scratch", IsMain = false, Status = "idle",
+                    Model = "claude-haiku-4.5", DisplayName = "agent:main:scratch",
+                    InputTokens = 6_400, OutputTokens = 1_200,
+                    ContextTokens = 64_000,
+                    UpdatedAt = now.AddHours(-4), LastSeen = now,
+                },
+            };
+        }
+
+        _lastUsage = new GatewayUsageInfo
+        {
+            InputTokens = 188_400,
+            OutputTokens = 49_200,
+            TotalTokens = 237_600,
+            CostUsd = 4.82,
+            RequestCount = 142,
+            Model = "claude-opus-4.7",
+        };
+
+        _lastUsageStatus = new GatewayUsageStatusInfo
+        {
+            UpdatedAt = DateTime.UtcNow,
+            Providers = new()
+            {
+                new GatewayUsageProviderInfo
+                {
+                    Provider = "anthropic", DisplayName = "Anthropic",
+                    Plan = "Pro",
+                    Windows = new()
+                    {
+                        new() { Label = "5h window", UsedPercent = 64 },
+                        new() { Label = "Weekly",    UsedPercent = 28 },
+                        new() { Label = "Monthly",   UsedPercent = 0 },
+                    },
+                },
+                new GatewayUsageProviderInfo
+                {
+                    Provider = "openai", DisplayName = "OpenAI",
+                    Plan = "Tier 4",
+                    Windows = new()
+                    {
+                        new() { Label = "RPM",    UsedPercent = 41 },
+                        new() { Label = "TPM",    UsedPercent = 73 },
+                        new() { Label = "Daily",  UsedPercent = 96 },
+                    },
+                },
+            },
+        };
+    }
+
+    /// <summary>
     /// Flyout items for the local-node Permissions row: one check-toggle per
     /// capability flag in <see cref="SettingsData"/>. Toggling saves the
     /// setting and reconnects so the gateway picks up the new capability set.
@@ -1559,26 +1647,34 @@ public partial class App : Application
         };
 
         AddPermToggle(items, "Windows node", FluentIconCatalog.System,
+            "Run OpenClaw as a local node on this PC",
             () => settings.EnableNodeMode, v => settings.EnableNodeMode = v);
         AddPermToggle(items, "Browser control", FluentIconCatalog.Browser,
+            "Let agents drive web browsers via proxy",
             () => settings.NodeBrowserProxyEnabled, v => settings.NodeBrowserProxyEnabled = v);
         AddPermToggle(items, "Camera", FluentIconCatalog.Camera,
+            "Allow webcam capture during sessions",
             () => settings.NodeCameraEnabled, v => settings.NodeCameraEnabled = v);
         AddPermToggle(items, "Canvas", FluentIconCatalog.Canvas,
+            "Render generated HTML canvases in chat",
             () => settings.NodeCanvasEnabled, v => settings.NodeCanvasEnabled = v);
         AddPermToggle(items, "Screen capture", FluentIconCatalog.Screen,
+            "Share what's on your screen with the agent",
             () => settings.NodeScreenEnabled, v => settings.NodeScreenEnabled = v);
         AddPermToggle(items, "Location", FluentIconCatalog.Location,
+            "Share this device's location",
             () => settings.NodeLocationEnabled, v => settings.NodeLocationEnabled = v);
         AddPermToggle(items, "Voice (TTS)", FluentIconCatalog.Voice,
+            "Read responses out loud",
             () => settings.NodeTtsEnabled, v => settings.NodeTtsEnabled = v);
         AddPermToggle(items, "Speech-to-text (STT)", FluentIconCatalog.Speech,
+            "Dictate input by speaking",
             () => settings.NodeSttEnabled, v => settings.NodeSttEnabled = v);
 
         return items;
     }
 
-    private void AddPermToggle(List<TrayMenuFlyoutItem> items, string label, string iconGlyph, Func<bool> get, Action<bool> set)
+    private void AddPermToggle(List<TrayMenuFlyoutItem> items, string label, string iconGlyph, string description, Func<bool> get, Action<bool> set)
     {
         var on = get();
         var actionId = $"perm-toggle|{label}";
@@ -1586,6 +1682,7 @@ public partial class App : Application
         {
             Text = label,
             Icon = iconGlyph,
+            Description = description,
             Action = actionId,
             IsToggle = true,
             IsOn = on,
@@ -1595,11 +1692,6 @@ public partial class App : Application
             set(!get());
             _settings?.Save();
             _ = _connectionManager?.ReconnectAsync();
-            if (_trayMenuWindow != null && _trayMenuWindow.IsShown)
-            {
-                _trayMenuWindow.ClearItems();
-                BuildTrayMenuPopup(_trayMenuWindow);
-            }
         };
     }
 
@@ -1622,50 +1714,50 @@ public partial class App : Application
     {
         var p = Math.Min(100.0, Math.Max(0.0, percent));
         var resources = Application.Current.Resources;
-        var accent = (Microsoft.UI.Xaml.Media.Brush)resources["AccentFillColorDefaultBrush"];
-        var track = (Microsoft.UI.Xaml.Media.Brush)resources["ControlStrongFillColorDefaultBrush"];
+        // Two-tier color: green by default, red only once usage nearly maxed
+        // (≥ 95%). No amber middle band — keeps the signal binary and clear.
+        string accentKey = p >= 95 ? "SystemFillColorCriticalBrush"
+                                   : "SystemFillColorSuccessBrush";
+        var accent = (Microsoft.UI.Xaml.Media.Brush)resources[accentKey];
+        var track = (Microsoft.UI.Xaml.Media.Brush)resources["ControlAltFillColorTertiaryBrush"];
+        // Subtle hairline stroke — macOS-style — gives the bar a defined edge
+        // even when the fill is at 0% or matches the surrounding chrome.
+        var stroke = (Microsoft.UI.Xaml.Media.Brush)resources["ControlStrokeColorDefaultBrush"];
 
-        var grid = new Grid
+        // Outer wrapper carries the rounded corners + track color and clips
+        // the inner accent fill. This guarantees both ends render a clean
+        // pill cap regardless of percent or flyout width.
+        var frame = new Microsoft.UI.Xaml.Controls.Border
         {
             Height = 6,
+            CornerRadius = new CornerRadius(3),
+            Background = track,
+            BorderBrush = stroke,
+            BorderThickness = new Thickness(1),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Center,
-            MinWidth = 80
+            Margin = new Thickness(0, 2, 0, 2),
+            MinWidth = 60,
         };
-        // 1e-6 guard so an empty (0%) bar still renders the track column at
-        // full width; a 0/0 star pair would collapse.
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.0001, p), GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.0001, 100.0 - p), GridUnitType.Star) });
+
+        var fillGrid = new Grid();
+        // 1e-6 guard so a 0% bar still renders the empty slot; a 0/0 star pair
+        // would collapse and break the wrapper height.
+        fillGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.0001, p), GridUnitType.Star) });
+        fillGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.0001, 100.0 - p), GridUnitType.Star) });
 
         var filled = new Microsoft.UI.Xaml.Controls.Border
         {
             Background = accent,
-            CornerRadius = new CornerRadius(3, 0, 0, 3),
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Stretch
+            VerticalAlignment = VerticalAlignment.Stretch,
+            Opacity = p <= 0 ? 0 : 1,
         };
-        if (p <= 0)
-        {
-            filled.Opacity = 0; // hide accent stub at exactly 0% but keep slot
-        }
         Grid.SetColumn(filled, 0);
-        grid.Children.Add(filled);
+        fillGrid.Children.Add(filled);
 
-        var rest = new Microsoft.UI.Xaml.Controls.Border
-        {
-            Background = track,
-            CornerRadius = p >= 100 ? new CornerRadius(0, 3, 3, 0) : new CornerRadius(0, 3, 3, 0),
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Stretch
-        };
-        if (p <= 0)
-        {
-            rest.CornerRadius = new CornerRadius(3);
-        }
-        Grid.SetColumn(rest, 1);
-        grid.Children.Add(rest);
-
-        return grid;
+        frame.Child = fillGrid;
+        return frame;
     }
 
     // ── Rich card builder helpers for tray menu ──
@@ -1953,7 +2045,7 @@ public partial class App : Application
 
         foreach (var session in _lastSessions.Take(8))
         {
-            var card = BuildSessionListCard(session, secondaryText, successBrush, cautionBrush, neutralBrush);
+            var card = BuildSessionListCard(session, secondaryText);
             items.Add(new() { CustomContent = card });
         }
 
@@ -1962,16 +2054,11 @@ public partial class App : Application
 
     private static UIElement BuildSessionListCard(
         SessionInfo session,
-        Microsoft.UI.Xaml.Media.Brush secondaryText,
-        Microsoft.UI.Xaml.Media.Brush successBrush,
-        Microsoft.UI.Xaml.Media.Brush cautionBrush,
-        Microsoft.UI.Xaml.Media.Brush neutralBrush)
+        Microsoft.UI.Xaml.Media.Brush secondaryText)
     {
         // 2-row card:
-        //   Row 0: ● {name}                              {age}
+        //   Row 0: {name}                                    {age}
         //   Row 1: {model}              [████░░░░] {used}/{ctx} ({pct}%)
-        var isActive = string.Equals(session.Status, "active", StringComparison.OrdinalIgnoreCase);
-        var isIdle = string.Equals(session.Status, "idle", StringComparison.OrdinalIgnoreCase);
         var usedTokens = session.InputTokens + session.OutputTokens;
         var contextTokens = session.ContextTokens > 0 ? session.ContextTokens : 200_000;
         var pct = usedTokens > 0 ? Math.Min(100.0, (double)usedTokens / contextTokens * 100.0) : 0.0;
@@ -1987,18 +2074,12 @@ public partial class App : Application
             MinWidth = 260
         };
 
-        // Row 0: dot + name + age
+        // Row 0: name + age
         var line1 = new Grid { ColumnSpacing = 6 };
         line1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         line1.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var nameRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
-        nameRow.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse
-        {
-            Width = 8, Height = 8,
-            VerticalAlignment = VerticalAlignment.Center,
-            Fill = isActive ? successBrush : isIdle ? cautionBrush : neutralBrush
-        });
         nameRow.Children.Add(new TextBlock
         {
             Text = session.DisplayName ?? session.Key,
@@ -2025,9 +2106,8 @@ public partial class App : Application
         }
         outer.Children.Add(line1);
 
-        // Row 1: model + progress + ratio
+        // Row 1: model + ratio (text only — bar gets its own row below for clarity)
         var line2 = new Grid { ColumnSpacing = 8 };
-        line2.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         line2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         line2.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
@@ -2038,15 +2118,10 @@ public partial class App : Application
             Style = captionStyle, FontSize = 11, Foreground = secondaryText,
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center,
-            MaxWidth = 100,
             IsTextSelectionEnabled = false
         };
         Grid.SetColumn(model, 0);
         line2.Children.Add(model);
-
-        var bar = BuildMiniBar(pct);
-        Grid.SetColumn(bar, 1);
-        line2.Children.Add(bar);
 
         var ratio = new TextBlock
         {
@@ -2055,10 +2130,17 @@ public partial class App : Application
             VerticalAlignment = VerticalAlignment.Center,
             IsTextSelectionEnabled = false
         };
-        Grid.SetColumn(ratio, 2);
+        Grid.SetColumn(ratio, 1);
         line2.Children.Add(ratio);
 
         outer.Children.Add(line2);
+
+        // Row 2: dedicated full-width progress bar so it never gets squeezed
+        // between model name and ratio text.
+        var bar = BuildMiniBar(pct);
+        bar.HorizontalAlignment = HorizontalAlignment.Stretch;
+        outer.Children.Add(bar);
+
         return outer;
     }
 
@@ -2222,10 +2304,12 @@ public partial class App : Application
 
                 foreach (var win in prov.Windows)
                 {
-                    var winRow = new Grid { ColumnSpacing = 8 };
-                    winRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
-                    winRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                    winRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    // Window block: label + % on one row, full-width bar below.
+                    var winBlock = new StackPanel { Spacing = 2 };
+
+                    var winHeader = new Grid { ColumnSpacing = 8 };
+                    winHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    winHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
                     var label = new TextBlock
                     {
@@ -2236,11 +2320,7 @@ public partial class App : Application
                         IsTextSelectionEnabled = false
                     };
                     Grid.SetColumn(label, 0);
-                    winRow.Children.Add(label);
-
-                    var bar = BuildMiniBar(Math.Min(100.0, Math.Max(0.0, win.UsedPercent)));
-                    Grid.SetColumn(bar, 1);
-                    winRow.Children.Add(bar);
+                    winHeader.Children.Add(label);
 
                     var pctLbl = new TextBlock
                     {
@@ -2250,10 +2330,16 @@ public partial class App : Application
                         VerticalAlignment = VerticalAlignment.Center,
                         IsTextSelectionEnabled = false
                     };
-                    Grid.SetColumn(pctLbl, 2);
-                    winRow.Children.Add(pctLbl);
+                    Grid.SetColumn(pctLbl, 1);
+                    winHeader.Children.Add(pctLbl);
 
-                    provCard.Children.Add(winRow);
+                    winBlock.Children.Add(winHeader);
+
+                    var bar = BuildMiniBar(Math.Min(100.0, Math.Max(0.0, win.UsedPercent)));
+                    bar.HorizontalAlignment = HorizontalAlignment.Stretch;
+                    winBlock.Children.Add(bar);
+
+                    provCard.Children.Add(winBlock);
                 }
 
                 items.Add(new() { CustomContent = provCard });
@@ -2345,7 +2431,6 @@ public partial class App : Application
         line1.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });            // dot + name stack
         line1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // spacer
         line1.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });            // os chip
-        line1.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });            // chevron
 
         var nameRow = new StackPanel
         {
@@ -2391,16 +2476,9 @@ public partial class App : Application
             line1.Children.Add(osChip);
         }
 
-        var chevron = new TextBlock
-        {
-            Text = "›",
-            FontSize = 14,
-            Opacity = 0.5,
-            VerticalAlignment = VerticalAlignment.Center,
-            IsTextSelectionEnabled = false
-        };
-        Grid.SetColumn(chevron, 3);
-        line1.Children.Add(chevron);
+        // Inner chevron removed — AddFlyoutCustomItem already appends the
+        // official Fluent chevron, so drawing another here looked like a
+        // duplicate ":›" glyph in narrow flyouts.
         outer.Children.Add(line1);
 
         // ── Line 2 (verbose details) ──
