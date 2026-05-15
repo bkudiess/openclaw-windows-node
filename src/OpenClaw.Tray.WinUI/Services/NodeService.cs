@@ -191,29 +191,17 @@ public sealed class NodeService : IDisposable
     }
     
     /// <summary>
-    /// Initialize and connect the node
+    /// Obsolete — node lifecycle is owned by <see cref="OpenClawTray.Services.Connection.GatewayConnectionManager"/>.
+    /// Call <see cref="OpenClawTray.Services.Connection.GatewayConnectionManager.EnsureNodeConnectedAsync(System.Threading.CancellationToken)"/>
+    /// (or <see cref="ConnectionManagerWindowsNodeConnector"/> from the easy-button setup engine).
+    /// Will be removed in phase 5 of the connection-unification rollout.
     /// </summary>
-    public async Task ConnectAsync(string gatewayUrl, string token, string? bootstrapToken = null)
+    [Obsolete("Node lifecycle is owned by GatewayConnectionManager. Use EnsureNodeConnectedAsync or ConnectionManagerWindowsNodeConnector. Will be removed in phase 5.")]
+    public Task ConnectAsync(string gatewayUrl, string token, string? bootstrapToken = null)
     {
-        if (_nodeClient != null)
-        {
-            await DisconnectAsync();
-        }
-
-        _logger.Info($"Starting Windows Node connection to {GatewayUrlHelper.SanitizeForDisplay(gatewayUrl)}");
-        _token = token;
-
-        _nodeClient = new WindowsNodeClient(gatewayUrl, token, _identityDataPath, _logger, bootstrapToken);
-        _nodeClient.StatusChanged += OnNodeStatusChanged;
-        _nodeClient.PairingStatusChanged += OnPairingStatusChanged;
-        _nodeClient.HealthReceived += OnNodeHealthReceived;
-        _nodeClient.GatewaySelfUpdated += OnGatewaySelfUpdated;
-        _nodeClient.InvokeCompleted += OnNodeInvokeCompleted;
-
-        // Register capabilities (also pushes them to _nodeClient and sets permissions)
-        RegisterCapabilities();
-
-        await _nodeClient.ConnectAsync();
+        throw new InvalidOperationException(
+            "NodeService.ConnectAsync is removed. Node lifecycle is now owned by GatewayConnectionManager — " +
+            "call manager.EnsureNodeConnectedAsync (or ConnectionManagerWindowsNodeConnector for the easy-button setup engine).");
     }
 
     /// <summary>
@@ -235,16 +223,24 @@ public sealed class NodeService : IDisposable
     }
     
     /// <summary>
-    /// Disconnect the node
+    /// Detach from the manager-owned node client and tear down capability state.
+    /// Does NOT dispose <c>_nodeClient</c> — the client lifecycle is owned by
+    /// <see cref="OpenClawTray.Services.Connection.GatewayConnectionManager"/> /
+    /// <see cref="OpenClawTray.Services.Connection.NodeConnector"/>; call
+    /// <c>GatewayConnectionManager.DisconnectAsync</c> to actually close the WebSocket.
     /// </summary>
-    public async Task DisconnectAsync()
+    public Task DisconnectAsync()
     {
         StopMcpServer();
 
         if (_nodeClient != null)
         {
-            await _nodeClient.DisconnectAsync();
-            _nodeClient.Dispose();
+            // Unsubscribe but don't dispose — the connector owns the client.
+            _nodeClient.StatusChanged -= OnNodeStatusChanged;
+            _nodeClient.PairingStatusChanged -= OnPairingStatusChanged;
+            _nodeClient.HealthReceived -= OnNodeHealthReceived;
+            _nodeClient.GatewaySelfUpdated -= OnGatewaySelfUpdated;
+            _nodeClient.InvokeCompleted -= OnNodeInvokeCompleted;
             _nodeClient = null;
         }
 
@@ -262,6 +258,8 @@ public sealed class NodeService : IDisposable
             _dispatcherQueue.TryEnqueue(() => _a2uiCanvasWindow.Close());
             _a2uiCanvasWindow = null;
         }
+
+        return Task.CompletedTask;
     }
     
     private void RegisterCapabilities()
@@ -414,7 +412,36 @@ public sealed class NodeService : IDisposable
         if (client is null) return;
 
         _token = bearerToken;
+
+        // Detach event subscriptions from previous client (if any) so a reconnect's
+        // fresh client doesn't double-fire NodeService events through both clients.
+        var previous = _nodeClient;
+        if (previous != null && !ReferenceEquals(previous, client))
+        {
+            previous.StatusChanged -= OnNodeStatusChanged;
+            previous.PairingStatusChanged -= OnPairingStatusChanged;
+            previous.HealthReceived -= OnNodeHealthReceived;
+            previous.GatewaySelfUpdated -= OnGatewaySelfUpdated;
+            previous.InvokeCompleted -= OnNodeInvokeCompleted;
+        }
+
         _nodeClient = client;
+
+        // Wire NodeService event re-emitters to the manager-owned client.
+        // App.OnPairingStatusChanged + OnNodeStatusChanged subscribe to NodeService events;
+        // those subscriptions are stable across reconnects because the subscriptions are
+        // on NodeService, not on the underlying WindowsNodeClient. (Pre-unification this
+        // wiring lived in NodeService.ConnectAsync — moved here so the unified
+        // manager-owned lifecycle still drives NodeService's event surface.)
+        if (!ReferenceEquals(previous, client))
+        {
+            client.StatusChanged += OnNodeStatusChanged;
+            client.PairingStatusChanged += OnPairingStatusChanged;
+            client.HealthReceived += OnNodeHealthReceived;
+            client.GatewaySelfUpdated += OnGatewaySelfUpdated;
+            client.InvokeCompleted += OnNodeInvokeCompleted;
+        }
+
         bool capabilitiesBuilt;
         lock (_capabilitiesLock)
         {

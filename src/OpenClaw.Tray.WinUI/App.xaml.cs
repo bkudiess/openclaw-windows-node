@@ -109,25 +109,33 @@ public partial class App : Application
     /// Creates the WSL local gateway setup engine using the current tray settings.
     /// The V2 setup bridge calls this to drive the local-WSL setup flow;
     /// the engine pairs the operator + Windows tray node into the gateway it
-    /// installs, so we eagerly materialize the NodeService when needed.
+    /// installs, so we eagerly materialize the NodeService when needed (for
+    /// capability registration via the manager's NodeConnector.ClientCreated bridge).
     /// </summary>
     public LocalGatewaySetupEngine CreateLocalGatewaySetupEngine(
         bool replaceExistingConfigurationConfirmed = false)
     {
         var settings = _settings ?? new SettingsManager();
+        // NodeService is still required for capability registration on the manager's
+        // WindowsNodeClient (via App.xaml.cs ClientCreated → AttachClient bridge).
         var nodeService = EnsureNodeServiceForLocalGatewaySetup(settings);
-        // Suppress node auto-connect in the connection manager during setup.
-        // The engine controls node pairing in its own phase (PairWindowsTrayNode).
+        // Suppress manager auto-start of node during setup so the engine retains
+        // strict phase ordering (operator paired → WSL CLI device-approve → node
+        // pairing). EnsureNodeConnectedAsync (called by ConnectionManagerWindowsNodeConnector
+        // in the PairWindowsTrayNode phase) bypasses this gate to drive the connect.
         _suppressNodeDuringSetup = true;
         try
         {
-            // Use the connection manager's operator connector so all handshake/pairing
-            // events appear in the diagnostics window and reuse the manager's v2/v3
-            // signature fallback, credential resolution, and device token persistence.
+            // Use the manager-backed connectors so all handshake/pairing events appear
+            // in the diagnostics window and reuse the manager's v2/v3 signature fallback,
+            // credential resolution, per-gateway identity store, and device token persistence.
             IGatewayOperatorConnector? operatorConnector = null;
+            IWindowsNodeConnector? windowsNodeConnector = null;
             if (_connectionManager != null && _gatewayRegistry != null)
             {
                 operatorConnector = new ConnectionManagerOperatorConnector(
+                    _connectionManager, _gatewayRegistry, new AppLogger());
+                windowsNodeConnector = new ConnectionManagerWindowsNodeConnector(
                     _connectionManager, _gatewayRegistry, new AppLogger());
             }
             var engine = LocalGatewaySetupEngineFactory.CreateLocalOnly(
@@ -136,7 +144,8 @@ public partial class App : Application
                 nodeService,
                 replaceExistingConfigurationConfirmed: replaceExistingConfigurationConfirmed,
                 gatewayRegistry: _gatewayRegistry,
-                operatorConnectorOverride: operatorConnector);
+                operatorConnectorOverride: operatorConnector,
+                windowsNodeConnectorOverride: windowsNodeConnector);
             // Clear suppress flag when engine completes so normal node connections resume.
             // Only clear if this engine is still the active one (prevents stale engine #1
             // from clearing the flag while engine #2 is running).
@@ -670,26 +679,13 @@ public partial class App : Application
         OpenClawTray.Chat.Explorations.ChatExplorationPresetStore.ApplyDefaultIfPresent();
         ShowSurfaceImprovementsTipIfNeeded();
 
+        // Initialize connection manager BEFORE onboarding so CreateLocalGatewaySetupEngine()
+        // (called by the easy-button flow) can wire ConnectionManagerOperatorConnector +
+        // ConnectionManagerWindowsNodeConnector. Without this ordering, the engine factory
+        // would fall back to the legacy NodeServiceWindowsNodeConnector path, which delegates
+        // to the now-obsolete NodeService.ConnectAsync and would fail at runtime.
         _gatewayRegistry = new GatewayRegistry(SettingsManager.SettingsDirectoryPath);
         _gatewayRegistry.Load();
-
-        // First-run check (also supports forced onboarding for testing).
-        // Wrapped in try/catch so a wizard construction failure cannot tear
-        // down the tray; user can retry via the Setup Guide menu item.
-        try
-        {
-            if (RequiresSetup(_settings) ||
-                Environment.GetEnvironmentVariable("OPENCLAW_FORCE_ONBOARDING") == "1")
-            {
-                await ShowOnboardingAsync();
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Error($"Onboarding failed during launch (tray remains available): {ex}");
-        }
-
-        // Initialize connection manager (north star architecture)
         var credentialResolver = new CredentialResolver(DeviceIdentityFileReader.Instance);
         var clientFactory = new GatewayClientFactory();
         var appLogger = new AppLogger();
@@ -728,10 +724,25 @@ public partial class App : Application
             nodeConnector: nodeConnector,
             isNodeEnabled: ShouldInitializeNodeService,
             diagnostics: diagnostics,
-            tunnelManager: _sshTunnelService,
-            shouldStartNodeConnection: ShouldInitializeNodeService);
+            tunnelManager: _sshTunnelService);
         _connectionManager.OperatorClientChanged += OnOperatorClientChanged;
         _connectionManager.StateChanged += OnManagerStateChanged;
+
+        // First-run check (also supports forced onboarding for testing).
+        // Wrapped in try/catch so a wizard construction failure cannot tear
+        // down the tray; user can retry via the Setup Guide menu item.
+        try
+        {
+            if (RequiresSetup(_settings) ||
+                Environment.GetEnvironmentVariable("OPENCLAW_FORCE_ONBOARDING") == "1")
+            {
+                await ShowOnboardingAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"Onboarding failed during launch (tray remains available): {ex}");
+        }
 
         // Ensure NodeService is constructed BEFORE InitializeGatewayClient triggers a
         // NodeConnector connect. The NodeConnector.ClientCreated event subscription
@@ -1953,26 +1964,11 @@ public partial class App : Application
         return _settings?.EnableNodeMode == true || _settings?.EnableMcpServer == true;
     }
 
-    private bool ShouldInitializeNodeService(GatewayRecord activeGateway, string managerIdentityPath)
-    {
-        if (!ShouldInitializeNodeService()) return false;
-
-        if (LocalNodeServiceOwnsIdentityFor(activeGateway))
-        {
-            Logger.Info("[ConnMgr] Suppressing manager-owned NodeConnector because local NodeService owns the active local gateway identity");
-            return false;
-        }
-
-        return true;
-    }
-
-    private bool LocalNodeServiceOwnsIdentityFor(GatewayRecord activeGateway)
-    {
-        if (!activeGateway.IsLocal || _settings == null) return false;
-        if (!StartupSetupState.HasStoredNodeDeviceToken(IdentityDataPath)) return false;
-
-        return EnsureNodeServiceForLocalGatewaySetup(_settings) != null;
-    }
+    // The pre-unification ShouldInitializeNodeService(GatewayRecord, string) overload
+    // and LocalNodeServiceOwnsIdentityFor have been removed: GatewayConnectionManager
+    // is now the single owner of the WindowsNodeClient lifecycle for ALL gateways
+    // (local + remote). NodeService remains as the capability registrar via the
+    // NodeConnector.ClientCreated → AttachClient bridge wired in InitializeApp.
 
     private void OnNodeStatusChanged(object? sender, ConnectionStatus status)
     {

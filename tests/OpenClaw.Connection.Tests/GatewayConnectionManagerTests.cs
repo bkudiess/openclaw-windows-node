@@ -159,8 +159,12 @@ public class GatewayConnectionManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task HandshakeSucceeded_SuppressesManagerNodeConnector_WhenLocalNodeServiceOwnsIdentity()
+    public async Task HandshakeSucceeded_RespectsShouldStartNodeConnectionGate_WhenFalse()
     {
+        // The shouldStartNodeConnection delegate (on the manager constructor) is a
+        // generic per-gateway gate. Pre-unification the App used it to defer to a
+        // legacy NodeService for local gateways; post-unification the App no longer
+        // wires this predicate, but the gate itself remains a useful seam for callers.
         SetupGateway("gw-local", "ws://localhost:18789", isLocal: true);
         _resolver.OperatorCredential = new GatewayCredential("op-tok", false, "test");
         _resolver.NodeCredential = new GatewayCredential("node-tok", false, "test");
@@ -177,7 +181,7 @@ public class GatewayConnectionManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task HandshakeSucceeded_StartsManagerNodeConnector_WhenNoLocalNodeServiceOwnsIdentity()
+    public async Task HandshakeSucceeded_StartsManagerNodeConnector_WhenGateAllows()
     {
         SetupGateway("gw-remote", "wss://remote.example", isLocal: false);
         _resolver.OperatorCredential = new GatewayCredential("op-tok", false, "test");

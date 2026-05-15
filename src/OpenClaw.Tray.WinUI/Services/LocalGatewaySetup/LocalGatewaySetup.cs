@@ -1683,6 +1683,7 @@ public interface IWindowsNodeConnector
 }
 
 #if !OPENCLAW_TRAY_TESTS
+[Obsolete("Use ConnectionManagerWindowsNodeConnector instead — drives node connection through GatewayConnectionManager. Will be removed in phase 5.")]
 public sealed class NodeServiceWindowsNodeConnector : IWindowsNodeConnector
 {
     private readonly NodeService _nodeService;
@@ -1695,7 +1696,9 @@ public sealed class NodeServiceWindowsNodeConnector : IWindowsNodeConnector
     public async Task ConnectAsync(string gatewayUrl, string token, string? bootstrapToken, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+#pragma warning disable CS0618 // legacy fallback path — phase 5 removes both this connector and NodeService.ConnectAsync
         await _nodeService.ConnectAsync(gatewayUrl, token, bootstrapToken);
+#pragma warning restore CS0618
         var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(35);
         while (DateTimeOffset.UtcNow < deadline)
         {
@@ -3292,7 +3295,8 @@ public static class LocalGatewaySetupEngineFactory
         string? identityDataPath = null,
         string? setupStatePath = null,
         OpenClaw.Connection.GatewayRegistry? gatewayRegistry = null,
-        IGatewayOperatorConnector? operatorConnectorOverride = null)
+        IGatewayOperatorConnector? operatorConnectorOverride = null,
+        IWindowsNodeConnector? windowsNodeConnectorOverride = null)
     {
         // Defense-in-depth fail-closed: refuse to construct the engine if any of the
         // 6 sync existing-config predicates fire and the caller has not passed explicit
@@ -3354,9 +3358,17 @@ public static class LocalGatewaySetupEngineFactory
         var gatewayConfigurationPreparer = new OpenClawCliGatewayConfigurationPreparer(wsl);
         var pendingDeviceApprover = new WslGatewayCliPendingDeviceApprover(wsl, options.OpenClawInstallPrefix + "/bin/openclaw");
 #if OPENCLAW_TRAY_TESTS
-        IWindowsNodeConnector? windowsNodeConnector = null;
+        IWindowsNodeConnector? windowsNodeConnector = windowsNodeConnectorOverride;
 #else
-        IWindowsNodeConnector? windowsNodeConnector = nodeService == null ? null : new NodeServiceWindowsNodeConnector(nodeService);
+        // Prefer caller-supplied override (production: ConnectionManagerWindowsNodeConnector
+        // — drives node connection through GatewayConnectionManager so all node handshake
+        // events flow through the manager's diagnostics + per-gateway identity store).
+        // Fall back to the legacy NodeService-driven path only if neither is available
+        // (kept for any test or call site that hasn't been migrated yet).
+#pragma warning disable CS0618 // NodeServiceWindowsNodeConnector is the legacy path; phase 5 removes both
+        IWindowsNodeConnector? windowsNodeConnector = windowsNodeConnectorOverride
+            ?? (nodeService == null ? null : new NodeServiceWindowsNodeConnector(nodeService));
+#pragma warning restore CS0618
 #endif
 
         return new LocalGatewaySetupEngine(
