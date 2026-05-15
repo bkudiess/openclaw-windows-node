@@ -18,7 +18,7 @@
                      Margin="0,0,0,0"/>
 
             <!-- ═══ Section 1: Status Card ═══ -->
-            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            <Border x:Name="StatusCard" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="16">
                 <StackPanel Spacing="8">
@@ -26,7 +26,6 @@
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
@@ -39,11 +38,6 @@
                                 VerticalAlignment="Center" Click="OnReconnect" IsEnabled="False" Margin="0,0,8,0"/>
                         <Button x:Name="DisconnectButton" Grid.Column="2" Content="Disconnect"
                                 VerticalAlignment="Center" Click="OnDisconnect" Visibility="Collapsed"/>
-                        <Button x:Name="DiagnosticsButton" Grid.Column="3" Content="🔍"
-                                ToolTipService.ToolTip="Open Connection Diagnostics"
-                                VerticalAlignment="Center" Click="OnOpenDiagnostics"
-                                Padding="8,4" Margin="4,0,0,0" FontSize="14"
-                                Background="Transparent"/>
                     </Grid>
                     <!-- Row 2: Gateway details -->
                     <TextBlock x:Name="GatewayDetailText"
@@ -55,47 +49,56 @@
                                Style="{StaticResource CaptionTextBlockStyle}"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                TextWrapping="Wrap"/>
-                    <!-- Row 4: State Machine Pills -->
-                    <Grid Margin="0,4,0,0">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
+                    <!-- Role Status Rows -->
+                    <StackPanel Margin="0,4,0,0" Spacing="6">
+                        <!-- Operator row -->
+                        <Border x:Name="OperatorAccentCard"
+                                Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                                BorderThickness="3,0,0,0" BorderBrush="Gray"
+                                CornerRadius="4" Padding="12,8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="🖥️" FontSize="16" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <TextBlock Grid.Column="1" Text="Operator" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="0,0,8,0">
+                                    <Ellipse x:Name="OperatorStatusDot" Width="10" Height="10" VerticalAlignment="Center" Fill="Gray"/>
+                                    <TextBlock x:Name="OperatorStatusLabel" Text="Off" FontSize="12" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <TextBlock x:Name="OperatorDetailText" Grid.Column="3" FontSize="11"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </Grid>
+                        </Border>
 
-                        <!-- Operator flow -->
-                        <StackPanel Grid.Row="0" Margin="0,0,0,4">
-                            <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,0,2">
-                                <TextBlock Text="OPERATOR" FontSize="9" FontWeight="Bold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" CharacterSpacing="80" VerticalAlignment="Center" Width="70"/>
-                                <Border x:Name="CpOpOff" CornerRadius="3" Padding="6,2"><TextBlock Text="Off" FontSize="10"/></Border>
-                                <TextBlock Text="→" VerticalAlignment="Center" FontSize="9" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                <Border x:Name="CpOpConnecting" CornerRadius="3" Padding="6,2"><TextBlock Text="Connecting" FontSize="10"/></Border>
-                                <TextBlock Text="→" VerticalAlignment="Center" FontSize="9" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                <Border x:Name="CpOpConnected" CornerRadius="3" Padding="6,2"><TextBlock Text="Connected" FontSize="10"/></Border>
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" Spacing="4" Margin="74,0,0,0">
-                                <Border x:Name="CpOpPairing" CornerRadius="3" Padding="6,2"><TextBlock Text="Pairing" FontSize="10"/></Border>
-                                <Border x:Name="CpOpError" CornerRadius="3" Padding="6,2"><TextBlock Text="Error" FontSize="10"/></Border>
-                            </StackPanel>
-                            <TextBlock x:Name="CpOpDetailText" FontSize="9" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="74,2,0,0" TextWrapping="Wrap"/>
-                        </StackPanel>
-
-                        <!-- Node flow -->
-                        <StackPanel Grid.Row="1">
-                            <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,0,2">
-                                <TextBlock Text="NODE" FontSize="9" FontWeight="Bold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" CharacterSpacing="80" VerticalAlignment="Center" Width="70"/>
-                                <Border x:Name="CpNodeOff" CornerRadius="3" Padding="6,2"><TextBlock Text="Off" FontSize="10"/></Border>
-                                <TextBlock Text="→" VerticalAlignment="Center" FontSize="9" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                <Border x:Name="CpNodeConnecting" CornerRadius="3" Padding="6,2"><TextBlock Text="Connecting" FontSize="10"/></Border>
-                                <TextBlock Text="→" VerticalAlignment="Center" FontSize="9" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                <Border x:Name="CpNodeConnected" CornerRadius="3" Padding="6,2"><TextBlock Text="Connected" FontSize="10"/></Border>
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" Spacing="4" Margin="74,0,0,0">
-                                <Border x:Name="CpNodePairing" CornerRadius="3" Padding="6,2"><TextBlock Text="Pairing" FontSize="10"/></Border>
-                                <Border x:Name="CpNodeError" CornerRadius="3" Padding="6,2"><TextBlock Text="Error" FontSize="10"/></Border>
-                            </StackPanel>
-                            <TextBlock x:Name="CpNodeDetailText" FontSize="9" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="74,2,0,0" TextWrapping="Wrap"/>
-                        </StackPanel>
-                    </Grid>
+                        <!-- Node row -->
+                        <Border x:Name="NodeAccentCard"
+                                Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                                BorderThickness="3,0,0,0" BorderBrush="Gray"
+                                CornerRadius="4" Padding="12,8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="📡" FontSize="16" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <TextBlock Grid.Column="1" Text="Node" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,12,0" Width="60"/>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="0,0,8,0">
+                                    <Ellipse x:Name="NodeStatusDot" Width="10" Height="10" VerticalAlignment="Center" Fill="Gray"/>
+                                    <TextBlock x:Name="NodeStatusLabel" Text="Off" FontSize="12" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <TextBlock x:Name="NodeDetailText" Grid.Column="3" FontSize="11"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
 
                     <!-- Row 5: Pairing guidance (shown when awaiting approval) -->
                     <Border x:Name="PairingGuidanceCard" Visibility="Collapsed"
@@ -148,124 +151,17 @@
             </Border>
 
 
-            <!-- ═══ Section 3: Setup Code ═══ -->
+            <!-- ═══ Connection Methods (Tabbed) ═══ -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="16">
-                <StackPanel Spacing="8">
-                    <TextBlock x:Uid="ConnectionPage_TextBlock_128" Text="🔑 Setup Code" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                    <TextBlock x:Uid="ConnectionPage_TextBlock_129" Text="Paste a setup code from openclaw qr"
-                               Style="{StaticResource CaptionTextBlockStyle}"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                    <Grid ColumnSpacing="8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBox x:Uid="SetupCodeTextBox" x:Name="SetupCodeTextBox" Grid.Column="0"
-                                 PlaceholderText="Paste setup code here…" TextChanged="OnSetupCodeTextChanged"/>
-                        <Button x:Uid="ApplySetupCodeButton" x:Name="ApplySetupCodeButton" Grid.Column="1" Content="Apply"
-                                Style="{ThemeResource AccentButtonStyle}"
-                                Click="OnApplySetupCode" VerticalAlignment="Bottom"/>
-                    </Grid>
-                    <!-- Decoded preview (shown after pasting) -->
-                    <StackPanel x:Name="SetupCodePreviewPanel" Spacing="4" Visibility="Collapsed">
-                        <TextBlock x:Name="SetupCodePreviewUrl"
-                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                        <TextBlock x:Name="SetupCodePreviewToken"
-                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                    </StackPanel>
-                    <TextBlock x:Name="SetupCodeResultText"
-                               Style="{StaticResource CaptionTextBlockStyle}"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                </StackPanel>
-            </Border>
-
-            <!-- ═══ Section 3.5: Recent Gateways ═══ -->
-            <Border x:Name="RecentGatewaysCard" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="16"
-                    Visibility="Collapsed">
-                <StackPanel Spacing="8">
-                    <TextBlock Text="📡 Recent Gateways" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                    <TextBlock Text="Switch between previously paired gateways."
-                               Style="{StaticResource CaptionTextBlockStyle}"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                    <StackPanel x:Name="RecentGatewayListPanel" Spacing="6"/>
-                </StackPanel>
-            </Border>
-
-            <!-- ═══ Section 4: Direct Connect ═══ -->
-            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="16">
-                <StackPanel Spacing="8">
-                    <TextBlock Text="🔗 Direct Connect" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                    <TextBlock Text="Connect with a gateway URL and shared token (admin scope, no pairing required for node)."
-                               Style="{StaticResource CaptionTextBlockStyle}"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                    <TextBox x:Name="GatewayUrlTextBox" Header="Gateway URL"
-                             PlaceholderText="ws://localhost:18790" Text="ws://localhost:18790"/>
-                    <TextBox x:Name="TokenTextBox" Header="Token"
-                             PlaceholderText="Shared gateway token"/>
-                    <TextBlock x:Name="DirectConnectResultText"
-                               Style="{StaticResource CaptionTextBlockStyle}"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
-                        <Button Content="Connect" Style="{ThemeResource AccentButtonStyle}" Click="OnDirectConnect"/>
-                    </StackPanel>
-
-                    <!-- SSH Tunnel -->
-                    <ToggleSwitch x:Uid="SshToggle" x:Name="SshToggle" Header="SSH Tunnel"
-                                  Toggled="OnSshToggled" Margin="0,4,0,0"/>
-                    <StackPanel x:Name="SshDetailsPanel" Spacing="8" Visibility="Collapsed">
-                        <Grid ColumnSpacing="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBox x:Uid="SshUserBox" x:Name="SshUserBox" Grid.Column="0" Header="SSH User" PlaceholderText="user"/>
-                            <TextBox x:Uid="SshHostBox" x:Name="SshHostBox" Grid.Column="1" Header="SSH Host" PlaceholderText="machine-name"/>
-                        </Grid>
-                        <Grid ColumnSpacing="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBox x:Uid="SshRemotePortBox" x:Name="SshRemotePortBox" Grid.Column="0" Header="Remote Port" PlaceholderText="18789"/>
-                            <TextBox x:Uid="SshLocalPortBox" x:Name="SshLocalPortBox" Grid.Column="1" Header="Local Port" PlaceholderText="18789"/>
-                        </Grid>
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-
-            <!-- ═══ Section 5: Device Identity ═══ -->
-            <Border x:Name="DeviceIdentityCard" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="16" Visibility="Collapsed">
-                <StackPanel Spacing="8">
-                    <TextBlock x:Uid="ConnectionPage_TextBlock_200" Text="🪪 This Device" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                    <Grid ColumnSpacing="8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock x:Uid="ConnectionPage_TextBlock_207" Grid.Column="0" Text="Device ID:" VerticalAlignment="Center"
-                                   Style="{StaticResource CaptionTextBlockStyle}"/>
-                        <TextBlock x:Name="DeviceIdText" Grid.Column="1" VerticalAlignment="Center"
-                                   Style="{StaticResource BodyTextBlockStyle}" IsTextSelectionEnabled="True"/>
-                        <Button x:Uid="CopyDeviceIdButton" x:Name="CopyDeviceIdButton" Grid.Column="2" Content="Copy"
-                                Click="OnCopyDeviceId" VerticalAlignment="Center"/>
-                    </Grid>
-                    <TextBlock x:Name="PairingStatusText"
-                               Style="{StaticResource CaptionTextBlockStyle}"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                    <!-- Pending approval help -->
-                    <StackPanel x:Name="ApprovalHelpPanel" Spacing="4" Visibility="Collapsed">
-                        <TextBlock x:Uid="ConnectionPage_TextBlock_219" Text="Run this command on the gateway host to approve:"
+                    BorderThickness="1" CornerRadius="8" Padding="16,8,16,16">
+            <Pivot x:Name="ConnectionPivot">
+                <PivotItem>
+                    <PivotItem.Header>
+                        <TextBlock Text="🔑 Setup Code" FontSize="13"/>
+                    </PivotItem.Header>
+                    <StackPanel Spacing="8" Padding="0,8,0,0">
+                        <TextBlock x:Uid="ConnectionPage_TextBlock_129" Text="Paste a setup code from openclaw qr"
                                    Style="{StaticResource CaptionTextBlockStyle}"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                         <Grid ColumnSpacing="8">
@@ -273,28 +169,83 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock x:Name="ApprovalCommandText" Grid.Column="0"
-                                       IsTextSelectionEnabled="True"
-                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                       FontFamily="Consolas" TextWrapping="Wrap"/>
-                            <Button x:Uid="CopyApprovalButton" x:Name="CopyApprovalButton" Grid.Column="1" Content="Copy"
-                                    Click="OnCopyApprovalCommand" VerticalAlignment="Top"/>
+                            <TextBox x:Uid="SetupCodeTextBox" x:Name="SetupCodeTextBox" Grid.Column="0"
+                                     PlaceholderText="Paste setup code here…" TextChanged="OnSetupCodeTextChanged"/>
+                            <Button x:Uid="ApplySetupCodeButton" x:Name="ApplySetupCodeButton" Grid.Column="1" Content="Apply"
+                                    Style="{ThemeResource AccentButtonStyle}"
+                                    Click="OnApplySetupCode" VerticalAlignment="Bottom"/>
                         </Grid>
+                        <!-- Decoded preview (shown after pasting) -->
+                        <StackPanel x:Name="SetupCodePreviewPanel" Spacing="4" Visibility="Collapsed">
+                            <TextBlock x:Name="SetupCodePreviewUrl"
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                            <TextBlock x:Name="SetupCodePreviewToken"
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        </StackPanel>
+                        <TextBlock x:Name="SetupCodeResultText"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                     </StackPanel>
-                </StackPanel>
-            </Border>
+                </PivotItem>
 
-            <!-- ═══ Section 6: Connection Log ═══ -->
-            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="16">
-                <StackPanel Spacing="8">
-                    <TextBlock x:Uid="ConnectionPage_TextBlock_243" Text="📋 Connection Log" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                    <StackPanel x:Name="ConnectionLogPanel" Spacing="2"/>
-                    <TextBlock x:Uid="ConnectionLogEmpty" x:Name="ConnectionLogEmpty" Text="No recent connection events."
-                               Style="{StaticResource CaptionTextBlockStyle}"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                </StackPanel>
+                <PivotItem>
+                    <PivotItem.Header>
+                        <TextBlock Text="📡 Recent Gateways" FontSize="13"/>
+                    </PivotItem.Header>
+                    <StackPanel Spacing="8" Padding="0,8,0,0">
+                        <TextBlock x:Name="RecentGatewaysEmptyText" Text="No saved gateways yet."
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   Visibility="Collapsed"/>
+                        <StackPanel x:Name="RecentGatewayListPanel" Spacing="6"/>
+                    </StackPanel>
+                </PivotItem>
+
+                <PivotItem>
+                    <PivotItem.Header>
+                        <TextBlock Text="🔗 Direct Connect" FontSize="13"/>
+                    </PivotItem.Header>
+                    <StackPanel Spacing="8" Padding="0,8,0,0">
+                        <TextBlock Text="Connect with a gateway URL and shared token."
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        <TextBox x:Name="GatewayUrlTextBox" Header="Gateway URL"
+                                 PlaceholderText="ws://localhost:18790" Text="ws://localhost:18790"/>
+                        <TextBox x:Name="TokenTextBox" Header="Token"
+                                 PlaceholderText="Shared gateway token"/>
+                        <TextBlock x:Name="DirectConnectResultText"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                            <Button Content="Connect" Style="{ThemeResource AccentButtonStyle}" Click="OnDirectConnect"/>
+                        </StackPanel>
+
+                        <!-- SSH Tunnel -->
+                        <ToggleSwitch x:Uid="SshToggle" x:Name="SshToggle" Header="SSH Tunnel"
+                                      Toggled="OnSshToggled"/>
+                        <StackPanel x:Name="SshDetailsPanel" Spacing="8" Visibility="Collapsed">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Uid="SshUserBox" x:Name="SshUserBox" Grid.Column="0" Header="SSH User" PlaceholderText="user"/>
+                                <TextBox x:Uid="SshHostBox" x:Name="SshHostBox" Grid.Column="1" Header="SSH Host" PlaceholderText="machine-name"/>
+                            </Grid>
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Uid="SshRemotePortBox" x:Name="SshRemotePortBox" Grid.Column="0" Header="Remote Port" PlaceholderText="18789"/>
+                                <TextBox x:Uid="SshLocalPortBox" x:Name="SshLocalPortBox" Grid.Column="1" Header="Local Port" PlaceholderText="18789"/>
+                            </Grid>
+                        </StackPanel>
+                    </StackPanel>
+                </PivotItem>
+            </Pivot>
             </Border>
 
         </StackPanel>
