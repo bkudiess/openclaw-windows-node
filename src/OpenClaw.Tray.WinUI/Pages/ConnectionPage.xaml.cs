@@ -281,9 +281,7 @@ public sealed partial class ConnectionPage : Page
 
         // Check if operator has scope to approve/reject
         var scopes = _hub?.GatewayClient?.GrantedOperatorScopes ?? (IReadOnlyList<string>)Array.Empty<string>();
-        var canPair = scopes.Any(s =>
-            s.Equals("operator.admin", StringComparison.OrdinalIgnoreCase) ||
-            s.Equals("operator.pairing", StringComparison.OrdinalIgnoreCase));
+        var canPair = OperatorScopeHelper.CanApproveDevices(scopes);
 
         foreach (var req in data.Pending)
         {
@@ -419,9 +417,7 @@ public sealed partial class ConnectionPage : Page
         NodePairingCard.Visibility = Visibility.Visible;
 
         var scopes = _hub?.GatewayClient?.GrantedOperatorScopes ?? (IReadOnlyList<string>)Array.Empty<string>();
-        var canPair = scopes.Any(s =>
-            s.Equals("operator.admin", StringComparison.OrdinalIgnoreCase) ||
-            s.Equals("operator.pairing", StringComparison.OrdinalIgnoreCase));
+        var canPair = OperatorScopeHelper.CanApproveDevices(scopes);
 
         foreach (var req in data.Pending)
         {
@@ -658,30 +654,7 @@ public sealed partial class ConnectionPage : Page
 
             // Clear stored device tokens so the shared token is used
             var identityDir = _gatewayRegistry.GetIdentityDirectory(recordId);
-            var keyPath = System.IO.Path.Combine(identityDir, "device-key-ed25519.json");
-            if (System.IO.File.Exists(keyPath))
-            {
-                try
-                {
-                    var json = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(keyPath));
-                    using var ms = new System.IO.MemoryStream();
-                    using var writer = new System.Text.Json.Utf8JsonWriter(ms, new System.Text.Json.JsonWriterOptions { Indented = true });
-                    writer.WriteStartObject();
-                    foreach (var prop in json.RootElement.EnumerateObject())
-                    {
-                        if (prop.Name is "DeviceToken" or "DeviceTokenScopes" or "NodeDeviceToken" or "NodeDeviceTokenScopes")
-                            continue;
-                        prop.WriteTo(writer);
-                    }
-                    writer.WriteEndObject();
-                    writer.Flush();
-                    System.IO.File.WriteAllBytes(keyPath, ms.ToArray());
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"[ConnectionPage] Failed to clear device tokens: {ex.Message}");
-                }
-            }
+            DeviceIdentityStore.ClearStoredTokens(identityDir);
 
             // Save settings (SSH config + gateway URL for legacy compat)
             if (previousSettings != null)
@@ -708,43 +681,10 @@ public sealed partial class ConnectionPage : Page
 
             await _connectionManager.ConnectAsync(recordId);
 
-            // Poll connection manager state — ConnectAsync fires connect asynchronously,
-            // so we need to wait for a definitive result before reporting success/failure.
-            bool connected = false;
-            bool failed = false;
-            for (int attempt = 0; attempt < 15; attempt++)
-            {
-                await Task.Delay(1000);
-                var snapshot = _connectionManager.CurrentSnapshot;
-                if (snapshot.OverallState is OverallConnectionState.Connected
-                    or OverallConnectionState.Ready)
-                {
-                    connected = true;
-                    break;
-                }
-                if (snapshot.OverallState is OverallConnectionState.Error)
-                {
-                    failed = true;
-                    break;
-                }
-                if (snapshot.OverallState is OverallConnectionState.PairingRequired)
-                {
-                    DirectConnectResultText.Text = $"⏳ Pairing required — approve on gateway";
-                    return; // don't rollback, pairing is in progress
-                }
-            }
-
-            if (connected)
-            {
-                DirectConnectResultText.Text = $"✓ Connected to {GatewayUrlHelper.SanitizeForDisplay(url)}";
-                return;
-            }
-
-            // Connection failed or timed out — rollback
-            var reason = failed ? "Connection failed" : "Connection timed out";
-            DirectConnectResultText.Text = $"✗ {reason}";
-            RollbackDirectConnect(previousActiveId, isNewRecord, recordId, existingRecordSnapshot,
-                previousSettings, prevGatewayUrl, prevUseSsh, prevSshUser, prevSshHost, prevSshRemotePort, prevSshLocalPort);
+            // The page already subscribes to StateChanged via UpdateFromSnapshot
+            // (wired in Initialize), which will update the UI as connection state
+            // progresses through Connecting → Connected/PairingRequired/Error.
+            DirectConnectResultText.Text = $"Connecting to {GatewayUrlHelper.SanitizeForDisplay(url)}…";
         }
         catch (Exception ex)
         {

@@ -146,6 +146,29 @@ internal sealed class ConnectionStateMachine
         }
     }
 
+    /// <summary>Update the operator device ID in the snapshot.</summary>
+    internal void SetOperatorDeviceId(string? deviceId)
+    {
+        Current = Current with { OperatorDeviceId = deviceId };
+    }
+
+    /// <summary>Update node info (device ID, pairing status, optional request ID) in the snapshot.</summary>
+    internal void SetNodeInfo(string? deviceId, OpenClaw.Shared.PairingStatus pairingStatus, string? pairingRequestId = null)
+    {
+        Current = Current with
+        {
+            NodeDeviceId = deviceId,
+            NodePairingStatus = pairingStatus,
+            NodePairingRequestId = pairingRequestId ?? Current.NodePairingRequestId
+        };
+    }
+
+    /// <summary>Update the operator pairing request ID in the snapshot.</summary>
+    internal void SetOperatorPairingRequestId(string? requestId)
+    {
+        Current = Current with { OperatorPairingRequestId = requestId };
+    }
+
     private void ApplyTransition(ConnectionTrigger trigger, string? detail)
     {
         switch (trigger)

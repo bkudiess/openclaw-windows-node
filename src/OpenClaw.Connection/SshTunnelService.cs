@@ -7,7 +7,7 @@ namespace OpenClaw.Connection;
 /// <summary>
 /// Manages an SSH local port-forward process for gateway access.
 /// </summary>
-public sealed class SshTunnelService : IDisposable
+public sealed class SshTunnelService : ISshTunnelManager
 {
     private readonly IOpenClawLogger _logger;
     private Process? _process;
@@ -23,6 +23,8 @@ public sealed class SshTunnelService : IDisposable
     }
 
     public bool IsRunning => _process is { HasExited: false };
+    public bool IsActive => IsRunning;
+    public string? LocalTunnelUrl => IsActive ? $"ws://localhost:{CurrentLocalPort}" : null;
     public string? CurrentUser { get; private set; }
     public string? CurrentHost { get; private set; }
     public int CurrentRemotePort { get; private set; }
@@ -210,5 +212,18 @@ public sealed class SshTunnelService : IDisposable
     public void Dispose()
     {
         Stop();
+    }
+
+    public Task<string> StartAsync(SshTunnelConfig config, CancellationToken ct)
+    {
+        EnsureStarted(config.User, config.Host, config.RemotePort, config.LocalPort, config.IncludeBrowserProxyForward);
+        var localUrl = $"ws://localhost:{config.LocalPort}";
+        return Task.FromResult(localUrl);
+    }
+
+    public Task StopAsync()
+    {
+        Stop();
+        return Task.CompletedTask;
     }
 }

@@ -372,14 +372,57 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
 
         // Clear stored device tokens so we start fresh with the bootstrap token.
         // The keypair (device ID) stays — only the tokens are wiped.
-        ClearStoredDeviceTokens(identityDir);
-
+        DeviceIdentityStore.ClearStoredTokens(identityDir, _logger);
         _diagnostics.Record("setup", $"Setup code applied for {GatewayUrlHelper.SanitizeForDisplay(gatewayUrl)}");
 
         // 5. Connect to new gateway
         await ConnectAsync(recordId);
 
         return new SetupCodeResult(SetupCodeOutcome.Success, GatewayUrl: gatewayUrl);
+    }
+
+    public async Task<SetupCodeResult> ConnectWithSharedTokenAsync(
+        string gatewayUrl, string token, SshTunnelConfig? sshTunnel = null)
+    {
+        ThrowIfDisposed();
+
+        if (!GatewayUrlHelper.IsValidGatewayUrl(gatewayUrl))
+            return new SetupCodeResult(SetupCodeOutcome.InvalidUrl, "Invalid gateway URL");
+
+        // Disconnect current gateway if any
+        await DisconnectAsync();
+
+        // Find or create gateway record (dedup by URL)
+        var existing = _registry.FindByUrl(gatewayUrl);
+        var recordId = existing?.Id ?? Guid.NewGuid().ToString();
+        var record = (existing ?? new GatewayRecord { Id = recordId }) with
+        {
+            Url = gatewayUrl,
+            SharedGatewayToken = token,
+            SshTunnel = sshTunnel,
+        };
+        _registry.AddOrUpdate(record);
+
+        // Clear stored device tokens so the shared token is used
+        var identityDir = _registry.GetIdentityDirectory(recordId);
+        if (!Directory.Exists(identityDir))
+            Directory.CreateDirectory(identityDir);
+        DeviceIdentityStore.ClearStoredTokens(identityDir, _logger);
+
+        _registry.SetActive(recordId);
+        _registry.Save();
+
+        // Connect to the gateway
+        try
+        {
+            await ConnectAsync(recordId);
+            return new SetupCodeResult(SetupCodeOutcome.Success, GatewayUrl: gatewayUrl);
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"[ConnMgr] ConnectWithSharedToken failed: {ex.Message}");
+            return new SetupCodeResult(SetupCodeOutcome.ConnectionFailed, ex.Message);
+        }
     }
 
     // ─── Event Handlers ───
@@ -459,10 +502,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             // Update device ID from client
             if (_activeLifecycle?.DataClient is { } client)
             {
-                _stateMachine.Current = _stateMachine.Current with
-                {
-                    OperatorDeviceId = client.OperatorDeviceId
-                };
+                _stateMachine.SetOperatorDeviceId(client.OperatorDeviceId);
             }
 
             EmitStateChanged(prev);
@@ -538,7 +578,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             _diagnostics.Record("pairing", $"Pairing required — waiting for approval (requestId={requestId})");
             _stateMachine.TryTransition(ConnectionTrigger.PairingPending);
             // Store requestId in snapshot so setup flows can use it for explicit approval
-            _stateMachine.Current = _stateMachine.Current with { OperatorPairingRequestId = requestId };
+            _stateMachine.SetOperatorPairingRequestId(requestId);
             _diagnostics.RecordStateChange(prev, _stateMachine.Current.OverallState);
             EmitStateChanged(prev);
         }
@@ -653,11 +693,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             // Update node state in snapshot
             if (_nodeConnector != null)
             {
-                _stateMachine.Current = _stateMachine.Current with
-                {
-                    NodeDeviceId = _nodeConnector.NodeDeviceId,
-                    NodePairingStatus = _nodeConnector.PairingStatus
-                };
+                _stateMachine.SetNodeInfo(_nodeConnector.NodeDeviceId, _nodeConnector.PairingStatus);
             }
 
             EmitStateChanged(prev);
@@ -692,12 +728,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             // Update snapshot
             if (_nodeConnector != null)
             {
-                _stateMachine.Current = _stateMachine.Current with
-                {
-                    NodePairingStatus = _nodeConnector.PairingStatus,
-                    NodeDeviceId = _nodeConnector.NodeDeviceId,
-                    NodePairingRequestId = e.RequestId
-                };
+                _stateMachine.SetNodeInfo(_nodeConnector.NodeDeviceId, _nodeConnector.PairingStatus, e.RequestId);
             }
 
             EmitStateChanged(prev);
@@ -724,9 +755,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 if (operatorClient?.IsConnectedToGateway == true)
                 {
                     var scopes = operatorClient.GrantedOperatorScopes;
-                    var canApprove = scopes.Any(s =>
-                        s.Equals("operator.admin", StringComparison.OrdinalIgnoreCase) ||
-                        s.Equals("operator.pairing", StringComparison.OrdinalIgnoreCase));
+                    var canApprove = OperatorScopeHelper.CanApproveDevices(scopes);
 
                     if (canApprove)
                     {
@@ -762,42 +791,6 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
     }
 
     // ─── Helpers ───
-
-    /// <summary>
-    /// Clear stored device tokens from an identity file, keeping the keypair intact.
-    /// </summary>
-    private void ClearStoredDeviceTokens(string identityDir)
-    {
-        var keyPath = Path.Combine(identityDir, "device-key-ed25519.json");
-        if (!File.Exists(keyPath)) return;
-        try
-        {
-            var json = File.ReadAllText(keyPath);
-            var doc = System.Text.Json.JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            // Rebuild without token fields
-            using var ms = new MemoryStream();
-            using var writer = new System.Text.Json.Utf8JsonWriter(ms, new System.Text.Json.JsonWriterOptions { Indented = true });
-            writer.WriteStartObject();
-            foreach (var prop in root.EnumerateObject())
-            {
-                // Skip token fields — keep everything else (keys, deviceId, algorithm, etc.)
-                if (prop.Name is "DeviceToken" or "DeviceTokenScopes" or "NodeDeviceToken" or "NodeDeviceTokenScopes")
-                    continue;
-                prop.WriteTo(writer);
-            }
-            writer.WriteEndObject();
-            writer.Flush();
-
-            File.WriteAllBytes(keyPath, ms.ToArray());
-            _logger.Info($"[ConnMgr] Cleared stored device tokens from {identityDir}");
-        }
-        catch (Exception ex)
-        {
-            _logger.Warn($"[ConnMgr] Failed to clear device tokens: {ex.Message}");
-        }
-    }
 
     private void EmitStateChanged(OverallConnectionState previousOverall)
     {

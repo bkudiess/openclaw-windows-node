@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
+using OpenClaw.Connection;
 using OpenClaw.Shared;
 using OpenClawTray.Helpers;
 using OpenClawTray.Windows;
@@ -769,6 +770,10 @@ public sealed partial class NodesPage : Page
         }
         PairingSection.Visibility = Visibility.Visible;
 
+        // Check if operator has scope to approve/reject
+        var scopes = _hub?.GatewayClient?.GrantedOperatorScopes ?? (IReadOnlyList<string>)Array.Empty<string>();
+        var canPair = OperatorScopeHelper.CanApproveDevices(scopes);
+
         foreach (var req in data.Pending)
         {
             var card = new Border
@@ -780,7 +785,8 @@ public sealed partial class NodesPage : Page
 
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            if (canPair)
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var info = new StackPanel { Spacing = 4 };
             info.Children.Add(new TextBlock
@@ -806,16 +812,61 @@ public sealed partial class NodesPage : Page
             Grid.SetColumn(info, 0);
             grid.Children.Add(info);
 
-            var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
-            var approveBtn = new Button { Content = "Approve", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
-            var rejectBtn = new Button { Content = "Reject" };
-            var capturedId = req.RequestId;
-            approveBtn.Click += async (s, e) => { if (_hub?.GatewayClient != null) await _hub.GatewayClient.NodePairApproveAsync(capturedId); };
-            rejectBtn.Click += async (s, e) => { if (_hub?.GatewayClient != null) await _hub.GatewayClient.NodePairRejectAsync(capturedId); };
-            buttons.Children.Add(approveBtn);
-            buttons.Children.Add(rejectBtn);
-            Grid.SetColumn(buttons, 1);
-            grid.Children.Add(buttons);
+            if (canPair)
+            {
+                var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+                var approveBtn = new Button { Content = "Approve", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
+                var rejectBtn = new Button { Content = "Reject" };
+                var capturedId = req.RequestId;
+
+                approveBtn.Click += async (s, e) =>
+                {
+                    approveBtn.IsEnabled = false;
+                    rejectBtn.IsEnabled = false;
+                    try
+                    {
+                        var client = _hub?.GatewayClient;
+                        if (client != null)
+                        {
+                            var ok = await client.NodePairApproveAsync(capturedId);
+                            if (ok)
+                                await client.RequestNodePairListAsync();
+                        }
+                    }
+                    catch { }
+                    finally
+                    {
+                        approveBtn.IsEnabled = true;
+                        rejectBtn.IsEnabled = true;
+                    }
+                };
+                rejectBtn.Click += async (s, e) =>
+                {
+                    approveBtn.IsEnabled = false;
+                    rejectBtn.IsEnabled = false;
+                    try
+                    {
+                        var client = _hub?.GatewayClient;
+                        if (client != null)
+                        {
+                            var ok = await client.NodePairRejectAsync(capturedId);
+                            if (ok)
+                                await client.RequestNodePairListAsync();
+                        }
+                    }
+                    catch { }
+                    finally
+                    {
+                        approveBtn.IsEnabled = true;
+                        rejectBtn.IsEnabled = true;
+                    }
+                };
+
+                buttons.Children.Add(approveBtn);
+                buttons.Children.Add(rejectBtn);
+                Grid.SetColumn(buttons, 1);
+                grid.Children.Add(buttons);
+            }
 
             card.Child = grid;
             PairingList.Children.Add(card);
@@ -832,6 +883,10 @@ public sealed partial class NodesPage : Page
         }
         DevicePairingSection.Visibility = Visibility.Visible;
 
+        // Check if operator has scope to approve/reject
+        var scopes = _hub?.GatewayClient?.GrantedOperatorScopes ?? (IReadOnlyList<string>)Array.Empty<string>();
+        var canPair = OperatorScopeHelper.CanApproveDevices(scopes);
+
         foreach (var req in data.Pending)
         {
             var card = new Border
@@ -843,7 +898,8 @@ public sealed partial class NodesPage : Page
 
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            if (canPair)
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var info = new StackPanel { Spacing = 4 };
             info.Children.Add(new TextBlock
@@ -872,16 +928,61 @@ public sealed partial class NodesPage : Page
             Grid.SetColumn(info, 0);
             grid.Children.Add(info);
 
-            var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
-            var approveBtn = new Button { Content = "Approve", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
-            var rejectBtn = new Button { Content = "Reject" };
-            var capturedId = req.RequestId;
-            approveBtn.Click += async (s, e) => { if (_hub?.GatewayClient != null) await _hub.GatewayClient.DevicePairApproveAsync(capturedId); };
-            rejectBtn.Click += async (s, e) => { if (_hub?.GatewayClient != null) await _hub.GatewayClient.DevicePairRejectAsync(capturedId); };
-            buttons.Children.Add(approveBtn);
-            buttons.Children.Add(rejectBtn);
-            Grid.SetColumn(buttons, 1);
-            grid.Children.Add(buttons);
+            if (canPair)
+            {
+                var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+                var approveBtn = new Button { Content = "Approve", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
+                var rejectBtn = new Button { Content = "Reject" };
+                var capturedId = req.RequestId;
+
+                approveBtn.Click += async (s, e) =>
+                {
+                    approveBtn.IsEnabled = false;
+                    rejectBtn.IsEnabled = false;
+                    try
+                    {
+                        var client = _hub?.GatewayClient;
+                        if (client != null)
+                        {
+                            var ok = await client.DevicePairApproveAsync(capturedId);
+                            if (ok)
+                                await client.RequestDevicePairListAsync();
+                        }
+                    }
+                    catch { }
+                    finally
+                    {
+                        approveBtn.IsEnabled = true;
+                        rejectBtn.IsEnabled = true;
+                    }
+                };
+                rejectBtn.Click += async (s, e) =>
+                {
+                    approveBtn.IsEnabled = false;
+                    rejectBtn.IsEnabled = false;
+                    try
+                    {
+                        var client = _hub?.GatewayClient;
+                        if (client != null)
+                        {
+                            var ok = await client.DevicePairRejectAsync(capturedId);
+                            if (ok)
+                                await client.RequestDevicePairListAsync();
+                        }
+                    }
+                    catch { }
+                    finally
+                    {
+                        approveBtn.IsEnabled = true;
+                        rejectBtn.IsEnabled = true;
+                    }
+                };
+
+                buttons.Children.Add(approveBtn);
+                buttons.Children.Add(rejectBtn);
+                Grid.SetColumn(buttons, 1);
+                grid.Children.Add(buttons);
+            }
 
             card.Child = grid;
             DevicePairingList.Children.Add(card);

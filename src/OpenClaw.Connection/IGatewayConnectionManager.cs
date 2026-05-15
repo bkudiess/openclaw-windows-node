@@ -26,6 +26,7 @@ public interface IGatewayConnectionManager : IDisposable
 
     // ─── Setup ───
     Task<SetupCodeResult> ApplySetupCodeAsync(string setupCode);
+    Task<SetupCodeResult> ConnectWithSharedTokenAsync(string gatewayUrl, string token, SshTunnelConfig? sshTunnel = null);
 
     // ─── Operator Client Access ───
     /// <summary>

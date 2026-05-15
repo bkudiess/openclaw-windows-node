@@ -712,17 +712,14 @@ public partial class App : Application
                 diagnostics.Record("node", $"ClientCreated handler THREW: {ex.Message}");
             }
         };
-        // Wrap the SSH tunnel service so the connection manager can start/stop the tunnel
-        var tunnelManager = _sshTunnelService != null
-            ? new SshTunnelManager(_sshTunnelService, appLogger)
-            : null;
+        // SshTunnelService implements ISshTunnelManager directly — no shim needed
         _connectionManager = new GatewayConnectionManager(
             credentialResolver, clientFactory, _gatewayRegistry, appLogger,
             identityStore: new DeviceIdentityFileStore(appLogger),
             nodeConnector: nodeConnector,
             isNodeEnabled: ShouldInitializeNodeService,
             diagnostics: diagnostics,
-            tunnelManager: tunnelManager,
+            tunnelManager: _sshTunnelService,
             shouldStartNodeConnection: ShouldInitializeNodeService);
         _connectionManager.OperatorClientChanged += OnOperatorClientChanged;
         _connectionManager.StateChanged += OnManagerStateChanged;
@@ -4614,8 +4611,16 @@ public partial class App : Application
     {
         if (_settings == null) return;
         if (!EnsureSshTunnelConfigured()) return;
-        
-        var baseUrl = _settings.GetEffectiveGatewayUrl()
+
+        if (!TryResolveChatCredentials(out var gatewayUrl, out var token, out var credentialSource, out var isBootstrapToken))
+        {
+            ShowConnectionSettingsForPairingIssue(
+                "Dashboard",
+                "Gateway URL or credential is not configured");
+            return;
+        }
+
+        var baseUrl = gatewayUrl
             .Replace("ws://", "http://")
             .Replace("wss://", "https://")
             .TrimEnd('/');
@@ -4624,11 +4629,10 @@ public partial class App : Application
             ? baseUrl
             : $"{baseUrl}/{path.TrimStart('/')}";
 
-        var activeToken = _gatewayRegistry?.GetActive()?.SharedGatewayToken;
-        if (!string.IsNullOrEmpty(activeToken))
+        if (!isBootstrapToken && !string.IsNullOrEmpty(token))
         {
             var separator = url.Contains('?') ? "&" : "?";
-            url = $"{url}{separator}token={Uri.EscapeDataString(activeToken)}";
+            url = $"{url}{separator}token={Uri.EscapeDataString(token)}";
         }
 
         try
