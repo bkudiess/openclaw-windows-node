@@ -1510,7 +1510,14 @@ public partial class App : Application
         if (!Directory.Exists(identityDir))
             Directory.CreateDirectory(identityDir);
 
-        // Copy identity file from legacy location if needed
+        // Copy identity file from legacy location if needed.
+        // device-key-ed25519.json holds BOTH the operator DeviceToken and the
+        // node NodeDeviceToken on a single record (DeviceIdentity.DeviceKeyData),
+        // so this single copy migrates both roles' identity for paired-pre-
+        // unification installs (the easy-button setup engine used to write the
+        // node-side tokens to this same legacy path via NodeService.ConnectAsync).
+        // The legacy file is preserved (copy, not move) for at least one release
+        // to allow safe rollback.
         var legacyIdentityPath = Path.Combine(SettingsManager.SettingsDirectoryPath, "device-key-ed25519.json");
         var newIdentityPath = Path.Combine(identityDir, "device-key-ed25519.json");
         if (File.Exists(legacyIdentityPath) && !File.Exists(newIdentityPath))
