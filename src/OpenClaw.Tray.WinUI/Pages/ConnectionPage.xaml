@@ -86,6 +86,7 @@
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" Text="📡" FontSize="16" VerticalAlignment="Center" Margin="0,0,8,0"/>
                                 <TextBlock Grid.Column="1" Text="Node" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,12,0" Width="60"/>
@@ -96,6 +97,11 @@
                                 <TextBlock x:Name="NodeDetailText" Grid.Column="3" FontSize="11"
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"
                                            TextTrimming="CharacterEllipsis"/>
+                                <ToggleSwitch x:Name="NodeModeToggle" Grid.Column="4"
+                                              VerticalAlignment="Center" Margin="8,0,0,0"
+                                              MinWidth="0" MinHeight="0"
+                                              Toggled="OnNodeModeToggled"
+                                              ToolTipService.ToolTip="Enable/disable Node Mode"/>
                             </Grid>
                         </Border>
                     </StackPanel>

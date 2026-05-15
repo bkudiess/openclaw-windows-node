@@ -108,6 +108,11 @@ public sealed partial class HubWindow : WindowEx
         NavView.OpenPaneLength = Math.Clamp(desired, minPane, maxPane);
     }
 
+    private void OnTitleBarStatusTapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
+    {
+        NavigateTo("connection");
+    }
+
     /// <summary>
     /// Navigate to the default page. Call after setting Settings/GatewayClient.
     /// </summary>

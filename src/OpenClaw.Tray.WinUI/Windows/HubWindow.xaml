@@ -57,8 +57,9 @@
                 </AutoSuggestBox.ItemTemplate>
             </AutoSuggestBox>
 
-            <!-- Status indicator on the right -->
-            <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+            <!-- Status indicator on the right (clickable → navigates to Connection page) -->
+            <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center"
+                        Tapped="OnTitleBarStatusTapped">
                 <StackPanel Orientation="Horizontal" Spacing="6">
                     <Ellipse x:Name="TitleStatusDot" Width="8" Height="8" VerticalAlignment="Center" Fill="Gray"/>
                     <TextBlock x:Name="TitleStatusText" Text="Disconnected"

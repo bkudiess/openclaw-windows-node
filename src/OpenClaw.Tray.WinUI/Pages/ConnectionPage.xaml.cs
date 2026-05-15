@@ -18,6 +18,7 @@ public sealed partial class ConnectionPage : Page
     private IGatewayConnectionManager? _connectionManager;
     private GatewayRegistry? _gatewayRegistry;
     private int _connectionAttempts;
+    private bool _suppressNodeModeToggle;
 
     public ConnectionPage()
     {
@@ -49,6 +50,11 @@ public sealed partial class ConnectionPage : Page
 
         UpdateStatus(hub.CurrentStatus);
         LoadRecentGateways();
+
+        // Initialize node mode toggle
+        _suppressNodeModeToggle = true;
+        NodeModeToggle.IsOn = settings.EnableNodeMode;
+        _suppressNodeModeToggle = false;
 
         // Default tab: show Setup Code when disconnected, Recent Gateways when connected
         var initialSnapshot = _connectionManager?.CurrentSnapshot;
@@ -451,6 +457,16 @@ public sealed partial class ConnectionPage : Page
     private void OnSshToggled(object sender, RoutedEventArgs e)
     {
         SshDetailsPanel.Visibility = SshToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void OnNodeModeToggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressNodeModeToggle) return;
+        var settings = _hub?.Settings;
+        if (settings == null) return;
+        settings.EnableNodeMode = NodeModeToggle.IsOn;
+        settings.Save();
+        _hub?.RaiseSettingsSaved();
     }
 
     private async void OnDirectConnect(object sender, RoutedEventArgs e)
