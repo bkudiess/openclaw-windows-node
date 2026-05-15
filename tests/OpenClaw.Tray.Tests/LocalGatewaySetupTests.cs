@@ -446,8 +446,6 @@ public class LocalGatewaySetupTests
         Assert.Equal(sharedToken, settings.Token);
         Assert.Equal(sharedToken, connector.LastToken);
         Assert.False(connector.LastTokenIsBootstrap);
-        Assert.Equal(OpenClawTray.Services.GatewayCredentialResolver.SourceSettingsToken,
-            OpenClawTray.Services.GatewayCredentialResolver.Resolve(settings.Token, settings.BootstrapToken, null)!.Source);
     }
 
     [Fact]

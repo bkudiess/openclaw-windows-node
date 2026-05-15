@@ -4,7 +4,7 @@ using OpenClaw.Shared;
 using OpenClawTray.Helpers;
 using OpenClawTray.Onboarding.Services;
 using OpenClawTray.Services;
-using OpenClawTray.Services.Connection;
+using OpenClaw.Connection;
 using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
@@ -229,47 +229,27 @@ public sealed partial class ConnectionPage : Page
 
     private void UpdatePairingGuidance(GatewayConnectionSnapshot snapshot)
     {
-        // Get device ID from snapshot or from the identity file
-        var deviceId = snapshot.OperatorDeviceId ?? snapshot.NodeDeviceId;
-        if (string.IsNullOrEmpty(deviceId))
-        {
-            // Try reading from identity file
-            try
-            {
-                var activeGw = _gatewayRegistry?.GetActive();
-                if (activeGw != null && _gatewayRegistry != null)
-                {
-                    var idDir = _gatewayRegistry.GetIdentityDirectory(activeGw.Id);
-                    var keyPath = System.IO.Path.Combine(idDir, "device-key-ed25519.json");
-                    if (System.IO.File.Exists(keyPath))
-                    {
-                        var json = System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(keyPath));
-                        if (json.RootElement.TryGetProperty("DeviceId", out var did))
-                            deviceId = did.GetString();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[ConnectionPage] Failed to read device ID from identity file: {ex.Message}");
-            }
-        }
+        // The approval command uses the pairing request ID (UUID), not the device ID (hex key hash).
+        // Fall back to device ID if request ID is unavailable.
+        string? approvalId = null;
 
         if (snapshot.OperatorState == RoleConnectionState.PairingRequired)
         {
+            approvalId = snapshot.OperatorPairingRequestId;
             PairingGuidanceCard.Visibility = Visibility.Visible;
             PairingGuidanceText.Text = "🔐 Operator: Awaiting approval from gateway";
-            PairingApproveCommandText.Text = !string.IsNullOrEmpty(deviceId)
-                ? $"openclaw devices approve {deviceId}"
-                : "openclaw devices approve <deviceId>";
+            PairingApproveCommandText.Text = !string.IsNullOrEmpty(approvalId)
+                ? $"openclaw devices approve {approvalId}"
+                : "openclaw devices approve <requestId>";
         }
         else if (snapshot.NodeState == RoleConnectionState.PairingRequired)
         {
+            approvalId = snapshot.NodePairingRequestId;
             PairingGuidanceCard.Visibility = Visibility.Visible;
             PairingGuidanceText.Text = "🔐 Node: Awaiting approval from gateway";
-            PairingApproveCommandText.Text = !string.IsNullOrEmpty(deviceId)
-                ? $"openclaw devices approve {deviceId}"
-                : "openclaw devices approve <deviceId>";
+            PairingApproveCommandText.Text = !string.IsNullOrEmpty(approvalId)
+                ? $"openclaw devices approve {approvalId}"
+                : "openclaw devices approve <requestId>";
         }
         else
         {
@@ -424,6 +404,127 @@ public sealed partial class ConnectionPage : Page
 
             card.Child = grid;
             DevicePairingListPanel.Children.Add(card);
+        }
+    }
+
+    /// <summary>
+    /// Called by HubWindow when node pairing list updates arrive.
+    /// Renders pending node pairing request cards with Approve/Reject buttons.
+    /// </summary>
+    public void UpdatePairingRequests(PairingListInfo data)
+    {
+        NodePairingListPanel.Children.Clear();
+        if (data.Pending.Count == 0)
+        {
+            NodePairingCard.Visibility = Visibility.Collapsed;
+            return;
+        }
+        NodePairingCard.Visibility = Visibility.Visible;
+
+        var scopes = _hub?.GatewayClient?.GrantedOperatorScopes ?? (IReadOnlyList<string>)Array.Empty<string>();
+        var canPair = scopes.Any(s =>
+            s.Equals("operator.admin", StringComparison.OrdinalIgnoreCase) ||
+            s.Equals("operator.pairing", StringComparison.OrdinalIgnoreCase));
+
+        foreach (var req in data.Pending)
+        {
+            var card = new Border
+            {
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardBackgroundFillColorSecondaryBrush"],
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(16),
+            };
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            if (canPair)
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var info = new StackPanel { Spacing = 4 };
+            info.Children.Add(new TextBlock
+            {
+                Text = req.DisplayName ?? req.NodeId,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+            });
+            var detail = $"{req.Platform ?? "unknown"}";
+            if (!string.IsNullOrEmpty(req.RemoteIp)) detail += $" · {req.RemoteIp}";
+            info.Children.Add(new TextBlock
+            {
+                Text = detail,
+                Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"]
+            });
+            if (req.IsRepair)
+            {
+                info.Children.Add(new TextBlock
+                {
+                    Text = "⚠️ Repair request",
+                    Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCautionBrush"],
+                    Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"]
+                });
+            }
+            Grid.SetColumn(info, 0);
+            grid.Children.Add(info);
+
+            if (canPair)
+            {
+                var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+                var approveBtn = new Button { Content = "Approve", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
+                var rejectBtn = new Button { Content = "Reject" };
+                var capturedId = req.RequestId;
+
+                approveBtn.Click += async (s, ev) =>
+                {
+                    approveBtn.IsEnabled = false;
+                    rejectBtn.IsEnabled = false;
+                    try
+                    {
+                        var client = _hub?.GatewayClient;
+                        if (client != null)
+                        {
+                            var ok = await client.NodePairApproveAsync(capturedId);
+                            if (ok)
+                                await client.RequestNodePairListAsync();
+                        }
+                    }
+                    catch { }
+                    finally
+                    {
+                        approveBtn.IsEnabled = true;
+                        rejectBtn.IsEnabled = true;
+                    }
+                };
+
+                rejectBtn.Click += async (s, ev) =>
+                {
+                    approveBtn.IsEnabled = false;
+                    rejectBtn.IsEnabled = false;
+                    try
+                    {
+                        var client = _hub?.GatewayClient;
+                        if (client != null)
+                        {
+                            var ok = await client.NodePairRejectAsync(capturedId);
+                            if (ok)
+                                await client.RequestNodePairListAsync();
+                        }
+                    }
+                    catch { }
+                    finally
+                    {
+                        approveBtn.IsEnabled = true;
+                        rejectBtn.IsEnabled = true;
+                    }
+                };
+
+                buttons.Children.Add(approveBtn);
+                buttons.Children.Add(rejectBtn);
+                Grid.SetColumn(buttons, 1);
+                grid.Children.Add(buttons);
+            }
+
+            card.Child = grid;
+            NodePairingListPanel.Children.Add(card);
         }
     }
 
@@ -618,18 +719,18 @@ public sealed partial class ConnectionPage : Page
             {
                 await Task.Delay(1000);
                 var snapshot = _connectionManager.CurrentSnapshot;
-                if (snapshot.OverallState is Services.Connection.OverallConnectionState.Connected
-                    or Services.Connection.OverallConnectionState.Ready)
+                if (snapshot.OverallState is OverallConnectionState.Connected
+                    or OverallConnectionState.Ready)
                 {
                     connected = true;
                     break;
                 }
-                if (snapshot.OverallState is Services.Connection.OverallConnectionState.Error)
+                if (snapshot.OverallState is OverallConnectionState.Error)
                 {
                     failed = true;
                     break;
                 }
-                if (snapshot.OverallState is Services.Connection.OverallConnectionState.PairingRequired)
+                if (snapshot.OverallState is OverallConnectionState.PairingRequired)
                 {
                     DirectConnectResultText.Text = $"⏳ Pairing required — approve on gateway";
                     return; // don't rollback, pairing is in progress

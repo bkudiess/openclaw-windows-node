@@ -397,9 +397,9 @@ public sealed class NodeService : IDisposable
 
     /// <summary>
     /// Adopt a <see cref="WindowsNodeClient"/> created by an outside party
-    /// (typically <see cref="OpenClawTray.Services.Connection.NodeConnector"/>)
+    /// (typically <see cref="OpenClaw.Connection.NodeConnector"/>)
     /// and register all current capabilities on it. Called via
-    /// <see cref="OpenClawTray.Services.Connection.INodeConnector.ClientCreated"/>
+    /// <see cref="OpenClaw.Connection.INodeConnector.ClientCreated"/>
     /// every time the connector spins up a fresh client (initial connect AND
     /// reconnect). Idempotent on the capability list — the same capability
     /// objects get registered against the new client; <c>WindowsNodeClient</c>

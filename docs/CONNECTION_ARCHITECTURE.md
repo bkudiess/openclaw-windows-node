@@ -18,6 +18,20 @@ Each gateway has a stable ID, URL, optional shared gateway token, optional boots
 
 `SettingsManager` still owns general tray settings such as node mode, MCP mode, SSH tunnel toggles, notifications, and UI preferences. It may read legacy `Token` / `BootstrapToken` JSON fields into memory for migration, but save must not write those legacy credential fields back.
 
+## Project structure
+
+Connection management code lives in `OpenClaw.Connection` (net10.0):
+
+```
+OpenClaw.Shared (net10.0)         — transport/protocol clients
+    ↑
+OpenClaw.Connection (net10.0)     — connection lifecycle, registry, credentials
+    ↑
+OpenClaw.Tray.WinUI (net10.0-windows) — UI app
+```
+
+`OpenClaw.Connection` owns: `GatewayConnectionManager`, `GatewayRegistry`, `CredentialResolver`, `ConnectionStateMachine`, `NodeConnector`, `SshTunnelService`, `SetupCodeDecoder`, and all connection interfaces/DTOs.
+
 ## Connection manager
 
 `GatewayConnectionManager` owns runtime connection state:

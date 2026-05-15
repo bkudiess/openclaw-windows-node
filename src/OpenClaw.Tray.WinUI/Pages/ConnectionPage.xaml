@@ -157,6 +157,20 @@
                 </StackPanel>
             </Border>
 
+            <!-- ═══ Section 1.6: Pending Node Pairing ═══ -->
+            <Border x:Name="NodePairingCard" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16"
+                    Visibility="Collapsed">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="📋 Pending Node Pairing" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                    <TextBlock Text="Nodes waiting for approval to connect to this gateway."
+                               Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    <StackPanel x:Name="NodePairingListPanel" Spacing="6"/>
+                </StackPanel>
+            </Border>
+
 
             <!-- ═══ Connection Methods (Tabbed) ═══ -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"

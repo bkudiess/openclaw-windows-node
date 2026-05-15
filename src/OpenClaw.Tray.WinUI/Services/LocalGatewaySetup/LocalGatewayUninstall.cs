@@ -9,7 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Win32;
 using OpenClaw.Shared;
-using OpenClawTray.Services.Connection;
+using OpenClaw.Connection;
 
 namespace OpenClawTray.Services.LocalGatewaySetup;
 

@@ -48,8 +48,8 @@ public sealed partial class HubWindow : WindowEx
     public Action? OpenSetupAction { get; set; }
     public Action? OpenConnectionStatusAction { get; set; }
     public Action? OpenVoiceAction { get; set; }
-    public OpenClawTray.Services.Connection.IGatewayConnectionManager? ConnectionManager { get; set; }
-    public OpenClawTray.Services.Connection.GatewayRegistry? GatewayRegistry { get; set; }
+    public OpenClaw.Connection.IGatewayConnectionManager? ConnectionManager { get; set; }
+    public OpenClaw.Connection.GatewayRegistry? GatewayRegistry { get; set; }
 
     // Node service state (set by App.xaml.cs in ShowHub)
     public bool NodeIsConnected { get; set; }
@@ -226,17 +226,17 @@ public sealed partial class HubWindow : WindowEx
         }
     }
 
-    private static Microsoft.UI.Xaml.Media.SolidColorBrush RoleDotBrush(OpenClawTray.Services.Connection.RoleConnectionState state) => state switch
+    private static Microsoft.UI.Xaml.Media.SolidColorBrush RoleDotBrush(OpenClaw.Connection.RoleConnectionState state) => state switch
     {
-        OpenClawTray.Services.Connection.RoleConnectionState.Connected =>
+        OpenClaw.Connection.RoleConnectionState.Connected =>
             new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.LimeGreen),
-        OpenClawTray.Services.Connection.RoleConnectionState.Connecting =>
+        OpenClaw.Connection.RoleConnectionState.Connecting =>
             new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Orange),
-        OpenClawTray.Services.Connection.RoleConnectionState.PairingRequired =>
+        OpenClaw.Connection.RoleConnectionState.PairingRequired =>
             new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Orange),
-        OpenClawTray.Services.Connection.RoleConnectionState.Error or
-        OpenClawTray.Services.Connection.RoleConnectionState.PairingRejected or
-        OpenClawTray.Services.Connection.RoleConnectionState.RateLimited =>
+        OpenClaw.Connection.RoleConnectionState.Error or
+        OpenClaw.Connection.RoleConnectionState.PairingRejected or
+        OpenClaw.Connection.RoleConnectionState.RateLimited =>
             new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Red),
         _ => new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Gray),
     };
@@ -585,6 +585,7 @@ public sealed partial class HubWindow : WindowEx
             {
                 if (IsClosed) return;
                 if (ContentFrame?.Content is NodesPage np) np.UpdatePairingRequests(data);
+                if (ContentFrame?.Content is ConnectionPage cp) cp.UpdatePairingRequests(data);
             });
         }
         catch { }
@@ -682,6 +683,7 @@ public sealed partial class HubWindow : WindowEx
                 break;
             case ConnectionPage connection:
                 connection.Initialize(this);
+                if (LastNodePairList != null) connection.UpdatePairingRequests(LastNodePairList);
                 if (LastDevicePairList != null) connection.UpdateDevicePairingRequests(LastDevicePairList);
                 break;
             case ChannelsPage channels: channels.Initialize(this); break;
