@@ -538,6 +538,8 @@ public partial class App : Application
         catch { }
     }
 
+    private void OnUiThread(Microsoft.UI.Dispatching.DispatcherQueueHandler action) => _dispatcherQueue?.TryEnqueue(action);
+
     /// <summary>
     /// Check if the app was launched via protocol activation (MSIX deep link).
     /// In WinUI 3, protocol activation is retrieved via AppInstance, not OnActivated.
@@ -944,7 +946,7 @@ public partial class App : Application
             // Wire Settings button → open the Hub on the Voice & Audio page.
             _voiceOverlayWindow.SettingsRequested += () =>
             {
-                _dispatcherQueue?.TryEnqueue(() => ShowHub("voice"));
+                OnUiThread(() => ShowHub("voice"));
             };
         }
 
@@ -2971,7 +2973,7 @@ public partial class App : Application
         _lastGatewaySelf = null;
 
         // Update UI references
-        _dispatcherQueue?.TryEnqueue(() =>
+        OnUiThread(() =>
         {
             if (_hubWindow != null && !_hubWindow.IsClosed)
             {
@@ -3008,7 +3010,7 @@ public partial class App : Application
         };
 
         _currentStatus = mapped;
-        _dispatcherQueue?.TryEnqueue(() =>
+        OnUiThread(() =>
         {
             _hubWindow?.UpdateStatus(mapped);
             UpdateTrayIcon();
@@ -3228,7 +3230,7 @@ public partial class App : Application
             // Status field is maintained by OnManagerStateChanged — no write needed here.
             _hubWindow?.UpdateStatus(status);
             UpdateTrayIcon();
-            _dispatcherQueue?.TryEnqueue(UpdateStatusDetailWindow);
+            OnUiThread(UpdateStatusDetailWindow);
         }
 
         // Keep hub node state in sync for ConnectionPage
@@ -3399,7 +3401,7 @@ public partial class App : Application
     }
 
     private void OnNodeToastRequested(object? sender, Microsoft.Toolkit.Uwp.Notifications.ToastContentBuilder builder)
-        => _dispatcherQueue?.TryEnqueue(() =>
+        => OnUiThread(() =>
             NonFatalAction.Run(() => ShowToast(builder), msg => Logger.Warn($"Failed to show node toast: {msg}")));
 
     private void OnNodeInvokeCompleted(object? sender, NodeInvokeCompletedEventArgs args)
@@ -3417,7 +3419,7 @@ public partial class App : Application
             details: details,
             nodeId: args.NodeId);
 
-        _dispatcherQueue?.TryEnqueue(UpdateStatusDetailWindow);
+        OnUiThread(UpdateStatusDetailWindow);
     }
 
     private static string GetNodeInvokePrivacyClass(string command)
@@ -3467,7 +3469,7 @@ public partial class App : Application
         }
 
         UpdateTrayIcon();
-        _dispatcherQueue?.TryEnqueue(UpdateStatusDetailWindow);
+        OnUiThread(UpdateStatusDetailWindow);
         
         if (status == ConnectionStatus.Connected)
         {
@@ -3557,7 +3559,7 @@ public partial class App : Application
             AddRecentActivity("Channel health updated", category: "channel", dashboardPath: "channels", details: summary);
         }
 
-        _dispatcherQueue?.TryEnqueue(() =>
+        OnUiThread(() =>
         {
             _hubWindow?.UpdateChannelHealth(channels);
             _hubWindow?.UpdateStatus(_currentStatus);
@@ -3567,9 +3569,9 @@ public partial class App : Application
     private void OnSessionsUpdated(object? sender, SessionInfo[] sessions)
     {
         _lastSessions = sessions;
-        _dispatcherQueue?.TryEnqueue(UpdateStatusDetailWindow);
+        OnUiThread(UpdateStatusDetailWindow);
 
-        _dispatcherQueue?.TryEnqueue(() =>
+        OnUiThread(() =>
         {
             _hubWindow?.UpdateSessions(sessions);
         });
@@ -3595,7 +3597,7 @@ public partial class App : Application
     private void OnUsageUpdated(object? sender, GatewayUsageInfo usage)
     {
         _lastUsage = usage;
-        _dispatcherQueue?.TryEnqueue(() =>
+        OnUiThread(() =>
         {
             _hubWindow?.UpdateUsage(usage);
         });
@@ -3604,7 +3606,7 @@ public partial class App : Application
     private void OnUsageStatusUpdated(object? sender, GatewayUsageStatusInfo usageStatus)
     {
         _lastUsageStatus = usageStatus;
-        _dispatcherQueue?.TryEnqueue(() =>
+        OnUiThread(() =>
         {
             _hubWindow?.UpdateUsageStatus(usageStatus);
         });
@@ -3613,9 +3615,9 @@ public partial class App : Application
     private void OnUsageCostUpdated(object? sender, GatewayCostUsageInfo usageCost)
     {
         _lastUsageCost = usageCost;
-        _dispatcherQueue?.TryEnqueue(UpdateStatusDetailWindow);
+        OnUiThread(UpdateStatusDetailWindow);
 
-        _dispatcherQueue?.TryEnqueue(() =>
+        OnUiThread(() =>
         {
             _hubWindow?.UpdateUsageCost(usageCost);
         });
@@ -3644,7 +3646,7 @@ public partial class App : Application
             stateVersionHealth = _lastGatewaySelf.StateVersionHealth,
             presenceCount = _lastGatewaySelf.PresenceCount
         });
-        _dispatcherQueue?.TryEnqueue(() =>
+        OnUiThread(() =>
         {
             UpdateStatusDetailWindow();
             _hubWindow?.UpdateGatewaySelf(_lastGatewaySelf);
@@ -3657,9 +3659,9 @@ public partial class App : Application
         var previousOnline = _lastNodes.Count(n => n.IsOnline);
         var online = nodes.Count(n => n.IsOnline);
         _lastNodes = nodes;
-        _dispatcherQueue?.TryEnqueue(UpdateStatusDetailWindow);
+        OnUiThread(UpdateStatusDetailWindow);
 
-        _dispatcherQueue?.TryEnqueue(() =>
+        OnUiThread(() =>
         {
             _hubWindow?.UpdateNodes(nodes);
         });
@@ -3682,14 +3684,12 @@ public partial class App : Application
                 _sessionPreviews[preview.Key] = preview;
             }
         }
-        _dispatcherQueue?.TryEnqueue(UpdateStatusDetailWindow);
+        OnUiThread(UpdateStatusDetailWindow);
     }
 
     private void OnSessionCommandCompleted(object? sender, SessionCommandResult result)
     {
-        if (_dispatcherQueue == null) return;
-
-        _dispatcherQueue.TryEnqueue(() =>
+        OnUiThread(() =>
         {
             try
             {
@@ -3731,32 +3731,32 @@ public partial class App : Application
 
     private void OnCronListUpdated(object? sender, System.Text.Json.JsonElement data)
     {
-        _dispatcherQueue?.TryEnqueue(() => _hubWindow?.UpdateCronList(data));
+        OnUiThread(() => _hubWindow?.UpdateCronList(data));
     }
 
     private void OnCronStatusUpdated(object? sender, System.Text.Json.JsonElement data)
     {
-        _dispatcherQueue?.TryEnqueue(() => _hubWindow?.UpdateCronStatus(data));
+        OnUiThread(() => _hubWindow?.UpdateCronStatus(data));
     }
 
     private void OnCronRunsUpdated(object? sender, System.Text.Json.JsonElement data)
     {
-        _dispatcherQueue?.TryEnqueue(() => _hubWindow?.UpdateCronRuns(data));
+        OnUiThread(() => _hubWindow?.UpdateCronRuns(data));
     }
 
     private void OnSkillsStatusUpdated(object? sender, System.Text.Json.JsonElement data)
     {
-        _dispatcherQueue?.TryEnqueue(() => _hubWindow?.UpdateSkillsStatus(data));
+        OnUiThread(() => _hubWindow?.UpdateSkillsStatus(data));
     }
 
     private void OnConfigUpdated(object? sender, System.Text.Json.JsonElement data)
     {
-        _dispatcherQueue?.TryEnqueue(() => _hubWindow?.UpdateConfig(data));
+        OnUiThread(() => _hubWindow?.UpdateConfig(data));
     }
 
     private void OnConfigSchemaUpdated(object? sender, System.Text.Json.JsonElement data)
     {
-        _dispatcherQueue?.TryEnqueue(() => _hubWindow?.UpdateConfigSchema(data));
+        OnUiThread(() => _hubWindow?.UpdateConfigSchema(data));
     }
 
     private System.Text.Json.JsonElement? _lastAgentsList;
@@ -3764,22 +3764,22 @@ public partial class App : Application
     private void OnAgentsListUpdated(object? sender, System.Text.Json.JsonElement data)
     {
         _lastAgentsList = data.Clone();
-        _dispatcherQueue?.TryEnqueue(() => _hubWindow?.UpdateAgentsList(data));
+        OnUiThread(() => _hubWindow?.UpdateAgentsList(data));
     }
 
     private void OnAgentFilesListUpdated(object? sender, System.Text.Json.JsonElement data)
     {
-        _dispatcherQueue?.TryEnqueue(() => _hubWindow?.UpdateAgentFilesList(data));
+        OnUiThread(() => _hubWindow?.UpdateAgentFilesList(data));
     }
 
     private void OnAgentFileContentUpdated(object? sender, System.Text.Json.JsonElement data)
     {
-        _dispatcherQueue?.TryEnqueue(() => _hubWindow?.UpdateAgentFileContent(data));
+        OnUiThread(() => _hubWindow?.UpdateAgentFileContent(data));
     }
 
     private void OnAgentEventReceived(object? sender, AgentEventInfo evt)
     {
-        _dispatcherQueue?.TryEnqueue(() =>
+        OnUiThread(() =>
         {
             _agentEventsCache.Insert(0, evt);
             if (_agentEventsCache.Count > MaxAppAgentEvents)
@@ -3791,25 +3791,25 @@ public partial class App : Application
     private void OnNodePairListUpdated(object? sender, PairingListInfo data)
     {
         _lastNodePairList = data;
-        _dispatcherQueue?.TryEnqueue(() => _hubWindow?.UpdateNodePairList(data));
+        OnUiThread(() => _hubWindow?.UpdateNodePairList(data));
     }
 
     private void OnDevicePairListUpdated(object? sender, DevicePairingListInfo data)
     {
         _lastDevicePairList = data;
-        _dispatcherQueue?.TryEnqueue(() => _hubWindow?.UpdateDevicePairList(data));
+        OnUiThread(() => _hubWindow?.UpdateDevicePairList(data));
     }
 
     private void OnModelsListUpdated(object? sender, ModelsListInfo data)
     {
         _lastModelsList = data;
-        _dispatcherQueue?.TryEnqueue(() => _hubWindow?.UpdateModelsList(data));
+        OnUiThread(() => _hubWindow?.UpdateModelsList(data));
     }
 
     private void OnPresenceUpdated(object? sender, PresenceEntry[] data)
     {
         _lastPresence = data;
-        _dispatcherQueue?.TryEnqueue(() => _hubWindow?.UpdatePresence(data));
+        OnUiThread(() => _hubWindow?.UpdatePresence(data));
     }
 
     private void OnNotificationReceived(object? sender, OpenClawNotification notification)
@@ -3827,7 +3827,7 @@ public partial class App : Application
         {
             if (_voiceOverlayWindow != null)
             {
-                _dispatcherQueue?.TryEnqueue(() =>
+                OnUiThread(() =>
                 {
                     try
                     {
@@ -3933,7 +3933,7 @@ public partial class App : Application
             if (_settings?.EnableNodeMode == true && _nodeService?.IsConnected == true)
             {
                 _lastCheckTime = DateTime.Now;
-                _dispatcherQueue?.TryEnqueue(UpdateStatusDetailWindow);
+                OnUiThread(UpdateStatusDetailWindow);
                 if (userInitiated)
                 {
                     ShowToast(new ToastContentBuilder()
@@ -4795,14 +4795,12 @@ public partial class App : Application
 
     private void OnVoiceHotkeyPressed(object? sender, EventArgs e)
     {
-        if (_dispatcherQueue == null) return;
-        _dispatcherQueue.TryEnqueue(() => ShowVoiceOverlay());
+        OnUiThread(() => ShowVoiceOverlay());
     }
 
     private void OnSettingsHotkeyPressed(object? sender, EventArgs e)
     {
-        if (_dispatcherQueue == null) return;
-        _dispatcherQueue.TryEnqueue(() => ShowHub("companion"));
+        OnUiThread(() => ShowHub("companion"));
     }
 
     #endregion
@@ -4974,7 +4972,7 @@ public partial class App : Application
                     if (!string.IsNullOrEmpty(uri))
                     {
                         Logger.Info($"Received deep link via IPC: {uri}");
-                        _dispatcherQueue?.TryEnqueue(() => HandleDeepLink(uri));
+                        OnUiThread(() => HandleDeepLink(uri));
                     }
                 }
                 catch (OperationCanceledException)
@@ -5074,7 +5072,7 @@ public partial class App : Application
         
         if (arguments.TryGetValue("action", out var action))
         {
-            _dispatcherQueue?.TryEnqueue(() =>
+            OnUiThread(() =>
             {
                 switch (action)
                 {

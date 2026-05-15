@@ -403,8 +403,10 @@ public sealed partial class ConnectionPage : Page
     }
 
     /// <summary>
-    /// Called by HubWindow when node pairing list updates arrive.
-    /// Renders pending node pairing request cards with Approve/Reject buttons.
+    /// Called by HubWindow when operator/node pairing list updates arrive.
+    /// Renders pending node-pair request cards with scope-gated Approve/Reject
+    /// buttons. Moved from the legacy NodesPage so all pairing approvals live
+    /// in one place on the Connection page.
     /// </summary>
     public void UpdatePairingRequests(PairingListInfo data)
     {
@@ -416,6 +418,8 @@ public sealed partial class ConnectionPage : Page
         }
         NodePairingCard.Visibility = Visibility.Visible;
 
+        // Same scope gate as device pairing: the gateway will reject without
+        // operator.pairing or operator.admin, so avoid showing dead actions.
         var scopes = _hub?.GatewayClient?.GrantedOperatorScopes ?? (IReadOnlyList<string>)Array.Empty<string>();
         var canPair = OperatorScopeHelper.CanApproveDevices(scopes);
 
@@ -437,7 +441,7 @@ public sealed partial class ConnectionPage : Page
             info.Children.Add(new TextBlock
             {
                 Text = req.DisplayName ?? req.NodeId,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             });
             var detail = $"{req.Platform ?? "unknown"}";
             if (!string.IsNullOrEmpty(req.RemoteIp)) detail += $" · {req.RemoteIp}";
@@ -445,7 +449,7 @@ public sealed partial class ConnectionPage : Page
             {
                 Text = detail,
                 Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"]
+                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
             });
             if (req.IsRepair)
             {
@@ -453,7 +457,7 @@ public sealed partial class ConnectionPage : Page
                 {
                     Text = "⚠️ Repair request",
                     Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCautionBrush"],
-                    Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"]
+                    Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
                 });
             }
             Grid.SetColumn(info, 0);
@@ -476,18 +480,26 @@ public sealed partial class ConnectionPage : Page
                         if (client != null)
                         {
                             var ok = await client.NodePairApproveAsync(capturedId);
-                            if (ok)
-                                await client.RequestNodePairListAsync();
+                            if (!ok)
+                            {
+                                approveBtn.IsEnabled = true;
+                                rejectBtn.IsEnabled = true;
+                            }
+                            // On success: gateway will broadcast node.pair.resolved
+                            // and HubWindow re-fetches the pairing list.
+                        }
+                        else
+                        {
+                            approveBtn.IsEnabled = true;
+                            rejectBtn.IsEnabled = true;
                         }
                     }
-                    catch { }
-                    finally
+                    catch
                     {
                         approveBtn.IsEnabled = true;
                         rejectBtn.IsEnabled = true;
                     }
                 };
-
                 rejectBtn.Click += async (s, ev) =>
                 {
                     approveBtn.IsEnabled = false;
@@ -498,12 +510,19 @@ public sealed partial class ConnectionPage : Page
                         if (client != null)
                         {
                             var ok = await client.NodePairRejectAsync(capturedId);
-                            if (ok)
-                                await client.RequestNodePairListAsync();
+                            if (!ok)
+                            {
+                                approveBtn.IsEnabled = true;
+                                rejectBtn.IsEnabled = true;
+                            }
+                        }
+                        else
+                        {
+                            approveBtn.IsEnabled = true;
+                            rejectBtn.IsEnabled = true;
                         }
                     }
-                    catch { }
-                    finally
+                    catch
                     {
                         approveBtn.IsEnabled = true;
                         rejectBtn.IsEnabled = true;

@@ -133,6 +133,7 @@ public sealed partial class HubWindow : WindowEx
         // Map legacy tags
         if (tag == "general") tag = "home";
         if (tag == "about") tag = "info";
+        if (tag == "nodes") tag = "instances";
         // Map legacy agent-scoped workspace/cron tags
         if (tag == "cron") tag = $"agent:{_currentAgentId}:cron";
         if (tag == "workspace") tag = $"agent:{_currentAgentId}:workspace";
@@ -317,7 +318,7 @@ public sealed partial class HubWindow : WindowEx
         if (IsClosed) return;
         DispatcherQueue?.TryEnqueue(() =>
         {
-            if (ContentFrame?.Content is NodesPage np) np.UpdateNodes(nodes);
+            if (ContentFrame?.Content is InstancesPage ip) ip.UpdateNodes(nodes);
             else if (ContentFrame?.Content is HomePage home) home.UpdateNodes(nodes);
         });
     }
@@ -584,7 +585,8 @@ public sealed partial class HubWindow : WindowEx
             DispatcherQueue?.TryEnqueue(() =>
             {
                 if (IsClosed) return;
-                if (ContentFrame?.Content is NodesPage np) np.UpdatePairingRequests(data);
+                // Operator/node pairing approval moved from NodesPage to ConnectionPage
+                // (single home for all pairing approvals).
                 if (ContentFrame?.Content is ConnectionPage cp) cp.UpdatePairingRequests(data);
             });
         }
@@ -599,7 +601,6 @@ public sealed partial class HubWindow : WindowEx
             DispatcherQueue?.TryEnqueue(() =>
             {
                 if (IsClosed) return;
-                if (ContentFrame?.Content is NodesPage np) np.UpdateDevicePairingRequests(data);
                 if (ContentFrame?.Content is ConnectionPage cp) cp.UpdateDevicePairingRequests(data);
             });
         }
@@ -631,8 +632,7 @@ public sealed partial class HubWindow : WindowEx
             DispatcherQueue?.TryEnqueue(() =>
             {
                 if (IsClosed) return;
-                if (ContentFrame?.Content is InstancesPage ip) ip.UpdatePresenceData(data);
-                if (ContentFrame?.Content is NodesPage np) np.UpdatePresence(data);
+                if (ContentFrame?.Content is InstancesPage ip) ip.UpdatePresence(data);
             });
         }
         catch { }
@@ -685,15 +685,10 @@ public sealed partial class HubWindow : WindowEx
                 connection.Initialize(this);
                 if (LastNodePairList != null) connection.UpdatePairingRequests(LastNodePairList);
                 if (LastDevicePairList != null) connection.UpdateDevicePairingRequests(LastDevicePairList);
+                if (LastNodePairList != null) connection.UpdatePairingRequests(LastNodePairList);
                 break;
             case ChannelsPage channels: channels.Initialize(this); break;
             case UsagePage usage: usage.Initialize(this); break;
-            case NodesPage nodes:
-                nodes.Initialize(this);
-                if (LastNodePairList != null) nodes.UpdatePairingRequests(LastNodePairList);
-                if (LastDevicePairList != null) nodes.UpdateDevicePairingRequests(LastDevicePairList);
-                if (LastPresence != null) nodes.UpdatePresence(LastPresence);
-                break;
             case CronPage cron: cron.Initialize(this); SeedCronData(cron); break;
             case SkillsPage skills:
                 skills.Initialize(this);
@@ -713,8 +708,12 @@ public sealed partial class HubWindow : WindowEx
                 }
                 break;
             case InstancesPage instances:
+                // Initialize already seeds _lastNodes/_lastPresence from
+                // hub.LastNodes/hub.LastPresence and triggers a single
+                // Rerender. Calling UpdateNodes/UpdatePresence here would
+                // cause two additional dispatcher-queued rebuilds on every
+                // page entry — visible flicker on lists with many cards.
                 instances.Initialize(this);
-                if (LastPresence != null) instances.UpdatePresenceData(LastPresence);
                 break;
             case PermissionsPage permissions: permissions.Initialize(this); break;
             case SandboxPage sandbox: sandbox.Initialize(this); break;
@@ -767,7 +766,7 @@ public sealed partial class HubWindow : WindowEx
         "chat" => typeof(ChatPage),
         "connection" => typeof(ConnectionPage),
         "channels" => typeof(ChannelsPage),
-        "nodes" => typeof(NodesPage),
+        "nodes" => typeof(InstancesPage),
         "instances" => typeof(InstancesPage),
         "config" => typeof(ConfigPage),
         "usage" => typeof(UsagePage),
@@ -895,7 +894,6 @@ public sealed partial class HubWindow : WindowEx
             new() { Icon = "🧠", Title = $"Go to Cron ({agentId})", Subtitle = "Scheduled tasks", Tag = $"agent:{agentId}:cron" },
             new() { Icon = "🧠", Title = $"Go to Workspace ({agentId})", Subtitle = "Workspace files", Tag = $"agent:{agentId}" },
             new() { Icon = "📡", Title = "Go to Channels", Subtitle = "Gateway channels", Tag = "channels" },
-            new() { Icon = "📡", Title = "Go to Nodes", Subtitle = "Connected nodes", Tag = "nodes" },
             new() { Icon = "📡", Title = "Go to Instances", Subtitle = "Gateway instances", Tag = "instances" },
             new() { Icon = "📡", Title = "Go to Config", Subtitle = "Gateway configuration", Tag = "config" },
             new() { Icon = "📡", Title = "Go to Usage", Subtitle = "Usage statistics", Tag = "usage" },

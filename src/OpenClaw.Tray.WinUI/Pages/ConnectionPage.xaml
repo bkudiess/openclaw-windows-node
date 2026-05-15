@@ -157,20 +157,26 @@
                 </StackPanel>
             </Border>
 
-            <!-- ═══ Section 1.6: Pending Node Pairing ═══ -->
+            <!-- ═══ Section 1.6: Pending Operator/Node Pairing ═══ -->
+            <!-- Moved here from the legacy NodesPage so all pairing approvals live
+                 in one place on the Connection page (closer to the rest of the
+                 pairing/credential UX). Visible only when the gateway reports
+                 pending node-pair requests. -->
             <Border x:Name="NodePairingCard" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="16"
                     Visibility="Collapsed">
                 <StackPanel Spacing="8">
-                    <TextBlock Text="📋 Pending Node Pairing" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                    <TextBlock Text="Nodes waiting for approval to connect to this gateway."
+                    <TextBlock x:Uid="ConnectionPage_NodePairing_Title"
+                               Text="🔗 Pending Operator/Node Pairing"
+                               Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                    <TextBlock x:Uid="ConnectionPage_NodePairing_Subtitle"
+                               Text="Operators and Windows nodes waiting for approval to connect to this gateway."
                                Style="{StaticResource CaptionTextBlockStyle}"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                     <StackPanel x:Name="NodePairingListPanel" Spacing="6"/>
                 </StackPanel>
             </Border>
-
 
             <!-- ═══ Connection Methods (Tabbed) ═══ -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
