@@ -115,6 +115,13 @@ public sealed class SshTunnelService : ISshTunnelManager
         }
     }
 
+    public void ResetNotConfigured()
+    {
+        Stop();
+        LastError = null;
+        Status = TunnelStatus.NotConfigured;
+    }
+
     private void StartProcess(string user, string host, int remotePort, int localPort, bool includeBrowserProxyForward)
     {
         var psi = new ProcessStartInfo

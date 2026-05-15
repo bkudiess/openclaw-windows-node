@@ -679,12 +679,11 @@ public sealed partial class ConnectionPage : Page
                 app.EnsureSshTunnelStarted();
             }
 
-            await _connectionManager.ConnectAsync(recordId);
+            var snapshot = await ConnectAndWaitForDirectConnectOutcomeAsync(recordId);
 
-            // The page already subscribes to StateChanged via UpdateFromSnapshot
-            // (wired in Initialize), which will update the UI as connection state
-            // progresses through Connecting → Connected/PairingRequired/Error.
-            DirectConnectResultText.Text = $"Connecting to {GatewayUrlHelper.SanitizeForDisplay(url)}…";
+            DirectConnectResultText.Text = snapshot.OperatorState == RoleConnectionState.PairingRequired
+                ? $"Pairing approval required for {GatewayUrlHelper.SanitizeForDisplay(url)}."
+                : $"Connected to {GatewayUrlHelper.SanitizeForDisplay(url)}.";
         }
         catch (Exception ex)
         {
@@ -692,6 +691,66 @@ public sealed partial class ConnectionPage : Page
             RollbackDirectConnect(previousActiveId, isNewRecord, recordId, existingRecordSnapshot,
                 previousSettings, prevGatewayUrl, prevUseSsh, prevSshUser, prevSshHost, prevSshRemotePort, prevSshLocalPort);
         }
+    }
+
+    private async Task<GatewayConnectionSnapshot> ConnectAndWaitForDirectConnectOutcomeAsync(string recordId)
+    {
+        if (_connectionManager == null)
+            throw new InvalidOperationException("Connection manager is not available.");
+
+        var completion = new TaskCompletionSource<GatewayConnectionSnapshot>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        void OnStateChanged(object? sender, GatewayConnectionSnapshot snapshot)
+        {
+            if (!string.Equals(snapshot.GatewayId, recordId, StringComparison.Ordinal))
+                return;
+            if (IsDirectConnectTerminal(snapshot))
+                completion.TrySetResult(snapshot);
+        }
+
+        _connectionManager.StateChanged += OnStateChanged;
+        try
+        {
+            await _connectionManager.ConnectAsync(recordId);
+
+            var current = _connectionManager.CurrentSnapshot;
+            if (string.Equals(current.GatewayId, recordId, StringComparison.Ordinal) &&
+                IsDirectConnectTerminal(current))
+            {
+                return EnsureDirectConnectSucceeded(current);
+            }
+
+            var completed = await Task.WhenAny(completion.Task, Task.Delay(TimeSpan.FromSeconds(15)));
+            if (completed != completion.Task)
+            {
+                throw new TimeoutException("Timed out waiting for the gateway connection to complete.");
+            }
+
+            return EnsureDirectConnectSucceeded(await completion.Task);
+        }
+        finally
+        {
+            _connectionManager.StateChanged -= OnStateChanged;
+        }
+    }
+
+    private static bool IsDirectConnectTerminal(GatewayConnectionSnapshot snapshot) =>
+        snapshot.OverallState is OverallConnectionState.Connected
+            or OverallConnectionState.Ready
+            or OverallConnectionState.Degraded ||
+        snapshot.OperatorState is RoleConnectionState.PairingRequired
+            or RoleConnectionState.Error;
+
+    private static GatewayConnectionSnapshot EnsureDirectConnectSucceeded(GatewayConnectionSnapshot snapshot)
+    {
+        if (snapshot.OperatorState == RoleConnectionState.Error)
+        {
+            var message = snapshot.OperatorError ?? snapshot.NodeError ?? "Gateway connection failed.";
+            throw new InvalidOperationException(message);
+        }
+
+        return snapshot;
     }
 
     private void RollbackDirectConnect(

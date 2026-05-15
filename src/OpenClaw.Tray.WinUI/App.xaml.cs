@@ -85,13 +85,17 @@ public partial class App : Application
 
         if (!_settings.UseSshTunnel)
         {
-            _sshTunnelService.Stop();
+            _sshTunnelService.ResetNotConfigured();
             return;
         }
 
         var includeBrowserProxyForward =
             _settings.NodeBrowserProxyEnabled &&
             SshTunnelCommandLine.CanForwardBrowserProxyPort(_settings.SshTunnelRemotePort, _settings.SshTunnelLocalPort);
+        if (_settings.NodeBrowserProxyEnabled && !includeBrowserProxyForward)
+        {
+            Logger.Warn("SSH tunnel browser proxy forward disabled because the derived port would be invalid");
+        }
 
         _sshTunnelService.EnsureStarted(
             _settings.SshTunnelUser,
@@ -4629,7 +4633,9 @@ public partial class App : Application
             ? baseUrl
             : $"{baseUrl}/{path.TrimStart('/')}";
 
-        if (!isBootstrapToken && !string.IsNullOrEmpty(token))
+        if (!isBootstrapToken &&
+            credentialSource == CredentialResolver.SourceSharedGatewayToken &&
+            !string.IsNullOrEmpty(token))
         {
             var separator = url.Contains('?') ? "&" : "?";
             url = $"{url}{separator}token={Uri.EscapeDataString(token)}";
