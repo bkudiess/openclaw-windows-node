@@ -99,7 +99,7 @@
             <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_109" Tag="channels" Content="Channels">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xEC05;"/></NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_112" Tag="nodes" Content="Nodes">
+            <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_112" Tag="instances" Content="Instances">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE977;"/></NavigationViewItem.Icon>
             </NavigationViewItem>
             <!-- Advanced — consolidates gateway-oriented pages -->

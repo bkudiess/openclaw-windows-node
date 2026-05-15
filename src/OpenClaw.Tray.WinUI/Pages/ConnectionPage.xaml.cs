@@ -408,6 +408,146 @@ public sealed partial class ConnectionPage : Page
         }
     }
 
+    /// <summary>
+    /// Called by HubWindow when operator/node pairing list updates arrive.
+    /// Renders pending node-pair request cards with scope-gated Approve/Reject
+    /// buttons. Moved from the legacy NodesPage so all pairing approvals live
+    /// in one place on the Connection page.
+    /// </summary>
+    public void UpdatePairingRequests(PairingListInfo data)
+    {
+        NodePairingListPanel.Children.Clear();
+        if (data.Pending.Count == 0)
+        {
+            NodePairingCard.Visibility = Visibility.Collapsed;
+            return;
+        }
+        NodePairingCard.Visibility = Visibility.Visible;
+
+        // Same scope gate as device pairing — gateway will reject without the
+        // operator.pairing or operator.admin scope, but we hide the action
+        // buttons up front so the user isn't presented with affordances that
+        // are guaranteed to fail.
+        var scopes = _hub?.GatewayClient?.GrantedOperatorScopes ?? (IReadOnlyList<string>)Array.Empty<string>();
+        var canPair = scopes.Any(s =>
+            s.Equals("operator.admin", StringComparison.OrdinalIgnoreCase) ||
+            s.Equals("operator.pairing", StringComparison.OrdinalIgnoreCase));
+
+        foreach (var req in data.Pending)
+        {
+            var card = new Border
+            {
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardBackgroundFillColorSecondaryBrush"],
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(16),
+            };
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            if (canPair)
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var info = new StackPanel { Spacing = 4 };
+            info.Children.Add(new TextBlock
+            {
+                Text = req.DisplayName ?? req.NodeId,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            });
+            info.Children.Add(new TextBlock
+            {
+                Text = $"{req.Platform ?? "unknown"} · {req.RemoteIp ?? ""}",
+                Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            });
+            if (req.IsRepair)
+            {
+                info.Children.Add(new TextBlock
+                {
+                    Text = "⚠️ Repair request",
+                    Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCautionBrush"],
+                    Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+                });
+            }
+            Grid.SetColumn(info, 0);
+            grid.Children.Add(info);
+
+            if (canPair)
+            {
+                var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+                var approveBtn = new Button { Content = "Approve", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
+                var rejectBtn = new Button { Content = "Reject" };
+                var capturedId = req.RequestId;
+
+                approveBtn.Click += async (s, ev) =>
+                {
+                    approveBtn.IsEnabled = false;
+                    rejectBtn.IsEnabled = false;
+                    try
+                    {
+                        var client = _hub?.GatewayClient;
+                        if (client != null)
+                        {
+                            var ok = await client.NodePairApproveAsync(capturedId);
+                            if (!ok)
+                            {
+                                approveBtn.IsEnabled = true;
+                                rejectBtn.IsEnabled = true;
+                            }
+                            // On success: gateway will broadcast node.pair.resolved
+                            // and HubWindow re-fetches the pairing list.
+                        }
+                        else
+                        {
+                            approveBtn.IsEnabled = true;
+                            rejectBtn.IsEnabled = true;
+                        }
+                    }
+                    catch
+                    {
+                        approveBtn.IsEnabled = true;
+                        rejectBtn.IsEnabled = true;
+                    }
+                };
+                rejectBtn.Click += async (s, ev) =>
+                {
+                    approveBtn.IsEnabled = false;
+                    rejectBtn.IsEnabled = false;
+                    try
+                    {
+                        var client = _hub?.GatewayClient;
+                        if (client != null)
+                        {
+                            var ok = await client.NodePairRejectAsync(capturedId);
+                            if (!ok)
+                            {
+                                approveBtn.IsEnabled = true;
+                                rejectBtn.IsEnabled = true;
+                            }
+                        }
+                        else
+                        {
+                            approveBtn.IsEnabled = true;
+                            rejectBtn.IsEnabled = true;
+                        }
+                    }
+                    catch
+                    {
+                        approveBtn.IsEnabled = true;
+                        rejectBtn.IsEnabled = true;
+                    }
+                };
+
+                buttons.Children.Add(approveBtn);
+                buttons.Children.Add(rejectBtn);
+                Grid.SetColumn(buttons, 1);
+                grid.Children.Add(buttons);
+            }
+
+            card.Child = grid;
+            NodePairingListPanel.Children.Add(card);
+        }
+    }
+
     private static string GetAuthErrorGuidance(string error)
     {
         if (error.Contains("token", StringComparison.OrdinalIgnoreCase))
