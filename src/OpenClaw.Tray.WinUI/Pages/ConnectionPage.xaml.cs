@@ -42,7 +42,6 @@ public sealed partial class ConnectionPage : Page
         // Populate manual connection fields
         GatewayUrlTextBox.Text = settings.GatewayUrl ?? "";
         SshToggle.IsOn = settings.UseSshTunnel;
-        SshDetailsPanel.Visibility = settings.UseSshTunnel ? Visibility.Visible : Visibility.Collapsed;
         SshUserBox.Text = settings.SshTunnelUser ?? "";
         SshHostBox.Text = settings.SshTunnelHost ?? "";
         SshRemotePortBox.Text = settings.SshTunnelRemotePort.ToString();
@@ -467,7 +466,13 @@ public sealed partial class ConnectionPage : Page
 
     private void OnSshToggled(object sender, RoutedEventArgs e)
     {
-        SshDetailsPanel.Visibility = SshToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        // SSH details are now inside the Expander — toggle just saves state
+        var settings = _hub?.Settings;
+        if (settings != null)
+        {
+            settings.UseSshTunnel = SshToggle.IsOn;
+            settings.Save();
+        }
     }
 
     private void OnNodeModeToggled(object sender, RoutedEventArgs e)

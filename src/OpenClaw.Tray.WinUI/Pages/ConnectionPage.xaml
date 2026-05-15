@@ -161,13 +161,13 @@
             <!-- ═══ Connection Methods (Tabbed) ═══ -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="16,8,16,8">
+                    BorderThickness="1" CornerRadius="8" Padding="16">
             <Pivot x:Name="ConnectionPivot">
                 <PivotItem>
                     <PivotItem.Header>
                         <TextBlock Text="🔑 Setup Code" FontSize="13"/>
                     </PivotItem.Header>
-                    <StackPanel Spacing="8" Padding="0,8,0,0">
+                    <StackPanel Spacing="8" Padding="0,12,0,0">
                         <TextBlock x:Uid="ConnectionPage_TextBlock_129" Text="Paste a setup code from openclaw qr"
                                    Style="{StaticResource CaptionTextBlockStyle}"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
@@ -201,7 +201,7 @@
                     <PivotItem.Header>
                         <TextBlock Text="📡 Recent Gateways" FontSize="13"/>
                     </PivotItem.Header>
-                    <StackPanel Spacing="8" Padding="0,8,0,0">
+                    <StackPanel Spacing="8" Padding="0,12,0,0">
                         <TextBlock x:Name="RecentGatewaysEmptyText" Text="No saved gateways yet."
                                    Style="{StaticResource CaptionTextBlockStyle}"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -214,7 +214,7 @@
                     <PivotItem.Header>
                         <TextBlock Text="🔗 Direct Connect" FontSize="13"/>
                     </PivotItem.Header>
-                    <StackPanel Spacing="8" Padding="0,8,0,0">
+                    <StackPanel Spacing="6" Padding="0,12,0,0">
                         <TextBlock Text="Connect with a gateway URL and shared token."
                                    Style="{StaticResource CaptionTextBlockStyle}"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
@@ -222,38 +222,49 @@
                                  PlaceholderText="ws://localhost:18790" Text="ws://localhost:18790"/>
                         <TextBox x:Name="TokenTextBox" Header="Token"
                                  PlaceholderText="Shared gateway token"/>
-                        <TextBlock x:Name="DirectConnectResultText"
-                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
-                            <Button Content="Connect" Style="{ThemeResource AccentButtonStyle}" Click="OnDirectConnect"/>
-                        </StackPanel>
-
-                        <!-- SSH Tunnel -->
-                        <ToggleSwitch x:Uid="SshToggle" x:Name="SshToggle" Header="SSH Tunnel"
-                                      Toggled="OnSshToggled"/>
-                        <StackPanel x:Name="SshDetailsPanel" Spacing="8" Visibility="Collapsed">
-                            <Grid ColumnSpacing="8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBox x:Uid="SshUserBox" x:Name="SshUserBox" Grid.Column="0" Header="SSH User" PlaceholderText="user"/>
-                                <TextBox x:Uid="SshHostBox" x:Name="SshHostBox" Grid.Column="1" Header="SSH Host" PlaceholderText="machine-name"/>
-                            </Grid>
-                            <Grid ColumnSpacing="8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBox x:Uid="SshRemotePortBox" x:Name="SshRemotePortBox" Grid.Column="0" Header="Remote Port" PlaceholderText="18789"/>
-                                <TextBox x:Uid="SshLocalPortBox" x:Name="SshLocalPortBox" Grid.Column="1" Header="Local Port" PlaceholderText="18789"/>
-                            </Grid>
-                        </StackPanel>
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="DirectConnectResultText" Grid.Column="0"
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       VerticalAlignment="Center"/>
+                            <Button Grid.Column="1" Content="Connect" Style="{ThemeResource AccentButtonStyle}" Click="OnDirectConnect"/>
+                        </Grid>
                     </StackPanel>
                 </PivotItem>
             </Pivot>
             </Border>
+
+            <!-- ═══ SSH Tunnel ═══ -->
+            <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                      IsExpanded="False">
+                <Expander.Header>
+                    <TextBlock Text="🔒 SSH Tunnel" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                </Expander.Header>
+                <StackPanel Spacing="8" Padding="4">
+                    <ToggleSwitch x:Uid="SshToggle" x:Name="SshToggle" Header="Enable SSH Tunnel"
+                                  Toggled="OnSshToggled" MinWidth="0"/>
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Uid="SshUserBox" x:Name="SshUserBox" Grid.Column="0" Header="SSH User" PlaceholderText="user"/>
+                        <TextBox x:Uid="SshHostBox" x:Name="SshHostBox" Grid.Column="1" Header="SSH Host" PlaceholderText="machine-name"/>
+                    </Grid>
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Uid="SshRemotePortBox" x:Name="SshRemotePortBox" Grid.Column="0" Header="Remote Port" PlaceholderText="18789"/>
+                        <TextBox x:Uid="SshLocalPortBox" x:Name="SshLocalPortBox" Grid.Column="1" Header="Local Port" PlaceholderText="18789"/>
+                    </Grid>
+                </StackPanel>
+            </Expander>
 
         </StackPanel>
     </ScrollViewer>
