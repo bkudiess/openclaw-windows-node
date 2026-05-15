@@ -90,10 +90,8 @@ public static class SetupExistingGatewayClassifier
         try
         {
             var distros = await wsl.ListDistrosAsync(cancellationToken).ConfigureAwait(false);
-            if (distros.Any(d => string.Equals(d.Name, AppOwnedDistroName, StringComparison.OrdinalIgnoreCase)))
-            {
-                return true;
-            }
+            var hasAppOwnedDistro = distros.Any(d => string.Equals(d.Name, AppOwnedDistroName, StringComparison.OrdinalIgnoreCase));
+            return hasAppOwnedDistro && hasLocalSetupEvidence;
         }
         catch (OperationCanceledException)
         {
@@ -104,8 +102,6 @@ public static class SetupExistingGatewayClassifier
             Logger.Warn($"[SetupExistingGatewayClassifier] WSL distro probe failed: {ex.Message}");
             return hasLocalSetupEvidence;
         }
-
-        return false;
     }
 
     private static bool HasLocalSetupEvidence(GatewayRegistry? registry, string localDataPath)

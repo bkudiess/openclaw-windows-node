@@ -121,6 +121,51 @@ public class LocalGatewaySetupTests
     }
 
     [Fact]
+    public void ShouldAllowExistingDistroForRun_AllowsFreshAppStateToReuseOrphanedOpenClawDistro()
+    {
+        var state = LocalGatewaySetupState.Create(new LocalGatewaySetupOptions());
+
+        var allow = LocalGatewaySetupEngine.ShouldAllowExistingDistroForRun(
+            state,
+            distroExists: true,
+            configuredAllowExistingDistro: false);
+
+        Assert.True(allow);
+    }
+
+    [Fact]
+    public void ShouldAllowExistingDistroForRun_AllowsRetryAfterDistroExistsPreflightFailure()
+    {
+        var state = LocalGatewaySetupState.Create(new LocalGatewaySetupOptions());
+        state.Issues.Add(new LocalGatewaySetupIssue(
+            "distro_exists",
+            "A WSL distro named OpenClawGateway already exists.",
+            LocalGatewaySetupSeverity.Blocking));
+        state.Block("preflight_blocked", "This PC is not ready for local WSL gateway setup.");
+
+        var allow = LocalGatewaySetupEngine.ShouldAllowExistingDistroForRun(
+            state,
+            distroExists: true,
+            configuredAllowExistingDistro: false);
+
+        Assert.True(allow);
+    }
+
+    [Fact]
+    public void ShouldAllowExistingDistroForRun_DoesNotAllowUnrelatedFailedState()
+    {
+        var state = LocalGatewaySetupState.Create(new LocalGatewaySetupOptions());
+        state.Block("port_in_use", "Local gateway port is already in use.");
+
+        var allow = LocalGatewaySetupEngine.ShouldAllowExistingDistroForRun(
+            state,
+            distroExists: true,
+            configuredAllowExistingDistro: false);
+
+        Assert.False(allow);
+    }
+
+    [Fact]
     public async Task WslStoreInstanceInstaller_UsesCraigApprovedInstallCommand_AndTrustsExitCode()
     {
         using var temp = new TempDirectory();
@@ -143,6 +188,148 @@ public class LocalGatewaySetupTests
             "2"]));
         Assert.DoesNotContain(wsl.Commands, command => command.Contains("--web-download"));
         Assert.DoesNotContain(wsl.Commands, command => command.Contains("--from-file"));
+    }
+
+    [Fact]
+    public async Task WslStoreInstanceInstaller_UnregistersBrokenExistingDistroAndReinstalls_WhenExistingDistroAllowed()
+    {
+        using var temp = new TempDirectory();
+        var installLocation = System.IO.Path.Combine(temp.Path, "OpenClawGateway");
+        var wsl = new FakeWslCommandRunner
+        {
+            Distros = [new WslDistroInfo("OpenClawGateway", "Stopped", 2)]
+        };
+        wsl.CommandResultByContains["-d OpenClawGateway -u root -- true"] = new WslCommandResult(
+            -1,
+            "",
+            "Failed to attach disk 'C:\\Users\\test\\AppData\\Local\\OpenClawTray\\wsl\\OpenClawGateway\\ext4.vhdx' to WSL2: The system cannot find the path specified. Error code: Wsl/Service/CreateInstance/MountDisk/HCS/ERROR_PATH_NOT_FOUND");
+        var installer = new WslStoreInstanceInstaller(wsl, createDirectory: _ => { });
+
+        var result = await installer.EnsureInstalledAsync(new LocalGatewaySetupOptions
+        {
+            AllowExistingDistro = true,
+            InstanceInstallLocation = installLocation
+        });
+
+        Assert.True(result.Success);
+        Assert.Contains("OpenClawGateway", wsl.UnregisteredDistros);
+        Assert.Contains(wsl.Commands, command => command.SequenceEqual([
+            "--install",
+            "Ubuntu-24.04",
+            "--name",
+            "OpenClawGateway",
+            "--location",
+            installLocation,
+            "--no-launch",
+            "--version",
+            "2"]));
+    }
+
+    [Fact]
+    public async Task WslStoreInstanceInstaller_UnregistersBrokenExistingDistro_WhenWslOutputsNulSeparatedText()
+    {
+        using var temp = new TempDirectory();
+        var installLocation = System.IO.Path.Combine(temp.Path, "OpenClawGateway");
+        var wsl = new FakeWslCommandRunner
+        {
+            Distros = [new WslDistroInfo("OpenClawGateway", "Stopped", 2)]
+        };
+        var missingDiskMessage = "Failed to attach disk 'C:\\Users\\test\\AppData\\Local\\OpenClawTray\\wsl\\OpenClawGateway\\ext4.vhdx' to WSL2: The system cannot find the path specified. Error code: Wsl/Service/CreateInstance/MountDisk/HCS/ERROR_PATH_NOT_FOUND";
+        wsl.CommandResultByContains["-d OpenClawGateway -u root -- true"] = new WslCommandResult(
+            -1,
+            string.Join("\0", missingDiskMessage.ToCharArray()),
+            "");
+        var installer = new WslStoreInstanceInstaller(wsl, createDirectory: _ => { });
+
+        var result = await installer.EnsureInstalledAsync(new LocalGatewaySetupOptions
+        {
+            AllowExistingDistro = true,
+            InstanceInstallLocation = installLocation
+        });
+
+        Assert.True(result.Success);
+        Assert.Contains("OpenClawGateway", wsl.UnregisteredDistros);
+        Assert.Contains(wsl.Commands, command => command.Count > 0 && command[0] == "--install");
+    }
+
+    [Fact]
+    public async Task WslStoreInstanceInstaller_DoesNotUnregisterExistingDistro_WhenMountDiskFailureIsNotMissingPath()
+    {
+        using var temp = new TempDirectory();
+        var wsl = new FakeWslCommandRunner
+        {
+            Distros = [new WslDistroInfo("OpenClawGateway", "Stopped", 2)]
+        };
+        wsl.CommandResultByContains["-d OpenClawGateway -u root -- true"] = new WslCommandResult(
+            -1,
+            "",
+            "Error code: Wsl/Service/CreateInstance/MountDisk/HCS/E_ACCESSDENIED");
+        var installer = new WslStoreInstanceInstaller(wsl, createDirectory: _ => { });
+
+        var result = await installer.EnsureInstalledAsync(new LocalGatewaySetupOptions
+        {
+            AllowExistingDistro = true,
+            InstanceInstallLocation = temp.Path
+        });
+
+        Assert.False(result.Success);
+        Assert.Equal("wsl_existing_distro_unavailable", result.ErrorCode);
+        Assert.Empty(wsl.UnregisteredDistros);
+        Assert.DoesNotContain(wsl.Commands, command => command.Count > 0 && command[0] == "--install");
+    }
+
+    [Fact]
+    public async Task WslStoreInstanceInstaller_InstallsFresh_WhenFailedUnregisterAlreadyRemovedDistro()
+    {
+        using var temp = new TempDirectory();
+        var installLocation = System.IO.Path.Combine(temp.Path, "OpenClawGateway");
+        var wsl = new FakeWslCommandRunner
+        {
+            Distros = [new WslDistroInfo("OpenClawGateway", "Stopped", 2)],
+            UnregisterResult = new WslCommandResult(1, "", "The specified distribution was not found."),
+            RemoveDistroOnUnregister = true
+        };
+        wsl.CommandResultByContains["-d OpenClawGateway -u root -- true"] = new WslCommandResult(
+            -1,
+            "",
+            "Failed to attach disk 'C:\\Users\\test\\AppData\\Local\\OpenClawTray\\wsl\\OpenClawGateway\\ext4.vhdx' to WSL2: The system cannot find the path specified. Error code: Wsl/Service/CreateInstance/MountDisk/HCS/ERROR_PATH_NOT_FOUND");
+        var installer = new WslStoreInstanceInstaller(wsl, createDirectory: _ => { });
+
+        var result = await installer.EnsureInstalledAsync(new LocalGatewaySetupOptions
+        {
+            AllowExistingDistro = true,
+            InstanceInstallLocation = installLocation
+        });
+
+        Assert.True(result.Success);
+        Assert.Contains("OpenClawGateway", wsl.UnregisteredDistros);
+        Assert.Contains(wsl.Commands, command => command.Count > 0 && command[0] == "--install");
+    }
+
+    [Fact]
+    public async Task WslStoreInstanceInstaller_FailsExistingDistroProbe_WhenFailureIsNotMissingDisk()
+    {
+        using var temp = new TempDirectory();
+        var wsl = new FakeWslCommandRunner
+        {
+            Distros = [new WslDistroInfo("OpenClawGateway", "Stopped", 2)]
+        };
+        wsl.CommandResultByContains["-d OpenClawGateway -u root -- true"] = new WslCommandResult(
+            1,
+            "",
+            "WSL is unavailable");
+        var installer = new WslStoreInstanceInstaller(wsl, createDirectory: _ => { });
+
+        var result = await installer.EnsureInstalledAsync(new LocalGatewaySetupOptions
+        {
+            AllowExistingDistro = true,
+            InstanceInstallLocation = temp.Path
+        });
+
+        Assert.False(result.Success);
+        Assert.Equal("wsl_existing_distro_unavailable", result.ErrorCode);
+        Assert.Empty(wsl.UnregisteredDistros);
+        Assert.DoesNotContain(wsl.Commands, command => command.Count > 0 && command[0] == "--install");
     }
 
     [Fact]
@@ -489,7 +676,7 @@ public class LocalGatewaySetupTests
     }
 
     [Fact]
-    public async Task Engine_StopsBeforeInstall_WhenPreflightBlocks()
+    public async Task Engine_ReusesOrphanedExistingDistro_WhenAppStateIsFresh()
     {
         using var temp = new TempDirectory();
         var wsl = new FakeWslCommandRunner { Distros = [new WslDistroInfo("OpenClawGateway", "Stopped", 2)] };
@@ -506,9 +693,9 @@ public class LocalGatewaySetupTests
 
         var state = await engine.RunLocalOnlyAsync();
 
-        Assert.Equal(LocalGatewaySetupStatus.FailedTerminal, state.Status);
-        Assert.Equal("preflight_blocked", state.FailureCode);
+        Assert.Equal(LocalGatewaySetupStatus.Complete, state.Status);
         Assert.DoesNotContain(wsl.Commands, command => command.Count > 0 && command[0] == "--install");
+        Assert.Contains(state.History, h => h.Phase == LocalGatewaySetupPhase.CreateWslInstance);
     }
 
     [Fact]
@@ -636,6 +823,9 @@ public class LocalGatewaySetupTests
         public string WslStatusOutput { get; set; } = "";
         public string RunInDistroOutput { get; set; } = "";
         public int InstallExitCode { get; set; }
+        public WslCommandResult UnregisterResult { get; set; } = new(0, "", "");
+        public bool RemoveDistroOnUnregister { get; set; } = true;
+        public Dictionary<string, WslCommandResult> CommandResultByContains { get; } = new();
         public Dictionary<string, string> CommandOutputByContains { get; } = new();
         public Dictionary<string, int> CommandExitCodeByContains { get; } = new();
 
@@ -651,6 +841,11 @@ public class LocalGatewaySetupTests
                 return Task.FromResult(new WslCommandResult(InstallExitCode, "", InstallExitCode == 0 ? "" : "install failed"));
 
             var joined = string.Join(" ", arguments);
+            foreach (var pair in CommandResultByContains)
+            {
+                if (joined.Contains(pair.Key, StringComparison.Ordinal))
+                    return Task.FromResult(pair.Value);
+            }
             foreach (var pair in CommandExitCodeByContains)
             {
                 if (joined.Contains(pair.Key, StringComparison.Ordinal))
@@ -677,8 +872,9 @@ public class LocalGatewaySetupTests
         public Task<WslCommandResult> UnregisterDistroAsync(string name, CancellationToken cancellationToken = default)
         {
             UnregisteredDistros.Add(name);
-            Distros.RemoveAll(d => d.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-            return Task.FromResult(new WslCommandResult(0, "", ""));
+            if (RemoveDistroOnUnregister)
+                Distros.RemoveAll(d => d.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            return Task.FromResult(UnregisterResult);
         }
 
         public Task<WslCommandResult> RunInDistroAsync(string name, IReadOnlyList<string> command, CancellationToken cancellationToken = default, IReadOnlyDictionary<string, string>? environment = null)

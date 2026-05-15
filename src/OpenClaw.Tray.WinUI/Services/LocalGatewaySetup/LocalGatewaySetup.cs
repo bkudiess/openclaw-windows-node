@@ -697,9 +697,52 @@ public sealed class WslStoreInstanceInstaller : IWslInstanceInstaller
         var distros = await _wsl.ListDistrosAsync(cancellationToken);
         if (distros.Any(d => string.Equals(d.Name, options.DistroName, StringComparison.OrdinalIgnoreCase) && d.Version == 2))
         {
-            return options.AllowExistingDistro
-                ? new WslInstanceInstallResult(true, installLocation, ["wsl_instance_already_exists"])
-                : new WslInstanceInstallResult(false, installLocation, ErrorCode: "distro_exists", ErrorMessage: $"A WSL distro named {options.DistroName} already exists.");
+            if (!options.AllowExistingDistro)
+            {
+                return new WslInstanceInstallResult(false, installLocation, ErrorCode: "distro_exists", ErrorMessage: $"A WSL distro named {options.DistroName} already exists.");
+            }
+
+            var probe = await _wsl.RunAsync(["-d", options.DistroName, "-u", "root", "--", "true"], cancellationToken);
+            if (probe.Success)
+            {
+                return new WslInstanceInstallResult(true, installLocation, ["wsl_instance_already_exists"]);
+            }
+
+            if (!IsMissingRegisteredDiskFailure(probe))
+            {
+                var existingDiagnostics = new List<string> { $"wsl_existing_distro_probe_exit_code={probe.ExitCode}" };
+                AddDiagnosticOutput(existingDiagnostics, "wsl_existing_distro_probe_stdout", probe.StandardOutput);
+                AddDiagnosticOutput(existingDiagnostics, "wsl_existing_distro_probe_stderr", probe.StandardError);
+                return new WslInstanceInstallResult(
+                    false,
+                    installLocation,
+                    existingDiagnostics,
+                    "wsl_existing_distro_unavailable",
+                    WslLogsHelp($"The existing {options.DistroName} WSL instance could not be started."));
+            }
+
+            var unregister = await _wsl.UnregisterDistroAsync(options.DistroName, cancellationToken);
+            if (!unregister.Success)
+            {
+                var remainingDistros = await _wsl.ListDistrosAsync(cancellationToken);
+                if (!remainingDistros.Any(d => string.Equals(d.Name, options.DistroName, StringComparison.OrdinalIgnoreCase) && d.Version == 2))
+                {
+                    // Another actor may have completed the unregister even though
+                    // wsl.exe returned a failure. Continue with a clean install.
+                }
+                else
+                {
+                    var unregisterDiagnostics = new List<string> { $"wsl_unregister_exit_code={unregister.ExitCode}" };
+                    AddDiagnosticOutput(unregisterDiagnostics, "wsl_unregister_stdout", unregister.StandardOutput);
+                    AddDiagnosticOutput(unregisterDiagnostics, "wsl_unregister_stderr", unregister.StandardError);
+                    return new WslInstanceInstallResult(
+                        false,
+                        installLocation,
+                        unregisterDiagnostics,
+                        "wsl_broken_distro_unregister_failed",
+                        WslLogsHelp($"The existing {options.DistroName} WSL registration points to a missing disk, but setup could not remove it."));
+                }
+            }
         }
 
         _createDirectory(installLocation);
@@ -746,6 +789,19 @@ public sealed class WslStoreInstanceInstaller : IWslInstanceInstaller
         var sanitized = SanitizeForDiagnostic(value);
         if (!string.IsNullOrWhiteSpace(sanitized))
             diagnostics.Add($"{name}={sanitized}");
+    }
+
+    internal static bool IsMissingRegisteredDiskFailure(WslCommandResult result)
+    {
+        var output = $"{result.StandardOutput}\n{result.StandardError}".Replace("\0", string.Empty, StringComparison.Ordinal);
+        var pathNotFound = output.Contains("ERROR_PATH_NOT_FOUND", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("The system cannot find the path specified", StringComparison.OrdinalIgnoreCase);
+        if (!pathNotFound)
+            return false;
+
+        return output.Contains("Failed to attach disk", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("CreateInstance/MountDisk", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("ext4.vhdx", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string WslLogsHelp(string message) => message + " Follow aka.ms/wsllogs for WSL diagnostic collection instructions.";
@@ -2802,8 +2858,8 @@ public sealed class LocalGatewaySetupEngine
         state.DistroName = _options.DistroName;
         state.GatewayUrl = LocalGatewayEndpointResolver.BuildLoopbackGatewayUrl(_options);
         var distroExists = await HasDistroAsync(cancellationToken);
-        var resumingAfterInstanceStarted = IsCreateOrLater(state.Phase) && distroExists;
-        var preflightOptions = _options with { AllowExistingDistro = _options.AllowExistingDistro || resumingAfterInstanceStarted };
+        var allowExistingDistroForRun = ShouldAllowExistingDistroForRun(state, distroExists, _options.AllowExistingDistro);
+        var preflightOptions = _options with { AllowExistingDistro = allowExistingDistroForRun };
 
         await RunPhaseAsync(state, LocalGatewaySetupPhase.Preflight, "Checking your PC", async () =>
         {
@@ -2836,7 +2892,7 @@ public sealed class LocalGatewaySetupEngine
 
         await RunPhaseAsync(state, LocalGatewaySetupPhase.CreateWslInstance, "Creating OpenClaw Gateway WSL instance", async () =>
         {
-            var installOptions = _options with { AllowExistingDistro = _options.AllowExistingDistro || resumingAfterInstanceStarted };
+            var installOptions = _options with { AllowExistingDistro = allowExistingDistroForRun };
             var result = await _wslInstanceInstaller.EnsureInstalledAsync(installOptions, cancellationToken);
             if (!result.Success)
             {
@@ -2972,6 +3028,28 @@ public sealed class LocalGatewaySetupEngine
         }
 
         return state;
+    }
+
+    internal static bool ShouldAllowExistingDistroForRun(
+        LocalGatewaySetupState state,
+        bool distroExists,
+        bool configuredAllowExistingDistro)
+    {
+        if (configuredAllowExistingDistro)
+            return true;
+
+        if (!distroExists)
+            return false;
+
+        if (state.Phase == LocalGatewaySetupPhase.NotStarted
+            || IsCreateOrLater(state.Phase))
+        {
+            return true;
+        }
+
+        return state.Phase == LocalGatewaySetupPhase.Failed
+            && state.FailureCode == "preflight_blocked"
+            && state.Issues.Any(issue => string.Equals(issue.Code, "distro_exists", StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task RunGatewayCliStartPhaseAsync(LocalGatewaySetupState state, CancellationToken cancellationToken)

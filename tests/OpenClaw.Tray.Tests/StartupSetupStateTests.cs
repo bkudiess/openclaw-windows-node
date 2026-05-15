@@ -251,7 +251,7 @@ public class StartupSetupStateTests
     }
 
     [Fact]
-    public async Task ClassifyAsync_ReturnsAppOwnedLocalWsl_WhenOpenClawDistroExistsWithoutLocalEvidence()
+    public async Task ClassifyAsync_StaleOpenClawDistroWithoutLocalEvidence_DoesNotTriggerLocalReplacementWarning()
     {
         using var temp = TempSettings.Create();
         var settings = new SettingsManager(temp.Path);
@@ -266,7 +266,20 @@ public class StartupSetupStateTests
 
         var kind = await SetupExistingGatewayClassifier.ClassifyAsync(registry, settings, temp.Path, wsl);
 
-        Assert.Equal(SetupExistingGatewayKind.AppOwnedLocalWsl, kind);
+        Assert.Equal(SetupExistingGatewayKind.ExternalOnly, kind);
+    }
+
+    [Fact]
+    public async Task ClassifyAsync_StaleOpenClawDistroOnFreshAppState_ReturnsNone()
+    {
+        using var temp = TempSettings.Create();
+        var settings = new SettingsManager(temp.Path);
+        var registry = new GatewayRegistry(temp.Path);
+        var wsl = new FakeWslCommandRunner([new WslDistroInfo("OpenClawGateway", "Stopped", 2)]);
+
+        var kind = await SetupExistingGatewayClassifier.ClassifyAsync(registry, settings, temp.Path, wsl);
+
+        Assert.Equal(SetupExistingGatewayKind.None, kind);
     }
 
     [Fact]
