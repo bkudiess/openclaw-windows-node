@@ -1,4 +1,4 @@
-<?xml version='1.0' encoding='utf-8'?>
+<?xml version="1.0" encoding="utf-8"?>
 <root xmlns:ns1="urn:schemas-microsoft-com:xml-msdata" xmlns:xs="http://www.w3.org/2001/XMLSchema">
   <xs:schema id="root">
     <xs:element name="root" ns1:IsDataSet="true">
@@ -691,9 +691,7 @@ Utilisez l'une de ces options :
   <data name="Toast_CameraBlockedDetail" xml:space="preserve">
     <value>Activez l'accès à la caméra dans les paramètres de confidentialité de Windows pour OpenClaw Tray</value>
   </data>
-
   <!-- ==================== Toast: Recording ==================== -->
-
   <data name="Toast_ScreenRecordingStarted" xml:space="preserve">
     <value>🔴 Enregistrement d'écran démarré</value>
   </data>
@@ -724,9 +722,7 @@ Utilisez l'une de ces options :
   <data name="Toast_CameraRecordingCompleteDetail" xml:space="preserve">
     <value>Le clip caméra a été envoyé à l'agent</value>
   </data>
-
   <!-- ==================== Recording Consent Dialog ==================== -->
-
   <data name="RecordingConsent_WindowTitle" xml:space="preserve">
     <value>OpenClaw · Demande d'autorisation</value>
   </data>
@@ -751,9 +747,7 @@ Utilisez l'une de ces options :
   <data name="RecordingConsent_Deny" xml:space="preserve">
     <value>Refuser</value>
   </data>
-
   <!-- ==================== Settings: Privacy ==================== -->
-
   <data name="Settings_PrivacyHeader" xml:space="preserve">
     <value>Confidentialité</value>
   </data>
@@ -778,9 +772,7 @@ Utilisez l'une de ces options :
   <data name="CameraRecordingToggle.Header" xml:space="preserve">
     <value>Autoriser l'enregistrement caméra</value>
   </data>
-
   <!-- ==================== Activity Stream: Recording ==================== -->
-
   <data name="Activity_ScreenRecordingStarted" xml:space="preserve">
     <value>Enregistrement d'écran démarré</value>
   </data>
@@ -799,7 +791,6 @@ Utilisez l'une de ces options :
   <data name="Activity_RecordingSentToAgent" xml:space="preserve">
     <value>Enregistrement {0} envoyé à l'agent</value>
   </data>
-
   <!-- ==================== Toast: Activity Stream Tip ==================== -->
   <data name="Toast_ActivityStreamTip" xml:space="preserve">
     <value>⚡ Nouveau: Fil d'activité</value>
@@ -1416,7 +1407,6 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
   <data name="Onboarding_Connection_LaterStatus" xml:space="preserve">
     <value>Vous pouvez configurer la passerelle plus tard dans les paramètres.</value>
   </data>
-
   <data name="Onboarding_SetupWarning_Title" xml:space="preserve">
     <value>Configurer OpenClaw</value>
   </data>
@@ -1899,32 +1889,8 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
   <data name="HealthCheckButton.Content" xml:space="preserve">
     <value>Vérification de l'état</value>
   </data>
-  <data name="InstancesPage_TextBlock_12.Text" xml:space="preserve">
-    <value>🖥️ Occurrences</value>
-  </data>
   <data name="RefreshButton.Content" xml:space="preserve">
     <value>⟳ Actualiser</value>
-  </data>
-  <data name="InstancesPage_TextBlock_22.Text" xml:space="preserve">
-    <value>🖥️ Aucune autre instance détectée</value>
-  </data>
-  <data name="InstancesPage_TextBlock_25.Text" xml:space="preserve">
-    <value>Les autres nœuds OpenClaw connectés à la même passerelle apparaîtront ici.</value>
-  </data>
-  <data name="NodesPage_TextBlock_10.Text" xml:space="preserve">
-    <value>🖥️ Nœuds</value>
-  </data>
-  <data name="NodesPage_TextBlock_22.Text" xml:space="preserve">
-    <value>Aucun nœud connecté</value>
-  </data>
-  <data name="NodesPage_TextBlock_29.Text" xml:space="preserve">
-    <value>🔗 Demandes d’appairage en attente</value>
-  </data>
-  <data name="NodesPage_TextBlock_35.Text" xml:space="preserve">
-    <value>📱 Appairages d’appareils en attente</value>
-  </data>
-  <data name="NodesPage_TextBlock_41.Text" xml:space="preserve">
-    <value>🌐 Clients connectés</value>
   </data>
   <data name="NodesPage_Action_Rename" xml:space="preserve">
     <value>Renommer</value>
@@ -2040,7 +2006,7 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
   <data name="PermissionsPage_Button_57.Content" xml:space="preserve">
     <value>Ajouter une règle</value>
   </data>
-<data name="PermissionsPage_TextBlock_69.Text" xml:space="preserve">
+  <data name="PermissionsPage_TextBlock_69.Text" xml:space="preserve">
     <value>Liste d’autorisation des nœuds</value>
   </data>
   <data name="PermissionsPage_TextBlock_72.Text" xml:space="preserve">
@@ -2257,7 +2223,7 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
     <value>Canaux</value>
   </data>
   <data name="HubWindow_NavigationViewItem_112.Content" xml:space="preserve">
-    <value>Nœuds</value>
+    <value>Instances connectées</value>
   </data>
   <data name="HubWindow_NavigationViewItem_115.Content" xml:space="preserve">
     <value>Liaisons</value>
@@ -2460,10 +2426,10 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
   <data name="CronPageRemoveJobToolTip.Content" xml:space="preserve">
     <value>Supprimer la tâche</value>
   </data>
-<data name="PermissionsPage_SttMoreSettingsLink.Content" xml:space="preserve">
+  <data name="PermissionsPage_SttMoreSettingsLink.Content" xml:space="preserve">
     <value>Plus de paramètres vocaux…</value>
   </data>
-<data name="PermissionsPage_TtsElevenLabsApiKey.Header" xml:space="preserve">
+  <data name="PermissionsPage_TtsElevenLabsApiKey.Header" xml:space="preserve">
     <value>Clé API ElevenLabs</value>
   </data>
   <data name="PermissionsPage_TtsElevenLabsHelp.Text" xml:space="preserve">
@@ -2795,7 +2761,8 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
   </data>
   <data name="VoiceSettingsPage_PreviewVoiceButtonContent" xml:space="preserve">
     <value>▶ Aperçu de la voix</value>
-  </data>  <data name="DebugPage_TextBlock_OverridesHeader.Text" xml:space="preserve">
+  </data>
+  <data name="DebugPage_TextBlock_OverridesHeader.Text" xml:space="preserve">
     <value>Substitutions de débogage</value>
   </data>
   <data name="DebugPage_TextBlock_OverridesCaption.Text" xml:space="preserve">
@@ -2947,7 +2914,8 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
   </data>
   <data name="VoiceSettingsPage_TestVoiceButtonText.Text" xml:space="preserve">
     <value>Tester la saisie vocale</value>
-  </data>  <data name="PermissionsPage_FeaturesDescription_Enabled" xml:space="preserve">
+  </data>
+  <data name="PermissionsPage_FeaturesDescription_Enabled" xml:space="preserve">
     <value>Toggle individual features that agents may request from this PC.</value>
   </data>
   <data name="PermissionsPage_FeaturesDescription_Disabled" xml:space="preserve">
@@ -3060,7 +3028,8 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
   </data>
   <data name="PermissionsPage_Allowlist_ParseFailed" xml:space="preserve">
     <value>Failed to parse allowlist from config.</value>
-  </data>  <data name="PermissionsPage_TtsStatus_DefaultProviderFormat" xml:space="preserve">
+  </data>
+  <data name="PermissionsPage_TtsStatus_DefaultProviderFormat" xml:space="preserve">
     <value>Default provider: {0}</value>
   </data>
   <data name="PermissionsPage_TtsStatus_ElevenLabsSaved" xml:space="preserve">
@@ -3069,6 +3038,115 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
   <data name="PermissionsPage_McpStatus_TokenReadFailedFormat" xml:space="preserve">
     <value>Failed to read token: {0}</value>
   </data>
-
-
+  <data name="InstancesPage_Title.Text" xml:space="preserve">
+    <value>Instances</value>
+  </data>
+  <data name="InstancesPage_Subtitle.Text" xml:space="preserve">
+    <value>Latest presence beacons from OpenClaw nodes.</value>
+  </data>
+  <data name="InstancesPage_ConnectionWarning.Title" xml:space="preserve">
+    <value>Not connected</value>
+  </data>
+  <data name="InstancesPage_ConnectionWarning.Message" xml:space="preserve">
+    <value>Connect to a gateway to see live instance data.</value>
+  </data>
+  <data name="InstancesPage_EmptyTitle.Text" xml:space="preserve">
+    <value>No instances reported yet.</value>
+  </data>
+  <data name="InstancesPage_ContextMenu_CopyDebug" xml:space="preserve">
+    <value>Copy debug summary</value>
+  </data>
+  <data name="InstancesPage_Status_Active" xml:space="preserve">
+    <value>Active</value>
+  </data>
+  <data name="InstancesPage_Status_Idle" xml:space="preserve">
+    <value>Idle</value>
+  </data>
+  <data name="InstancesPage_Status_Disconnected" xml:space="preserve">
+    <value>Disconnected</value>
+  </data>
+  <data name="InstancesPage_Reason_Self" xml:space="preserve">
+    <value>Self</value>
+  </data>
+  <data name="InstancesPage_Reason_Connect" xml:space="preserve">
+    <value>Connect</value>
+  </data>
+  <data name="InstancesPage_Reason_Disconnect" xml:space="preserve">
+    <value>Disconnect</value>
+  </data>
+  <data name="InstancesPage_Reason_NodeConnect" xml:space="preserve">
+    <value>Node connect</value>
+  </data>
+  <data name="InstancesPage_Reason_NodeDisconnect" xml:space="preserve">
+    <value>Node disconnect</value>
+  </data>
+  <data name="InstancesPage_Reason_Launch" xml:space="preserve">
+    <value>Launch</value>
+  </data>
+  <data name="InstancesPage_Reason_Heartbeat" xml:space="preserve">
+    <value>Heartbeat</value>
+  </data>
+  <data name="InstancesPage_Reason_Refresh" xml:space="preserve">
+    <value>Instances refresh</value>
+  </data>
+  <data name="InstancesPage_Reason_Resync" xml:space="preserve">
+    <value>Resync</value>
+  </data>
+  <data name="ConnectionPage_NodePairing_Title.Text" xml:space="preserve">
+    <value>🔗 Pending Operator/Node Pairing</value>
+  </data>
+  <data name="ConnectionPage_NodePairing_Subtitle.Text" xml:space="preserve">
+    <value>Operators and Windows nodes waiting for approval to connect to this gateway.</value>
+  </data>
+  <data name="InstancesPage_RefreshLabel.Text" xml:space="preserve">
+    <value>Refresh</value>
+  </data>
+  <data name="InstancesPage_CapabilitiesCount_Format" xml:space="preserve">
+    <value>{0} capabilities</value>
+  </data>
+  <data name="InstancesPage_CommandsCount_Format" xml:space="preserve">
+    <value>{0} commands</value>
+  </data>
+  <data name="InstancesPage_Presence_AccessibilityFormat" xml:space="preserve">
+    <value>{0} presence</value>
+  </data>
+  <data name="InstancesPage_UpdateReason_Tooltip_Format" xml:space="preserve">
+    <value>Why this presence entry was last updated (debug marker). Raw: {0}</value>
+  </data>
+  <data name="InstancesPage_UpdateReason_Tooltip_NoReason" xml:space="preserve">
+    <value>Why this presence entry was last updated (debug marker).</value>
+  </data>
+  <data name="InstancesPage_StatusTooltip_Disconnected" xml:space="preserve">
+    <value>Disconnected — no active presence</value>
+  </data>
+  <data name="InstancesPage_StatusTooltip_Active_Format" xml:space="preserve">
+    <value>Active — last seen {0}</value>
+  </data>
+  <data name="InstancesPage_StatusTooltip_Idle_Format" xml:space="preserve">
+    <value>Idle — last seen {0}</value>
+  </data>
+  <data name="InstancesPage_Status_Inactive" xml:space="preserve">
+    <value>Inactive</value>
+  </data>
+  <data name="InstancesPage_StatusTooltip_Inactive_Format" xml:space="preserve">
+    <value>Inactive — last seen {0}</value>
+  </data>
+  <data name="InstancesPage_Role_AccessibilityFormat" xml:space="preserve">
+    <value>Role: {0}</value>
+  </data>
+  <data name="InstanceManage_CopyNodeId_AccessibilityName" xml:space="preserve">
+    <value>Copy node ID</value>
+  </data>
+  <data name="InstancesPage_TimeAgo_Seconds_Format" xml:space="preserve">
+    <value>il y a {0}s</value>
+  </data>
+  <data name="InstancesPage_TimeAgo_Minutes_Format" xml:space="preserve">
+    <value>il y a {0}m</value>
+  </data>
+  <data name="InstancesPage_TimeAgo_Hours_Format" xml:space="preserve">
+    <value>il y a {0}h</value>
+  </data>
+  <data name="InstancesPage_TimeAgo_Days_Format" xml:space="preserve">
+    <value>il y a {0}j</value>
+  </data>
 </root>
