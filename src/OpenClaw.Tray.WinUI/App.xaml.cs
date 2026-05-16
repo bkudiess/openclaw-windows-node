@@ -1,4 +1,4 @@
-﻿using Microsoft.Toolkit.Uwp.Notifications;
+using Microsoft.Toolkit.Uwp.Notifications;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
@@ -30,7 +30,7 @@ using WinUIEx;
 
 namespace OpenClawTray;
 
-public partial class App : Application
+public partial class App : Application, OpenClawTray.Services.IAppCommands
 {
     private const string PipeName = "OpenClawTray-DeepLink";
     
@@ -177,6 +177,8 @@ public partial class App : Application
     private GlobalHotkeyService? _globalHotkey;
     private Mutex? _mutex;
     private Microsoft.UI.Dispatching.DispatcherQueue? _dispatcherQueue;
+    private AppState? _appState;
+    private GatewayService? _gatewayService;
     private CancellationTokenSource? _deepLinkCts;
     private bool _isExiting;
     
@@ -188,27 +190,6 @@ public partial class App : Application
     private ConnectionStatus _currentStatus = ConnectionStatus.Disconnected;
     private WeakReference<ToggleSwitch>? _connectionToggleRef;
     private bool _suspendConnectionToggleEvent;
-    private AgentActivity? _currentActivity;
-    private ChannelHealth[] _lastChannels = Array.Empty<ChannelHealth>();
-    private SessionInfo[] _lastSessions = Array.Empty<SessionInfo>();
-    private GatewayNodeInfo[] _lastNodes = Array.Empty<GatewayNodeInfo>();
-    private readonly Dictionary<string, SessionPreviewInfo> _sessionPreviews = new();
-    private readonly object _sessionPreviewsLock = new();
-    private DateTime _lastPreviewRequestUtc = DateTime.MinValue;
-    private GatewayUsageInfo? _lastUsage;
-    private GatewayUsageStatusInfo? _lastUsageStatus;
-    private GatewayCostUsageInfo? _lastUsageCost;
-    private GatewaySelfInfo? _lastGatewaySelf;
-    private PairingListInfo? _lastNodePairList;
-    private DevicePairingListInfo? _lastDevicePairList;
-    private ModelsListInfo? _lastModelsList;
-    private PresenceEntry[]? _lastPresence;
-    private readonly List<AgentEventInfo> _agentEventsCache = new();
-    private const int MaxAppAgentEvents = 400;
-    private UpdateCommandCenterInfo _lastUpdateInfo = BuildInitialUpdateInfo();
-    private DateTime _lastCheckTime = DateTime.Now;
-    private DateTime _lastUsageActivityLogUtc = DateTime.MinValue;
-    private string? _lastChannelStatusSignature;
 
     // FrozenDictionary for O(1) case-insensitive notification type → setting lookup — no per-call allocation.
     private static readonly System.Collections.Frozen.FrozenDictionary<string, Func<SettingsManager, bool>> s_notifTypeMap =
@@ -225,21 +206,14 @@ public partial class App : Application
             ["error"]     = s => s.NotifyUrgent,  // errors follow urgent setting
         }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
-    // Session-aware activity tracking
-    private readonly Dictionary<string, AgentActivity> _sessionActivities = new();
-    private string? _displayedSessionKey;
-    private DateTime _lastSessionSwitch = DateTime.MinValue;
-    private static readonly TimeSpan SessionSwitchDebounce = TimeSpan.FromSeconds(3);
-
     // Windows (created on demand)
     private HubWindow? _hubWindow;
     private TrayMenuWindow? _trayMenuWindow;
     private QuickSendDialog? _quickSendDialog;
     private ChatWindow? _chatWindow;
     private ConnectionStatusWindow? _connectionStatusWindow;
-    private string? _authFailureMessage;
 
-    // Bug 3: per-device idempotency for "Node paired" toast. WindowsNodeClient.HandleHelloOk
+    // Bug 3: per-device idempotencyfor "Node paired" toast. WindowsNodeClient.HandleHelloOk
     // re-fires PairingStatusChanged(Paired) on every WS reconnect; we only want one toast
     // per device per session. (Source-side suppression also exists in WindowsNodeClient as
     // defense-in-depth.)
@@ -630,6 +604,17 @@ public partial class App : Application
                 ? null
                 : OpenClawTray.Chat.FunctionalChatHostExtensions.AsPost(_dispatcherQueue));
         DiagnosticsJsonlService.Configure(DataPath);
+
+        // Central observable model + gateway event handler.
+        _appState = new AppState(_dispatcherQueue);
+        _appState.UpdateInfo = BuildInitialUpdateInfo();
+        _gatewayService = new GatewayService(_appState, _dispatcherQueue!);
+        _gatewayService.ConnectionStatusChanged += OnGatewayConnectionStatusChanged;
+        _gatewayService.AuthenticationFailed += OnGatewayAuthenticationFailed;
+        _gatewayService.SessionCommandCompleted += OnGatewaySessionCommandCompleted;
+        _gatewayService.NotificationReceived += OnGatewayNotificationReceived;
+        _appState.PropertyChanged += OnAppStateChanged;
+
         DiagnosticsJsonlService.Write("app.start", new
         {
             nodeMode = _settings.EnableNodeMode,
@@ -1117,11 +1102,11 @@ public partial class App : Application
 
     private void CopyNodeSummaryToClipboard()
     {
-        if (_lastNodes.Length == 0) return;
+        if (_appState!.Nodes.Length == 0) return;
 
         try
         {
-            var lines = _lastNodes.Select(node =>
+            var lines = _appState!.Nodes.Select(node =>
             {
                 var state = node.IsOnline ? "online" : "offline";
                 var name = string.IsNullOrWhiteSpace(node.DisplayName) ? node.ShortId : node.DisplayName;
@@ -1133,7 +1118,7 @@ public partial class App : Application
 
             ShowToast(new ToastContentBuilder()
                 .AddText(LocalizationHelper.GetString("Toast_NodeSummaryCopied"))
-                .AddText(string.Format(LocalizationHelper.GetString("Toast_NodeSummaryCopiedDetail"), _lastNodes.Length)));
+                .AddText(string.Format(LocalizationHelper.GetString("Toast_NodeSummaryCopiedDetail"), _appState!.Nodes.Length)));
         }
         catch (Exception ex)
         {
@@ -1258,15 +1243,7 @@ public partial class App : Application
 
     private void LocalDisconnectCleanup()
     {
-        _lastSessions = Array.Empty<SessionInfo>();
-        _lastNodes = Array.Empty<GatewayNodeInfo>();
-        _lastPresence = Array.Empty<PresenceEntry>();
-        _lastChannels = Array.Empty<ChannelHealth>();
-        _lastNodePairList = null;
-        _lastDevicePairList = null;
-        _lastModelsList = null;
-        _lastGatewaySelf = null;
-        _agentEventsCache.Clear();
+        _appState?.ClearCachedData();
         UpdateTrayIcon();
         _hubWindow?.UpdateStatus(ConnectionStatus.Disconnected);
         RefreshTrayMenuIfOpen();
@@ -1310,21 +1287,21 @@ public partial class App : Application
         return new TrayMenuSnapshot
         {
             CurrentStatus = _currentStatus,
-            AuthFailureMessage = _authFailureMessage,
+            AuthFailureMessage = _appState?.AuthFailureMessage,
             GatewayUrl = _settings?.GetEffectiveGatewayUrl(),
-            GatewaySelf = _lastGatewaySelf,
-            Presence = _lastPresence,
+            GatewaySelf = _appState?.GatewaySelf,
+            Presence = _appState?.Presence,
             EnableNodeMode = _settings?.EnableNodeMode == true && _nodeService != null,
             NodeIsPaired = _nodeService?.IsPaired ?? false,
             NodeIsPendingApproval = _nodeService?.IsPendingApproval ?? false,
             NodeIsConnected = _nodeService?.IsConnected ?? false,
-            NodePairList = _lastNodePairList,
-            DevicePairList = _lastDevicePairList,
-            Nodes = _lastNodes,
-            Sessions = _lastSessions,
-            Usage = _lastUsage,
-            UsageStatus = _lastUsageStatus,
-            UsageCost = _lastUsageCost,
+            NodePairList = _appState?.NodePairList,
+            DevicePairList = _appState?.DevicePairList,
+            Nodes = _appState?.Nodes ?? Array.Empty<GatewayNodeInfo>(),
+            Sessions = _appState?.Sessions ?? Array.Empty<SessionInfo>(),
+            Usage = _appState?.Usage,
+            UsageStatus = _appState?.UsageStatus,
+            UsageCost = _appState?.UsageCost,
             Settings = _settings,
             SetupMenuLabel = setupMenuLabel,
         };
@@ -1347,74 +1324,77 @@ public partial class App : Application
 
         {
             var now = DateTime.UtcNow;
-            _lastSessions = new[]
+            if (_appState != null)
             {
-                new SessionInfo
+                _appState.Sessions = new[]
                 {
-                    Key = "preview:main", IsMain = true, Status = "active",
-                    Model = "claude-opus-4.7", DisplayName = "Main · preview",
-                    InputTokens = 124_000, OutputTokens = 36_000,
-                    ContextTokens = 200_000,
-                    UpdatedAt = now.AddMinutes(-2), LastSeen = now,
-                },
-                new SessionInfo
+                    new SessionInfo
+                    {
+                        Key = "preview:main", IsMain = true, Status = "active",
+                        Model = "claude-opus-4.7", DisplayName = "Main · preview",
+                        InputTokens = 124_000, OutputTokens = 36_000,
+                        ContextTokens = 200_000,
+                        UpdatedAt = now.AddMinutes(-2), LastSeen = now,
+                    },
+                    new SessionInfo
+                    {
+                        Key = "preview:dashboard", IsMain = false, Status = "idle",
+                        Model = "gpt-5.4", DisplayName = "agent:main:dashboard",
+                        InputTokens = 58_000, OutputTokens = 12_000,
+                        ContextTokens = 128_000,
+                        UpdatedAt = now.AddHours(-1), LastSeen = now,
+                    },
+                    new SessionInfo
+                    {
+                        Key = "preview:scratch", IsMain = false, Status = "idle",
+                        Model = "claude-haiku-4.5", DisplayName = "agent:main:scratch",
+                        InputTokens = 6_400, OutputTokens = 1_200,
+                        ContextTokens = 64_000,
+                        UpdatedAt = now.AddHours(-4), LastSeen = now,
+                    },
+                };
+
+                _appState.Usage = new GatewayUsageInfo
                 {
-                    Key = "preview:dashboard", IsMain = false, Status = "idle",
-                    Model = "gpt-5.4", DisplayName = "agent:main:dashboard",
-                    InputTokens = 58_000, OutputTokens = 12_000,
-                    ContextTokens = 128_000,
-                    UpdatedAt = now.AddHours(-1), LastSeen = now,
-                },
-                new SessionInfo
+                    InputTokens = 188_400,
+                    OutputTokens = 49_200,
+                    TotalTokens = 237_600,
+                    CostUsd = 4.82,
+                    RequestCount = 142,
+                    Model = "claude-opus-4.7",
+                };
+
+                _appState.UsageStatus = new GatewayUsageStatusInfo
                 {
-                    Key = "preview:scratch", IsMain = false, Status = "idle",
-                    Model = "claude-haiku-4.5", DisplayName = "agent:main:scratch",
-                    InputTokens = 6_400, OutputTokens = 1_200,
-                    ContextTokens = 64_000,
-                    UpdatedAt = now.AddHours(-4), LastSeen = now,
-                },
-            };
+                    UpdatedAt = DateTime.UtcNow,
+                    Providers = new()
+                    {
+                        new GatewayUsageProviderInfo
+                        {
+                            Provider = "anthropic", DisplayName = "Anthropic",
+                            Plan = "Pro",
+                            Windows = new()
+                            {
+                                new() { Label = "5h window", UsedPercent = 64 },
+                                new() { Label = "Weekly",    UsedPercent = 28 },
+                                new() { Label = "Monthly",   UsedPercent = 0 },
+                            },
+                        },
+                        new GatewayUsageProviderInfo
+                        {
+                            Provider = "openai", DisplayName = "OpenAI",
+                            Plan = "Tier 4",
+                            Windows = new()
+                            {
+                                new() { Label = "RPM",    UsedPercent = 41 },
+                                new() { Label = "TPM",    UsedPercent = 73 },
+                                new() { Label = "Daily",  UsedPercent = 96 },
+                            },
+                        },
+                    },
+                };
+            }
         }
-
-        _lastUsage = new GatewayUsageInfo
-        {
-            InputTokens = 188_400,
-            OutputTokens = 49_200,
-            TotalTokens = 237_600,
-            CostUsd = 4.82,
-            RequestCount = 142,
-            Model = "claude-opus-4.7",
-        };
-
-        _lastUsageStatus = new GatewayUsageStatusInfo
-        {
-            UpdatedAt = DateTime.UtcNow,
-            Providers = new()
-            {
-                new GatewayUsageProviderInfo
-                {
-                    Provider = "anthropic", DisplayName = "Anthropic",
-                    Plan = "Pro",
-                    Windows = new()
-                    {
-                        new() { Label = "5h window", UsedPercent = 64 },
-                        new() { Label = "Weekly",    UsedPercent = 28 },
-                        new() { Label = "Monthly",   UsedPercent = 0 },
-                    },
-                },
-                new GatewayUsageProviderInfo
-                {
-                    Provider = "openai", DisplayName = "OpenAI",
-                    Plan = "Tier 4",
-                    Windows = new()
-                    {
-                        new() { Label = "RPM",    UsedPercent = 41 },
-                        new() { Label = "TPM",    UsedPercent = 73 },
-                        new() { Label = "Daily",  UsedPercent = 96 },
-                    },
-                },
-            },
-        };
     }
 
 
@@ -1636,70 +1616,14 @@ public partial class App : Application
     /// </summary>
     private void OnOperatorClientChanged(object? sender, OperatorClientChangedEventArgs e)
     {
-        // Unsubscribe from old client
-        if (e.OldClient is { } old)
-        {
-            old.StatusChanged -= OnConnectionStatusChanged;
-            old.AuthenticationFailed -= OnAuthenticationFailed;
-            old.ActivityChanged -= OnActivityChanged;
-            old.NotificationReceived -= OnNotificationReceived;
-            old.ChannelHealthUpdated -= OnChannelHealthUpdated;
-            old.SessionsUpdated -= OnSessionsUpdated;
-            old.UsageUpdated -= OnUsageUpdated;
-            old.UsageStatusUpdated -= OnUsageStatusUpdated;
-            old.UsageCostUpdated -= OnUsageCostUpdated;
-            old.NodesUpdated -= OnNodesUpdated;
-            old.SessionPreviewUpdated -= OnSessionPreviewUpdated;
-            old.SessionCommandCompleted -= OnSessionCommandCompleted;
-            old.GatewaySelfUpdated -= OnGatewaySelfUpdated;
-            old.CronListUpdated -= OnCronListUpdated;
-            old.CronStatusUpdated -= OnCronStatusUpdated;
-            old.CronRunsUpdated -= OnCronRunsUpdated;
-            old.ConfigUpdated -= OnConfigUpdated;
-            old.ConfigSchemaUpdated -= OnConfigSchemaUpdated;
-            old.SkillsStatusUpdated -= OnSkillsStatusUpdated;
-            old.AgentEventReceived -= OnAgentEventReceived;
-            old.NodePairListUpdated -= OnNodePairListUpdated;
-            old.DevicePairListUpdated -= OnDevicePairListUpdated;
-            old.ModelsListUpdated -= OnModelsListUpdated;
-            old.PresenceUpdated -= OnPresenceUpdated;
-            old.AgentsListUpdated -= OnAgentsListUpdated;
-            old.AgentFilesListUpdated -= OnAgentFilesListUpdated;
-            old.AgentFileContentUpdated -= OnAgentFileContentUpdated;
-        }
+        // Delegate all 27 event subscriptions to GatewayService
+        _gatewayService?.AttachClient(e.NewClient, e.OldClient);
 
-        // Subscribe to new client
+        // Configure new client
         if (e.NewClient is { } client)
         {
             client.SetUserRules(_settings?.UserRules?.Count > 0 ? _settings.UserRules : null);
             client.SetPreferStructuredCategories(_settings?.PreferStructuredCategories ?? true);
-            client.StatusChanged += OnConnectionStatusChanged;
-            client.AuthenticationFailed += OnAuthenticationFailed;
-            client.ActivityChanged += OnActivityChanged;
-            client.NotificationReceived += OnNotificationReceived;
-            client.ChannelHealthUpdated += OnChannelHealthUpdated;
-            client.SessionsUpdated += OnSessionsUpdated;
-            client.UsageUpdated += OnUsageUpdated;
-            client.UsageStatusUpdated += OnUsageStatusUpdated;
-            client.UsageCostUpdated += OnUsageCostUpdated;
-            client.NodesUpdated += OnNodesUpdated;
-            client.SessionPreviewUpdated += OnSessionPreviewUpdated;
-            client.SessionCommandCompleted += OnSessionCommandCompleted;
-            client.GatewaySelfUpdated += OnGatewaySelfUpdated;
-            client.CronListUpdated += OnCronListUpdated;
-            client.CronStatusUpdated += OnCronStatusUpdated;
-            client.CronRunsUpdated += OnCronRunsUpdated;
-            client.ConfigUpdated += OnConfigUpdated;
-            client.ConfigSchemaUpdated += OnConfigSchemaUpdated;
-            client.SkillsStatusUpdated += OnSkillsStatusUpdated;
-            client.AgentEventReceived += OnAgentEventReceived;
-            client.NodePairListUpdated += OnNodePairListUpdated;
-            client.DevicePairListUpdated += OnDevicePairListUpdated;
-            client.ModelsListUpdated += OnModelsListUpdated;
-            client.PresenceUpdated += OnPresenceUpdated;
-            client.AgentsListUpdated += OnAgentsListUpdated;
-            client.AgentFilesListUpdated += OnAgentFilesListUpdated;
-            client.AgentFileContentUpdated += OnAgentFileContentUpdated;
 
             var concreteClient = client as OpenClawGatewayClient;
             if (concreteClient == null)
@@ -1713,7 +1637,8 @@ public partial class App : Application
 
         RaiseChatProviderChanged();
 
-        _lastGatewaySelf = null;
+        if (_appState != null)
+            _appState.GatewaySelf = null;
 
         // Update UI references
         OnUiThread(() =>
@@ -1734,6 +1659,7 @@ public partial class App : Application
     /// <summary>
     /// Handles the connection manager's StateChanged event.
     /// Maps the snapshot to the existing tray icon / UI status system.
+    /// Only authoritative writer of <see cref="AppState.Status"/>.
     /// </summary>
     private void OnManagerStateChanged(object? sender, GatewayConnectionSnapshot snap)
     {
@@ -1755,6 +1681,7 @@ public partial class App : Application
         _currentStatus = mapped;
         OnUiThread(() =>
         {
+            if (_appState != null) _appState.Status = mapped;
             _hubWindow?.UpdateStatus(mapped);
             UpdateTrayIcon();
             SyncConnectionToggle(mapped);
@@ -1787,9 +1714,9 @@ public partial class App : Application
             _nodeService.NotificationRequested += OnNodeNotificationRequested;
             _nodeService.ToastRequested += OnNodeToastRequested;
             _nodeService.PairingStatusChanged += OnPairingStatusChanged;
-            _nodeService.ChannelHealthUpdated += OnChannelHealthUpdated;
+            _nodeService.ChannelHealthUpdated += _gatewayService!.OnChannelHealthUpdated;
             _nodeService.InvokeCompleted += OnNodeInvokeCompleted;
-            _nodeService.GatewaySelfUpdated += OnGatewaySelfUpdated;
+            _nodeService.GatewaySelfUpdated += _gatewayService!.OnGatewaySelfUpdated;
             return _nodeService;
         }
         catch (Exception ex)
@@ -1823,14 +1750,14 @@ public partial class App : Application
             nodeConnected = _nodeService?.IsConnected ?? false,
             nodePaired = _nodeService?.IsPaired ?? false,
             nodePendingApproval = _nodeService?.IsPendingApproval ?? false,
-            gatewayVersion = _lastGatewaySelf?.ServerVersion,
-            sessionCount = _lastSessions?.Length ?? 0,
-            nodeCount = _lastNodes?.Length ?? 0,
+            gatewayVersion = _appState!.GatewaySelf?.ServerVersion,
+            sessionCount = _appState!.Sessions?.Length ?? 0,
+            nodeCount = _appState!.Nodes?.Length ?? 0,
         };
 
         app.SessionsHandler = async (agentId) =>
         {
-            var sessions = _lastSessions ?? Array.Empty<SessionInfo>();
+            var sessions = _appState!.Sessions ?? Array.Empty<SessionInfo>();
             if (!string.IsNullOrEmpty(agentId))
                 sessions = sessions.Where(s => s.Key != null &&
                     s.Key.StartsWith($"agent:{agentId}:", StringComparison.OrdinalIgnoreCase)).ToArray();
@@ -1839,8 +1766,8 @@ public partial class App : Application
 
         app.AgentsHandler = async () =>
         {
-            if (_lastAgentsList.HasValue &&
-                _lastAgentsList.Value.TryGetProperty("agents", out var agentsArr) &&
+            if (_appState!.AgentsList.HasValue &&
+                _appState!.AgentsList.Value.TryGetProperty("agents", out var agentsArr) &&
                 agentsArr.ValueKind == System.Text.Json.JsonValueKind.Array)
             {
                 return System.Text.Json.JsonSerializer.Deserialize<object>(agentsArr.GetRawText());
@@ -1850,7 +1777,7 @@ public partial class App : Application
 
         app.NodesHandler = () =>
         {
-            return _lastNodes?.Select(n => new { n.DisplayName, n.NodeId, n.IsOnline, n.Platform, n.CapabilityCount }).ToArray()
+            return _appState!.Nodes?.Select(n => new { n.DisplayName, n.NodeId, n.IsOnline, n.Platform, n.CapabilityCount }).ToArray()
                 ?? Array.Empty<object>();
         };
 
@@ -1915,8 +1842,8 @@ public partial class App : Application
             var items = new List<object>
             {
                 new { type = "status", status = _currentStatus.ToString() },
-                new { type = "sessions", count = _lastSessions?.Length ?? 0 },
-                new { type = "nodes", count = _lastNodes?.Length ?? 0 },
+                new { type = "sessions", count = _appState!.Sessions?.Length ?? 0 },
+                new { type = "nodes", count = _appState!.Nodes?.Length ?? 0 },
             };
             return items;
         };
@@ -2188,32 +2115,15 @@ public partial class App : Application
         return "metadata";
     }
 
-    private void OnConnectionStatusChanged(object? sender, ConnectionStatus status)
+    // ── Re-raised event handlers from GatewayService ──────────────────
+
+    private void OnGatewayConnectionStatusChanged(object? sender, ConnectionStatus status)
     {
-        // Status field is maintained by OnManagerStateChanged — no write needed here.
-        DiagnosticsJsonlService.Write("connection.status", new
-        {
-            status = status.ToString(),
-            nodeMode = _settings?.EnableNodeMode == true
-        });
         _hubWindow?.UpdateStatus(status);
         if (status == ConnectionStatus.Connected)
         {
-            _authFailureMessage = null;
             if (_hubWindow != null && !_hubWindow.IsClosed)
                 _hubWindow.LastAuthError = null;
-        }
-
-        // Clear stale data when disconnected so tray menu doesn't show old sessions/nodes
-        if (status == ConnectionStatus.Disconnected || status == ConnectionStatus.Error)
-        {
-            _lastSessions = Array.Empty<SessionInfo>();
-            _lastChannels = Array.Empty<ChannelHealth>();
-            _lastNodes = Array.Empty<GatewayNodeInfo>();
-            _lastNodePairList = null;
-            _lastDevicePairList = null;
-            _lastModelsList = null;
-            _lastGatewaySelf = null;
         }
 
         UpdateTrayIcon();
@@ -2226,10 +2136,224 @@ public partial class App : Application
                 RefreshTrayMenuIfOpen();
             }
         });
-        
+
         if (status == ConnectionStatus.Connected)
         {
             _ = RunHealthCheckAsync();
+        }
+    }
+
+    private void OnGatewayAuthenticationFailed(object? sender, string message)
+    {
+        UpdateTrayIcon();
+
+        // Forward to hub/connection page
+        if (_hubWindow != null && !_hubWindow.IsClosed)
+        {
+            _hubWindow.LastAuthError = message;
+            _hubWindow.UpdateStatus(_currentStatus);
+        }
+    }
+
+    private void OnGatewaySessionCommandCompleted(object? sender, SessionCommandResult result)
+    {
+        OnUiThread(() =>
+        {
+            try
+            {
+                var title = result.Ok ? "✅ Session updated" : "❌ Session action failed";
+                var key = string.IsNullOrWhiteSpace(result.Key) ? "session" : result.Key!;
+                var message = result.Ok
+                    ? result.Method switch
+                    {
+                        "sessions.patch" => $"Updated settings for {key}",
+                        "sessions.reset" => $"Reset {key}",
+                        "sessions.compact" => result.Kept.HasValue
+                            ? $"Compacted {key} ({result.Kept.Value} lines kept)"
+                            : $"Compacted {key}",
+                        "sessions.delete" => $"Deleted {key}",
+                        _ => $"Completed action for {key}"
+                    }
+                    : result.Error ?? "Request failed";
+                AddRecentActivity(
+                    $"{title.Replace("✅ ", "").Replace("❌ ", "")}: {message}",
+                    category: "session",
+                    dashboardPath: !string.IsNullOrWhiteSpace(result.Key) ? $"sessions/{result.Key}" : "sessions",
+                    sessionKey: result.Key);
+
+                ShowToast(new ToastContentBuilder()
+                    .AddText(title)
+                    .AddText(message));
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"Failed to show session action toast: {ex.Message}");
+            }
+        });
+
+        if (result.Ok)
+        {
+            _ = _connectionManager?.OperatorClient?.RequestSessionsAsync();
+        }
+    }
+
+    private void OnGatewayNotificationReceived(object? sender, OpenClawNotification notification)
+    {
+        // Voice overlay: show agent chat responses, and (independently) speak them
+        // if the user enabled "Read responses aloud".
+        if (notification.IsChat && !string.IsNullOrEmpty(notification.Message))
+        {
+            if (_voiceOverlayWindow != null)
+            {
+                OnUiThread(() =>
+                {
+                    try
+                    {
+                        _voiceOverlayWindow?.AddAgentResponse(notification.Message);
+                    }
+                    catch { }
+                });
+            }
+
+            // TTS: read response aloud whenever the toggle is on (any chat surface).
+            if (_settings?.VoiceTtsEnabled == true)
+            {
+                _ = (_chatCoordinator?.SpeakResponseAsync(notification.Message) ?? Task.CompletedTask);
+            }
+        }
+
+        if (_settings?.ShowNotifications != true) return;
+        if (!ShouldShowNotification(notification)) return;
+
+        // Store in history
+        NotificationHistoryService.AddNotification(new Services.GatewayNotification
+        {
+            Title = notification.Title,
+            Message = notification.Message,
+            Category = notification.Type
+        });
+
+        // Show toast
+        try
+        {
+            var builder = new ToastContentBuilder()
+                .AddText(notification.Title ?? "OpenClaw")
+                .AddText(notification.Message);
+
+            var logoPath = GetNotificationIcon(notification.Type);
+            if (!string.IsNullOrEmpty(logoPath) && System.IO.File.Exists(logoPath))
+            {
+                builder.AddAppLogoOverride(new Uri(logoPath), ToastGenericAppLogoCrop.Circle);
+            }
+
+            if (notification.IsChat)
+            {
+                builder.AddArgument("action", "open_chat")
+                       .AddButton(new ToastButton()
+                           .SetContent("Open Chat")
+                           .AddArgument("action", "open_chat"));
+            }
+
+            ShowToast(builder);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Failed to show toast: {ex.Message}");
+        }
+    }
+
+    // ── AppState → HubWindow bridge (temporary until pages observe directly) ──
+
+    private void OnAppStateChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (_hubWindow == null || _hubWindow.IsClosed || _appState == null) return;
+
+        switch (e.PropertyName)
+        {
+            case nameof(AppState.Status):
+                _hubWindow.UpdateStatus(_appState.Status);
+                break;
+            case nameof(AppState.GatewaySelf):
+                _hubWindow.UpdateGatewaySelf(_appState.GatewaySelf!);
+                UpdateStatusDetailWindow();
+                break;
+            case nameof(AppState.Sessions):
+                _hubWindow.UpdateSessions(_appState.Sessions);
+                UpdateStatusDetailWindow();
+                break;
+            case nameof(AppState.Channels):
+                _hubWindow.UpdateChannelHealth(_appState.Channels);
+                _hubWindow.UpdateStatus(_appState.Status);
+                break;
+            case nameof(AppState.Usage):
+                _hubWindow.UpdateUsage(_appState.Usage!);
+                break;
+            case nameof(AppState.UsageStatus):
+                _hubWindow.UpdateUsageStatus(_appState.UsageStatus!);
+                break;
+            case nameof(AppState.UsageCost):
+                _hubWindow.UpdateUsageCost(_appState.UsageCost!);
+                UpdateStatusDetailWindow();
+                break;
+            case nameof(AppState.Nodes):
+                _hubWindow.UpdateNodes(_appState.Nodes);
+                UpdateStatusDetailWindow();
+                break;
+            case nameof(AppState.NodePairList):
+                if (_appState.NodePairList != null)
+                    _hubWindow.UpdateNodePairList(_appState.NodePairList);
+                break;
+            case nameof(AppState.DevicePairList):
+                if (_appState.DevicePairList != null)
+                    _hubWindow.UpdateDevicePairList(_appState.DevicePairList);
+                break;
+            case nameof(AppState.ModelsList):
+                if (_appState.ModelsList != null)
+                    _hubWindow.UpdateModelsList(_appState.ModelsList);
+                break;
+            case nameof(AppState.Presence):
+                if (_appState.Presence != null)
+                    _hubWindow.UpdatePresence(_appState.Presence);
+                break;
+            case nameof(AppState.AgentsList):
+                if (_appState.AgentsList.HasValue)
+                    _hubWindow.UpdateAgentsList(_appState.AgentsList.Value);
+                break;
+            case nameof(AppState.Config):
+                if (_appState.Config.HasValue)
+                    _hubWindow.UpdateConfig(_appState.Config.Value);
+                break;
+            case nameof(AppState.ConfigSchema):
+                if (_appState.ConfigSchema.HasValue)
+                    _hubWindow.UpdateConfigSchema(_appState.ConfigSchema.Value);
+                break;
+            case nameof(AppState.SkillsData):
+                if (_appState.SkillsData.HasValue)
+                    _hubWindow.UpdateSkillsStatus(_appState.SkillsData.Value);
+                break;
+            case nameof(AppState.CronList):
+                if (_appState.CronList.HasValue)
+                    _hubWindow.UpdateCronList(_appState.CronList.Value);
+                break;
+            case nameof(AppState.CronStatus):
+                if (_appState.CronStatus.HasValue)
+                    _hubWindow.UpdateCronStatus(_appState.CronStatus.Value);
+                break;
+            case nameof(AppState.CronRuns):
+                if (_appState.CronRuns.HasValue)
+                    _hubWindow.UpdateCronRuns(_appState.CronRuns.Value);
+                break;
+            case nameof(AppState.AgentFilesList):
+                if (_appState.AgentFilesList.HasValue)
+                    _hubWindow.UpdateAgentFilesList(_appState.AgentFilesList.Value);
+                break;
+            case nameof(AppState.AgentFileContent):
+                if (_appState.AgentFileContent.HasValue)
+                    _hubWindow.UpdateAgentFileContent(_appState.AgentFileContent.Value);
+                break;
+            case nameof(AppState.CurrentActivity):
+                UpdateTrayIcon();
+                break;
         }
     }
 
@@ -2289,416 +2413,6 @@ public partial class App : Application
         }
     }
 
-    private void OnAuthenticationFailed(object? sender, string message)
-    {
-        _authFailureMessage = message;
-        Logger.Error($"Authentication failed: {message}");
-        DiagnosticsJsonlService.Write("connection.auth_failed", new
-        {
-            message,
-            nodeMode = _settings?.EnableNodeMode == true
-        });
-        AddRecentActivity($"Auth failed: {message}", category: "error");
-        UpdateTrayIcon();
-
-        // Forward to hub/connection page
-        if (_hubWindow != null && !_hubWindow.IsClosed)
-        {
-            _hubWindow.LastAuthError = message;
-            _hubWindow.UpdateStatus(_currentStatus);
-        }
-    }
-
-    private void OnActivityChanged(object? sender, AgentActivity? activity)
-    {
-        if (activity == null)
-        {
-            // Activity ended
-            if (_displayedSessionKey != null && _sessionActivities.ContainsKey(_displayedSessionKey))
-            {
-                _sessionActivities.Remove(_displayedSessionKey);
-            }
-            _currentActivity = null;
-        }
-        else
-        {
-            var sessionKey = activity.SessionKey ?? "default";
-            _sessionActivities[sessionKey] = activity;
-            AddRecentActivity(
-                $"{sessionKey}: {activity.Label}",
-                category: "session",
-                dashboardPath: $"sessions/{sessionKey}",
-                details: activity.Kind.ToString(),
-                sessionKey: sessionKey);
-
-            // Debounce session switching
-            var now = DateTime.Now;
-            if (_displayedSessionKey != sessionKey && 
-                (now - _lastSessionSwitch) > SessionSwitchDebounce)
-            {
-                _displayedSessionKey = sessionKey;
-                _lastSessionSwitch = now;
-            }
-
-            if (_displayedSessionKey == sessionKey)
-            {
-                _currentActivity = activity;
-            }
-        }
-        
-        UpdateTrayIcon();
-    }
-
-    private void OnChannelHealthUpdated(object? sender, ChannelHealth[] channels)
-    {
-        _lastChannels = channels;
-        _lastCheckTime = DateTime.Now;
-        var signature = string.Join("|", channels
-            .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
-            .Select(c => $"{c.Name}:{c.Status}:{c.Error}"));
-        if (!string.Equals(signature, _lastChannelStatusSignature, StringComparison.Ordinal))
-        {
-            _lastChannelStatusSignature = signature;
-            var summary = channels.Length == 0
-                ? "No channels reported"
-                : string.Join(", ", channels.Select(c => $"{c.Name}={c.Status}"));
-            DiagnosticsJsonlService.Write("gateway.health.channels", new
-            {
-                channelCount = channels.Length,
-                healthyCount = channels.Count(c => ChannelHealth.IsHealthyStatus(c.Status)),
-                errorCount = channels.Count(c => !string.IsNullOrWhiteSpace(c.Error))
-            });
-            AddRecentActivity("Channel health updated", category: "channel", dashboardPath: "channels", details: summary);
-        }
-
-        OnUiThread(() =>
-        {
-            _hubWindow?.UpdateChannelHealth(channels);
-            _hubWindow?.UpdateStatus(_currentStatus);
-        });
-    }
-
-    private void OnSessionsUpdated(object? sender, SessionInfo[] sessions)
-    {
-        _lastSessions = sessions;
-        OnUiThread(UpdateStatusDetailWindow);
-
-        OnUiThread(() =>
-        {
-            _hubWindow?.UpdateSessions(sessions);
-        });
-
-        var activeKeys = new HashSet<string>(sessions.Select(s => s.Key), StringComparer.Ordinal);
-        lock (_sessionPreviewsLock)
-        {
-            var stale = _sessionPreviews.Keys.Where(key => !activeKeys.Contains(key)).ToArray();
-            foreach (var key in stale)
-                _sessionPreviews.Remove(key);
-        }
-
-        if (_connectionManager?.OperatorClient != null &&
-            sessions.Length > 0 &&
-            DateTime.UtcNow - _lastPreviewRequestUtc > TimeSpan.FromSeconds(5))
-        {
-            _lastPreviewRequestUtc = DateTime.UtcNow;
-            var keys = sessions.Take(5).Select(s => s.Key).ToArray();
-            _ = _connectionManager.OperatorClient.RequestSessionPreviewAsync(keys, limit: 3, maxChars: 140);
-        }
-    }
-
-    private void OnUsageUpdated(object? sender, GatewayUsageInfo usage)
-    {
-        _lastUsage = usage;
-        OnUiThread(() =>
-        {
-            _hubWindow?.UpdateUsage(usage);
-        });
-    }
-
-    private void OnUsageStatusUpdated(object? sender, GatewayUsageStatusInfo usageStatus)
-    {
-        _lastUsageStatus = usageStatus;
-        OnUiThread(() =>
-        {
-            _hubWindow?.UpdateUsageStatus(usageStatus);
-        });
-    }
-
-    private void OnUsageCostUpdated(object? sender, GatewayCostUsageInfo usageCost)
-    {
-        _lastUsageCost = usageCost;
-        OnUiThread(UpdateStatusDetailWindow);
-
-        OnUiThread(() =>
-        {
-            _hubWindow?.UpdateUsageCost(usageCost);
-        });
-
-        if (DateTime.UtcNow - _lastUsageActivityLogUtc > TimeSpan.FromMinutes(1))
-        {
-            _lastUsageActivityLogUtc = DateTime.UtcNow;
-            AddRecentActivity(
-                $"{usageCost.Days}d usage ${usageCost.Totals.TotalCost:F2}",
-                category: "usage",
-                dashboardPath: "usage",
-                details: $"{usageCost.Totals.TotalTokens:N0} tokens");
-        }
-    }
-
-    private void OnGatewaySelfUpdated(object? sender, GatewaySelfInfo gatewaySelf)
-    {
-        _lastGatewaySelf = _lastGatewaySelf?.Merge(gatewaySelf) ?? gatewaySelf;
-        DiagnosticsJsonlService.Write("gateway.self", new
-        {
-            version = _lastGatewaySelf.ServerVersion,
-            protocol = _lastGatewaySelf.Protocol,
-            uptimeMs = _lastGatewaySelf.UptimeMs,
-            authMode = _lastGatewaySelf.AuthMode,
-            stateVersionPresence = _lastGatewaySelf.StateVersionPresence,
-            stateVersionHealth = _lastGatewaySelf.StateVersionHealth,
-            presenceCount = _lastGatewaySelf.PresenceCount
-        });
-        OnUiThread(() =>
-        {
-            UpdateStatusDetailWindow();
-            _hubWindow?.UpdateGatewaySelf(_lastGatewaySelf);
-        });
-    }
-
-    private void OnNodesUpdated(object? sender, GatewayNodeInfo[] nodes)
-    {
-        var previousCount = _lastNodes.Length;
-        var previousOnline = _lastNodes.Count(n => n.IsOnline);
-        var online = nodes.Count(n => n.IsOnline);
-        _lastNodes = nodes;
-        OnUiThread(UpdateStatusDetailWindow);
-
-        OnUiThread(() =>
-        {
-            _hubWindow?.UpdateNodes(nodes);
-        });
-
-        if (nodes.Length != previousCount || online != previousOnline)
-        {
-            AddRecentActivity(
-                $"Nodes {online}/{nodes.Length} online",
-                category: "node",
-                dashboardPath: "nodes");
-        }
-    }
-
-    private void OnSessionPreviewUpdated(object? sender, SessionsPreviewPayloadInfo payload)
-    {
-        lock (_sessionPreviewsLock)
-        {
-            foreach (var preview in payload.Previews)
-            {
-                _sessionPreviews[preview.Key] = preview;
-            }
-        }
-        OnUiThread(UpdateStatusDetailWindow);
-    }
-
-    private void OnSessionCommandCompleted(object? sender, SessionCommandResult result)
-    {
-        OnUiThread(() =>
-        {
-            try
-            {
-                var title = result.Ok ? "✅ Session updated" : "❌ Session action failed";
-                var key = string.IsNullOrWhiteSpace(result.Key) ? "session" : result.Key!;
-                var message = result.Ok
-                    ? result.Method switch
-                    {
-                        "sessions.patch" => $"Updated settings for {key}",
-                        "sessions.reset" => $"Reset {key}",
-                        "sessions.compact" => result.Kept.HasValue
-                            ? $"Compacted {key} ({result.Kept.Value} lines kept)"
-                            : $"Compacted {key}",
-                        "sessions.delete" => $"Deleted {key}",
-                        _ => $"Completed action for {key}"
-                    }
-                    : result.Error ?? "Request failed";
-                AddRecentActivity(
-                    $"{title.Replace("✅ ", "").Replace("❌ ", "")}: {message}",
-                    category: "session",
-                    dashboardPath: !string.IsNullOrWhiteSpace(result.Key) ? $"sessions/{result.Key}" : "sessions",
-                    sessionKey: result.Key);
-
-                ShowToast(new ToastContentBuilder()
-                    .AddText(title)
-                    .AddText(message));
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"Failed to show session action toast: {ex.Message}");
-            }
-        });
-
-        if (result.Ok)
-        {
-            _ = _connectionManager?.OperatorClient?.RequestSessionsAsync();
-        }
-    }
-
-    private void OnCronListUpdated(object? sender, System.Text.Json.JsonElement data)
-    {
-        OnUiThread(() => _hubWindow?.UpdateCronList(data));
-    }
-
-    private void OnCronStatusUpdated(object? sender, System.Text.Json.JsonElement data)
-    {
-        OnUiThread(() => _hubWindow?.UpdateCronStatus(data));
-    }
-
-    private void OnCronRunsUpdated(object? sender, System.Text.Json.JsonElement data)
-    {
-        OnUiThread(() => _hubWindow?.UpdateCronRuns(data));
-    }
-
-    private void OnSkillsStatusUpdated(object? sender, System.Text.Json.JsonElement data)
-    {
-        OnUiThread(() => _hubWindow?.UpdateSkillsStatus(data));
-    }
-
-    private void OnConfigUpdated(object? sender, System.Text.Json.JsonElement data)
-    {
-        OnUiThread(() => _hubWindow?.UpdateConfig(data));
-    }
-
-    private void OnConfigSchemaUpdated(object? sender, System.Text.Json.JsonElement data)
-    {
-        OnUiThread(() => _hubWindow?.UpdateConfigSchema(data));
-    }
-
-    private System.Text.Json.JsonElement? _lastAgentsList;
-
-    private void OnAgentsListUpdated(object? sender, System.Text.Json.JsonElement data)
-    {
-        _lastAgentsList = data.Clone();
-        OnUiThread(() => _hubWindow?.UpdateAgentsList(data));
-    }
-
-    private void OnAgentFilesListUpdated(object? sender, System.Text.Json.JsonElement data)
-    {
-        OnUiThread(() => _hubWindow?.UpdateAgentFilesList(data));
-    }
-
-    private void OnAgentFileContentUpdated(object? sender, System.Text.Json.JsonElement data)
-    {
-        OnUiThread(() => _hubWindow?.UpdateAgentFileContent(data));
-    }
-
-    private void OnAgentEventReceived(object? sender, AgentEventInfo evt)
-    {
-        OnUiThread(() =>
-        {
-            _agentEventsCache.Insert(0, evt);
-            if (_agentEventsCache.Count > MaxAppAgentEvents)
-                _agentEventsCache.RemoveRange(MaxAppAgentEvents, _agentEventsCache.Count - MaxAppAgentEvents);
-            _hubWindow?.UpdateAgentEvent(evt);
-        });
-    }
-
-    private void OnNodePairListUpdated(object? sender, PairingListInfo data)
-    {
-        _lastNodePairList = data;
-        OnUiThread(() => _hubWindow?.UpdateNodePairList(data));
-    }
-
-    private void OnDevicePairListUpdated(object? sender, DevicePairingListInfo data)
-    {
-        _lastDevicePairList = data;
-        OnUiThread(() => _hubWindow?.UpdateDevicePairList(data));
-    }
-
-    private void OnModelsListUpdated(object? sender, ModelsListInfo data)
-    {
-        _lastModelsList = data;
-        OnUiThread(() => _hubWindow?.UpdateModelsList(data));
-    }
-
-    private void OnPresenceUpdated(object? sender, PresenceEntry[] data)
-    {
-        _lastPresence = data;
-        OnUiThread(() => _hubWindow?.UpdatePresence(data));
-    }
-
-    private void OnNotificationReceived(object? sender, OpenClawNotification notification)
-    {
-        AddRecentActivity(
-            $"{notification.Type ?? "info"}: {notification.Title ?? "notification"}",
-            category: "notification",
-            details: notification.Message);
-
-        // Voice overlay: show agent chat responses, and (independently) speak them
-        // if the user enabled "Read responses aloud". TTS used to be gated on
-        // an active voice overlay session — we want the toggle to honor every
-        // chat reply now that voice and text chat will eventually share one UI.
-        if (notification.IsChat && !string.IsNullOrEmpty(notification.Message))
-        {
-            if (_voiceOverlayWindow != null)
-            {
-                OnUiThread(() =>
-                {
-                    try
-                    {
-                        _voiceOverlayWindow?.AddAgentResponse(notification.Message);
-                    }
-                    catch { }
-                });
-            }
-
-            // TTS: read response aloud whenever the toggle is on (any chat surface).
-            if (_settings?.VoiceTtsEnabled == true)
-            {
-                _ = (_chatCoordinator?.SpeakResponseAsync(notification.Message) ?? Task.CompletedTask);
-            }
-        }
-
-        if (_settings?.ShowNotifications != true) return;
-        if (!ShouldShowNotification(notification)) return;
-
-        // Store in history
-        NotificationHistoryService.AddNotification(new Services.GatewayNotification
-        {
-            Title = notification.Title,
-            Message = notification.Message,
-            Category = notification.Type
-        });
-
-        // Show toast
-        try
-        {
-            var builder = new ToastContentBuilder()
-                .AddText(notification.Title ?? "OpenClaw")
-                .AddText(notification.Message);
-
-            // Add category-specific inline image (emoji rendered as text is fine, 
-            // but we can add app logo override for better visibility)
-            var logoPath = GetNotificationIcon(notification.Type);
-            if (!string.IsNullOrEmpty(logoPath) && System.IO.File.Exists(logoPath))
-            {
-                builder.AddAppLogoOverride(new Uri(logoPath), ToastGenericAppLogoCrop.Circle);
-            }
-
-            // Add "Open Chat" button for chat notifications
-            if (notification.IsChat)
-            {
-                builder.AddArgument("action", "open_chat")
-                       .AddButton(new ToastButton()
-                           .SetContent("Open Chat")
-                           .AddArgument("action", "open_chat"));
-            }
-
-            ShowToast(builder);
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"Failed to show toast: {ex.Message}");
-        }
-    }
-
     private static string? GetNotificationIcon(string? type)
     {
         // For now, use the app icon for all notifications
@@ -2744,7 +2458,7 @@ public partial class App : Application
         {
             if (_settings?.EnableNodeMode == true && _nodeService?.IsConnected == true)
             {
-                _lastCheckTime = DateTime.Now;
+                _appState!.LastCheckTime = DateTime.Now;
                 OnUiThread(UpdateStatusDetailWindow);
                 if (userInitiated)
                 {
@@ -2766,7 +2480,7 @@ public partial class App : Application
 
         try
         {
-            _lastCheckTime = DateTime.Now;
+            _appState!.LastCheckTime = DateTime.Now;
             await client.CheckHealthAsync();
             if (userInitiated)
             {
@@ -2837,12 +2551,12 @@ public partial class App : Application
     private TrayStateSnapshot CaptureTraySnapshot() => new TrayStateSnapshot
     {
         Status = _currentStatus,
-        CurrentActivity = _currentActivity,
-        Channels = _lastChannels,
-        Nodes = _lastNodes,
+        CurrentActivity = _appState!.CurrentActivity,
+        Channels = _appState!.Channels,
+        Nodes = _appState!.Nodes,
         LocalNodeFallback = _nodeService?.GetLocalNodeInfo(),
-        AuthFailureMessage = _authFailureMessage,
-        LastCheckTime = _lastCheckTime,
+        AuthFailureMessage = _appState!.AuthFailureMessage,
+        LastCheckTime = _appState!.LastCheckTime,
         Settings = _settings
     };
 
@@ -2856,6 +2570,7 @@ public partial class App : Application
         {
             _hubWindow = new HubWindow();
             _hubWindow.Settings = _settings;
+            _hubWindow.AppModel = _appState;
             _hubWindow.GatewayClient = _connectionManager?.OperatorClient;
             _hubWindow.CurrentStatus = _currentStatus;
             _hubWindow.OpenDashboardAction = OpenDashboard;
@@ -2881,7 +2596,7 @@ public partial class App : Application
             {
                 _ = _connectionManager?.ReconnectAsync();
             };
-            _hubWindow.ClearAppAgentEventsCache = () => _agentEventsCache.Clear();
+            _hubWindow.ClearAppAgentEventsCache = () => _appState!.ClearAgentEvents();
             if (_nodeService != null)
             {
                 _hubWindow.NodeIsConnected = _nodeService.IsConnected;
@@ -2954,15 +2669,15 @@ public partial class App : Application
     {
         if (_hubWindow == null) return;
         // Seed all cached data types so pages see data immediately
-        if (_lastSessions.Length > 0) _hubWindow.UpdateSessions(_lastSessions);
-        if (_lastNodes.Length > 0) _hubWindow.UpdateNodes(_lastNodes);
-        if (_lastNodePairList != null) _hubWindow.UpdateNodePairList(_lastNodePairList);
-        if (_lastDevicePairList != null) _hubWindow.UpdateDevicePairList(_lastDevicePairList);
-        if (_lastModelsList != null) _hubWindow.UpdateModelsList(_lastModelsList);
-        if (_lastPresence != null) _hubWindow.UpdatePresence(_lastPresence);
-        if (_lastGatewaySelf != null) _hubWindow.UpdateGatewaySelf(_lastGatewaySelf);
-        if (_lastAgentsList.HasValue) _hubWindow.UpdateAgentsList(_lastAgentsList.Value);
-        if (_agentEventsCache.Count > 0) _hubWindow.SeedAgentEvents(_agentEventsCache);
+        if (_appState!.Sessions.Length > 0) _hubWindow.UpdateSessions(_appState!.Sessions);
+        if (_appState!.Nodes.Length > 0) _hubWindow.UpdateNodes(_appState!.Nodes);
+        if (_appState!.NodePairList != null) _hubWindow.UpdateNodePairList(_appState!.NodePairList);
+        if (_appState!.DevicePairList != null) _hubWindow.UpdateDevicePairList(_appState!.DevicePairList);
+        if (_appState!.ModelsList != null) _hubWindow.UpdateModelsList(_appState!.ModelsList);
+        if (_appState!.Presence != null) _hubWindow.UpdatePresence(_appState!.Presence);
+        if (_appState!.GatewaySelf != null) _hubWindow.UpdateGatewaySelf(_appState!.GatewaySelf);
+        if (_appState!.AgentsList.HasValue) _hubWindow.UpdateAgentsList(_appState!.AgentsList.Value);
+        if (_appState!.AgentEvents.Count > 0) _hubWindow.SeedAgentEvents();
     }
 
     private void ShowSettings()
@@ -2987,7 +2702,7 @@ public partial class App : Application
             case SettingsChangeImpact.FullReconnectRequired:
             case SettingsChangeImpact.OperatorReconnectRequired:
                 // Full reconnect: tear down everything and rebuild
-                _lastGatewaySelf = null;
+                _appState!.GatewaySelf = null;
                 if (_settings?.UseSshTunnel != true)
                 {
                     _sshTunnelService?.Stop();
@@ -3212,16 +2927,16 @@ public partial class App : Application
     private AppStateSnapshot CaptureSnapshot() => new AppStateSnapshot
     {
         Status = _currentStatus,
-        LastCheckTime = _lastCheckTime,
-        Channels = _lastChannels,
-        Sessions = _lastSessions,
-        Nodes = _lastNodes,
-        Usage = _lastUsage,
-        UsageStatus = _lastUsageStatus,
-        UsageCost = _lastUsageCost,
-        GatewaySelf = _lastGatewaySelf,
-        AuthFailureMessage = _authFailureMessage,
-        LastUpdateInfo = _lastUpdateInfo,
+        LastCheckTime = _appState!.LastCheckTime,
+        Channels = _appState!.Channels,
+        Sessions = _appState!.Sessions,
+        Nodes = _appState!.Nodes,
+        Usage = _appState!.Usage,
+        UsageStatus = _appState!.UsageStatus,
+        UsageCost = _appState!.UsageCost,
+        GatewaySelf = _appState!.GatewaySelf,
+        AuthFailureMessage = _appState!.AuthFailureMessage,
+        LastUpdateInfo = _appState!.UpdateInfo,
         Settings = _settings,
         NodeService = _nodeService,
         SshTunnelSnapshot = _sshTunnelService?.CreateSnapshot(),
@@ -3469,12 +3184,31 @@ public partial class App : Application
         }
     }
 
+    // ── IAppCommands implementation ─────────────────────────────────────
+
+    void IAppCommands.OpenDashboard(string? path) => OpenDashboard(path);
+    void IAppCommands.Navigate(string pageTag) => ShowHub(pageTag);
+    void IAppCommands.Reconnect() => _ = _connectionManager?.ReconnectAsync();
+    void IAppCommands.Disconnect()
+    {
+        _ = _connectionManager?.DisconnectAsync();
+        UpdateTrayIcon();
+        _hubWindow?.UpdateStatus(ConnectionStatus.Disconnected);
+    }
+    void IAppCommands.ShowVoiceOverlay() => ShowVoiceOverlay();
+    void IAppCommands.ShowChat() => ShowChatWindow();
+    void IAppCommands.ShowQuickSend() => ShowQuickSend();
+    void IAppCommands.CheckForUpdates() => _ = CheckForUpdatesUserInitiatedAsync();
+    void IAppCommands.ShowOnboarding() => _ = ShowOnboardingAsync();
+    void IAppCommands.ShowConnectionStatus() => ShowConnectionStatusWindow();
+    void IAppCommands.NotifySettingsSaved() => OnSettingsSaved(this, EventArgs.Empty);
+
     private async void ToggleChannel(string channelName)
     {
         var client = _connectionManager?.OperatorClient;
         if (client == null) return;
 
-        var channel = _lastChannels.FirstOrDefault(c => c.Name == channelName);
+        var channel = _appState!.Channels.FirstOrDefault(c => c.Name == channelName);
         if (channel == null) return;
 
         try
@@ -3637,7 +3371,7 @@ public partial class App : Application
         {
 #if DEBUG
             Logger.Info("Skipping update check in debug build");
-            _lastUpdateInfo = new UpdateCommandCenterInfo
+            _appState!.UpdateInfo = new UpdateCommandCenterInfo
             {
                 Status = "Skipped",
                 CurrentVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown",
@@ -3647,7 +3381,7 @@ public partial class App : Application
             return true;
 #else
             Logger.Info("Checking for updates...");
-            _lastUpdateInfo = new UpdateCommandCenterInfo
+            _appState!.UpdateInfo = new UpdateCommandCenterInfo
             {
                 Status = "Checking",
                 CurrentVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown",
@@ -3658,7 +3392,7 @@ public partial class App : Application
             if (!updateFound)
             {
                 Logger.Info("No updates available");
-                _lastUpdateInfo = new UpdateCommandCenterInfo
+                _appState!.UpdateInfo = new UpdateCommandCenterInfo
                 {
                     Status = "Current",
                     CurrentVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown",
@@ -3671,7 +3405,7 @@ public partial class App : Application
             var release = AppUpdater.LatestRelease!;
             var changelog = AppUpdater.GetChangelog(true) ?? "No release notes available.";
             Logger.Info($"Update available: {release.TagName}");
-            _lastUpdateInfo = new UpdateCommandCenterInfo
+            _appState!.UpdateInfo = new UpdateCommandCenterInfo
             {
                 Status = "Available",
                 CurrentVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown",
@@ -3684,7 +3418,7 @@ public partial class App : Application
                 string.Equals(_settings.SkippedUpdateTag, release.TagName, StringComparison.OrdinalIgnoreCase))
             {
                 Logger.Info($"Skipping update prompt for remembered version {release.TagName}");
-                _lastUpdateInfo.Detail = "skipped by user";
+                _appState!.UpdateInfo.Detail = "skipped by user";
                 return true;
             }
 
@@ -3693,7 +3427,7 @@ public partial class App : Application
 
             if (result == UpdateDialogResult.Download)
             {
-                _lastUpdateInfo.Detail = "download requested";
+                _appState!.UpdateInfo.Detail = "download requested";
                 if (_settings != null)
                 {
                     _settings.SkippedUpdateTag = string.Empty;
@@ -3707,7 +3441,7 @@ public partial class App : Application
             {
                 _settings.SkippedUpdateTag = release.TagName ?? string.Empty;
                 _settings.Save();
-                _lastUpdateInfo.Detail = "skipped by user";
+                _appState!.UpdateInfo.Detail = "skipped by user";
             }
 
             return true; // RemindLater or Skip - continue
@@ -3716,7 +3450,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             Logger.Warn($"Update check failed: {ex.Message}");
-            _lastUpdateInfo = new UpdateCommandCenterInfo
+            _appState!.UpdateInfo = new UpdateCommandCenterInfo
             {
                 Status = "Failed",
                 CurrentVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown",

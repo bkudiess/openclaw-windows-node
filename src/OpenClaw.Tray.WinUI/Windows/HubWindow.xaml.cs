@@ -35,6 +35,7 @@ public sealed partial class HubWindow : WindowEx
     }
     public IOperatorGatewayClient? GatewayClient { get; set; }
     public ConnectionStatus CurrentStatus { get; set; }
+    internal AppState? AppModel { get; set; }
     private string _currentAgentId = "main";
     public string CurrentAgentId => _currentAgentId;
 
@@ -60,20 +61,20 @@ public sealed partial class HubWindow : WindowEx
     public VoiceService? VoiceServiceInstance { get; set; }
     public string? NodeFullDeviceId { get; set; }
 
-    // Cached gateway data — pages read these on navigation
-    public SessionInfo[]? LastSessions { get; private set; }
-    public ChannelHealth[]? LastChannels { get; private set; }
-    public GatewayUsageInfo? LastUsage { get; private set; }
-    public GatewayCostUsageInfo? LastUsageCost { get; private set; }
-    public GatewayUsageStatusInfo? LastUsageStatus { get; private set; }
-    public GatewayNodeInfo[]? LastNodes { get; private set; }
+    // Gateway data — read-through from AppModel (single source of truth)
+    public SessionInfo[]? LastSessions => AppModel?.Sessions;
+    public ChannelHealth[]? LastChannels => AppModel?.Channels;
+    public GatewayUsageInfo? LastUsage => AppModel?.Usage;
+    public GatewayCostUsageInfo? LastUsageCost => AppModel?.UsageCost;
+    public GatewayUsageStatusInfo? LastUsageStatus => AppModel?.UsageStatus;
+    public GatewayNodeInfo[]? LastNodes => AppModel?.Nodes;
 
-    public System.Text.Json.JsonElement? LastConfig { get; private set; }
-    public System.Text.Json.JsonElement? LastConfigSchema { get; private set; }
-    public System.Text.Json.JsonElement? LastSkillsData { get; private set; }
-    public string? LastSkillsAgentId { get; private set; }
-    public System.Text.Json.JsonElement? LastAgentFilesList { get; private set; }
-    public string? LastAgentFilesListAgentId { get; private set; }
+    public System.Text.Json.JsonElement? LastConfig => AppModel?.Config;
+    public System.Text.Json.JsonElement? LastConfigSchema => AppModel?.ConfigSchema;
+    public System.Text.Json.JsonElement? LastSkillsData => AppModel?.SkillsData;
+    public string? LastSkillsAgentId => AppModel?.SkillsAgentId;
+    public System.Text.Json.JsonElement? LastAgentFilesList => AppModel?.AgentFilesList;
+    public string? LastAgentFilesListAgentId => AppModel?.AgentFilesListAgentId;
     private string? _pendingAgentFilesListAgentId;
 
     // Event for settings saved (App.xaml.cs subscribes)
@@ -181,8 +182,8 @@ public sealed partial class HubWindow : WindowEx
                 if (IsClosed) return;
                 CurrentStatus = status;
                 _cachedCommands = null;
-                if (status == ConnectionStatus.Disconnected)
-                    _lastGatewaySelf = null;
+                if (status == ConnectionStatus.Disconnected && AppModel != null)
+                    AppModel.GatewaySelf = null;
                 UpdateTitleBarStatus(status);
                 if (ContentFrame?.Content is ConnectionPage connectionPage)
                 {
@@ -206,7 +207,7 @@ public sealed partial class HubWindow : WindowEx
         TitleStatusDot.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
 
         // Build status text with version when connected
-        if (status == ConnectionStatus.Connected && _lastGatewaySelf is { ServerVersion: { Length: > 0 } ver })
+        if (status == ConnectionStatus.Connected && LastGatewaySelf is { ServerVersion: { Length: > 0 } ver })
             TitleStatusText.Text = $"v{ver}";
         else
             TitleStatusText.Text = text;
@@ -241,12 +242,10 @@ public sealed partial class HubWindow : WindowEx
         _ => new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Gray),
     };
 
-    private GatewaySelfInfo? _lastGatewaySelf;
-    public GatewaySelfInfo? LastGatewaySelf => _lastGatewaySelf;
+    public GatewaySelfInfo? LastGatewaySelf => AppModel?.GatewaySelf;
 
     public void UpdateGatewaySelf(GatewaySelfInfo self)
     {
-        _lastGatewaySelf = self;
         try
         {
             DispatcherQueue?.TryEnqueue(() =>
@@ -262,7 +261,6 @@ public sealed partial class HubWindow : WindowEx
 
     public void UpdateSessions(SessionInfo[] sessions)
     {
-        LastSessions = sessions;
         if (IsClosed) return;
         DispatcherQueue?.TryEnqueue(() =>
         {
@@ -273,7 +271,6 @@ public sealed partial class HubWindow : WindowEx
 
     public void UpdateChannelHealth(ChannelHealth[] channels)
     {
-        LastChannels = channels;
         if (IsClosed) return;
         DispatcherQueue?.TryEnqueue(() =>
         {
@@ -284,7 +281,6 @@ public sealed partial class HubWindow : WindowEx
 
     public void UpdateUsage(GatewayUsageInfo usage)
     {
-        LastUsage = usage;
         if (IsClosed) return;
         DispatcherQueue?.TryEnqueue(() =>
         {
@@ -294,7 +290,6 @@ public sealed partial class HubWindow : WindowEx
 
     public void UpdateUsageCost(GatewayCostUsageInfo cost)
     {
-        LastUsageCost = cost;
         if (IsClosed) return;
         DispatcherQueue?.TryEnqueue(() =>
         {
@@ -305,7 +300,6 @@ public sealed partial class HubWindow : WindowEx
 
     public void UpdateUsageStatus(GatewayUsageStatusInfo status)
     {
-        LastUsageStatus = status;
         if (IsClosed) return;
         DispatcherQueue?.TryEnqueue(() =>
         {
@@ -315,7 +309,6 @@ public sealed partial class HubWindow : WindowEx
 
     public void UpdateNodes(GatewayNodeInfo[] nodes)
     {
-        LastNodes = nodes;
         if (IsClosed) return;
         DispatcherQueue?.TryEnqueue(() =>
         {
@@ -323,13 +316,10 @@ public sealed partial class HubWindow : WindowEx
         });
     }
 
-    // Cached cron data for when CronPage isn't active
-    private System.Text.Json.JsonElement? _lastCronList;
-    private System.Text.Json.JsonElement? _lastCronStatus;
+    // Cron data — read-through from AppModel (no private cache needed)
 
     public void UpdateCronList(System.Text.Json.JsonElement data)
     {
-        _lastCronList = data.Clone();
         try
         {
             DispatcherQueue?.TryEnqueue(() =>
@@ -343,7 +333,6 @@ public sealed partial class HubWindow : WindowEx
 
     public void UpdateCronStatus(System.Text.Json.JsonElement data)
     {
-        _lastCronStatus = data.Clone();
         try
         {
             DispatcherQueue?.TryEnqueue(() =>
@@ -370,14 +359,13 @@ public sealed partial class HubWindow : WindowEx
 
     public void SeedCronData(CronPage page)
     {
-        if (_lastCronList.HasValue) page.UpdateFromGateway(_lastCronList.Value);
-        if (_lastCronStatus.HasValue) page.UpdateFromGateway(_lastCronStatus.Value);
+        if (AppModel?.CronList.HasValue == true) page.UpdateFromGateway(AppModel.CronList.Value);
+        if (AppModel?.CronStatus.HasValue == true) page.UpdateFromGateway(AppModel.CronStatus.Value);
     }
 
     public void UpdateConfig(System.Text.Json.JsonElement config)
     {
         var snapshot = config.Clone();
-        LastConfig = snapshot;
         if (IsClosed) return;
         DispatcherQueue?.TryEnqueue(() =>
         {
@@ -389,7 +377,6 @@ public sealed partial class HubWindow : WindowEx
     public void UpdateConfigSchema(System.Text.Json.JsonElement schema)
     {
         var snapshot = schema.Clone();
-        LastConfigSchema = snapshot;
         if (IsClosed) return;
         try
         {
@@ -407,13 +394,11 @@ public sealed partial class HubWindow : WindowEx
         try
         {
             var snapshot = data.Clone();
-            LastSkillsData = snapshot;
             DispatcherQueue?.TryEnqueue(() =>
             {
                 if (IsClosed) return;
                 if (ContentFrame?.Content is SkillsPage sp)
                 {
-                    LastSkillsAgentId = sp.CurrentAgentId;
                     sp.UpdateFromGateway(snapshot);
                 }
             });
@@ -423,7 +408,6 @@ public sealed partial class HubWindow : WindowEx
 
     public void UpdateAgentsList(System.Text.Json.JsonElement data)
     {
-        LastAgentsData = data;
         try
         {
             DispatcherQueue?.TryEnqueue(() =>
@@ -461,22 +445,7 @@ public sealed partial class HubWindow : WindowEx
     }
 
     /// <summary>Extract agent IDs from cached agents data.</summary>
-    public List<string> GetAgentIds()
-    {
-        var ids = new List<string>();
-        if (LastAgentsData.HasValue &&
-            LastAgentsData.Value.TryGetProperty("agents", out var agentsEl) &&
-            agentsEl.ValueKind == System.Text.Json.JsonValueKind.Array)
-        {
-            foreach (var agent in agentsEl.EnumerateArray())
-            {
-                var id = agent.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
-                if (!string.IsNullOrEmpty(id)) ids.Add(id);
-            }
-        }
-        if (ids.Count == 0) ids.Add("main");
-        return ids;
-    }
+    public List<string> GetAgentIds() => AppModel?.GetAgentIds() ?? new List<string> { "main" };
 
     public void RecordAgentFilesListRequest(string agentId)
     {
@@ -490,8 +459,6 @@ public sealed partial class HubWindow : WindowEx
             var snapshot = data.Clone();
             var responseAgentId = _pendingAgentFilesListAgentId ?? _currentAgentId;
             _pendingAgentFilesListAgentId = null;
-            LastAgentFilesListAgentId = responseAgentId;
-            LastAgentFilesList = snapshot;
             DispatcherQueue?.TryEnqueue(() =>
             {
                 if (IsClosed) return;
@@ -519,11 +486,7 @@ public sealed partial class HubWindow : WindowEx
         catch { }
     }
 
-    // Agent events ring buffer (max 400, cached centrally)
-    // All mutations happen on the UI thread via DispatcherQueue
-    private const int MaxAgentEvents = 400;
-    private readonly System.Collections.Generic.List<AgentEventInfo> _agentEvents = new();
-    public System.Collections.Generic.IReadOnlyList<AgentEventInfo> LastAgentEvents => _agentEvents;
+    public System.Collections.Generic.IReadOnlyList<AgentEventInfo> LastAgentEvents => AppModel?.AgentEvents ?? (System.Collections.Generic.IReadOnlyList<AgentEventInfo>)Array.Empty<AgentEventInfo>();
 
     /// <summary>Called by App to also clear its own agent event cache when Clear is invoked.</summary>
     public Action? ClearAppAgentEventsCache { get; set; }
@@ -532,25 +495,21 @@ public sealed partial class HubWindow : WindowEx
     {
         DispatcherQueue?.TryEnqueue(() =>
         {
-            _agentEvents.Clear();
+            AppModel?.ClearAgentEvents();
             ClearAppAgentEventsCache?.Invoke();
         });
     }
 
-    /// <summary>Seed the hub's agent event cache from App-level cache (deduplicates by RunId+Seq).</summary>
-    public void SeedAgentEvents(IReadOnlyList<AgentEventInfo> appCache)
+    /// <summary>Seed the currently visible AgentEventsPage from AppModel.</summary>
+    public void SeedAgentEvents()
     {
         DispatcherQueue?.TryEnqueue(() =>
         {
-            var existingKeys = new System.Collections.Generic.HashSet<(string, int)>(
-                _agentEvents.Select(e => (e.RunId, e.Seq)));
-            foreach (var evt in appCache)
+            if (ContentFrame?.Content is AgentEventsPage page)
             {
-                if (!existingKeys.Contains((evt.RunId, evt.Seq)))
-                {
-                    _agentEvents.Add(evt);
-                    if (_agentEvents.Count >= MaxAgentEvents) break;
-                }
+                var events = AppModel?.AgentEvents ?? (System.Collections.Generic.IReadOnlyList<AgentEventInfo>)Array.Empty<AgentEventInfo>();
+                foreach (var evt in events)
+                    page.AddEvent(evt);
             }
         });
     }
@@ -562,23 +521,19 @@ public sealed partial class HubWindow : WindowEx
             DispatcherQueue?.TryEnqueue(() =>
             {
                 if (IsClosed) return;
-                _agentEvents.Insert(0, evt);
-                if (_agentEvents.Count > MaxAgentEvents)
-                    _agentEvents.RemoveRange(MaxAgentEvents, _agentEvents.Count - MaxAgentEvents);
                 if (ContentFrame?.Content is AgentEventsPage agentEvents) agentEvents.AddEvent(evt);
             });
         }
         catch { }
     }
 
-    // Pairing data
-    public PairingListInfo? LastNodePairList { get; private set; }
-    public DevicePairingListInfo? LastDevicePairList { get; private set; }
-    public ModelsListInfo? LastModelsList { get; private set; }
+    // Pairing data — read-through from AppModel
+    public PairingListInfo? LastNodePairList => AppModel?.NodePairList;
+    public DevicePairingListInfo? LastDevicePairList => AppModel?.DevicePairList;
+    public ModelsListInfo? LastModelsList => AppModel?.ModelsList;
 
     public void UpdateNodePairList(PairingListInfo data)
     {
-        LastNodePairList = data;
         try
         {
             DispatcherQueue?.TryEnqueue(() =>
@@ -594,7 +549,6 @@ public sealed partial class HubWindow : WindowEx
 
     public void UpdateDevicePairList(DevicePairingListInfo data)
     {
-        LastDevicePairList = data;
         try
         {
             DispatcherQueue?.TryEnqueue(() =>
@@ -608,7 +562,6 @@ public sealed partial class HubWindow : WindowEx
 
     public void UpdateModelsList(ModelsListInfo data)
     {
-        LastModelsList = data;
         try
         {
             DispatcherQueue?.TryEnqueue(() =>
@@ -620,12 +573,11 @@ public sealed partial class HubWindow : WindowEx
         catch { }
     }
 
-    public PresenceEntry[]? LastPresence { get; private set; }
-    public System.Text.Json.JsonElement? LastAgentsData { get; private set; }
+    public PresenceEntry[]? LastPresence => AppModel?.Presence;
+    public System.Text.Json.JsonElement? LastAgentsData => AppModel?.AgentsList;
 
     public void UpdatePresence(PresenceEntry[] data)
     {
-        LastPresence = data;
         try
         {
             DispatcherQueue?.TryEnqueue(() =>
