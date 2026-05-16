@@ -2135,6 +2135,35 @@ public sealed class WslGatewayCliPendingDeviceApprover : IPendingDeviceApprover
     public const int MaxStdoutSurfaceLength = 1024;
     private static readonly TimeSpan DefaultStage1RetryDelay = TimeSpan.FromMilliseconds(750);
 
+    /// <summary>
+    /// When the gateway restarts mid-PairWindowsTrayNode (which can happen 10-15s after
+    /// operator pairing — gateway flushes config and restarts the service), the WSL CLI
+    /// briefly cannot reach the gateway and exits non-zero with stderr containing
+    /// "1006 abnormal closure" / "gateway closed" / "Gateway not yet ready". The original
+    /// 750ms single-retry isn't enough for the gateway to come back. When we detect this
+    /// pattern in both initial attempts, we keep retrying with exponential backoff up to
+    /// this cap so the WSL approve flow survives a transient gateway restart instead of
+    /// failing with the misleading operator_pending_approval_failed code.
+    /// </summary>
+    private static readonly TimeSpan[] GatewayDownRetryDelays =
+    [
+        TimeSpan.FromSeconds(2),
+        TimeSpan.FromSeconds(4),
+        TimeSpan.FromSeconds(8),
+    ];
+
+    /// <summary>
+    /// Patterns in CLI stderr that indicate the gateway is transiently down (typically
+    /// mid-restart) rather than a real pairing/auth failure.
+    /// </summary>
+    private static readonly string[] GatewayDownStderrPatterns =
+    [
+        "1006 abnormal closure",
+        "gateway closed",
+        "Gateway not yet ready",
+        "Could not start the CLI",
+    ];
+
     private readonly IWslCommandRunner _wsl;
     private readonly string _commandName;
     private readonly TimeSpan _stage1RetryDelay;
@@ -2300,7 +2329,70 @@ public sealed class WslGatewayCliPendingDeviceApprover : IPendingDeviceApprover
             ["bash", "-lc", BuildPreviewScript()],
             cancellationToken,
             tokenEnvironment);
+        if (second.Success || ParsePreviewJson(second.StandardOutput).Success)
+        {
+            return new Stage1Outcome(second, FirstResult: first);
+        }
+
+        // Bug: gateway-restart mid-PairWindowsTrayNode (manual test 2026-05-16) — when the
+        // gateway emits a 1012 service-restart shortly after operator pairing, both initial
+        // stage-1 attempts can hit a still-restarting gateway and fail with stderr like:
+        //   [openclaw] Reason: gateway closed (1006 abnormal closure (no close frame))
+        // The 750ms retry window isn't enough for the gateway to come back. If we recognize
+        // this pattern in both attempts, keep retrying with exponential backoff so the
+        // engine doesn't misreport this as operator_pending_approval_failed.
+        if (LooksLikeGatewayDown(first) && LooksLikeGatewayDown(second))
+        {
+            var last = second;
+            foreach (var delay in GatewayDownRetryDelays)
+            {
+                try
+                {
+                    await Task.Delay(delay, cancellationToken);
+                }
+                catch (TaskCanceledException)
+                {
+                    return new Stage1Outcome(last, FirstResult: first);
+                }
+
+                var attempt = await _wsl.RunInDistroAsync(
+                    state.DistroName,
+                    ["bash", "-lc", BuildPreviewScript()],
+                    cancellationToken,
+                    tokenEnvironment);
+                if (attempt.Success || ParsePreviewJson(attempt.StandardOutput).Success)
+                {
+                    return new Stage1Outcome(attempt, FirstResult: first);
+                }
+                last = attempt;
+                if (!LooksLikeGatewayDown(attempt))
+                {
+                    // Stopped looking like a transient gateway-down failure — bail and let
+                    // the caller surface this attempt's stderr verbatim.
+                    return new Stage1Outcome(last, FirstResult: first);
+                }
+            }
+            return new Stage1Outcome(last, FirstResult: first);
+        }
+
         return new Stage1Outcome(second, FirstResult: first);
+    }
+
+    /// <summary>
+    /// Heuristic match for "the gateway is down right now, retry will probably succeed"
+    /// — see <see cref="GatewayDownStderrPatterns"/>.
+    /// </summary>
+    internal static bool LooksLikeGatewayDown(WslCommandResult result)
+    {
+        if (result.Success) return false;
+        var stderr = result.StandardError ?? string.Empty;
+        if (stderr.Length == 0) return false;
+        foreach (var pattern in GatewayDownStderrPatterns)
+        {
+            if (stderr.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     /// <summary>
