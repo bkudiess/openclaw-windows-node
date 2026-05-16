@@ -51,13 +51,16 @@ public sealed class ConnectionManagerWindowsNodeConnector : IWindowsNodeConnecto
         {
             // Defensive: the operator phase should always have created this record.
             // If it didn't, create one now so the manager can resolve credentials.
+            // IsLocal is derived from the URL via LocalGatewayUrlClassifier so this
+            // doesn't silently misclassify a remote gateway if the connector is
+            // ever reused outside the local-loopback easy-button flow.
             var fresh = new GatewayRecord
             {
                 Id = Guid.NewGuid().ToString(),
                 Url = normalized,
                 SharedGatewayToken = !string.IsNullOrWhiteSpace(token) ? token : null,
                 BootstrapToken = !string.IsNullOrWhiteSpace(bootstrapToken) ? bootstrapToken : null,
-                IsLocal = true,
+                IsLocal = LocalGatewayUrlClassifier.IsLocalGatewayUrl(normalized),
             };
             _registry.AddOrUpdate(fresh);
             _registry.SetActive(fresh.Id);

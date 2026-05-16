@@ -105,6 +105,13 @@ public sealed class NodeService : IDisposable
     private readonly List<INodeCapability> _capabilities = new();
     private readonly object _capabilitiesLock = new();
 
+    // Serializes AttachClient ↔ DisconnectAsync so a reconnect that overlaps a
+    // disconnect can't leave stale subscriptions on an old client or double-
+    // subscribe a re-attached client (Hanselman review #1). Held only for
+    // the synchronous subscription bookkeeping; capability registration uses
+    // its own lock above.
+    private readonly object _clientLock = new();
+
     // Local MCP server — exposes the same capabilities to local MCP clients.
     // TODO: when the port becomes user-configurable (see docs/MCP_MODE.md
     // "Deferred"), McpServerUrl needs to read the live port off the running
@@ -225,15 +232,20 @@ public sealed class NodeService : IDisposable
     {
         StopMcpServer();
 
-        if (_nodeClient != null)
+        WindowsNodeClient? previous;
+        lock (_clientLock)
+        {
+            previous = _nodeClient;
+            _nodeClient = null;
+        }
+        if (previous != null)
         {
             // Unsubscribe but don't dispose — the connector owns the client.
-            _nodeClient.StatusChanged -= OnNodeStatusChanged;
-            _nodeClient.PairingStatusChanged -= OnPairingStatusChanged;
-            _nodeClient.HealthReceived -= OnNodeHealthReceived;
-            _nodeClient.GatewaySelfUpdated -= OnGatewaySelfUpdated;
-            _nodeClient.InvokeCompleted -= OnNodeInvokeCompleted;
-            _nodeClient = null;
+            previous.StatusChanged -= OnNodeStatusChanged;
+            previous.PairingStatusChanged -= OnPairingStatusChanged;
+            previous.HealthReceived -= OnNodeHealthReceived;
+            previous.GatewaySelfUpdated -= OnGatewaySelfUpdated;
+            previous.InvokeCompleted -= OnNodeInvokeCompleted;
         }
 
         lock (_capabilitiesLock) { _capabilities.Clear(); }
@@ -405,28 +417,39 @@ public sealed class NodeService : IDisposable
 
         _token = bearerToken;
 
-        // Detach event subscriptions from previous client (if any) so a reconnect's
-        // fresh client doesn't double-fire NodeService events through both clients.
-        var previous = _nodeClient;
-        if (previous != null && !ReferenceEquals(previous, client))
+        // Hanselman review #1: serialize subscription bookkeeping so AttachClient ↔
+        // DisconnectAsync ↔ a follow-up AttachClient can't leave stale handlers on
+        // an old client or double-subscribe the same client. Unconditional
+        // unsubscribe-then-subscribe makes the wiring idempotent regardless of
+        // whether the previous client is the same instance or null.
+        WindowsNodeClient? previous;
+        lock (_clientLock)
         {
-            previous.StatusChanged -= OnNodeStatusChanged;
-            previous.PairingStatusChanged -= OnPairingStatusChanged;
-            previous.HealthReceived -= OnNodeHealthReceived;
-            previous.GatewaySelfUpdated -= OnGatewaySelfUpdated;
-            previous.InvokeCompleted -= OnNodeInvokeCompleted;
-        }
+            previous = _nodeClient;
+            if (previous != null && !ReferenceEquals(previous, client))
+            {
+                previous.StatusChanged -= OnNodeStatusChanged;
+                previous.PairingStatusChanged -= OnPairingStatusChanged;
+                previous.HealthReceived -= OnNodeHealthReceived;
+                previous.GatewaySelfUpdated -= OnGatewaySelfUpdated;
+                previous.InvokeCompleted -= OnNodeInvokeCompleted;
+            }
 
-        _nodeClient = client;
+            _nodeClient = client;
 
-        // Wire NodeService event re-emitters to the manager-owned client.
-        // App.OnPairingStatusChanged + OnNodeStatusChanged subscribe to NodeService events;
-        // those subscriptions are stable across reconnects because the subscriptions are
-        // on NodeService, not on the underlying WindowsNodeClient. (Pre-unification this
-        // wiring lived in NodeService.ConnectAsync — moved here so the unified
-        // manager-owned lifecycle still drives NodeService's event surface.)
-        if (!ReferenceEquals(previous, client))
-        {
+            // Wire NodeService event re-emitters to the manager-owned client.
+            // App.OnPairingStatusChanged + OnNodeStatusChanged subscribe to NodeService events;
+            // those subscriptions are stable across reconnects because the subscriptions are
+            // on NodeService, not on the underlying WindowsNodeClient. (Pre-unification this
+            // wiring lived in NodeService.ConnectAsync — moved here so the unified
+            // manager-owned lifecycle still drives NodeService's event surface.)
+            // -= before += so a re-attach of the same client (e.g. AttachClient called
+            // again after a DisconnectAsync that nulled _nodeClient) doesn't double-subscribe.
+            client.StatusChanged -= OnNodeStatusChanged;
+            client.PairingStatusChanged -= OnPairingStatusChanged;
+            client.HealthReceived -= OnNodeHealthReceived;
+            client.GatewaySelfUpdated -= OnGatewaySelfUpdated;
+            client.InvokeCompleted -= OnNodeInvokeCompleted;
             client.StatusChanged += OnNodeStatusChanged;
             client.PairingStatusChanged += OnPairingStatusChanged;
             client.HealthReceived += OnNodeHealthReceived;

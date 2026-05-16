@@ -600,6 +600,9 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
     {
         ThrowIfDisposed();
 
+        // Honor a pre-canceled token before any side effects (Hanselman review #4).
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (_nodeConnector == null)
             throw new InvalidOperationException("No node connector is configured on the manager.");
 
@@ -652,12 +655,33 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         {
             await StartNodeConnectionAsync();
 
-            // Re-evaluate state in case the connector reached terminal state synchronously
-            // (test connectors may; production NodeConnector is async).
-            Handler(this, _stateMachine.Current);
+            // Hanselman review #5: StartNodeConnectionAsync has three silent-return
+            // paths (null connector / missing gateway record / no node credential).
+            // If none of them fire a state transition, the post-start snapshot is
+            // still Idle (or Disabled). Surface that immediately rather than waiting
+            // 35s for a misleading TimeoutException — the actual diagnostic was
+            // already recorded via _diagnostics.Record("node", ...) by the start path.
+            var postStart = _stateMachine.Current;
+            if (postStart.NodeState is RoleConnectionState.Idle or RoleConnectionState.Disabled)
+            {
+                tcs.TrySetException(new InvalidOperationException(
+                    "Node connection could not be started — see ConnectionDiagnostics for the credential/record-resolution failure."));
+            }
+            else
+            {
+                // Re-evaluate state in case the connector reached terminal state synchronously
+                // (test connectors may; production NodeConnector is async).
+                Handler(this, postStart);
+            }
 
+            // Hanselman review #3: only apply the default 35s timeout when the caller
+            // didn't supply a cancellable token. A caller that DOES pass one is signaling
+            // they own the deadline (e.g. setup engine with its own retry budget).
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            cts.CancelAfter(TimeSpan.FromSeconds(35));
+            if (!cancellationToken.CanBeCanceled)
+            {
+                cts.CancelAfter(TimeSpan.FromSeconds(35));
+            }
 
             try
             {
