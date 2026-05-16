@@ -170,7 +170,7 @@
             </NavigationViewItem>
         </NavigationView.FooterMenuItems>
 
-        <Frame x:Name="ContentFrame">
+        <Frame x:Name="ContentFrame" Navigated="OnContentFrameNavigated">
             <Frame.ContentTransitions>
                 <TransitionCollection>
                     <NavigationThemeTransition/>

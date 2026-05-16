@@ -27,6 +27,13 @@ public sealed partial class SessionsPage : Page
     {
         _hub = hub;
 
+        // Show "← Back to Connection" only when the user arrived from
+        // Connection's cross-page link; staying hidden when the rail nav
+        // is used keeps the page chrome quiet for direct navigation.
+        BackToConnectionLink.Visibility = hub.LastNavigationOrigin == "connection"
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
         if (hub.GatewayClient == null)
         {
             ConnectionWarning.IsOpen = true;
@@ -43,6 +50,9 @@ public sealed partial class SessionsPage : Page
         _ = hub.GatewayClient.RequestSessionsAsync();
         _ = hub.GatewayClient.RequestModelsListAsync();
     }
+
+    private void OnBackToConnectionClicked(object sender, RoutedEventArgs e)
+        => _hub?.NavigateTo("connection");
 
     public void UpdateSessions(SessionInfo[] sessions)
     {

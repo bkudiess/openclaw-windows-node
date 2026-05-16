@@ -37,6 +37,14 @@ public sealed partial class InstancesPage : Page
     public void Initialize(HubWindow hub)
     {
         _hub = hub;
+
+        // Show "← Back to Connection" only when the user arrived from
+        // Connection's cross-page link; staying hidden when the rail nav
+        // is used keeps the page chrome quiet for direct navigation.
+        BackToConnectionLink.Visibility = hub.LastNavigationOrigin == "connection"
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
         var connected = hub.GatewayClient != null;
         ConnectionWarning.Visibility = connected ? Visibility.Collapsed : Visibility.Visible;
 
@@ -49,6 +57,9 @@ public sealed partial class InstancesPage : Page
             _ = RequestNodesWithSpinnerAsync();
         }
     }
+
+    private void OnBackToConnectionClicked(object sender, RoutedEventArgs e)
+        => _hub?.NavigateTo("connection");
 
     public void UpdateNodes(GatewayNodeInfo[] nodes)
     {

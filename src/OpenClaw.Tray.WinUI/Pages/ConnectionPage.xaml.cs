@@ -1438,12 +1438,12 @@ public sealed partial class ConnectionPage : Page
 
     // ─── Operator card navigation ────────────────────────────────────
 
-    private void OnOpenSessions(object sender, RoutedEventArgs e) => _hub?.NavigateTo("sessions");
-    private void OnOpenInstances(object sender, RoutedEventArgs e) => _hub?.NavigateTo("instances");
+    private void OnOpenSessions(object sender, RoutedEventArgs e) => _hub?.NavigateTo("sessions", "connection");
+    private void OnOpenInstances(object sender, RoutedEventArgs e) => _hub?.NavigateTo("instances", "connection");
 
     // ─── Node card navigation ────────────────────────────────────────
 
-    private void OnOpenPermissions(object sender, RoutedEventArgs e) => _hub?.NavigateTo("permissions");
+    private void OnOpenPermissions(object sender, RoutedEventArgs e) => _hub?.NavigateTo("permissions", "connection");
 
     private void OnCopyNodeApproveCommand(object sender, RoutedEventArgs e)
     {

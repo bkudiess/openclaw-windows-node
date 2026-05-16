@@ -39,6 +39,13 @@ public sealed partial class PermissionsPage : Page
         _hub = hub;
         HostnameText.Text = Environment.MachineName;
 
+        // Show "← Back to Connection" only when the user arrived from
+        // Connection's cross-page link; staying hidden when the rail nav
+        // is used keeps the page chrome quiet for direct navigation.
+        BackToConnectionLink.Visibility = hub.LastNavigationOrigin == "connection"
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
         BindNodeModeMaster(hub);
         BuildCapabilityToggles(hub);
         UpdateMcpStatus(hub);
@@ -50,6 +57,9 @@ public sealed partial class PermissionsPage : Page
         LoadExecPolicy();
         LoadAllowlist(hub.LastConfig);
     }
+
+    private void OnBackToConnectionClicked(object sender, RoutedEventArgs e)
+        => _hub?.NavigateTo("connection");
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
