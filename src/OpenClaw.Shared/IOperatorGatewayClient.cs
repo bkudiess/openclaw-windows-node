@@ -93,6 +93,8 @@ public interface IOperatorGatewayClient
     Task<bool> DevicePairApproveAsync(string requestId);
     Task<bool> DevicePairRejectAsync(string requestId);
     Task<bool> StartChannelAsync(string channelName);
+    /// <summary>Start a channel and return the full gateway response so the page can detect "unknown channel" (plugin not loaded).</summary>
+    Task<ChannelStartResult?> StartChannelDetailedAsync(string channelName, int timeoutMs = 12000);
     Task<bool> StopChannelAsync(string channelName);
     /// <summary>Fetch the rich channels.status snapshot from the gateway. Mac/web canonical wire method.</summary>
     Task<ChannelsStatusSnapshot?> GetChannelsStatusAsync(bool probe = false, int timeoutMs = 12000);

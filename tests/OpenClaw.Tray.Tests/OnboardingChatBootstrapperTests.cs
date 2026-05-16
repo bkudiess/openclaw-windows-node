@@ -190,6 +190,7 @@ public sealed class OnboardingChatBootstrapperTests : IDisposable
         public Task<bool> DevicePairApproveAsync(string requestId) => Task.FromResult(false);
         public Task<bool> DevicePairRejectAsync(string requestId) => Task.FromResult(false);
         public Task<bool> StartChannelAsync(string channelName) => Task.FromResult(false);
+        public Task<ChannelStartResult?> StartChannelDetailedAsync(string channelName, int timeoutMs = 12000) => Task.FromResult<ChannelStartResult?>(null);
         public Task<bool> StopChannelAsync(string channelName) => Task.FromResult(false);
         public Task<ChannelsStatusSnapshot?> GetChannelsStatusAsync(bool probe = false, int timeoutMs = 12000) => Task.FromResult<ChannelsStatusSnapshot?>(null);
         public Task<bool> LogoutChannelAsync(string channelName, int timeoutMs = 12000) => Task.FromResult(false);

@@ -15,6 +15,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage.Streams;
 
 namespace OpenClawTray.Pages;
@@ -395,15 +396,17 @@ public sealed partial class ChannelsPage : Page
         Grid.SetColumn(middle, 1);
         grid.Children.Add(middle);
 
-        // Header actions (Refresh, Logout)
+        // Header actions: Start (configured-but-stopped channels), Logout
+        // (configured channels with a session to end). Per-channel Refresh
+        // was dropped in favor of the page-level Refresh-all in the toolbar.
         var actions = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 6,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        if (record.Capabilities.HasFlag(ChannelCapabilities.CanRefresh))
-            actions.Children.Add(BuildHeaderActionButton(FluentIconCatalog.ChannelRefresh, "Refresh", null, ignored => { var _ignored = RefreshAsync(); }));
+        if (record.Capabilities.HasFlag(ChannelCapabilities.CanStart))
+            actions.Children.Add(BuildHeaderActionButton(FluentIconCatalog.ChannelStart, "Start", record.Id, channelId => { var _ignored = StartChannelAsync(channelId!); }));
         if (record.Capabilities.HasFlag(ChannelCapabilities.CanLogout))
             actions.Children.Add(BuildHeaderActionButton(FluentIconCatalog.ChannelLogout, "Logout", record.Id, channelId => { var _ignored = LogoutAsync(channelId!); }));
         Grid.SetColumn(actions, 2);
@@ -504,6 +507,15 @@ public sealed partial class ChannelsPage : Page
         // plugin channels we fall back to the "Open Config page" stub.
         var inlineForm = BuildInlineConfigForm(record);
         stack.Children.Add(BuildSection("Configuration", inlineForm));
+
+        // "Install plugin on your gateway" panel. Gateway doesn't expose
+        // plugin install over the operator wire (verified: src/gateway/
+        // server-methods-list.ts only exposes channels.{status,start,stop,
+        // logout}), so this panel surfaces the exact CLI command the user
+        // needs to run on the gateway host — with a one-click Copy button.
+        // Collapsed by default for healthy/running channels; auto-expanded
+        // when the channel isn't running yet so the user spots it.
+        stack.Children.Add(BuildInstallPluginPanel(record));
 
         return stack;
     }
@@ -1464,6 +1476,114 @@ public sealed partial class ChannelsPage : Page
         return stack;
     }
 
+    /// <summary>
+    /// Collapsible "Install plugin on your gateway" panel. The gateway doesn't
+    /// expose plugin install over the operator wire (verified against
+    /// <c>openclaw/src/gateway/server-methods-list.ts</c> — only
+    /// <c>channels.{status,start,stop,logout}</c> and <c>config.*</c> are
+    /// available), so this panel shows the exact CLI command the user needs
+    /// to run on the gateway host, plus a one-click Copy button and a docs
+    /// link. Auto-expands on channels that aren't running yet — that's
+    /// usually the trigger for "did I forget to install the plugin?".
+    /// </summary>
+    private FrameworkElement BuildInstallPluginPanel(ChannelRecord record)
+    {
+        var pkg = $"@openclaw/{record.Id}";
+        var cmd = $"openclaw plugins install {pkg}";
+
+        var expander = new Expander
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            // Auto-expand for channels that aren't running — that's the case
+            // where "did I install the plugin?" is the most likely question.
+            IsExpanded = !record.IsRunning,
+        };
+
+        var headerRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var icon = FluentIconCatalog.Build(FluentIconCatalog.ChannelInstall, 16);
+        icon.VerticalAlignment = VerticalAlignment.Center;
+        icon.Foreground = (Brush)Application.Current.Resources["AccentTextFillColorPrimaryBrush"];
+        headerRow.Children.Add(icon);
+        headerRow.Children.Add(new TextBlock
+        {
+            Text = "Install plugin on your gateway",
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        expander.Header = headerRow;
+
+        var body = new StackPanel { Spacing = 10 };
+
+        body.Children.Add(new TextBlock
+        {
+            Text = $"Channel plugins are loaded by the gateway, not the tray — so installs happen on the machine that hosts your gateway. If {record.Id} isn't coming up after Save, the plugin may not be installed yet.",
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 13,
+            Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+        });
+
+        // Read-only command row: TextBox with the command, Copy button next to it.
+        var cmdRow = new Grid();
+        cmdRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        cmdRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var cmdBox = new TextBox
+        {
+            Text = cmd,
+            IsReadOnly = true,
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas, Cascadia Mono, monospace"),
+            Margin = new Thickness(0, 0, 8, 0),
+        };
+        Grid.SetColumn(cmdBox, 0);
+        cmdRow.Children.Add(cmdBox);
+
+        var copyBtn = new Button { Content = "Copy" };
+        copyBtn.Click += (_, _) =>
+        {
+            try
+            {
+                var pkgData = new DataPackage();
+                pkgData.SetText(cmd);
+                Clipboard.SetContent(pkgData);
+                // Briefly indicate copied — flip the label, restore after a short delay.
+                copyBtn.Content = "Copied";
+                _ = Task.Delay(1200).ContinueWith(_ =>
+                {
+                    if (DispatcherQueue == null) return;
+                    DispatcherQueue.TryEnqueue(() => copyBtn.Content = "Copy");
+                }, TaskScheduler.Default);
+            }
+            catch
+            {
+                copyBtn.Content = "Copy failed";
+            }
+        };
+        Grid.SetColumn(copyBtn, 1);
+        cmdRow.Children.Add(copyBtn);
+
+        body.Children.Add(cmdRow);
+
+        body.Children.Add(new TextBlock
+        {
+            Text = "Run this command on the machine that hosts your gateway. After it finishes, come back and click Refresh.",
+            FontSize = 11,
+            Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
+            TextWrapping = TextWrapping.Wrap,
+        });
+
+        var docsLink = new HyperlinkButton
+        {
+            Content = "Plugin install docs →",
+            NavigateUri = new Uri("https://docs.openclaw.ai/plugins/install"),
+            Padding = new Thickness(0),
+        };
+        body.Children.Add(docsLink);
+
+        expander.Content = body;
+        return expander;
+    }
+
     private async Task LogoutAsync(string channelId)
     {
         var client = CurrentApp.GatewayClient;
@@ -1494,6 +1614,63 @@ public sealed partial class ChannelsPage : Page
             ErrorBar.IsOpen = true;
         }
         await RefreshAsync(probe: false);
+    }
+
+    /// <summary>
+    /// Try to start a channel via <c>channels.start</c>. Used as the recovery
+    /// affordance when a channel is configured but didn't come up on its own
+    /// (e.g., after a save that didn't auto-start, or after a gateway restart).
+    /// Surfaces gateway errors on the page-level <c>SaveBanner</c> — including
+    /// the telltale "unknown channel" which means the channel's plugin isn't
+    /// loaded on the gateway host and the user needs to install it via the
+    /// gateway-host CLI.
+    /// </summary>
+    private async Task StartChannelAsync(string channelId)
+    {
+        var client = CurrentApp.GatewayClient;
+        if (client == null)
+        {
+            _pendingSaveBanner = (channelId, "Not connected",
+                "Connect to a gateway before starting channels.",
+                InfoBarSeverity.Error);
+            ApplyPendingSaveBanner();
+            return;
+        }
+
+        _pendingSaveBanner = (channelId, $"Starting {channelId}…",
+            "Asking the gateway to start this channel.",
+            InfoBarSeverity.Informational);
+        ApplyPendingSaveBanner();
+
+        var result = await client.StartChannelDetailedAsync(channelId);
+        if (result == null || !result.Ok)
+        {
+            _pendingSaveBanner = (channelId, $"Couldn't start {channelId}",
+                result?.Error ?? "The gateway didn't respond.",
+                InfoBarSeverity.Error);
+            ApplyPendingSaveBanner();
+            return;
+        }
+
+        if (result.LooksLikeMissingPlugin)
+        {
+            // Strong signal the plugin isn't loaded on the gateway host.
+            _pendingSaveBanner = (channelId,
+                $"Gateway doesn't have the {channelId} plugin installed",
+                $"Install it on your gateway host: openclaw plugins install @openclaw/{channelId}. See the channel's expander for the copyable command.",
+                InfoBarSeverity.Warning);
+            ApplyPendingSaveBanner();
+            return;
+        }
+
+        // Re-fetch the snapshot so Render() can upgrade the banner to "running"
+        // if the channel transitioned. If it didn't, Render() leaves a
+        // "started but not running yet" warning.
+        _pendingSaveBanner = (channelId, $"{channelId} start requested",
+            "Waiting for the gateway to confirm the channel is running…",
+            InfoBarSeverity.Success);
+        ApplyPendingSaveBanner();
+        await RefreshAsync(probe: true);
     }
 
     // ─── Header state resolution (dot color, badge, subtitle) ─────────────

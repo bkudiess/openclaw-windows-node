@@ -807,50 +807,87 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
         return TrySendTrackedRequestAsync("device.pair.reject", new { requestId });
     }
 
-    /// <summary>Start a channel (telegram, whatsapp, etc).</summary>
+    /// <summary>
+    /// Start a channel. Sends <c>channels.start { channel }</c> — the gateway's
+    /// canonical wire method per <c>src/gateway/server-methods-list.ts:21</c>.
+    /// (Note: previously this sent <c>channel.start</c> singular which the gateway
+    /// rejects as an unknown method; that was a latent bug.) Returns true when
+    /// the gateway acknowledges the start, false on any failure. For the rich
+    /// error payload — including "unknown channel" which means the channel
+    /// plugin isn't installed on the gateway host — use
+    /// <see cref="StartChannelDetailedAsync"/>.
+    /// </summary>
     public async Task<bool> StartChannelAsync(string channelName)
     {
-        if (!IsConnected) return false;
+        var result = await StartChannelDetailedAsync(channelName);
+        return result != null && result.Ok && result.Started;
+    }
+
+    /// <summary>
+    /// Start a channel via <c>channels.start</c> and return the full gateway
+    /// response (including error message + raw JSON). The page uses this to
+    /// distinguish "channel started" from "plugin not loaded on gateway" so
+    /// the user gets accurate guidance instead of a generic failure.
+    /// </summary>
+    public async Task<ChannelStartResult?> StartChannelDetailedAsync(string channelName, int timeoutMs = 12000)
+    {
+        if (!IsConnected) return null;
         try
         {
-            var req = new
+            var response = await SendWizardRequestAsync(
+                "channels.start",
+                new { channel = channelName },
+                timeoutMs);
+            var raw = response.GetRawText();
+            string? acctId = null;
+            string? channel = null;
+            bool started = false;
+            if (response.ValueKind == System.Text.Json.JsonValueKind.Object)
             {
-                type = "req",
-                id = Guid.NewGuid().ToString(),
-                method = "channel.start",
-                @params = new { channel = channelName }
+                if (response.TryGetProperty("channel", out var ch) && ch.ValueKind == System.Text.Json.JsonValueKind.String)
+                    channel = ch.GetString();
+                if (response.TryGetProperty("accountId", out var aid) && aid.ValueKind == System.Text.Json.JsonValueKind.String)
+                    acctId = aid.GetString();
+                if (response.TryGetProperty("started", out var st) && st.ValueKind == System.Text.Json.JsonValueKind.True)
+                    started = true;
+            }
+            _logger.Info($"channels.start {channelName} → started={started}");
+            return new ChannelStartResult
+            {
+                Channel = channel ?? channelName,
+                AccountId = acctId,
+                Started = started,
+                Ok = true,
+                RawResponse = raw,
             };
-            await SendRawAsync(JsonSerializer.Serialize(req));
-            _logger.Info($"Sent channel.start for {channelName}");
-            return true;
         }
         catch (Exception ex)
         {
-            _logger.Error($"Failed to start channel {channelName}", ex);
-            return false;
+            _logger.Warn($"channels.start {channelName} failed: {ex.Message}");
+            return new ChannelStartResult
+            {
+                Channel = channelName,
+                Started = false,
+                Ok = false,
+                Error = ex.Message,
+                RawResponse = ex.ToString(),
+            };
         }
     }
 
-    /// <summary>Stop a channel (telegram, whatsapp, etc).</summary>
+    /// <summary>Stop a channel. Sends <c>channels.stop { channel }</c>.</summary>
     public async Task<bool> StopChannelAsync(string channelName)
     {
         if (!IsConnected) return false;
         try
         {
-            var req = new
-            {
-                type = "req",
-                id = Guid.NewGuid().ToString(),
-                method = "channel.stop",
-                @params = new { channel = channelName }
-            };
-            await SendRawAsync(JsonSerializer.Serialize(req));
-            _logger.Info($"Sent channel.stop for {channelName}");
+            await SendWizardRequestAsync("channels.stop", new { channel = channelName }, 12000);
+            _logger.Info($"channels.stop {channelName} succeeded");
             return true;
         }
         catch (Exception ex)
         {
-            _logger.Error($"Failed to stop channel {channelName}", ex);
+            _logger.Warn($"channels.stop {channelName} failed: {ex.Message}");
             return false;
         }
     }

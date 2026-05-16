@@ -305,6 +305,44 @@ public class ChannelsAggregatorTests
     }
 
     [Fact]
+    public void IsChannelRunning_TrueOnlyOnRunningOrConnected()
+    {
+        // Running is a strict subset of Configured: configured-without-running
+        // returns false so the page can offer "Start channel" as recovery.
+        Assert.True(ChannelsAggregator.IsChannelRunning(Json("""{ "running": true }"""), null));
+        Assert.True(ChannelsAggregator.IsChannelRunning(Json("""{ "connected": true }"""), null));
+        Assert.False(ChannelsAggregator.IsChannelRunning(Json("""{ "configured": true }"""), null));
+        Assert.False(ChannelsAggregator.IsChannelRunning(Json("""{ }"""), null));
+    }
+
+    [Fact]
+    public void Aggregate_CanStart_OnlyWhenConfiguredButNotRunning()
+    {
+        // 'telegram': configured but stopped — this is the canonical "Start
+        // channel" scenario.
+        // 'discord':  configured AND running — Start would be a no-op, no flag.
+        // 'slack':    not configured at all — no Start until credentials exist.
+        var snap = SnapshotWith(
+            "telegram,discord,slack",
+            ("telegram", """{ "configured": true }"""),
+            ("discord",  """{ "configured": true, "running": true }"""),
+            ("slack",    """{ }"""));
+        var records = ChannelsAggregator.Aggregate(snap, DateTime.UtcNow).ToDictionary(r => r.Id);
+
+        Assert.True(records["telegram"].IsConfigured);
+        Assert.False(records["telegram"].IsRunning);
+        Assert.True(records["telegram"].Capabilities.HasFlag(ChannelCapabilities.CanStart));
+
+        Assert.True(records["discord"].IsConfigured);
+        Assert.True(records["discord"].IsRunning);
+        Assert.False(records["discord"].Capabilities.HasFlag(ChannelCapabilities.CanStart));
+
+        Assert.False(records["slack"].IsConfigured);
+        Assert.False(records["slack"].IsRunning);
+        Assert.False(records["slack"].Capabilities.HasFlag(ChannelCapabilities.CanStart));
+    }
+
+    [Fact]
     public void Aggregate_SurfacesChannelsMissingFromChannelOrder()
     {
         // Older gateways or plugin-only setups may omit channelOrder while still

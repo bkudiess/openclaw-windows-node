@@ -54,25 +54,24 @@
                     </Button>
                 </Grid>
 
-                <!-- Single canonical "what is this page / where do I go for help"
-                     orienting line. Channels are gateway-side state; the form
-                     below writes to the gateway's config. Docs link is THE
-                     authoritative answer to "how do I set this up". -->
-                <Border Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1" CornerRadius="8" Padding="14,10">
-                    <StackPanel Spacing="6">
-                        <TextBlock x:Uid="ChannelsPage_Intro"
-                                   Text="Channels are configured on your gateway. To add one, expand it below and fill in its credentials. The form saves directly to your gateway's config."
-                                   TextWrapping="Wrap"
-                                   FontSize="13"/>
+                <!-- "How channels work" intro: always-open InfoBar that
+                     answers "what is this page" and exposes the canonical
+                     docs link via its ActionButton slot. Replaces the
+                     previous Border+HyperlinkButton card. -->
+                <InfoBar x:Uid="ChannelsPage_GuideBar"
+                         x:Name="GuideBar"
+                         Severity="Informational"
+                         IsOpen="True"
+                         IsClosable="False"
+                         Title="How channels work"
+                         Message="Channels are configured on your gateway. To add one, expand it below and fill in its credentials — the form saves directly to your gateway's config. The setup guide walks through each channel end-to-end.">
+                    <InfoBar.ActionButton>
                         <HyperlinkButton x:Uid="ChannelsPage_DocsLink"
-                                         Content="Read the channels guide →"
+                                         Content="Read the channels guide"
                                          NavigateUri="https://docs.openclaw.ai/channels"
-                                         Padding="0"
                                          AutomationProperties.Name="Open the OpenClaw channels documentation"/>
-                    </StackPanel>
-                </Border>
+                    </InfoBar.ActionButton>
+                </InfoBar>
 
                 <!-- "Not connected to gateway" InfoBar -->
                 <InfoBar x:Uid="ChannelsPage_NotConnected"

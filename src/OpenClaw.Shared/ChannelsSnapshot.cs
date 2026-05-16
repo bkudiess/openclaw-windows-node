@@ -249,3 +249,41 @@ public sealed class WebLoginWaitResult
     /// <summary>Raw JSON of the gateway response (or stringified exception). Used by the diagnostic disclosure in the UI.</summary>
     public string? RawResponse { get; init; }
 }
+
+/// <summary>
+/// Result of <c>channels.start</c>. Mirrors the gateway response shape
+/// (<c>{ channel, accountId, started }</c>) and adds error/raw fields so the
+/// page can surface the gateway's actual error message — including the
+/// telltale "unknown channel: foo" which means the channel plugin isn't
+/// loaded on the gateway host and the operator needs to run
+/// <c>openclaw plugins install @openclaw/&lt;id&gt;</c> on that machine.
+/// </summary>
+public sealed class ChannelStartResult
+{
+    /// <summary>Channel id the gateway acted on (echoes the request param).</summary>
+    public string? Channel { get; init; }
+
+    /// <summary>Account id the gateway started (default if none was requested).</summary>
+    public string? AccountId { get; init; }
+
+    /// <summary>True when the gateway reports the channel transitioned to started.</summary>
+    public bool Started { get; init; }
+
+    /// <summary>Overall wire-level success — false on transport failure or gateway ok:false.</summary>
+    public bool Ok { get; init; }
+
+    /// <summary>Gateway-side error message when <see cref="Ok"/> is false. Null on success.</summary>
+    public string? Error { get; init; }
+
+    /// <summary>Raw JSON of the gateway response (or stringified exception). Used by the page diagnostic disclosure.</summary>
+    public string? RawResponse { get; init; }
+
+    /// <summary>
+    /// True when the gateway responded with "unknown channel" — a strong signal
+    /// the channel plugin isn't loaded on the gateway host. Used to upgrade
+    /// the page's hint to "install the plugin on your gateway first".
+    /// </summary>
+    public bool LooksLikeMissingPlugin =>
+        Error != null &&
+        Error.Contains("unknown channel", System.StringComparison.OrdinalIgnoreCase);
+}

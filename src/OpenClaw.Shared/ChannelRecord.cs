@@ -26,6 +26,15 @@ public sealed class ChannelRecord
     /// <summary>True if this channel has any active configuration/state. Mirrors Mac's <c>channelEnabled</c>.</summary>
     public bool IsConfigured { get; init; }
 
+    /// <summary>
+    /// True when the channel is actively running on the gateway right now
+    /// (status.running, or any account.Running/Connected). Distinct from
+    /// <see cref="IsConfigured"/> which is the broader "has credentials or
+    /// any active state" flag. The page uses this to decide whether to offer
+    /// the "Start channel" action.
+    /// </summary>
+    public bool IsRunning { get; init; }
+
     /// <summary>Capability flags (per-channel — driven by id).</summary>
     public ChannelCapabilities Capabilities { get; init; }
 
@@ -47,10 +56,13 @@ public sealed class ChannelRecord
 public enum ChannelCapabilities
 {
     None = 0,
+    /// <summary>Legacy: kept on every record but unused by the page header (a single page-level Refresh-all button covers this).</summary>
     CanRefresh = 1 << 0,
     CanLogout = 1 << 1,
     CanShowQr = 1 << 2,
     CanRelink = 1 << 3,
+    /// <summary>Configured-but-not-running channel: offer a <c>channels.start</c> action.</summary>
+    CanStart = 1 << 4,
 }
 
 /// <summary>
@@ -111,9 +123,12 @@ public static class ChannelsAggregator
             snapshot.ChannelDefaultAccountId.TryGetValue(id, out var defaultAccountId);
 
             var configured = IsChannelConfigured(raw, accounts);
+            var running = IsChannelRunning(raw, accounts);
 
             // Capability gating:
-            //   CanRefresh — always available; refresh is a global action.
+            //   CanRefresh — kept for backcompat, but the page no longer renders
+            //                a per-channel Refresh button; one page-level
+            //                Refresh-all covers it.
             //   CanShowQr  — QR channels (WhatsApp/Signal): available even when
             //                unconfigured because the QR scan IS how you
             //                configure them. Show-QR is the bootstrap path.
@@ -124,6 +139,11 @@ public static class ChannelsAggregator
             //                only when actually configured. Hardcoding logout to
             //                the channel id alone shows a Logout button on
             //                "not configured" rows, which confuses users.
+            //   CanStart   — channel is configured but not running. Offers a
+            //                channels.start action. Distinct from save-and-start
+            //                in the inline form: this is the recovery affordance
+            //                for an already-configured channel that didn't come
+            //                up on its own.
             var caps = ChannelCapabilities.CanRefresh;
             if (QrLinkChannels.Contains(id))
             {
@@ -132,6 +152,8 @@ public static class ChannelsAggregator
             }
             if (configured && LogoutChannels.Contains(id))
                 caps |= ChannelCapabilities.CanLogout;
+            if (configured && !running)
+                caps |= ChannelCapabilities.CanStart;
 
             records.Add(new ChannelRecord
             {
@@ -143,6 +165,7 @@ public static class ChannelsAggregator
                 Accounts = accounts,
                 DefaultAccountId = defaultAccountId,
                 IsConfigured = configured,
+                IsRunning = running,
                 Capabilities = caps,
                 IsUnavailableOnWindows = WindowsUnsupportedChannels.Contains(id),
                 SortOrder = i,
@@ -211,6 +234,28 @@ public static class ChannelsAggregator
         {
             foreach (var acc in accounts)
                 if (acc.Configured == true || acc.Running == true || acc.Connected == true)
+                    return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Narrower than <see cref="IsChannelConfigured"/>: true only when the
+    /// channel is actively running (status.running, or any account is
+    /// running/connected). A channel that's only <c>configured: true</c> but
+    /// not yet running returns false, so the page can offer "Start channel".
+    /// </summary>
+    public static bool IsChannelRunning(JsonElement raw, IReadOnlyList<ChannelAccountSnapshot>? accounts)
+    {
+        if (raw.ValueKind == JsonValueKind.Object)
+        {
+            if (TryGetBool(raw, "running")) return true;
+            if (TryGetBool(raw, "connected")) return true;
+        }
+        if (accounts != null)
+        {
+            foreach (var acc in accounts)
+                if (acc.Running == true || acc.Connected == true)
                     return true;
         }
         return false;
