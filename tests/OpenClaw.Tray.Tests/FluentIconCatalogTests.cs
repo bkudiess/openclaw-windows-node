@@ -25,6 +25,8 @@ public sealed class FluentIconCatalogTests
         "People", "Money", "ServerEnvironment", "CapabilityOff", "Channels",
         "ChevronR", "Check",
         "Brand",
+        // Diagnostics surface (see src/OpenClaw.Tray.WinUI/Pages/DebugPage.xaml).
+        "Bug", "Briefcase", "Folder", "Copy", "Document", "Refresh", "Clear", "Develop",
     };
 
     private static string ReadCatalogSource()

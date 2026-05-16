@@ -190,6 +190,21 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             ? WinRT.Interop.WindowNative.GetWindowHandle(_onboardingWindow)
             : IntPtr.Zero;
 
+    /// <summary>
+    /// Returns the HWND of the Hub window, or IntPtr.Zero if it isn't open.
+    /// Used by pages hosted in the Hub that need to parent a file picker
+    /// or other Win32-style dialog. Pages should not hold a reference to
+    /// the HubWindow directly (single-app-model rule); they call this
+    /// when they need the handle and discard it afterwards.
+    /// Guards against the close-window race where `_hubWindow != null`
+    /// but the window is mid-teardown — every other call site in this
+    /// file pairs the null check with `!IsClosed` (Hanselman v2 #4).
+    /// </summary>
+    public IntPtr GetHubWindowHandle()
+        => _hubWindow != null && !_hubWindow.IsClosed
+            ? WinRT.Interop.WindowNative.GetWindowHandle(_hubWindow)
+            : IntPtr.Zero;
+
     private SettingsManager? _settings;
     private ConnectionSettingsSnapshot? _previousSettingsSnapshot;
     private SshTunnelService? _sshTunnelService;
@@ -2584,8 +2599,19 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         AutoStartManager.SetAutoStart(_settings.AutoStart);
 
         // Notify ad-hoc listeners (e.g. ChatWindow may be alive but not
-        // owned by the hub) that settings have changed.
-        SettingsChanged?.Invoke(this, EventArgs.Empty);
+        // owned by the hub) that settings have changed. Marshal onto the
+        // UI thread because IAppCommands.NotifySettingsSaved is a public
+        // entry point that may be invoked from background work; existing
+        // handlers (DebugPage, ChatWindow) update UI directly and would
+        // crash if dispatched from a non-UI thread (Hanselman v2 #7).
+        if (_dispatcherQueue != null && !_dispatcherQueue.HasThreadAccess)
+        {
+            _dispatcherQueue.TryEnqueue(() => SettingsChanged?.Invoke(this, EventArgs.Empty));
+        }
+        else
+        {
+            SettingsChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private void ShowWebChat()
@@ -2745,7 +2771,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         // Tray status detail window reads from AppState too.
     }
 
-    private GatewayCommandCenterState BuildCommandCenterState() =>
+    internal GatewayCommandCenterState BuildCommandCenterState() =>
         new CommandCenterStateBuilder(CaptureSnapshot()).Build();
 
     private AppStateSnapshot CaptureSnapshot() => new AppStateSnapshot

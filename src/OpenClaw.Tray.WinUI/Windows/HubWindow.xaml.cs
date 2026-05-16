@@ -540,7 +540,7 @@ public sealed partial class HubWindow : WindowEx
             new() { Icon = "🛡️", Title = "Go to Permissions", Subtitle = "Capabilities, exec policy & allowlists", Tag = "permissions" },
             new() { Icon = "🕐", Title = "Go to Activity", Subtitle = "Activity stream", Tag = "activity" },
             new() { Icon = "⚙️", Title = "Go to Settings", Subtitle = "Application settings", Tag = "settings" },
-            new() { Icon = "🐛", Title = "Go to Debug", Subtitle = "Debug information", Tag = "debug" },
+            new() { Icon = "🐛", Title = "Go to Diagnostics", Subtitle = "Logs, support bundle, device identity, developer tools", Tag = "debug" },
             new() { Icon = "ℹ️", Title = "Go to Info", Subtitle = "About this app", Tag = "info" },
 
             // Actions

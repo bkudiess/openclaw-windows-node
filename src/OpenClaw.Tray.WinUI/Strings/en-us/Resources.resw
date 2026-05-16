@@ -2302,7 +2302,7 @@ On your gateway host (Mac/Linux), run:
     <value>Activity</value>
   </data>
   <data name="HubWindow_NavigationViewItem_145.Content" xml:space="preserve">
-    <value>Debug</value>
+    <value>Diagnostics</value>
   </data>
   <data name="HubWindow_NavigationViewItem_148.Content" xml:space="preserve">
     <value>Info</value>

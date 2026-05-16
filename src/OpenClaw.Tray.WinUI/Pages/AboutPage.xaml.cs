@@ -5,6 +5,7 @@ using OpenClawTray.Services;
 using System;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Threading.Tasks;
 
 namespace OpenClawTray.Pages;
 
@@ -94,13 +95,27 @@ public sealed partial class AboutPage : Page
     {
         try
         {
-            var context = $"OpenClaw Hub v0.1.0\n"
-                + $"OS: {Environment.OSVersion}\n"
-                + $"Runtime: {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}\n"
-                + $"Connection: {CurrentApp.AppState?.Status}\n"
-                + $"Gateway: {CurrentApp.Settings?.GetEffectiveGatewayUrl() ?? "n/a"}\n";
+            // Unified with the richer CommandCenterTextHelper.BuildSupportContext
+            // that the Diagnostics page uses, sourced from App's authoritative
+            // CommandCenterState builder. Falls back to a minimal local
+            // string only when the state isn't available yet (cold start).
+            string context;
+            var state = CurrentApp.BuildCommandCenterState();
+            if (state != null)
+            {
+                context = OpenClawTray.Helpers.CommandCenterTextHelper.BuildSupportContext(state);
+            }
+            else
+            {
+                context = $"OpenClaw Hub v0.1.0\n"
+                    + $"OS: {Environment.OSVersion}\n"
+                    + $"Runtime: {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}\n"
+                    + $"Connection: {CurrentApp.AppState?.Status}\n"
+                    + $"Gateway: {CurrentApp.Settings?.GetEffectiveGatewayUrl() ?? "n/a"}\n";
+            }
 
             ClipboardHelper.CopyText(context);
+            await Task.CompletedTask;
         }
         catch (Exception ex)
         {
@@ -111,6 +126,11 @@ public sealed partial class AboutPage : Page
     private void OnCheckUpdatesClick(object sender, RoutedEventArgs e)
     {
         ((IAppCommands)CurrentApp).CheckForUpdates();
+    }
+
+    private void OnMoreDiagnosticsClick(object sender, RoutedEventArgs e)
+    {
+        ((IAppCommands)CurrentApp).Navigate("debug");
     }
 
     private void OnDocumentationClick(object sender, RoutedEventArgs e)
