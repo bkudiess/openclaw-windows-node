@@ -2281,19 +2281,24 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
                 if (_hubWindow != null && !_hubWindow.IsClosed && _appState.GatewaySelf != null)
                     _hubWindow.UpdateGatewaySelf(_appState.GatewaySelf);
                 UpdateStatusDetailWindow();
+                RefreshTrayMenuIfOpen();
                 break;
             case nameof(AppState.Sessions):
                 UpdateStatusDetailWindow();
+                RefreshTrayMenuIfOpen();
                 break;
             case nameof(AppState.Channels):
                 if (_hubWindow != null && !_hubWindow.IsClosed)
                     _hubWindow.UpdateStatus(_appState.Status);
+                RefreshTrayMenuIfOpen();
                 break;
             case nameof(AppState.UsageCost):
                 UpdateStatusDetailWindow();
+                RefreshTrayMenuIfOpen();
                 break;
             case nameof(AppState.Nodes):
                 UpdateStatusDetailWindow();
+                RefreshTrayMenuIfOpen();
                 break;
             case nameof(AppState.AgentsList):
                 if (_hubWindow != null && !_hubWindow.IsClosed && _appState.AgentsList.HasValue)
@@ -2302,10 +2307,37 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             case nameof(AppState.CurrentActivity):
                 UpdateTrayIcon();
                 break;
+            case nameof(AppState.Usage):
+            case nameof(AppState.UsageStatus):
+            case nameof(AppState.Presence):
+            case nameof(AppState.NodePairList):
+            case nameof(AppState.DevicePairList):
+                RefreshTrayMenuIfOpen();
+                break;
         }
     }
 
+    private bool _trayMenuRefreshPending;
+
     private void RefreshTrayMenuIfOpen()
+    {
+        if (_trayMenuWindow == null || !_trayMenuWindow.IsShown)
+            return;
+
+        // Debounce: multiple AppState properties change in rapid succession
+        // (sessions, nodes, usage, channels all arrive on connect).
+        // Coalesce into a single rebuild on the next dispatcher tick.
+        if (_trayMenuRefreshPending)
+            return;
+        _trayMenuRefreshPending = true;
+        _dispatcherQueue?.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            _trayMenuRefreshPending = false;
+            RefreshTrayMenuNow();
+        });
+    }
+
+    private void RefreshTrayMenuNow()
     {
         try
         {

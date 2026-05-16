@@ -728,15 +728,17 @@ public sealed partial class ConnectionPage : Page
         if (settings != null) NodeModeToggle.IsOn = settings.EnableNodeMode;
         _suppressNodeModeToggle = false;
 
-        // Approve command box (only when pairing required)
+        // Approve command box + connect button (only when pairing required)
         if (plan.NodeCard == NodeCardState.OnNodePairingRequired && plan.NodeApproveCommand != null)
         {
             NodeApproveCmdBox.Visibility = Visibility.Visible;
             NodeApproveCmdText.Text = plan.NodeApproveCommand;
+            NodeReconnectButton.Visibility = Visibility.Visible;
         }
         else
         {
             NodeApproveCmdBox.Visibility = Visibility.Collapsed;
+            NodeReconnectButton.Visibility = Visibility.Collapsed;
         }
 
         // Capability chips — skip the rebuild if the rendered output would
@@ -781,7 +783,7 @@ public sealed partial class ConnectionPage : Page
             RecoveryCategory.Pairing => new[]
             {
                 "Approve this client on the gateway host using the command below.",
-                "Once approved, this client will connect automatically.",
+                "Once approved, click Connect to resume.",
             },
             RecoveryCategory.Tunnel => new[]
             {
@@ -1580,6 +1582,90 @@ public sealed partial class ConnectionPage : Page
 
     // ─── Add gateway: Save ────────────────────────────────────────────
 
+    // ─── Auto-test connectivity (debounced) ────────────────────────────
+
+    private System.Threading.CancellationTokenSource? _connectivityTestCts;
+
+    private void OnDirectInputChanged(object sender, RoutedEventArgs e)
+    {
+        ScheduleConnectivityTest(DirectUrlBox.Text?.Trim());
+    }
+
+    private void ScheduleConnectivityTest(string? rawUrl)
+    {
+        _connectivityTestCts?.Cancel();
+        if (string.IsNullOrWhiteSpace(rawUrl))
+        {
+            AddTestResultText.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+            return;
+        }
+        _connectivityTestCts = new System.Threading.CancellationTokenSource();
+        var token = _connectivityTestCts.Token;
+        // Debounce 600ms so we don't hit the network on every keystroke
+        _ = RunConnectivityTestAsync(rawUrl, token, delay: 600);
+    }
+
+    private async Task RunConnectivityTestAsync(string rawUrl, System.Threading.CancellationToken ct, int delay = 0)
+    {
+        if (delay > 0)
+        {
+            await Task.Delay(delay, ct);
+            if (ct.IsCancellationRequested) return;
+        }
+
+        AddTestResultText.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+        AddTestResultText.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
+        AddTestResultText.Text = "Testing connection…";
+
+        try
+        {
+            var url = GatewayUrlHelper.NormalizeForWebSocket(rawUrl);
+            var httpUrl = url.Replace("ws://", "http://").Replace("wss://", "https://").TrimEnd('/');
+
+            using var httpClient = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            System.Net.Http.HttpResponseMessage? response = null;
+            try { response = await httpClient.GetAsync(httpUrl, ct); }
+            catch (OperationCanceledException) { throw; }
+            catch { }
+
+            if (ct.IsCancellationRequested) return;
+
+            if (response == null || !response.IsSuccessStatusCode)
+            {
+                try { response = await httpClient.GetAsync($"{httpUrl}/health", ct); }
+                catch (OperationCanceledException) { throw; }
+                catch { }
+            }
+
+            if (ct.IsCancellationRequested) return;
+
+            if (response != null && response.IsSuccessStatusCode)
+            {
+                AddTestResultText.Text = $"✓ Gateway reachable";
+                AddTestResultText.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorSuccessBrush"];
+            }
+            else if (response != null)
+            {
+                AddTestResultText.Text = $"⚠ Gateway responded with {(int)response.StatusCode}";
+                AddTestResultText.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCautionBrush"];
+            }
+            else
+            {
+                AddTestResultText.Text = $"✗ Cannot reach gateway";
+                AddTestResultText.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCriticalBrush"];
+            }
+        }
+        catch (OperationCanceledException) { /* debounce or page nav */ }
+        catch (Exception ex)
+        {
+            if (!ct.IsCancellationRequested)
+            {
+                AddTestResultText.Text = $"✗ {ex.Message}";
+                AddTestResultText.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCriticalBrush"];
+            }
+        }
+    }
+
     private async void OnAddSave(object sender, RoutedEventArgs e)
     {
         var tag = ActiveAddPaneTag();
@@ -1978,6 +2064,9 @@ public sealed partial class ConnectionPage : Page
                 : decoded.Token!.Substring(0, Math.Min(8, decoded.Token.Length)) + "…";
             AddSetupCodePreviewToken.Text = $"Token: {tokenHint}";
             AddSetupCodePreviewPanel.Visibility = Visibility.Visible;
+            // Auto-test connectivity with the decoded URL
+            if (!string.IsNullOrEmpty(decoded.Url))
+                ScheduleConnectivityTest(decoded.Url);
         }
         else
         {
@@ -2146,6 +2235,11 @@ public sealed partial class ConnectionPage : Page
     private void OnDisconnect(object sender, RoutedEventArgs e)
     {
         ((IAppCommands)CurrentApp).Disconnect();
+    }
+
+    private void OnReconnectFromRecovery(object sender, RoutedEventArgs e)
+    {
+        ((IAppCommands)CurrentApp).Reconnect();
     }
 
     /// <summary>
