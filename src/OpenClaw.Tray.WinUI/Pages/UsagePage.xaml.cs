@@ -1,9 +1,11 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using OpenClaw.Shared;
+using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
 
@@ -12,30 +14,37 @@ namespace OpenClawTray.Pages;
 public sealed partial class UsagePage : Page
 {
     private HubWindow? _hub;
+    private AppState? _appState;
     // Default matches the XAML-selected Period7DaysItem (IsSelected="True").
     private int _currentPeriodDays = 7;
 
     public UsagePage()
     {
         InitializeComponent();
+        Unloaded += (_, _) =>
+        {
+            if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
+        };
     }
 
     public void Initialize(HubWindow hub)
     {
         _hub = hub;
+        _appState = ((App)Application.Current).AppState;
+        _appState.PropertyChanged += OnAppStateChanged;
         ConnectionWarning.Visibility = hub.GatewayClient != null ? Visibility.Collapsed : Visibility.Visible;
         if (hub.GatewayClient != null)
         {
             // Apply cached data immediately, then request fresh.
-            if (hub.LastUsage != null) UpdateUsage(hub.LastUsage);
+            if (_appState?.Usage != null) UpdateUsage(_appState.Usage);
             // Only apply cached cost data when its period matches the current
             // selection — otherwise the daily list briefly shows e.g. 30-day
             // data while the selector reads "7 Days".
-            if (hub.LastUsageCost != null && hub.LastUsageCost.Days == _currentPeriodDays)
+            if (_appState?.UsageCost != null && _appState.UsageCost.Days == _currentPeriodDays)
             {
-                UpdateUsageCost(hub.LastUsageCost);
+                UpdateUsageCost(_appState.UsageCost);
             }
-            if (hub.LastUsageStatus != null) UpdateUsageStatus(hub.LastUsageStatus);
+            if (_appState?.UsageStatus != null) UpdateUsageStatus(_appState.UsageStatus);
             _ = hub.GatewayClient.RequestUsageAsync();
             _ = hub.GatewayClient.RequestUsageCostAsync(_currentPeriodDays);
             _ = hub.GatewayClient.RequestUsageStatusAsync();
@@ -44,6 +53,22 @@ public sealed partial class UsagePage : Page
         {
             // Not connected — nothing to load, hide the loading skeleton.
             ProviderLoadingPanel.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(AppState.Usage):
+                if (_appState!.Usage != null) UpdateUsage(_appState.Usage);
+                break;
+            case nameof(AppState.UsageCost):
+                if (_appState!.UsageCost != null) UpdateUsageCost(_appState.UsageCost);
+                break;
+            case nameof(AppState.UsageStatus):
+                if (_appState!.UsageStatus != null) UpdateUsageStatus(_appState.UsageStatus);
+                break;
         }
     }
 

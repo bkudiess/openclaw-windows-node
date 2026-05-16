@@ -4,32 +4,51 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
 using OpenClaw.Shared;
+using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 
 namespace OpenClawTray.Pages;
 
 public sealed partial class ChannelsPage : Page
 {
     private HubWindow? _hub;
+    private AppState? _appState;
 
     public ChannelsPage()
     {
         InitializeComponent();
+        Unloaded += (_, _) =>
+        {
+            if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
+        };
     }
 
     public void Initialize(HubWindow hub)
     {
         _hub = hub;
+        _appState = ((App)Application.Current).AppState;
+        _appState.PropertyChanged += OnAppStateChanged;
         ConnectionWarning.Visibility = hub.GatewayClient != null ? Visibility.Collapsed : Visibility.Visible;
         if (hub.GatewayClient != null)
         {
             // Apply cached data immediately
-            if (hub.LastChannels != null)
-                UpdateChannels(hub.LastChannels);
+            if (_appState?.Channels != null)
+                UpdateChannels(_appState.Channels);
             else
                 ChannelsList.Children.Clear();
+        }
+    }
+
+    private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(AppState.Channels):
+                UpdateChannels(_appState!.Channels);
+                break;
         }
     }
 

@@ -1,8 +1,10 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using OpenClawTray.Helpers;
+using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
 
 namespace OpenClawTray.Pages;
@@ -10,16 +12,33 @@ namespace OpenClawTray.Pages;
 public sealed partial class AboutPage : Page
 {
     private HubWindow? _hub;
+    private AppState? _appState;
 
     public AboutPage()
     {
         InitializeComponent();
+        Unloaded += (_, _) =>
+        {
+            if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
+        };
     }
 
     public void Initialize(HubWindow hub)
     {
         _hub = hub;
+        _appState = ((App)Application.Current).AppState;
+        _appState.PropertyChanged += OnAppStateChanged;
         TryLoadGatewayInfo();
+    }
+
+    private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(AppState.GatewaySelf):
+                RefreshGatewayInfo();
+                break;
+        }
     }
 
     public void RefreshGatewayInfo() => TryLoadGatewayInfo();

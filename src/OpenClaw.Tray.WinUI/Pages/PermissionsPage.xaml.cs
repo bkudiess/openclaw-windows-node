@@ -48,7 +48,7 @@ public sealed partial class PermissionsPage : Page
         ApplyFeaturesEnabledState(hub);
 
         LoadExecPolicy();
-        LoadAllowlist(hub.LastConfig);
+        LoadAllowlist(hub.AppModel?.Config);
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)

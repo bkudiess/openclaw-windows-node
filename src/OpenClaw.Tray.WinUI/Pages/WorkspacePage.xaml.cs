@@ -1,9 +1,11 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using OpenClaw.Shared;
+using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Text.Json;
 
 namespace OpenClawTray.Pages;
@@ -11,6 +13,7 @@ namespace OpenClawTray.Pages;
 public sealed partial class WorkspacePage : Page
 {
     private HubWindow? _hub;
+    private AppState? _appState;
     private readonly Dictionary<string, TabViewItem> _fileTabs = new(StringComparer.OrdinalIgnoreCase);
     private bool _tabsPopulated;
 
@@ -20,28 +23,45 @@ public sealed partial class WorkspacePage : Page
     public WorkspacePage()
     {
         InitializeComponent();
+        Unloaded += (_, _) =>
+        {
+            if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
+        };
     }
 
     public void Initialize(HubWindow hub)
     {
         _hub = hub;
-        // If HubWindow has cached file list data for this agent, it will replay after Initialize.
+        _appState = ((App)Application.Current).AppState;
+        _appState.PropertyChanged += OnAppStateChanged;
         // Only request fresh data when no matching cache exists.
-        var hasMatchingCache = hub.LastAgentFilesList.HasValue &&
-            string.Equals(hub.LastAgentFilesListAgentId, AgentId, StringComparison.OrdinalIgnoreCase);
+        var hasMatchingCache = _appState?.AgentFilesList.HasValue == true &&
+            string.Equals(_appState?.AgentFilesListAgentId, AgentId, StringComparison.OrdinalIgnoreCase);
         if (hub.GatewayClient != null && hub.CurrentStatus == ConnectionStatus.Connected && !hasMatchingCache)
         {
             FallbackInfoBar.IsOpen = false;
             LoadingRing.IsActive = true;
             LoadingPanel.Visibility = Visibility.Visible;
             ClearTabs();
-            hub.RecordAgentFilesListRequest(AgentId);
             _ = hub.GatewayClient.RequestAgentFilesListAsync(AgentId);
         }
         else if (hub.GatewayClient == null || hub.CurrentStatus != ConnectionStatus.Connected)
         {
             FallbackInfoBar.IsOpen = true;
             FallbackInfoBar.Message = "Connect to gateway to view workspace files.";
+        }
+    }
+
+    private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(AppState.AgentFilesList):
+                if (_appState!.AgentFilesList.HasValue) UpdateAgentFilesList(_appState.AgentFilesList.Value);
+                break;
+            case nameof(AppState.AgentFileContent):
+                if (_appState!.AgentFileContent.HasValue) UpdateAgentFileContent(_appState.AgentFileContent.Value);
+                break;
         }
     }
 
@@ -185,7 +205,6 @@ public sealed partial class WorkspacePage : Page
             LoadingPanel.Visibility = Visibility.Visible;
             FallbackInfoBar.IsOpen = false;
             ClearTabs();
-            _hub.RecordAgentFilesListRequest(AgentId);
             _ = _hub.GatewayClient.RequestAgentFilesListAsync(AgentId);
         }
     }

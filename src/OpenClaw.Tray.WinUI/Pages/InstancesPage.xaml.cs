@@ -5,9 +5,11 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using OpenClaw.Shared;
 using OpenClawTray.Helpers;
+using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
 
@@ -25,28 +27,48 @@ namespace OpenClawTray.Pages;
 public sealed partial class InstancesPage : Page
 {
     private HubWindow? _hub;
+    private AppState? _appState;
     private GatewayNodeInfo[]? _lastNodes;
     private PresenceEntry[]? _lastPresence;
 
     public InstancesPage()
     {
         InitializeComponent();
+        Unloaded += (_, _) =>
+        {
+            if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
+        };
     }
 
     /// <summary>Called by HubWindow when this page becomes the navigation target.</summary>
     public void Initialize(HubWindow hub)
     {
         _hub = hub;
+        _appState = ((App)Application.Current).AppState;
+        _appState.PropertyChanged += OnAppStateChanged;
         var connected = hub.GatewayClient != null;
         ConnectionWarning.Visibility = connected ? Visibility.Collapsed : Visibility.Visible;
 
-        _lastNodes = hub.LastNodes;
-        _lastPresence = hub.LastPresence;
+        _lastNodes = _appState?.Nodes;
+        _lastPresence = _appState?.Presence;
         Rerender();
 
         if (connected)
         {
             _ = RequestNodesWithSpinnerAsync();
+        }
+    }
+
+    private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(AppState.Nodes):
+                UpdateNodes(_appState!.Nodes);
+                break;
+            case nameof(AppState.Presence):
+                if (_appState!.Presence != null) UpdatePresence(_appState.Presence);
+                break;
         }
     }
 

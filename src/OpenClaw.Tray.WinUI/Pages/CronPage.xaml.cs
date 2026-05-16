@@ -3,9 +3,11 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using OpenClaw.Shared;
+using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -17,6 +19,7 @@ namespace OpenClawTray.Pages;
 public sealed partial class CronPage : Page
 {
     private HubWindow? _hub;
+    private AppState? _appState;
     private List<CronJobViewModel> _jobs = new();
     private Border? _editingCard = null; // card hidden during inline edit
     private string? _historyJobId = null; // job whose history is currently displayed
@@ -28,15 +31,37 @@ public sealed partial class CronPage : Page
     public CronPage()
     {
         InitializeComponent();
+        Unloaded += (_, _) =>
+        {
+            if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
+        };
     }
 
     public void Initialize(HubWindow hub)
     {
         _hub = hub;
+        _appState = ((App)Application.Current).AppState;
+        _appState.PropertyChanged += OnAppStateChanged;
         if (hub.GatewayClient != null)
         {
             _ = hub.GatewayClient.RequestCronListAsync();
             _ = hub.GatewayClient.RequestCronStatusAsync();
+        }
+    }
+
+    private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(AppState.CronList):
+                if (_appState!.CronList.HasValue) UpdateFromGateway(_appState.CronList.Value);
+                break;
+            case nameof(AppState.CronStatus):
+                if (_appState!.CronStatus.HasValue) UpdateFromGateway(_appState.CronStatus.Value);
+                break;
+            case nameof(AppState.CronRuns):
+                if (_appState!.CronRuns.HasValue) UpdateCronRuns(_appState.CronRuns.Value);
+                break;
         }
     }
 

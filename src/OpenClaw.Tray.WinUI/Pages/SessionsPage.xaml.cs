@@ -3,9 +3,11 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using OpenClaw.Shared;
+using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 
 namespace OpenClawTray.Pages;
@@ -13,6 +15,7 @@ namespace OpenClawTray.Pages;
 public sealed partial class SessionsPage : Page
 {
     private HubWindow? _hub;
+    private AppState? _appState;
     private SessionInfo[]? _allSessions;
     private string _activeChannel = "all";
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _refreshTimer;
@@ -20,12 +23,18 @@ public sealed partial class SessionsPage : Page
     public SessionsPage()
     {
         InitializeComponent();
-        Unloaded += (_, _) => { _refreshTimer?.Stop(); _refreshTimer = null; };
+        Unloaded += (_, _) =>
+        {
+            _refreshTimer?.Stop(); _refreshTimer = null;
+            if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
+        };
     }
 
     public void Initialize(HubWindow hub)
     {
         _hub = hub;
+        _appState = ((App)Application.Current).AppState;
+        _appState.PropertyChanged += OnAppStateChanged;
 
         if (hub.GatewayClient == null)
         {
@@ -37,8 +46,8 @@ public sealed partial class SessionsPage : Page
 
         ConnectionWarning.IsOpen = false;
 
-        if (hub.LastSessions != null)
-            UpdateSessions(hub.LastSessions);
+        if (_appState?.Sessions != null)
+            UpdateSessions(_appState.Sessions);
 
         _ = hub.GatewayClient.RequestSessionsAsync();
         _ = hub.GatewayClient.RequestModelsListAsync();
@@ -112,6 +121,19 @@ public sealed partial class SessionsPage : Page
         else
         {
             SessionListView.ItemsSource = viewModels;
+        }
+    }
+
+    private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(AppState.Sessions):
+                UpdateSessions(_appState!.Sessions);
+                break;
+            case nameof(AppState.ModelsList):
+                if (_appState!.ModelsList != null) UpdateModelsList(_appState.ModelsList);
+                break;
         }
     }
 

@@ -3,9 +3,11 @@ using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -17,6 +19,7 @@ public sealed partial class ConfigPage : Page
     private static readonly JsonElement s_emptyObject = JsonDocument.Parse("{}").RootElement.Clone();
 
     private HubWindow? _hub;
+    private AppState? _appState;
     private JsonElement? _lastConfig;
     private JsonElement? _lastSchema;
     private string? _baseHash;
@@ -29,11 +32,17 @@ public sealed partial class ConfigPage : Page
     public ConfigPage()
     {
         InitializeComponent();
+        Unloaded += (_, _) =>
+        {
+            if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
+        };
     }
 
     public void Initialize(HubWindow hub)
     {
         _hub = hub;
+        _appState = ((App)Application.Current).AppState;
+        _appState.PropertyChanged += OnAppStateChanged;
         OpenClawTray.Services.Logger.Info("[ConfigPage] Initialize");
         if (hub.GatewayClient != null)
         {
@@ -87,6 +96,19 @@ public sealed partial class ConfigPage : Page
                 ShowConfigRenderError();
             }
         });
+    }
+
+    private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(AppState.Config):
+                if (_appState!.Config.HasValue) UpdateConfig(_appState.Config.Value);
+                break;
+            case nameof(AppState.ConfigSchema):
+                if (_appState!.ConfigSchema.HasValue) UpdateConfigSchema(_appState.ConfigSchema.Value);
+                break;
+        }
     }
 
     public void UpdateConfigSchema(JsonElement schema)

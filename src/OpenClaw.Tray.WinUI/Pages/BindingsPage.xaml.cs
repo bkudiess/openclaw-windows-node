@@ -1,7 +1,9 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Text.Json;
 
 namespace OpenClawTray.Pages;
@@ -9,21 +11,38 @@ namespace OpenClawTray.Pages;
 public sealed partial class BindingsPage : Page
 {
     private HubWindow? _hub;
+    private AppState? _appState;
 
     public BindingsPage()
     {
         InitializeComponent();
+        Unloaded += (_, _) =>
+        {
+            if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
+        };
     }
 
     public void Initialize(HubWindow hub)
     {
         _hub = hub;
+        _appState = ((App)Application.Current).AppState;
+        _appState.PropertyChanged += OnAppStateChanged;
         // Use cached config if available
-        if (hub.LastConfig.HasValue)
-            ParseBindings(hub.LastConfig.Value);
+        if (_appState?.Config.HasValue == true)
+            ParseBindings(_appState.Config.Value);
         // Request fresh config
         if (hub.GatewayClient != null)
             _ = hub.GatewayClient.RequestConfigAsync();
+    }
+
+    private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(AppState.Config):
+                if (_appState!.Config.HasValue) UpdateConfig(_appState.Config.Value);
+                break;
+        }
     }
 
     public void UpdateConfig(JsonElement config)

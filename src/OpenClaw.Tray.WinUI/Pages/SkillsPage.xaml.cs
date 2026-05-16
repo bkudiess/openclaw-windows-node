@@ -2,8 +2,10 @@ using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Text.Json;
 using Windows.UI;
@@ -13,6 +15,7 @@ namespace OpenClawTray.Pages;
 public sealed partial class SkillsPage : Page
 {
     private HubWindow? _hub;
+    private AppState? _appState;
     private List<SkillData> _allSkills = new();
 
     public string? CurrentAgentId => GetSelectedAgentId();
@@ -20,6 +23,10 @@ public sealed partial class SkillsPage : Page
     public SkillsPage()
     {
         InitializeComponent();
+        Unloaded += (_, _) =>
+        {
+            if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
+        };
         EnabledHeaderBtn.Click += (s, e) =>
         {
             _enabledExpanded = !_enabledExpanded;
@@ -38,10 +45,22 @@ public sealed partial class SkillsPage : Page
     public void Initialize(HubWindow hub)
     {
         _hub = hub;
+        _appState = ((App)Application.Current).AppState;
+        _appState.PropertyChanged += OnAppStateChanged;
         PopulateAgentFilter(hub);
         if (hub.GatewayClient != null)
         {
             _ = hub.GatewayClient.RequestSkillsStatusAsync(GetSelectedAgentId());
+        }
+    }
+
+    private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(AppState.SkillsData):
+                if (_appState!.SkillsData.HasValue) UpdateFromGateway(_appState.SkillsData.Value);
+                break;
         }
     }
 

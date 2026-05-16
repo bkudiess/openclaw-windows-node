@@ -9,6 +9,7 @@ using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -32,6 +33,7 @@ public sealed partial class ConnectionPage : Page
 {
     // ─── DI / services ───
     private HubWindow? _hub;
+    private AppState? _appState;
     private IGatewayConnectionManager? _connectionManager;
     private GatewayRegistry? _gatewayRegistry;
     private GatewayDiscoveryService? _discoveryService;
@@ -89,6 +91,8 @@ public sealed partial class ConnectionPage : Page
     public void Initialize(HubWindow hub)
     {
         _hub = hub;
+        _appState = ((App)Application.Current).AppState;
+        _appState.PropertyChanged += OnAppStateChanged;
         _connectionManager = hub.ConnectionManager;
         _gatewayRegistry = hub.GatewayRegistry;
         var settings = hub.Settings;
@@ -142,6 +146,7 @@ public sealed partial class ConnectionPage : Page
             _reconnectMaskTimer.Tick -= OnReconnectMaskTimeout;
             _reconnectMaskTimer = null;
         }
+        if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
     }
 
     private void OnManagerStateChanged(object? sender, GatewayConnectionSnapshot snapshot)
@@ -419,9 +424,9 @@ public sealed partial class ConnectionPage : Page
             return;
         }
 
-        var self = _hub?.LastGatewaySelf;
-        var channels = _hub?.LastChannels;
-        var cost = _hub?.LastUsageCost;
+        var self = _appState?.GatewaySelf;
+        var channels = _appState?.Channels;
+        var cost = _appState?.UsageCost;
         var activeRec = _gatewayRegistry?.GetActive();
 
         // Compute the fingerprint from the same inputs the chips render so
@@ -584,7 +589,7 @@ public sealed partial class ConnectionPage : Page
 
         // Status sub-row (mirrors PermissionsPage NodeStatusDot pattern):
         // colored dot + descriptive label that reflects the live state.
-        var sessions = _hub?.LastSessions;
+        var sessions = _appState?.Sessions;
         int activeSessions = sessions?.Count(s =>
             string.Equals(s.Status, "active", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(s.Status, "running", StringComparison.OrdinalIgnoreCase)) ?? 0;
@@ -2219,6 +2224,28 @@ public sealed partial class ConnectionPage : Page
         _maskHasObservedTransient = false;
         if (_connectionManager != null)
             RefreshFromSnapshot(_connectionManager.CurrentSnapshot);
+    }
+
+    private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(AppState.Status):
+                UpdateStatus(_appState!.Status);
+                break;
+            case nameof(AppState.NodePairList):
+                if (_appState!.NodePairList != null) UpdatePairingRequests(_appState.NodePairList);
+                break;
+            case nameof(AppState.DevicePairList):
+                if (_appState!.DevicePairList != null) UpdateDevicePairingRequests(_appState.DevicePairList);
+                break;
+            case nameof(AppState.Channels):
+            case nameof(AppState.UsageCost):
+            case nameof(AppState.Sessions):
+            case nameof(AppState.GatewaySelf):
+                OnGlanceDataChanged();
+                break;
+        }
     }
 
     // ─── Pending pairing — populate the banner with existing semantics ─
