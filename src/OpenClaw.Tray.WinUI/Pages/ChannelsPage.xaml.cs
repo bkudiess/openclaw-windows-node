@@ -5,7 +5,6 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
 using OpenClaw.Shared;
 using OpenClawTray.Services;
-using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -14,7 +13,7 @@ namespace OpenClawTray.Pages;
 
 public sealed partial class ChannelsPage : Page
 {
-    private HubWindow? _hub;
+    private static App CurrentApp => (App)Microsoft.UI.Xaml.Application.Current;
     private AppState? _appState;
 
     public ChannelsPage()
@@ -26,13 +25,12 @@ public sealed partial class ChannelsPage : Page
         };
     }
 
-    public void Initialize(HubWindow hub)
+    public void Initialize()
     {
-        _hub = hub;
-        _appState = ((App)Application.Current).AppState;
+        _appState = CurrentApp.AppState;
         _appState.PropertyChanged += OnAppStateChanged;
-        ConnectionWarning.Visibility = hub.GatewayClient != null ? Visibility.Collapsed : Visibility.Visible;
-        if (hub.GatewayClient != null)
+        ConnectionWarning.Visibility = CurrentApp.GatewayClient != null ? Visibility.Collapsed : Visibility.Visible;
+        if (CurrentApp.GatewayClient != null)
         {
             // Apply cached data immediately
             if (_appState?.Channels != null)
@@ -167,7 +165,7 @@ public sealed partial class ChannelsPage : Page
     {
         if (sender is Button btn && btn.Tag is string name)
         {
-            var client = _hub?.GatewayClient;
+            var client = CurrentApp.GatewayClient;
             if (client == null) { ConnectionWarning.Visibility = Visibility.Visible; return; }
             btn.IsEnabled = false;
             try
@@ -184,7 +182,7 @@ public sealed partial class ChannelsPage : Page
     {
         if (sender is Button btn && btn.Tag is string name)
         {
-            var client = _hub?.GatewayClient;
+            var client = CurrentApp.GatewayClient;
             if (client == null) { ConnectionWarning.Visibility = Visibility.Visible; return; }
             btn.IsEnabled = false;
             try

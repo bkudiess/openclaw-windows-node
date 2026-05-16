@@ -63,6 +63,13 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
     public GatewayConnectionManager? ConnectionManager => _connectionManager;
     internal SettingsManager Settings => _settings ?? throw new InvalidOperationException("Settings are not initialized.");
 
+    /// <summary>The active hub window, exposed so pages can obtain an HWND for file pickers.</summary>
+    internal Microsoft.UI.Xaml.Window? ActiveHubWindow => _hubWindow;
+    /// <summary>The current voice service instance (node or standalone).</summary>
+    internal VoiceService? VoiceService => _nodeService?.VoiceService ?? _standaloneVoiceService;
+    /// <summary>The full device ID of the local node service (if running).</summary>
+    internal string? NodeFullDeviceId => _nodeService?.FullDeviceId;
+
     public OpenClawTray.Chat.OpenClawChatDataProvider? ChatProvider => _chatCoordinator?.Provider;
 
     /// <summary>

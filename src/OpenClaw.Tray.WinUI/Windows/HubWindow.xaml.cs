@@ -321,25 +321,25 @@ public sealed partial class HubWindow : WindowEx
     {
         switch (ContentFrame.Content)
         {
-            case ChatPage chat: chat.Initialize(this); break;
-            case SessionsPage sessions: sessions.Initialize(this); break;
-            case ConnectionPage connection: connection.Initialize(this); break;
-            case ChannelsPage channels: channels.Initialize(this); break;
-            case UsagePage usage: usage.Initialize(this); break;
-            case CronPage cron: cron.Initialize(this); break;
-            case SkillsPage skills: skills.Initialize(this); break;
+            case ChatPage chat: chat.Initialize(); break;
+            case SessionsPage sessions: sessions.Initialize(); break;
+            case ConnectionPage connection: connection.Initialize(); break;
+            case ChannelsPage channels: channels.Initialize(); break;
+            case UsagePage usage: usage.Initialize(); break;
+            case CronPage cron: cron.Initialize(); break;
+            case SkillsPage skills: skills.Initialize(); break;
             case ConfigPage config:
-                try { config.Initialize(this); }
+                try { config.Initialize(); }
                 catch (Exception ex)
                 {
                     OpenClawTray.Services.Logger.Error($"[HubWindow] ConfigPage seed failed: {ex}");
                 }
                 break;
-            case InstancesPage instances: instances.Initialize(this); break;
-            case PermissionsPage permissions: permissions.Initialize(this); break;
-            case SandboxPage sandbox: sandbox.Initialize(this); break;
-            case VoiceSettingsPage voice: voice.Initialize(this, VoiceServiceInstance); break;
-            case ActivityPage activity: activity.Initialize(this); break;
+            case InstancesPage instances: instances.Initialize(); break;
+            case PermissionsPage permissions: permissions.Initialize(); break;
+            case SandboxPage sandbox: sandbox.Initialize(); break;
+            case VoiceSettingsPage voice: voice.Initialize(VoiceServiceInstance); break;
+            case ActivityPage activity: activity.Initialize(); break;
             case AgentEventsPage agentEvents:
                 agentEvents.ClearCentralCache = () => AppModel?.ClearAgentEvents();
                 agentEvents.PopulateAgentFilter(this);
@@ -347,11 +347,14 @@ public sealed partial class HubWindow : WindowEx
                 var eventsAgentFilter = agentEventsTag?.StartsWith("agent:") == true ? _currentAgentId : null;
                 agentEvents.SetAgentFilter(eventsAgentFilter);
                 break;
-            case WorkspacePage workspace: workspace.Initialize(this); break;
-            case BindingsPage bindings: bindings.Initialize(this); break;
-            case SettingsPage settings: settings.Initialize(this); break;
-            case DebugPage debug: debug.Initialize(this); break;
-            case AboutPage about: about.Initialize(this); break;
+            case WorkspacePage workspace:
+                workspace.AgentId = _currentAgentId;
+                workspace.Initialize();
+                break;
+            case BindingsPage bindings: bindings.Initialize(); break;
+            case SettingsPage settings: settings.Initialize(); break;
+            case DebugPage debug: debug.Initialize(); break;
+            case AboutPage about: about.Initialize(); break;
         }
     }
 

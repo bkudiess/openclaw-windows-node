@@ -2,7 +2,6 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using OpenClawTray.Helpers;
 using OpenClawTray.Services;
-using OpenClawTray.Windows;
 using System;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -11,7 +10,7 @@ namespace OpenClawTray.Pages;
 
 public sealed partial class AboutPage : Page
 {
-    private HubWindow? _hub;
+    private static App CurrentApp => (App)Microsoft.UI.Xaml.Application.Current;
     private AppState? _appState;
 
     public AboutPage()
@@ -23,10 +22,9 @@ public sealed partial class AboutPage : Page
         };
     }
 
-    public void Initialize(HubWindow hub)
+    public void Initialize()
     {
-        _hub = hub;
-        _appState = ((App)Application.Current).AppState;
+        _appState = CurrentApp.AppState;
         _appState.PropertyChanged += OnAppStateChanged;
         TryLoadGatewayInfo();
     }
@@ -45,8 +43,8 @@ public sealed partial class AboutPage : Page
 
     private void TryLoadGatewayInfo()
     {
-        var self = _hub?.LastGatewaySelf;
-        if (_hub?.CurrentStatus == OpenClaw.Shared.ConnectionStatus.Connected && self != null)
+        var self = CurrentApp.AppState?.GatewaySelf;
+        if (CurrentApp.AppState?.Status == OpenClaw.Shared.ConnectionStatus.Connected && self != null)
         {
             GatewayVersionText.Text = self.VersionText;
             GatewayModelText.Text = self.Protocol.HasValue ? $"protocol v{self.Protocol}" : "unknown";
@@ -99,8 +97,8 @@ public sealed partial class AboutPage : Page
             var context = $"OpenClaw Hub v0.1.0\n"
                 + $"OS: {Environment.OSVersion}\n"
                 + $"Runtime: {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}\n"
-                + $"Connection: {_hub?.CurrentStatus}\n"
-                + $"Gateway: {_hub?.Settings?.GetEffectiveGatewayUrl() ?? "n/a"}\n";
+                + $"Connection: {CurrentApp.AppState?.Status}\n"
+                + $"Gateway: {CurrentApp.Settings?.GetEffectiveGatewayUrl() ?? "n/a"}\n";
 
             ClipboardHelper.CopyText(context);
         }
@@ -112,7 +110,7 @@ public sealed partial class AboutPage : Page
 
     private void OnCheckUpdatesClick(object sender, RoutedEventArgs e)
     {
-        _hub?.CheckForUpdatesAction?.Invoke();
+        ((IAppCommands)CurrentApp).CheckForUpdates();
     }
 
     private void OnDocumentationClick(object sender, RoutedEventArgs e)
@@ -141,6 +139,6 @@ public sealed partial class AboutPage : Page
 
     private void OnDashboardClick(object sender, RoutedEventArgs e)
     {
-        _hub?.OpenDashboardAction?.Invoke(null);
+        ((IAppCommands)CurrentApp).OpenDashboard(null);
     }
 }

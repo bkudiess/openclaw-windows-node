@@ -1,7 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using OpenClawTray.Services;
-using OpenClawTray.Windows;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Text.Json;
@@ -10,7 +9,7 @@ namespace OpenClawTray.Pages;
 
 public sealed partial class BindingsPage : Page
 {
-    private HubWindow? _hub;
+    private static App CurrentApp => (App)Microsoft.UI.Xaml.Application.Current;
     private AppState? _appState;
 
     public BindingsPage()
@@ -22,17 +21,16 @@ public sealed partial class BindingsPage : Page
         };
     }
 
-    public void Initialize(HubWindow hub)
+    public void Initialize()
     {
-        _hub = hub;
-        _appState = ((App)Application.Current).AppState;
+        _appState = CurrentApp.AppState;
         _appState.PropertyChanged += OnAppStateChanged;
         // Use cached config if available
         if (_appState?.Config.HasValue == true)
             ParseBindings(_appState.Config.Value);
         // Request fresh config
-        if (hub.GatewayClient != null)
-            _ = hub.GatewayClient.RequestConfigAsync();
+        if (CurrentApp.GatewayClient != null)
+            _ = CurrentApp.GatewayClient.RequestConfigAsync();
     }
 
     private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
@@ -97,9 +95,9 @@ public sealed partial class BindingsPage : Page
 
     private void RefreshButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_hub?.GatewayClient != null)
+        if (CurrentApp.GatewayClient != null)
         {
-            _ = _hub.GatewayClient.RequestConfigAsync();
+            _ = CurrentApp.GatewayClient.RequestConfigAsync();
         }
     }
 

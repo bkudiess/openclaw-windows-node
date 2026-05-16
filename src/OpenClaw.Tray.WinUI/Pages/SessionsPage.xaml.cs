@@ -4,7 +4,6 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using OpenClaw.Shared;
 using OpenClawTray.Services;
-using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -14,7 +13,7 @@ namespace OpenClawTray.Pages;
 
 public sealed partial class SessionsPage : Page
 {
-    private HubWindow? _hub;
+    private static App CurrentApp => (App)Microsoft.UI.Xaml.Application.Current;
     private AppState? _appState;
     private SessionInfo[]? _allSessions;
     private string _activeChannel = "all";
@@ -30,13 +29,12 @@ public sealed partial class SessionsPage : Page
         };
     }
 
-    public void Initialize(HubWindow hub)
+    public void Initialize()
     {
-        _hub = hub;
-        _appState = ((App)Application.Current).AppState;
+        _appState = CurrentApp.AppState;
         _appState.PropertyChanged += OnAppStateChanged;
 
-        if (hub.GatewayClient == null)
+        if (CurrentApp.GatewayClient == null)
         {
             ConnectionWarning.IsOpen = true;
             EmptyState.Visibility = Visibility.Collapsed;
@@ -49,8 +47,8 @@ public sealed partial class SessionsPage : Page
         if (_appState?.Sessions != null)
             UpdateSessions(_appState.Sessions);
 
-        _ = hub.GatewayClient.RequestSessionsAsync();
-        _ = hub.GatewayClient.RequestModelsListAsync();
+        _ = CurrentApp.GatewayClient.RequestSessionsAsync();
+        _ = CurrentApp.GatewayClient.RequestModelsListAsync();
     }
 
     public void UpdateSessions(SessionInfo[] sessions)
@@ -173,7 +171,7 @@ public sealed partial class SessionsPage : Page
 
     private void ChannelSelector_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {
-        if (_hub == null) return;
+        
         var selected = sender.SelectedItem;
         _activeChannel = selected == AllTab ? "all" : (selected?.Text ?? "all");
         ApplyFilter();
@@ -183,7 +181,7 @@ public sealed partial class SessionsPage : Page
     {
         if (sender is Button btn && btn.Tag is string key)
         {
-            var client = _hub?.GatewayClient;
+            var client = CurrentApp.GatewayClient;
             if (client == null) return;
             try { await client.ResetSessionAsync(key); }
             catch { }
@@ -194,7 +192,7 @@ public sealed partial class SessionsPage : Page
     {
         if (sender is Button btn && btn.Tag is string key)
         {
-            var client = _hub?.GatewayClient;
+            var client = CurrentApp.GatewayClient;
             if (client == null) return;
             try { await client.DeleteSessionAsync(key); }
             catch { }
@@ -205,7 +203,7 @@ public sealed partial class SessionsPage : Page
     {
         if (sender is Button btn && btn.Tag is string key)
         {
-            var client = _hub?.GatewayClient;
+            var client = CurrentApp.GatewayClient;
             if (client == null) return;
             try { await client.CompactSessionAsync(key); }
             catch { }
@@ -214,7 +212,7 @@ public sealed partial class SessionsPage : Page
 
     private void OnRefresh(object sender, RoutedEventArgs e)
     {
-        var client = _hub?.GatewayClient;
+        var client = CurrentApp.GatewayClient;
         if (client != null)
         {
             _ = client.RequestSessionsAsync();

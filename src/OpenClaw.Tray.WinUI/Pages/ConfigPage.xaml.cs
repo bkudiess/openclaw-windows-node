@@ -4,7 +4,6 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using OpenClawTray.Services;
-using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -18,7 +17,7 @@ public sealed partial class ConfigPage : Page
 {
     private static readonly JsonElement s_emptyObject = JsonDocument.Parse("{}").RootElement.Clone();
 
-    private HubWindow? _hub;
+    private static App CurrentApp => (App)Microsoft.UI.Xaml.Application.Current;
     private AppState? _appState;
     private JsonElement? _lastConfig;
     private JsonElement? _lastSchema;
@@ -38,16 +37,15 @@ public sealed partial class ConfigPage : Page
         };
     }
 
-    public void Initialize(HubWindow hub)
+    public void Initialize()
     {
-        _hub = hub;
-        _appState = ((App)Application.Current).AppState;
+        _appState = CurrentApp.AppState;
         _appState.PropertyChanged += OnAppStateChanged;
         OpenClawTray.Services.Logger.Info("[ConfigPage] Initialize");
-        if (hub.GatewayClient != null)
+        if (CurrentApp.GatewayClient != null)
         {
-            _ = hub.GatewayClient.RequestConfigSchemaAsync();
-            _ = hub.GatewayClient.RequestConfigAsync();
+            _ = CurrentApp.GatewayClient.RequestConfigSchemaAsync();
+            _ = CurrentApp.GatewayClient.RequestConfigAsync();
         }
     }
 
@@ -234,7 +232,7 @@ public sealed partial class ConfigPage : Page
 
     private void OnOpenDashboard(object sender, RoutedEventArgs e)
     {
-        _hub?.OpenDashboardAction?.Invoke("config");
+        ((IAppCommands)CurrentApp).OpenDashboard("config");
     }
 
     private static void ExpandAll(IList<TreeViewNode> nodes)
@@ -267,7 +265,7 @@ public sealed partial class ConfigPage : Page
             return;
         }
 
-        if (_hub?.GatewayClient == null || !_lastConfig.HasValue)
+        if (CurrentApp.GatewayClient == null || !_lastConfig.HasValue)
         {
             SaveStatus.Text = "Not connected";
             return;
@@ -295,13 +293,13 @@ public sealed partial class ConfigPage : Page
         SaveStatus.Text = "Saving...";
         try
         {
-            var ok = await _hub.GatewayClient.PatchConfigAsync(updatedElement, _baseHash);
+            var ok = await CurrentApp.GatewayClient.PatchConfigAsync(updatedElement, _baseHash);
             SaveStatus.Text = ok ? "✓ Saved" : "✗ Save failed — changes preserved";
 
             if (ok)
             {
                 _pendingChanges.Clear();
-                _ = _hub.GatewayClient.RequestConfigAsync();
+                _ = CurrentApp.GatewayClient.RequestConfigAsync();
             }
         }
         catch (Exception) { SaveStatus.Text = "✗ Save failed — changes preserved"; }
@@ -356,11 +354,11 @@ public sealed partial class ConfigPage : Page
 
     private void OnRefresh(object sender, RoutedEventArgs e)
     {
-        if (_hub?.GatewayClient != null)
+        if (CurrentApp.GatewayClient != null)
         {
             SaveStatus.Text = "";
-            _ = _hub.GatewayClient.RequestConfigSchemaAsync();
-            _ = _hub.GatewayClient.RequestConfigAsync();
+            _ = CurrentApp.GatewayClient.RequestConfigSchemaAsync();
+            _ = CurrentApp.GatewayClient.RequestConfigAsync();
         }
     }
 
@@ -743,20 +741,20 @@ public sealed partial class ConfigPage : Page
 
     private void OnValueEdited(string configPath, object newValue)
     {
-        if (_hub?.GatewayClient == null) return;
+        if (CurrentApp.GatewayClient == null) return;
 
         _ = Task.Run(async () =>
         {
             try
             {
-                var success = await _hub.GatewayClient.SetConfigAsync(configPath, newValue);
+                var success = await CurrentApp.GatewayClient.SetConfigAsync(configPath, newValue);
                 DispatcherQueue?.TryEnqueue(() =>
                 {
                     SaveStatus.Text = success
                         ? $"✅ Sent {configPath}"
                         : $"❌ Failed to save {configPath}";
-                    if (success && _hub?.GatewayClient != null)
-                        _ = _hub.GatewayClient.RequestConfigAsync();
+                    if (success && CurrentApp.GatewayClient != null)
+                        _ = CurrentApp.GatewayClient.RequestConfigAsync();
                 });
             }
             catch (Exception ex)

@@ -6,7 +6,6 @@ using Microsoft.UI.Xaml.Media;
 using OpenClaw.Shared;
 using OpenClawTray.Helpers;
 using OpenClawTray.Services;
-using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -26,7 +25,7 @@ namespace OpenClawTray.Pages;
 /// </summary>
 public sealed partial class InstancesPage : Page
 {
-    private HubWindow? _hub;
+    private static App CurrentApp => (App)Microsoft.UI.Xaml.Application.Current;
     private AppState? _appState;
     private GatewayNodeInfo[]? _lastNodes;
     private PresenceEntry[]? _lastPresence;
@@ -41,12 +40,11 @@ public sealed partial class InstancesPage : Page
     }
 
     /// <summary>Called by HubWindow when this page becomes the navigation target.</summary>
-    public void Initialize(HubWindow hub)
+    public void Initialize()
     {
-        _hub = hub;
-        _appState = ((App)Application.Current).AppState;
+        _appState = CurrentApp.AppState;
         _appState.PropertyChanged += OnAppStateChanged;
-        var connected = hub.GatewayClient != null;
+        var connected = CurrentApp.GatewayClient != null;
         ConnectionWarning.Visibility = connected ? Visibility.Collapsed : Visibility.Visible;
 
         _lastNodes = _appState?.Nodes;
@@ -102,9 +100,9 @@ public sealed partial class InstancesPage : Page
 
     private async System.Threading.Tasks.Task RequestNodesWithSpinnerAsync()
     {
-        if (_hub?.GatewayClient is not { } client)
+        if (CurrentApp.GatewayClient is not { } client)
         {
-            // Still re-render in case _hub.GatewayClient state changed.
+            // Still re-render in case gateway client state changed.
             Rerender();
             return;
         }
@@ -137,7 +135,7 @@ public sealed partial class InstancesPage : Page
 
     private void Rerender()
     {
-        var connected = _hub?.GatewayClient != null;
+        var connected = CurrentApp.GatewayClient != null;
         ConnectionWarning.Visibility = connected ? Visibility.Collapsed : Visibility.Visible;
 
         // Single timestamp shared by merge classification AND age formatting so
@@ -150,7 +148,7 @@ public sealed partial class InstancesPage : Page
             _lastPresence,
             new InstanceMergeOptions
             {
-                LocalNodeId = _hub?.NodeFullDeviceId,
+                LocalNodeId = CurrentApp.NodeFullDeviceId,
                 LocalHost = Environment.MachineName,
                 OnUnmatchedNode = msg => Debug.WriteLine($"[InstancesPage] {msg}"),
                 NowUtc = () => nowUtc,
@@ -240,9 +238,9 @@ public sealed partial class InstancesPage : Page
         var updateLine = BuildUpdateLine(row, nowUtc);
         if (updateLine is not null) body.Children.Add(updateLine);
 
-        if (row.IsManaged && row.Node is not null && _hub is not null)
+        if (row.IsManaged && row.Node is not null)
         {
-            var managementBody = InstanceManagementControls.BuildManagementBody(row.Node, _hub, this);
+            var managementBody = InstanceManagementControls.BuildManagementBody(row.Node, CurrentApp.GatewayClient, this);
             if (managementBody is FrameworkElement fe)
             {
                 fe.Margin = new Thickness(0, 10, 0, 0);
