@@ -683,7 +683,6 @@ public sealed partial class HubWindow : WindowEx
                 connection.Initialize(this);
                 if (LastNodePairList != null) connection.UpdatePairingRequests(LastNodePairList);
                 if (LastDevicePairList != null) connection.UpdateDevicePairingRequests(LastDevicePairList);
-                if (LastNodePairList != null) connection.UpdatePairingRequests(LastNodePairList);
                 break;
             case ChannelsPage channels: channels.Initialize(this); break;
             case UsagePage usage: usage.Initialize(this); break;

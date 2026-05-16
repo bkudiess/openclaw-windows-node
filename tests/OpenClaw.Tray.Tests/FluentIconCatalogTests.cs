@@ -17,10 +17,12 @@ public sealed class FluentIconCatalogTests
     private static readonly string[] ExpectedConstants =
     {
         "StatusOk", "StatusWarn", "StatusErr",
-        "Sessions", "Approvals", "Devices", "Permissions",
-        "Browser", "Camera", "Canvas", "Screen", "Location", "Voice", "System",
-        "Dashboard", "Chat", "CanvasAct", "VoiceAct", "Settings", "QuickSend",
+        "Sessions", "Approvals", "Devices", "Hostname", "Permissions",
+        "Browser", "Camera", "Canvas", "Screen", "Location", "Voice", "Speech", "System", "Operator",
+        "Dashboard", "OpenInBrowser", "Chat", "CanvasAct", "VoiceAct", "Settings", "QuickSend",
         "Setup", "About", "Exit",
+        "Add", "Back", "Sync", "Lock", "Plug", "MoreOverflow",
+        "People", "Money", "ServerEnvironment", "CapabilityOff", "Channels",
         "ChevronR", "Check",
         "Brand",
     };

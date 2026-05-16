@@ -62,6 +62,7 @@ public static class FluentIconCatalog
     public const string Money = "\uE9D9";          // Money — $today chip
     public const string ServerEnvironment = "\uE968"; // ServerEnvironment — topology chip
     public const string CapabilityOff = "\uE894";  // RemoveFrom — disabled capability state
+    public const string Channels = "\uEC05";       // CellularData/Tower — N/M channels chip
 
     // ── Affordances ────────────────────────────────────────────────
     public const string ChevronR = "\uE76C";       // ChevronRight

@@ -9,6 +9,7 @@ using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -42,6 +43,35 @@ public sealed partial class ConnectionPage : Page
     private bool _suppressConnectionToggle;
     private ConnectionPagePlan _currentPlan = new();
 
+    // Tracks which gateway record the Add Gateway form is currently editing
+    // (set by OnSavedRowEdit / OnEditTunnelSettings; null = creating a brand
+    // new record). Used by DoDirectConnectFromAddFormAsync so a URL change
+    // updates the original record instead of orphaning it as a duplicate.
+    private string? _editingGatewayId;
+
+    // ─── Reconnect-mask state ───
+    // Toggling Node mode forces the connection manager to tear down the
+    // WS and rebuild it (so the gateway sees the role change). That brief
+    // Disconnecting → Disconnected → Connecting → Connected transition was
+    // showing through every visual surface (strip headline, operator card,
+    // active-row badge) as a "you're disconnected!" flicker, which is wrong
+    // — the user's *intent* is still to be connected, the connection layer
+    // is just round-tripping. We mask the gateway/operator visuals during
+    // this window and let them resume once the snapshot stabilizes again.
+    private GatewayConnectionSnapshot? _lastStableSnapshot;
+    private DateTime _suppressReconnectVisualsUntilUtc = DateTime.MinValue;
+    private Microsoft.UI.Xaml.DispatcherTimer? _reconnectMaskTimer;
+
+    // ─── Fingerprint caches ───
+    // ItemsSource swaps re-template every item even when the content is
+    // identical, which causes a visible flash on every snapshot tick.
+    // We stash a string fingerprint of the inputs and skip the swap when
+    // the rendered output would be identical. Keeps the page calm during
+    // the rapid-fire snapshot transitions a Node-mode toggle produces.
+    private string? _savedGatewaysFingerprint;
+    private string? _glanceChipsFingerprint;
+    private string? _capabilityChipsFingerprint;
+
     public ConnectionPage()
     {
         InitializeComponent();
@@ -69,7 +99,10 @@ public sealed partial class ConnectionPage : Page
         NodeModeToggle.IsOn = settings.EnableNodeMode;
         _suppressNodeModeToggle = false;
 
-        LoadSavedGateways();
+        // RefreshFromSnapshot below already calls LoadSavedGateways with the
+        // up-to-date snapshot — calling it standalone here would render the
+        // active row as "disconnected" for one frame before the snapshot pass
+        // flips it to "Connected".
         RefreshFromSnapshot(_connectionManager?.CurrentSnapshot ?? GatewayConnectionSnapshot.Idle);
     }
 
@@ -81,6 +114,12 @@ public sealed partial class ConnectionPage : Page
             _gatewayRegistry.Changed -= OnRegistryChanged;
         _discoveryService?.Dispose();
         _discoveryService = null;
+        if (_reconnectMaskTimer != null)
+        {
+            _reconnectMaskTimer.Stop();
+            _reconnectMaskTimer.Tick -= OnReconnectMaskTimeout;
+            _reconnectMaskTimer = null;
+        }
     }
 
     private void OnManagerStateChanged(object? sender, GatewayConnectionSnapshot snapshot)
@@ -115,11 +154,41 @@ public sealed partial class ConnectionPage : Page
     {
         if (_hub == null) return;
 
+        // Reconnect-mask: see field comment. While the mask window is open,
+        // pretend the gateway/operator state is still at its last-stable
+        // value, so the strip headline, operator card, and active-row badge
+        // don't churn through Disconnecting → Disconnected → Connecting just
+        // because the user toggled Node mode. The Node-related fields pass
+        // through so the Node card itself still reflects reality.
+        if (IsStableState(snapshot.OverallState))
+        {
+            _lastStableSnapshot = snapshot;
+            // Once the connection has actually re-stabilized, drop the mask
+            // immediately — no need to wait out the rest of the timeout.
+            _suppressReconnectVisualsUntilUtc = DateTime.MinValue;
+            _reconnectMaskTimer?.Stop();
+        }
+
+        bool maskActive = _lastStableSnapshot != null
+                          && DateTime.UtcNow < _suppressReconnectVisualsUntilUtc
+                          && IsTransientState(snapshot.OverallState);
+
+        var effective = maskActive
+            ? _lastStableSnapshot! with
+            {
+                NodeState = snapshot.NodeState,
+                NodeError = snapshot.NodeError,
+                NodePairingStatus = snapshot.NodePairingStatus,
+                NodePairingRequestId = snapshot.NodePairingRequestId,
+                NodeDeviceId = snapshot.NodeDeviceId,
+            }
+            : snapshot;
+
         // Cache the snapshot so downstream visuals (e.g. the connection toggle
         // in ApplyStripVisuals) read from the fresh state, not the previous
         // turn's value. Without this, the toggle defaulted to OFF on first
         // load even when the snapshot already reported Connected.
-        _lastSnapshot = snapshot;
+        _lastSnapshot = effective;
 
         var savedCount = _gatewayRegistry?.GetAll().Count ?? 0;
         var activeRecord = _gatewayRegistry?.GetActive();
@@ -127,7 +196,7 @@ public sealed partial class ConnectionPage : Page
         var settings = _hub.Settings;
 
         var plan = ConnectionPagePlan.Build(
-            snapshot, activeRecord, self, settings, savedCount, _userIntent);
+            effective, activeRecord, self, settings, savedCount, _userIntent);
 
         _currentPlan = plan;
         ApplyPlan(plan);
@@ -247,13 +316,15 @@ public sealed partial class ConnectionPage : Page
         // ON = currently connected (or attempting); tap OFF to disconnect.
         // OFF = idle/disconnecting; tap ON to reconnect.
         bool hasActive = plan.RelevantGatewayId != null;
+        // "ON" = the gateway is or is trying to be connected. Error state
+        // is a terminal failure — toggle should read OFF so the affordance
+        // ("tap to disconnect") stops lying to the user; tapping ON re-tries.
         bool toggleOn = _lastSnapshot.OverallState is
             OverallConnectionState.Connecting
             or OverallConnectionState.Connected
             or OverallConnectionState.Ready
             or OverallConnectionState.Degraded
-            or OverallConnectionState.PairingRequired
-            or OverallConnectionState.Error;
+            or OverallConnectionState.PairingRequired;
         ConnectionToggle.Visibility = hasActive ? Visibility.Visible : Visibility.Collapsed;
         // Avoid recursive Toggled events while we sync from snapshot
         _suppressConnectionToggle = true;
@@ -279,9 +350,19 @@ public sealed partial class ConnectionPage : Page
     public void OnGlanceDataChanged()
     {
         // Re-run the strip/operator pass with the cached snapshot so chips
-        // pick up the new data without bouncing the rest of the page.
+        // pick up the new data without bouncing the rest of the page. Derive
+        // visibility from _lastSnapshot directly — ConnectionToggle.IsOn is
+        // a downstream visual signal, not the source of truth, and during
+        // any future regression where they diverge we'd render stale chips.
         if (_currentPlan == null) return;
-        ApplyGlanceChips(_currentPlan, ConnectionToggle.IsOn);
+        bool show = _currentPlan.RelevantGatewayId != null
+                    && _lastSnapshot.OverallState is
+                        OverallConnectionState.Connecting
+                        or OverallConnectionState.Connected
+                        or OverallConnectionState.Ready
+                        or OverallConnectionState.Degraded
+                        or OverallConnectionState.PairingRequired;
+        ApplyGlanceChips(_currentPlan, show);
         ApplyOperatorCard(_currentPlan);
     }
 
@@ -289,6 +370,9 @@ public sealed partial class ConnectionPage : Page
     {
         if (!show)
         {
+            const string emptyFp = "<empty>";
+            if (_glanceChipsFingerprint == emptyFp) return;
+            _glanceChipsFingerprint = emptyFp;
             GlanceChipsHost.ItemsSource = Array.Empty<Border>();
             return;
         }
@@ -297,11 +381,35 @@ public sealed partial class ConnectionPage : Page
         var channels = _hub?.LastChannels;
         var cost = _hub?.LastUsageCost;
         var activeRec = _gatewayRegistry?.GetActive();
+
+        // Compute the fingerprint from the same inputs the chips render so
+        // we can short-circuit when nothing observable changed. Cheaper than
+        // re-templating ~5 chip Borders every snapshot tick.
+        var topology = ClassifyTopology(activeRec);
+        var hostname = Environment.MachineName;
+        int? presence = self?.PresenceCount;
+        int channelTotal = channels?.Length ?? 0;
+        int channelOk = channels is { Length: > 0 }
+            ? channels.Count(c => c.IsLinked && (
+                string.Equals(c.Status, "ready", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(c.Status, "ok", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(c.Status, "connected", StringComparison.OrdinalIgnoreCase)))
+            : 0;
+        double todayAmount = 0d;
+        if (cost?.Daily is { Count: > 0 })
+        {
+            var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
+            var entry = cost.Daily.FirstOrDefault(d => d.Date == today);
+            todayAmount = entry?.TotalCost ?? 0d;
+        }
+        var fp = $"{topology}|{hostname}|{presence}|{channelOk}/{channelTotal}|${todayAmount:0.00}";
+        if (_glanceChipsFingerprint == fp) return;
+        _glanceChipsFingerprint = fp;
+
         var chips = new List<Border>(5);
 
         // 1. Topology — Local / via SSH / LAN / Tailscale / Remote.
         //    Tells the user what kind of gateway they're talking to.
-        var topology = ClassifyTopology(activeRec);
         if (topology != null)
         {
             chips.Add(BuildGlanceChip(Helpers.FluentIconCatalog.ServerEnvironment, topology, neutral: true));
@@ -309,7 +417,6 @@ public sealed partial class ConnectionPage : Page
 
         // 2. Local hostname — "on PERSEID". Tells the user what device the
         //    tray (and therefore Operator + Node) runs on. Free signal.
-        var hostname = Environment.MachineName;
         if (!string.IsNullOrWhiteSpace(hostname))
         {
             chips.Add(BuildGlanceChip(Helpers.FluentIconCatalog.Hostname, $"on {hostname}", neutral: true));
@@ -317,33 +424,26 @@ public sealed partial class ConnectionPage : Page
 
         // 3. Presence count — "1 client" / "3 clients" if the gateway has
         //    multiple operators connected.
-        if (self?.PresenceCount is int n && n > 0)
+        if (presence is int n && n > 0)
         {
             var label = n == 1 ? "1 client" : $"{n} clients";
             chips.Add(BuildGlanceChip(Helpers.FluentIconCatalog.People, label, neutral: true));
         }
 
-        // 3. Channels glance — "2/2 channels ready" when at least one channel
+        // 4. Channels glance — "2/2 channels ready" when at least one channel
         //    is configured. Counts linked-and-ok channels.
-        if (channels is { Length: > 0 })
+        if (channelTotal > 0)
         {
-            int total = channels.Length;
-            int ok = channels.Count(c => c.IsLinked &&
-                (string.Equals(c.Status, "ready", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(c.Status, "ok", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(c.Status, "connected", StringComparison.OrdinalIgnoreCase)));
-            var label = $"{ok}/{total} channel{(total == 1 ? "" : "s")}";
-            chips.Add(BuildGlanceChip("\uEC05", label, neutral: ok == total)); // Cell tower
+            var label = $"{channelOk}/{channelTotal} channel{(channelTotal == 1 ? "" : "s")}";
+            chips.Add(BuildGlanceChip(Helpers.FluentIconCatalog.Channels, label, neutral: channelOk == channelTotal));
         }
 
-        // 4. Today's $ — sum of today's daily entry, falls back to "$0.00".
+        // 5. Today's $ — falls back to "$0.00 today" so the chip stays in a
+        //    consistent slot even on a fresh day with no usage yet.
         if (cost?.Daily is { Count: > 0 })
         {
-            var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
-            var todayEntry = cost.Daily.FirstOrDefault(d => d.Date == today);
-            var amount = todayEntry?.TotalCost ?? 0d;
-            var label = amount > 0
-                ? $"${amount:0.00} today"
+            var label = todayAmount > 0
+                ? $"${todayAmount:0.00} today"
                 : "$0.00 today";
             chips.Add(BuildGlanceChip(Helpers.FluentIconCatalog.Money, label, neutral: true));
         }
@@ -547,13 +647,19 @@ public sealed partial class ConnectionPage : Page
                 "Node error"),
             NodeCardState.Off => (
                 Helpers.FluentIconCatalog.CapabilityOff,
-                "SystemFillColorNeutralBrush",
+                "SystemFillColorCriticalBrush",
                 "Node mode disabled"),
-            _ => (Helpers.FluentIconCatalog.CapabilityOff, "SystemFillColorNeutralBrush", "Node mode disabled"),
+            _ => (Helpers.FluentIconCatalog.CapabilityOff, "SystemFillColorCriticalBrush", "Node mode disabled"),
         };
         NodeStatusIcon.Glyph = nodeGlyph;
         NodeStatusIcon.Foreground = ResolveBrush(nodeBrushKey);
         NodeStatusText.Text = nodeStatusText;
+        // When Node mode is off, also tint the status text red as a subtle
+        // hint that this PC isn't sharing capabilities. Other states keep
+        // the default Body foreground so they read like normal status copy.
+        NodeStatusText.Foreground = plan.NodeCard == NodeCardState.Off
+            ? ResolveBrush("SystemFillColorCriticalBrush")
+            : ResolveBrush("TextFillColorPrimaryBrush");
 
         // Canonical capability list per design naming.md:
         //   "Providing N capabilities: browser, camera, canvas, screen, location, tts, stt"
@@ -583,8 +689,15 @@ public sealed partial class ConnectionPage : Page
             NodeApproveCmdBox.Visibility = Visibility.Collapsed;
         }
 
-        // Capability chips
-        NodeCapabilityChipsHost.ItemsSource = BuildCapabilityChips(settings, plan.NodeCard);
+        // Capability chips — skip the rebuild if the rendered output would
+        // be identical (e.g. mid-reconnect snapshot ticks where settings and
+        // node state haven't actually changed).
+        var capFp = $"{plan.NodeCard}|{settings?.NodeBrowserProxyEnabled}|{settings?.NodeCameraEnabled}|{settings?.NodeCanvasEnabled}|{settings?.NodeScreenEnabled}";
+        if (_capabilityChipsFingerprint != capFp)
+        {
+            _capabilityChipsFingerprint = capFp;
+            NodeCapabilityChipsHost.ItemsSource = BuildCapabilityChips(settings, plan.NodeCard);
+        }
 
         // Permissions link is always visible (entry point even when sharing is off);
         // Voice and Skills deep links were removed from the simplified node card.
@@ -838,6 +951,23 @@ public sealed partial class ConnectionPage : Page
         }
 
         SavedGatewaysEmptyText.Visibility = emptyVisible;
+
+        // Fingerprint to skip ItemsSource swap when nothing observable
+        // changed — see field comment. Includes overall connection state
+        // because that drives the per-row "Connected" badge.
+        var sb = new System.Text.StringBuilder(items.Count * 64);
+        sb.Append(_lastSnapshot.OverallState).Append('|');
+        foreach (var r in items)
+        {
+            sb.Append(r.Id).Append('/').Append(r.IsActive ? '1' : '0').Append('/')
+              .Append(r.DisplayName).Append('/').Append(r.LastConnectedRelative ?? "")
+              .Append('/').Append(r.HasSshTunnel ? '1' : '0').Append('/')
+              .Append(r.AuthModeLabel ?? "").Append(';');
+        }
+        var fp = sb.ToString();
+        if (_savedGatewaysFingerprint == fp) return;
+        _savedGatewaysFingerprint = fp;
+
         SavedGatewaysList.ItemsSource = BuildSavedGatewayRowControls(items);
         RecoverySavedList.ItemsSource = BuildSavedGatewayRowControls(items);
         RecoverySavedHeaderText.Text = items.Count == 1
@@ -1064,6 +1194,7 @@ public sealed partial class ConnectionPage : Page
 
     private void OnEnterAddGateway(object sender, RoutedEventArgs e)
     {
+        _editingGatewayId = null;
         _userIntent = UserIntent.AddingGateway;
         // Direct is default — make sure the selector is on Direct.
         ShowAddPane("direct");
@@ -1073,6 +1204,7 @@ public sealed partial class ConnectionPage : Page
 
     private void OnEnterAddGatewayDirect(object sender, RoutedEventArgs e)
     {
+        _editingGatewayId = null;
         _userIntent = UserIntent.AddingGateway;
         ShowAddPane("direct");
         AddDirectItem.IsSelected = true;
@@ -1081,6 +1213,7 @@ public sealed partial class ConnectionPage : Page
 
     private void OnEnterAddGatewaySetupCode(object sender, RoutedEventArgs e)
     {
+        _editingGatewayId = null;
         _userIntent = UserIntent.AddingGateway;
         ShowAddPane("setup");
         AddSetupCodeItem.IsSelected = true;
@@ -1096,6 +1229,7 @@ public sealed partial class ConnectionPage : Page
 
     private void OnAddBack(object sender, RoutedEventArgs e)
     {
+        _editingGatewayId = null;
         _userIntent = UserIntent.None;
         // Clear transient form state so re-entering is fresh
         AddResultText.Text = "";
@@ -1152,6 +1286,7 @@ public sealed partial class ConnectionPage : Page
                 OnRestartTunnel(sender, e);
                 break;
             case ConnectionPrimaryAction.Rep:
+                _editingGatewayId = null;
                 _userIntent = UserIntent.None;
                 // Surface Recovery's paste textbox is already on screen for Auth recovery.
                 // For Pairing-type Rep, take the user to Add → Setup code as a fast path.
@@ -1222,6 +1357,7 @@ public sealed partial class ConnectionPage : Page
         var active = _gatewayRegistry?.GetActive();
         if (active == null) return;
         var rec = active;
+        _editingGatewayId = rec.Id;
         _userIntent = UserIntent.AddingGateway;
         DirectUrlBox.Text = rec.Url;
         DirectTokenBox.Password = rec.SharedGatewayToken ?? "";
@@ -1290,6 +1426,7 @@ public sealed partial class ConnectionPage : Page
         var rec = _gatewayRegistry?.GetById(gwId);
         if (rec == null) return;
         // Pre-fill the Direct pane for editing
+        _editingGatewayId = gwId;
         _userIntent = UserIntent.AddingGateway;
         DirectUrlBox.Text = rec.Url;
         DirectTokenBox.Password = rec.SharedGatewayToken ?? "";
@@ -1324,6 +1461,15 @@ public sealed partial class ConnectionPage : Page
         var result = await dialog.ShowAsync();
         if (result == ContentDialogResult.Primary)
         {
+            // If the user is removing the currently-active gateway, tear
+            // down the live connection first — otherwise the connection
+            // manager keeps trying to talk to a record that no longer
+            // exists in the registry, which leaves the UI in a stale state.
+            var wasActive = string.Equals(_gatewayRegistry?.ActiveGatewayId, gwId, StringComparison.Ordinal);
+            if (wasActive && _connectionManager != null)
+            {
+                try { await _connectionManager.DisconnectAsync(); } catch { }
+            }
             _gatewayRegistry?.Remove(gwId);
             _gatewayRegistry?.Save();
             LoadSavedGateways();
@@ -1409,10 +1555,24 @@ public sealed partial class ConnectionPage : Page
         var prevSshRemotePort = previousSettings?.SshTunnelRemotePort ?? 0;
         var prevSshLocalPort = previousSettings?.SshTunnelLocalPort ?? 0;
 
-        var existing = _gatewayRegistry.FindByUrl(url);
+        // Resolve which record we're operating on:
+        //   1. If the user opened the form via Edit on a saved row, prefer
+        //      the original record id — this lets a URL change *update* the
+        //      existing record instead of orphaning it as a duplicate.
+        //   2. Otherwise look up by URL (typical "user typed a URL" flow).
+        //   3. Otherwise it's brand new.
+        var existing = _editingGatewayId != null
+            ? _gatewayRegistry.GetById(_editingGatewayId) ?? _gatewayRegistry.FindByUrl(url)
+            : _gatewayRegistry.FindByUrl(url);
         var isNewRecord = existing == null;
         var existingRecordSnapshot = existing;
         var recordId = existing?.Id ?? Guid.NewGuid().ToString();
+
+        // Hoisted out of the try block so the catch handler can pass the
+        // backup to RollbackDirectConnect for credential restore.
+        string? identityKeyPath = null;
+        string? identityBackup = null;
+        bool identityCleared = false;
 
         try
         {
@@ -1432,8 +1592,32 @@ public sealed partial class ConnectionPage : Page
             _gatewayRegistry.SetActive(recordId);
             _gatewayRegistry.Save();
 
+            // Identity-token handling.
+            //   - When the user provides a NEW shared token, the previous
+            //     device token is no longer trusted by the gateway, so we
+            //     clear the stored device tokens to force a fresh re-pair.
+            //   - When the form is left blank (user is just renaming /
+            //     fixing SSH), keep the existing device tokens — clearing
+            //     them would silently force a re-pair the user didn't ask
+            //     for and would violate the "never downgrade a paired
+            //     device" architecture rule.
+            //   - When we DO clear, snapshot the identity JSON first so
+            //     RollbackDirectConnect can restore the user's credentials
+            //     if the connection then fails.
             var identityDir = _gatewayRegistry.GetIdentityDirectory(recordId);
-            DeviceIdentityStore.ClearStoredTokens(identityDir);
+            identityKeyPath = Path.Combine(identityDir, "device-key-ed25519.json");
+            try
+            {
+                if (File.Exists(identityKeyPath))
+                    identityBackup = File.ReadAllText(identityKeyPath);
+            }
+            catch { /* backup is best-effort; rollback simply skips restore */ }
+
+            if (!string.IsNullOrWhiteSpace(token))
+            {
+                DeviceIdentityStore.ClearStoredTokens(identityDir);
+                identityCleared = true;
+            }
 
             if (previousSettings != null)
             {
@@ -1461,7 +1645,8 @@ public sealed partial class ConnectionPage : Page
                 ? $"Pairing approval required for {GatewayUrlHelper.SanitizeForDisplay(url)}."
                 : $"Connected to {GatewayUrlHelper.SanitizeForDisplay(url)}.";
 
-            // Success — leave Add mode
+            // Success — leave Add mode and stop tracking the edited record.
+            _editingGatewayId = null;
             _userIntent = UserIntent.None;
             LoadSavedGateways();
             RefreshFromSnapshot(_lastSnapshot);
@@ -1471,7 +1656,9 @@ public sealed partial class ConnectionPage : Page
             AddResultText.Text = $"✗ {ex.Message}";
             RollbackDirectConnect(previousActiveId, isNewRecord, recordId, existingRecordSnapshot,
                 previousSettings, prevGatewayUrl, prevUseSsh, prevSshUser, prevSshHost,
-                prevSshRemotePort, prevSshLocalPort);
+                prevSshRemotePort, prevSshLocalPort,
+                identityCleared ? identityKeyPath : null,
+                identityCleared ? identityBackup : null);
         }
         finally
         {
@@ -1540,7 +1727,8 @@ public sealed partial class ConnectionPage : Page
         string? previousActiveId, bool isNewRecord, string recordId,
         GatewayRecord? existingRecordSnapshot, SettingsManager? settings,
         string? prevGatewayUrl, bool prevUseSsh, string? prevSshUser,
-        string? prevSshHost, int prevSshRemotePort, int prevSshLocalPort)
+        string? prevSshHost, int prevSshRemotePort, int prevSshLocalPort,
+        string? identityKeyPath = null, string? identityBackup = null)
     {
         if (_gatewayRegistry == null) return;
 
@@ -1552,6 +1740,18 @@ public sealed partial class ConnectionPage : Page
         if (previousActiveId != null)
             _gatewayRegistry.SetActive(previousActiveId);
         _gatewayRegistry.Save();
+
+        // Restore the device-token JSON we cleared at the top of
+        // DoDirectConnectFromAddFormAsync. Without this, a failed direct
+        // connect after the user had typed a (possibly wrong) shared token
+        // would permanently destroy the device token earned during the
+        // last successful pairing — forcing a full re-pair the user never
+        // asked for.
+        if (!string.IsNullOrEmpty(identityKeyPath) && identityBackup != null)
+        {
+            try { File.WriteAllText(identityKeyPath, identityBackup); }
+            catch { /* best-effort restore; failure cannot regress further */ }
+        }
 
         if (settings != null)
         {
@@ -1591,6 +1791,7 @@ public sealed partial class ConnectionPage : Page
                 };
                 if (result.Outcome == SetupCodeOutcome.Success)
                 {
+                    _editingGatewayId = null;
                     _userIntent = UserIntent.None;
                     LoadSavedGateways();
                     RefreshFromSnapshot(_lastSnapshot);
@@ -1664,6 +1865,9 @@ public sealed partial class ConnectionPage : Page
             _discoveryService?.Stop();
             return;
         }
+        // Set the guard synchronously so a fast double-click cannot spawn
+        // a parallel scan. RunScanForGatewaysAsync resets it in finally.
+        _scanInProgress = true;
         await RunScanForGatewaysAsync();
     }
 
@@ -1786,6 +1990,7 @@ public sealed partial class ConnectionPage : Page
         if (sender is not Button btn || btn.Tag is not string url) return;
         // Pre-fill the Direct pane and enter AddGateway mode. User types
         // the token there and clicks Save & connect.
+        _editingGatewayId = null;
         DirectUrlBox.Text = url;
         DirectTokenBox.Password = "";
         DirectNameBox.Text = "";
@@ -1834,8 +2039,48 @@ public sealed partial class ConnectionPage : Page
         if (settings == null) return;
         settings.EnableNodeMode = NodeModeToggle.IsOn;
         settings.Save();
+        // Toggling Node mode forces a full reconnect of the gateway WS so
+        // the role change registers; mask the brief transient window so the
+        // gateway/operator visuals don't flicker through "Disconnected".
+        BeginReconnectMask();
         _hub?.RaiseSettingsSaved();
         RefreshFromSnapshot(_lastSnapshot);
+    }
+
+    private static bool IsStableState(OverallConnectionState s) =>
+        s is OverallConnectionState.Connected
+          or OverallConnectionState.Ready
+          or OverallConnectionState.Degraded;
+
+    private static bool IsTransientState(OverallConnectionState s) =>
+        s is OverallConnectionState.Disconnecting
+          or OverallConnectionState.Idle
+          or OverallConnectionState.Connecting;
+
+    private void BeginReconnectMask()
+    {
+        // 8s ceiling: typical Node-toggle reconnects on a healthy WAN settle
+        // in 1-3s; this gives slow networks headroom without leaving the UI
+        // showing a stale "connected" state forever if the reconnect fails.
+        _suppressReconnectVisualsUntilUtc = DateTime.UtcNow.AddSeconds(8);
+        if (_reconnectMaskTimer == null)
+        {
+            _reconnectMaskTimer = new Microsoft.UI.Xaml.DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(8),
+            };
+            _reconnectMaskTimer.Tick += OnReconnectMaskTimeout;
+        }
+        _reconnectMaskTimer.Stop();
+        _reconnectMaskTimer.Start();
+    }
+
+    private void OnReconnectMaskTimeout(object? sender, object e)
+    {
+        _reconnectMaskTimer?.Stop();
+        _suppressReconnectVisualsUntilUtc = DateTime.MinValue;
+        if (_connectionManager != null)
+            RefreshFromSnapshot(_connectionManager.CurrentSnapshot);
     }
 
     // ─── Pending pairing — populate the banner with existing semantics ─
@@ -1919,12 +2164,24 @@ public sealed partial class ConnectionPage : Page
 
         if (canPair)
         {
+            // Legacy gateways may not populate RequestId for device pairing
+            // requests; UpdatePairingGuidance already falls back to DeviceId
+            // for the user-facing copy. Apply the same fallback here so the
+            // approve/deny click can call into the gateway client even on
+            // legacy snapshots; if neither id is present, leave the buttons
+            // disabled so the user isn't tricked into a no-op.
+            var capturedId = req.RequestId ?? req.DeviceId;
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
             var approveBtn = new Button { Content = "Approve", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
             var rejectBtn = new Button { Content = "Deny" };
-            var capturedId = req.RequestId;
+            if (string.IsNullOrEmpty(capturedId))
+            {
+                approveBtn.IsEnabled = false;
+                rejectBtn.IsEnabled = false;
+            }
             approveBtn.Click += async (_, __) =>
             {
+                if (string.IsNullOrEmpty(capturedId)) return;
                 approveBtn.IsEnabled = false; rejectBtn.IsEnabled = false;
                 try
                 {
@@ -1941,6 +2198,7 @@ public sealed partial class ConnectionPage : Page
             };
             rejectBtn.Click += async (_, __) =>
             {
+                if (string.IsNullOrEmpty(capturedId)) return;
                 approveBtn.IsEnabled = false; rejectBtn.IsEnabled = false;
                 try
                 {
@@ -2004,12 +2262,21 @@ public sealed partial class ConnectionPage : Page
 
         if (canPair)
         {
+            // Same fallback as device pairing: legacy gateways may omit
+            // RequestId, so prefer NodeId. If neither is present, disable
+            // the buttons so the user can't trigger a no-op call.
+            var capturedId = req.RequestId ?? req.NodeId;
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
             var approveBtn = new Button { Content = "Approve", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
             var rejectBtn = new Button { Content = "Deny" };
-            var capturedId = req.RequestId;
+            if (string.IsNullOrEmpty(capturedId))
+            {
+                approveBtn.IsEnabled = false;
+                rejectBtn.IsEnabled = false;
+            }
             approveBtn.Click += async (_, __) =>
             {
+                if (string.IsNullOrEmpty(capturedId)) return;
                 approveBtn.IsEnabled = false; rejectBtn.IsEnabled = false;
                 try
                 {
@@ -2025,6 +2292,7 @@ public sealed partial class ConnectionPage : Page
             };
             rejectBtn.Click += async (_, __) =>
             {
+                if (string.IsNullOrEmpty(capturedId)) return;
                 approveBtn.IsEnabled = false; rejectBtn.IsEnabled = false;
                 try
                 {
