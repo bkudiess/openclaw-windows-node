@@ -31,6 +31,8 @@ public sealed partial class SessionsPage : Page
 
     public void Initialize()
     {
+        // Guard against duplicate subscriptions (NavigationCacheMode reuses page)
+        if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
         _appState = CurrentApp.AppState;
         _appState.PropertyChanged += OnAppStateChanged;
 

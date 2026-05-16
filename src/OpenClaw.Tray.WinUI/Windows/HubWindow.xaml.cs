@@ -341,11 +341,18 @@ public sealed partial class HubWindow : WindowEx
             case VoiceSettingsPage voice: voice.Initialize(VoiceServiceInstance); break;
             case ActivityPage activity: activity.Initialize(); break;
             case AgentEventsPage agentEvents:
+                agentEvents.Initialize(this);
                 agentEvents.ClearCentralCache = () => AppModel?.ClearAgentEvents();
                 agentEvents.PopulateAgentFilter(this);
                 var agentEventsTag = (NavView?.SelectedItem as NavigationViewItem)?.Tag as string;
                 var eventsAgentFilter = agentEventsTag?.StartsWith("agent:") == true ? _currentAgentId : null;
                 agentEvents.SetAgentFilter(eventsAgentFilter);
+                // Seed existing events from AppState
+                if (agentEvents.EventCount == 0 && AppModel?.AgentEvents is { Count: > 0 } events)
+                {
+                    for (int i = events.Count - 1; i >= 0; i--)
+                        agentEvents.AddEvent(events[i]);
+                }
                 break;
             case WorkspacePage workspace:
                 workspace.AgentId = _currentAgentId;

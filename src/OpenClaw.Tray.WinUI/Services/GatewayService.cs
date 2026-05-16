@@ -294,7 +294,6 @@ internal sealed class GatewayService
         if (sender != _currentClient) return;
 
         var activeKeys = new HashSet<string>(sessions.Select(s => s.Key), StringComparer.Ordinal);
-        _state.PruneSessionPreviews(activeKeys);
 
         // Throttled preview request
         if (_currentClient != null &&
@@ -306,7 +305,11 @@ internal sealed class GatewayService
             _ = _currentClient.RequestSessionPreviewAsync(keys, limit: 3, maxChars: 140);
         }
 
-        EnqueueModelUpdate(() => _state.Sessions = sessions);
+        EnqueueModelUpdate(() =>
+        {
+            _state.Sessions = sessions;
+            _state.PruneSessionPreviews(activeKeys);
+        });
     }
 
     private void OnUsageCostUpdated(object? sender, GatewayCostUsageInfo usageCost)

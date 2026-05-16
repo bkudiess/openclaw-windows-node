@@ -1642,12 +1642,11 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
 
         RaiseChatProviderChanged();
 
-        if (_appState != null)
-            _appState.GatewaySelf = null;
-
         // Update UI references
         OnUiThread(() =>
         {
+            if (_appState != null)
+                _appState.GatewaySelf = null;
             if (_hubWindow != null && !_hubWindow.IsClosed)
             {
                 _hubWindow.GatewayClient = _connectionManager?.OperatorClient;
@@ -2279,8 +2278,8 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
                     _hubWindow.UpdateStatus(_appState.Status);
                 break;
             case nameof(AppState.GatewaySelf):
-                if (_hubWindow != null && !_hubWindow.IsClosed)
-                    _hubWindow.UpdateGatewaySelf(_appState.GatewaySelf!);
+                if (_hubWindow != null && !_hubWindow.IsClosed && _appState.GatewaySelf != null)
+                    _hubWindow.UpdateGatewaySelf(_appState.GatewaySelf);
                 UpdateStatusDetailWindow();
                 break;
             case nameof(AppState.Sessions):
