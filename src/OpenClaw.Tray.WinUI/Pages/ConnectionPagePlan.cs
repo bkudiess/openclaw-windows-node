@@ -525,11 +525,16 @@ internal sealed record ConnectionPagePlan
         // `openclaw approve node …` form does not match any registered
         // subcommand and silently failed when users pasted it.
         // Missing requestId is a real-world case on older gateway builds:
-        // emit a discovery hint instead of a bare `approve` (which the
-        // CLI rejects with "missing required argument").
+        // emit a single discovery command (`openclaw nodes pending`) the
+        // user can paste verbatim into any shell — they then pick a
+        // requestId from its output and run approve manually. We avoid
+        // embedding a "# then:" or "<requestId>" follow-up in the clipboard
+        // text because `#` is treated as a literal arg by cmd.exe and `<`
+        // is parsed as input redirection — pasting either breaks for
+        // Windows-cmd users.
         return reqId != null
             ? $"openclaw nodes approve {reqId}"
-            : "openclaw nodes pending  # then: openclaw nodes approve <requestId>";
+            : "openclaw nodes pending";
     }
 
     private static string? BuildDevicePairingApproveCommand(GatewayConnectionSnapshot snap)
@@ -540,11 +545,11 @@ internal sealed record ConnectionPagePlan
             ? ConnectionCardPlanSanitizer.Sanitize(snap.OperatorPairingRequestId!, maxLen: 64)
             : null;
         // Noun-first per openclaw/src/cli/devices-cli.ts:
-        // `openclaw devices approve <requestId>`. Mirror BuildNodeApproveCommand
-        // for the missing-id discovery hint.
+        // `openclaw devices approve <requestId>`. Mirror BuildNodeApproveCommand:
+        // single discovery command in the clipboard, no shell-hostile suffix.
         return reqId != null
             ? $"openclaw devices approve {reqId}"
-            : "openclaw devices list  # then: openclaw devices approve <requestId>";
+            : "openclaw devices list";
     }
 
     private static string? ExtractNodeErrorDetail(GatewayConnectionSnapshot snap)

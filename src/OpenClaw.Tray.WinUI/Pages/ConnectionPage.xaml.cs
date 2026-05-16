@@ -1044,6 +1044,15 @@ public sealed partial class ConnectionPage : Page
     }
 
     /// <summary>
+    /// Returns true when the active gateway row is in a state where
+    /// "Disconnect" is a meaningful action. Delegates to
+    /// <see cref="ConnectionPageRowState.CanDisconnectFromBadge"/>, kept
+    /// pure so the contract can be unit-tested.
+    /// </summary>
+    private static bool CanDisconnectFromBadge(OverallConnectionState state) =>
+        ConnectionPageRowState.CanDisconnectFromBadge(state);
+
+    /// <summary>
     /// Returns the inline status badge to render on the active gateway row
     /// in the saved-gateways list, or <c>null</c> when the row should fall
     /// back to a [Connect] button. The badge tracks the *real* overall
@@ -1069,10 +1078,18 @@ public sealed partial class ConnectionPage : Page
             OverallConnectionState.PairingRequired =>
                 (Helpers.FluentIconCatalog.Lock, "SystemFillColorCautionBrush", "Awaiting approval"),
 
+            // Error: surface as a critical-colored badge so the user can
+            // distinguish "active gateway is broken" from "this row is just
+            // not active". Without this, an Error active row fell through
+            // to [Connect], indistinguishable from any inactive row, and
+            // the overflow menu lost the Disconnect/teardown affordance.
+            OverallConnectionState.Error =>
+                (Helpers.FluentIconCatalog.StatusErr, "SystemFillColorCriticalBrush", "Error"),
+
             OverallConnectionState.Disconnecting =>
                 (Helpers.FluentIconCatalog.Sync, "TextFillColorSecondaryBrush", "Disconnecting…"),
 
-            // Idle / Error → no badge; caller renders [Connect].
+            // Idle → no badge; caller renders [Connect].
             _ => null,
         };
 
@@ -1100,6 +1117,13 @@ public sealed partial class ConnectionPage : Page
             Foreground = ResolveBrush(brushKey),
             VerticalAlignment = VerticalAlignment.Center,
         });
+        // Accessibility: the badge label is the screen-reader narration for
+        // the active row's status. Marking the container as a polite live
+        // region triggers a re-announcement when the page rebuilds the row
+        // with a new badge (e.g. Connecting… → Awaiting approval → Connected).
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(stack, label);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetLiveSetting(
+            stack, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
         return stack;
     }
 
@@ -1225,12 +1249,17 @@ public sealed partial class ConnectionPage : Page
         flyout.Items.Add(openDashboard);
         if (hasLiveAffordance)
         {
-            // Whenever the row has a status badge (Connected / Connecting…
-            // / Awaiting approval / Disconnecting…) we offer Disconnect as
-            // the corresponding teardown / cancel action.
-            var disconnect = new MenuFlyoutItem { Text = "Disconnect", Tag = row.Id };
-            disconnect.Click += OnDisconnect;
-            flyout.Items.Add(disconnect);
+            // Whenever the row is in a state where Disconnect makes sense
+            // (Connected / Connecting… / Awaiting approval / Error) we offer
+            // it as the corresponding teardown / cancel action. Disconnecting
+            // is intentionally excluded — teardown is already in flight and
+            // re-entering would race the connection manager.
+            if (CanDisconnectFromBadge(_lastSnapshot.OverallState))
+            {
+                var disconnect = new MenuFlyoutItem { Text = "Disconnect", Tag = row.Id };
+                disconnect.Click += OnDisconnect;
+                flyout.Items.Add(disconnect);
+            }
             var editActive = new MenuFlyoutItem { Text = "Edit", Tag = row.Id };
             editActive.Click += OnSavedRowEdit;
             flyout.Items.Add(editActive);
@@ -2337,6 +2366,79 @@ public sealed partial class ConnectionPage : Page
     }
 
     /// <summary>
+    /// Runs an Approve or Deny decision and manages the buttons' enabled
+    /// state. Both buttons are disabled while the call is in flight; on
+    /// failure or a missing gateway client they're re-enabled immediately.
+    /// On success they stay disabled, expecting the gateway to push a
+    /// list-updated event that rebuilds the panel (and drops this card).
+    /// A 8-second watchdog re-enables the buttons if that event never
+    /// arrives — without it, a dropped websocket frame would leave the
+    /// row permanently inert and the user would have no way to retry.
+    /// </summary>
+    private async Task RunPairingDecisionAsync(
+        Button approveBtn, Button rejectBtn, bool isApprove,
+        Func<IOperatorGatewayClient, Task<bool>> action)
+    {
+        approveBtn.IsEnabled = false;
+        rejectBtn.IsEnabled = false;
+        bool successPath = false;
+        try
+        {
+            var client = _hub?.GatewayClient;
+            if (client == null) return; // finally re-enables
+            var ok = await action(client);
+            successPath = ok;
+            // !ok falls into finally below — re-enable so user can retry.
+        }
+        catch
+        {
+            // Swallow; finally re-enables. The pairing list refresh has
+            // its own observable surface (gateway list-updated event), so
+            // there's no clean place to surface a per-row error here.
+        }
+        finally
+        {
+            if (!successPath)
+            {
+                approveBtn.IsEnabled = true;
+                rejectBtn.IsEnabled = true;
+            }
+            else
+            {
+                ArmPairingDecisionWatchdog(approveBtn, rejectBtn);
+            }
+        }
+    }
+
+    private void ArmPairingDecisionWatchdog(Button approveBtn, Button rejectBtn)
+    {
+        // 8 s matches the existing reconnect-mask budget at the top of the
+        // file — the gateway's normal list-updated round-trip is < 1 s, so
+        // arming at 8 s only fires when something has genuinely gone wrong
+        // (websocket dropped, gateway crashed mid-approve, ...). The card
+        // will be removed by RefreshFromSnapshot in the happy path, which
+        // cancels this watchdog implicitly because the targets are no
+        // longer parented.
+        var timer = new Microsoft.UI.Xaml.DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(8),
+        };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            // If the row is still on screen (Parent != null), the gateway
+            // didn't push a list update — re-enable so the user can retry
+            // instead of being stuck with permanently disabled buttons.
+            if (approveBtn.Parent != null)
+            {
+                approveBtn.IsEnabled = true;
+                rejectBtn.IsEnabled = true;
+            }
+        };
+        timer.Start();
+    }
+
+    /// <summary>
     /// Builds a per-row pairing decision button (Approve / Deny). The button
     /// stays a plain <see cref="Button"/> — accent style is intentionally
     /// avoided so we comply with the Fluent "one accent per view" rule when
@@ -2435,36 +2537,22 @@ public sealed partial class ConnectionPage : Page
             approveBtn.Click += async (_, __) =>
             {
                 if (string.IsNullOrEmpty(capturedId)) return;
-                approveBtn.IsEnabled = false; rejectBtn.IsEnabled = false;
-                try
+                await RunPairingDecisionAsync(approveBtn, rejectBtn, isApprove: true, async client =>
                 {
-                    var client = _hub?.GatewayClient;
-                    if (client != null)
-                    {
-                        var ok = await client.DevicePairApproveAsync(capturedId);
-                        if (ok) await client.RequestDevicePairListAsync();
-                        else { approveBtn.IsEnabled = true; rejectBtn.IsEnabled = true; }
-                    }
-                    else { approveBtn.IsEnabled = true; rejectBtn.IsEnabled = true; }
-                }
-                catch { approveBtn.IsEnabled = true; rejectBtn.IsEnabled = true; }
+                    var ok = await client.DevicePairApproveAsync(capturedId);
+                    if (ok) await client.RequestDevicePairListAsync();
+                    return ok;
+                });
             };
             rejectBtn.Click += async (_, __) =>
             {
                 if (string.IsNullOrEmpty(capturedId)) return;
-                approveBtn.IsEnabled = false; rejectBtn.IsEnabled = false;
-                try
+                await RunPairingDecisionAsync(approveBtn, rejectBtn, isApprove: false, async client =>
                 {
-                    var client = _hub?.GatewayClient;
-                    if (client != null)
-                    {
-                        var ok = await client.DevicePairRejectAsync(capturedId);
-                        if (ok) await client.RequestDevicePairListAsync();
-                        else { approveBtn.IsEnabled = true; rejectBtn.IsEnabled = true; }
-                    }
-                    else { approveBtn.IsEnabled = true; rejectBtn.IsEnabled = true; }
-                }
-                catch { approveBtn.IsEnabled = true; rejectBtn.IsEnabled = true; }
+                    var ok = await client.DevicePairRejectAsync(capturedId);
+                    if (ok) await client.RequestDevicePairListAsync();
+                    return ok;
+                });
             };
             buttons.Children.Add(approveBtn);
             buttons.Children.Add(rejectBtn);
@@ -2541,34 +2629,26 @@ public sealed partial class ConnectionPage : Page
             approveBtn.Click += async (_, __) =>
             {
                 if (string.IsNullOrEmpty(capturedId)) return;
-                approveBtn.IsEnabled = false; rejectBtn.IsEnabled = false;
-                try
+                await RunPairingDecisionAsync(approveBtn, rejectBtn, isApprove: true, async client =>
                 {
-                    var client = _hub?.GatewayClient;
-                    if (client != null)
-                    {
-                        var ok = await client.NodePairApproveAsync(capturedId);
-                        if (!ok) { approveBtn.IsEnabled = true; rejectBtn.IsEnabled = true; }
-                    }
-                    else { approveBtn.IsEnabled = true; rejectBtn.IsEnabled = true; }
-                }
-                catch { approveBtn.IsEnabled = true; rejectBtn.IsEnabled = true; }
+                    var ok = await client.NodePairApproveAsync(capturedId);
+                    // Symmetry with device pairing: ask for a fresh list so the
+                    // panel rebuilds and this card drops out. Without this the
+                    // Approve/Deny buttons stayed disabled until the gateway
+                    // spontaneously pushed a list update.
+                    if (ok) await client.RequestNodePairListAsync();
+                    return ok;
+                });
             };
             rejectBtn.Click += async (_, __) =>
             {
                 if (string.IsNullOrEmpty(capturedId)) return;
-                approveBtn.IsEnabled = false; rejectBtn.IsEnabled = false;
-                try
+                await RunPairingDecisionAsync(approveBtn, rejectBtn, isApprove: false, async client =>
                 {
-                    var client = _hub?.GatewayClient;
-                    if (client != null)
-                    {
-                        var ok = await client.NodePairRejectAsync(capturedId);
-                        if (!ok) { approveBtn.IsEnabled = true; rejectBtn.IsEnabled = true; }
-                    }
-                    else { approveBtn.IsEnabled = true; rejectBtn.IsEnabled = true; }
-                }
-                catch { approveBtn.IsEnabled = true; rejectBtn.IsEnabled = true; }
+                    var ok = await client.NodePairRejectAsync(capturedId);
+                    if (ok) await client.RequestNodePairListAsync();
+                    return ok;
+                });
             };
             buttons.Children.Add(approveBtn);
             buttons.Children.Add(rejectBtn);
