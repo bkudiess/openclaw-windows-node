@@ -127,6 +127,14 @@ public sealed class TrayMenuPopupCompositionTests
         return File.ReadAllText(path);
     }
 
+    private static string ReadStateBuilder()
+    {
+        var path = Path.Combine(
+            GetRepositoryRoot(),
+            "src", "OpenClaw.Tray.WinUI", "Services", "TrayMenuStateBuilder.cs");
+        return File.ReadAllText(path);
+    }
+
     private static string ReadHubWindowXaml()
     {
         var path = Path.Combine(
@@ -152,7 +160,7 @@ public sealed class TrayMenuPopupCompositionTests
     [Fact]
     public void BuildTrayMenuPopup_UsesThemeBrushes()
     {
-        var src = ReadAppXaml();
+        var src = ReadStateBuilder();
         Assert.Contains("SystemFillColorSuccessBrush", src);
         Assert.Contains("SystemFillColorCautionBrush", src);
         Assert.Contains("SystemFillColorNeutralBrush", src);
@@ -162,7 +170,7 @@ public sealed class TrayMenuPopupCompositionTests
     [Fact]
     public void BuildTrayMenuPopup_SectionOrder_GatewayThenDevicesThenSessions()
     {
-        var src = ReadAppXaml();
+        var src = ReadStateBuilder();
         var gateway = src.IndexOf("// ── Gateway Section ──", StringComparison.Ordinal);
         var devices = src.IndexOf("// ── Connected Devices (moved above Sessions) ──", StringComparison.Ordinal);
         var sessions = src.IndexOf("// ── Sessions (now below Devices) ──", StringComparison.Ordinal);
@@ -179,7 +187,7 @@ public sealed class TrayMenuPopupCompositionTests
     [Fact]
     public void BuildTrayMenuPopup_EmitsPermissionsSubmenuForLocalDevice()
     {
-        var src = ReadAppXaml();
+        var src = ReadStateBuilder();
         Assert.Contains("BuildPermissionsFlyoutItems", src);
         Assert.Contains("FluentIconCatalog.Permissions", src);
     }
@@ -187,9 +195,8 @@ public sealed class TrayMenuPopupCompositionTests
     [Fact]
     public void BuildTrayMenuPopup_RoutesAboutAction()
     {
-        var src = ReadAppXaml();
-        Assert.Contains("\"About\", FluentIconCatalog.Build(FluentIconCatalog.About), \"about\"", src);
-        Assert.Contains("case \"about\":", src);
+        Assert.Contains("\"About\", FluentIconCatalog.Build(FluentIconCatalog.About), \"about\"", ReadStateBuilder());
+        Assert.Contains("case \"about\":", ReadAppXaml());
     }
 
     [Fact]
