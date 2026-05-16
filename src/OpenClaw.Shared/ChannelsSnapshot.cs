@@ -228,6 +228,12 @@ public sealed class WebLoginStartResult
     public string? Message { get; init; }
     public string? QrDataUrl { get; init; }
     public bool Connected { get; init; }
+
+    /// <summary>Gateway-side error message when the call failed (ok=false), or transport exception. Null on success.</summary>
+    public string? Error { get; init; }
+
+    /// <summary>Raw JSON of the gateway response (or stringified exception). Used by the diagnostic disclosure in the UI.</summary>
+    public string? RawResponse { get; init; }
 }
 
 /// <summary>Result of <c>web.login.wait</c> — long-poll outcome.</summary>
@@ -236,4 +242,10 @@ public sealed class WebLoginWaitResult
     public string? Message { get; init; }
     public string? QrDataUrl { get; init; }
     public bool Connected { get; init; }
+
+    /// <summary>Gateway-side error message when the call failed (ok=false), or transport exception. Null on success.</summary>
+    public string? Error { get; init; }
+
+    /// <summary>Raw JSON of the gateway response (or stringified exception). Used by the diagnostic disclosure in the UI.</summary>
+    public string? RawResponse { get; init; }
 }

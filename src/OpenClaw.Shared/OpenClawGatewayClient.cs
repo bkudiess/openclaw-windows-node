@@ -915,12 +915,20 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
                 Message = response.ValueKind == JsonValueKind.Object && response.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String ? m.GetString() : null,
                 QrDataUrl = response.ValueKind == JsonValueKind.Object && response.TryGetProperty("qrDataUrl", out var q) && q.ValueKind == JsonValueKind.String ? q.GetString() : null,
                 Connected = response.ValueKind == JsonValueKind.Object && response.TryGetProperty("connected", out var c) && c.ValueKind == JsonValueKind.True,
+                RawResponse = response.ValueKind != JsonValueKind.Undefined ? response.GetRawText() : null,
             };
         }
         catch (Exception ex)
         {
             _logger.Warn($"web.login.start failed: {ex.Message}");
-            return null;
+            // Return a populated result with the error so the UI can surface
+            // it in the diagnostic disclosure. Returning null would lose the
+            // gateway's actual reason for failing.
+            return new WebLoginStartResult
+            {
+                Error = ex.Message,
+                RawResponse = ex.ToString(),
+            };
         }
     }
 
@@ -939,12 +947,17 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
                 Message = response.ValueKind == JsonValueKind.Object && response.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String ? m.GetString() : null,
                 QrDataUrl = response.ValueKind == JsonValueKind.Object && response.TryGetProperty("qrDataUrl", out var q) && q.ValueKind == JsonValueKind.String ? q.GetString() : null,
                 Connected = response.ValueKind == JsonValueKind.Object && response.TryGetProperty("connected", out var c) && c.ValueKind == JsonValueKind.True,
+                RawResponse = response.ValueKind != JsonValueKind.Undefined ? response.GetRawText() : null,
             };
         }
         catch (Exception ex)
         {
             _logger.Warn($"web.login.wait failed: {ex.Message}");
-            return null;
+            return new WebLoginWaitResult
+            {
+                Error = ex.Message,
+                RawResponse = ex.ToString(),
+            };
         }
     }
 

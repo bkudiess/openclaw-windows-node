@@ -79,7 +79,20 @@ public static class ChannelsAggregator
     /// Aggregate a snapshot into <see cref="ChannelRecord"/>s.
     /// Returns records ordered Configured-first, then by gateway/fallback sort order.
     /// </summary>
-    public static IReadOnlyList<ChannelRecord> Aggregate(ChannelsStatusSnapshot? snapshot, DateTime now)
+    /// <param name="snapshot">Latest <c>channels.status</c> response, or null when none has been fetched.</param>
+    /// <param name="now">Current time, used to stamp each record's <see cref="ChannelRecord.LastUpdatedAt"/>.</param>
+    /// <param name="useBuiltInFallback">
+    /// When true, an empty snapshot falls back to <see cref="BuiltInChannelOrder"/>
+    /// (useful as a preview when no gateway is connected). When false, an empty
+    /// snapshot produces an empty list so the page doesn't fake-list channels
+    /// the gateway didn't actually report. Callers should pass true only when
+    /// the user isn't connected yet; once connected, the page should show
+    /// exactly what the gateway exposes.
+    /// </param>
+    public static IReadOnlyList<ChannelRecord> Aggregate(
+        ChannelsStatusSnapshot? snapshot,
+        DateTime now,
+        bool useBuiltInFallback = true)
     {
         snapshot ??= new ChannelsStatusSnapshot();
 
@@ -87,7 +100,7 @@ public static class ChannelsAggregator
         // might use to expose channels. Older gateways and plugin-only setups
         // sometimes omit channelOrder while still populating channels/meta —
         // iterating channelOrder alone would silently drop them.
-        var order = BuildOrderedIds(snapshot);
+        var order = BuildOrderedIds(snapshot, useBuiltInFallback);
         var records = new List<ChannelRecord>(order.Count);
 
         for (int i = 0; i < order.Count; i++)
@@ -148,10 +161,17 @@ public static class ChannelsAggregator
     /// Build the ordered channel id list by unioning every source in the snapshot:
     /// <c>channelOrder</c> (canonical, if provided) → channel ids in <c>channels</c>
     /// (covers older gateways missing channelOrder) → ids in <c>channelMeta</c> /
-    /// <c>channelAccounts</c> (covers metadata-only entries). Falls back to the
-    /// built-in ordering when the snapshot is empty.
+    /// <c>channelAccounts</c> (covers metadata-only entries).
     /// </summary>
-    internal static IReadOnlyList<string> BuildOrderedIds(ChannelsStatusSnapshot snapshot)
+    /// <param name="useBuiltInFallback">
+    /// When true, an empty snapshot falls back to <see cref="BuiltInChannelOrder"/>
+    /// (preview mode for disconnected users). When false, an empty snapshot
+    /// returns an empty list (honest mode for connected users — we don't claim
+    /// the gateway supports channels it never reported).
+    /// </param>
+    internal static IReadOnlyList<string> BuildOrderedIds(
+        ChannelsStatusSnapshot snapshot,
+        bool useBuiltInFallback = true)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var order = new List<string>();
@@ -170,8 +190,11 @@ public static class ChannelsAggregator
         Append(snapshot.Channels.Keys);
         Append(snapshot.ChannelAccounts.Keys);
 
-        // Last resort: built-in order when the gateway returned literally nothing.
-        if (order.Count == 0) Append(BuiltInChannelOrder);
+        // Built-in fallback: only fires when we got literally nothing from the
+        // gateway AND the caller wants a preview list (e.g. user not yet
+        // connected). Connected users see an empty list instead of fake
+        // channels.
+        if (order.Count == 0 && useBuiltInFallback) Append(BuiltInChannelOrder);
         return order;
     }
 

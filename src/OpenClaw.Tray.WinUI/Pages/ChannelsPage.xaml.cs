@@ -203,7 +203,15 @@ public sealed partial class ChannelsPage : Page
 
     private void Render(ChannelsStatusSnapshot snapshot)
     {
-        var records = ChannelsAggregator.Aggregate(snapshot, _latestSnapshotAt == default ? DateTime.UtcNow : _latestSnapshotAt);
+        // When connected to a gateway, show ONLY what the gateway reports — no
+        // built-in fallback list. Fake-listing channels the gateway doesn't
+        // expose causes clicks-into-nothing on Show QR. When disconnected,
+        // fall back to the built-in list so the page isn't empty.
+        var useFallback = CurrentApp.GatewayClient == null;
+        var records = ChannelsAggregator.Aggregate(
+            snapshot,
+            _latestSnapshotAt == default ? DateTime.UtcNow : _latestSnapshotAt,
+            useBuiltInFallback: useFallback);
         var configured = records.Where(r => r.IsConfigured).ToList();
         var available = records.Where(r => !r.IsConfigured).ToList();
 
@@ -221,7 +229,9 @@ public sealed partial class ChannelsPage : Page
         EmptyState.Visibility = records.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
         MetaText.Text = records.Count == 0
-            ? "no channels reported by gateway"
+            ? (useFallback
+                ? "connect to a gateway to see what channels are available"
+                : "this gateway didn't report any channels")
             : $"{records.Count} channels · {configured.Count} configured · last check just now";
     }
 
@@ -403,9 +413,12 @@ public sealed partial class ChannelsPage : Page
         if (record.Capabilities.HasFlag(ChannelCapabilities.CanShowQr))
             stack.Children.Add(BuildLinkingPlaceholder(record));
 
-        // Configuration section — Phase 2 schema-driven form lives here. For now, a
-        // simple navigate-to-config-page hint so users can still edit channel config.
-        stack.Children.Add(BuildSection("Configuration", BuildConfigPlaceholder(record)));
+        // Configuration section — inline credential form for channels we have
+        // explicit field definitions for (Telegram bot token, Discord webhook,
+        // Slack tokens, Google Chat webhook, Nostr key/relays). For unknown
+        // plugin channels we fall back to the "Open Config page" stub.
+        var inlineForm = BuildInlineConfigForm(record);
+        stack.Children.Add(BuildSection("Configuration", inlineForm));
 
         return stack;
     }
@@ -429,7 +442,8 @@ public sealed partial class ChannelsPage : Page
     /// Per-channel "Getting started" card. Shown only for unconfigured channels
     /// so the user has a concrete, channel-specific path forward instead of a
     /// generic "Open Config page" stub. Each guide is a short numbered list
-    /// describing exactly what to do for that channel.
+    /// describing exactly what to do for that channel, plus an external help
+    /// link when there's a canonical third-party page to visit.
     /// </summary>
     private FrameworkElement? BuildSetupGuide(ChannelRecord record)
     {
@@ -488,9 +502,40 @@ public sealed partial class ChannelsPage : Page
             stack.Children.Add(stepRow);
         }
 
+        // External help link, if we have one for this channel. Clicking the
+        // HyperlinkButton opens the user's default browser via the standard
+        // WinUI mechanism (we don't need a code-behind handler).
+        var (linkText, linkUrl) = ResolveExternalHelpLink(record.Id);
+        if (!string.IsNullOrEmpty(linkUrl))
+        {
+            var helpLink = new HyperlinkButton
+            {
+                Content = linkText,
+                NavigateUri = new Uri(linkUrl),
+                Padding = new Thickness(0, 4, 0, 0),
+            };
+            stack.Children.Add(helpLink);
+        }
+
         card.Child = stack;
         return card;
     }
+
+    /// <summary>
+    /// External help URL for the third-party service a channel needs credentials
+    /// from. Where there's no canonical page (e.g. WhatsApp/Signal use a phone
+    /// app, not a website), returns (null, null).
+    /// </summary>
+    private static (string? Text, string? Url) ResolveExternalHelpLink(string channelId) =>
+        channelId.ToLowerInvariant() switch
+        {
+            "telegram"   => ("How to create a Telegram bot →",     "https://core.telegram.org/bots/features#botfather"),
+            "discord"    => ("How to create a Discord webhook →",  "https://support.discord.com/hc/en-us/articles/228383668"),
+            "googlechat" => ("How to add a Google Chat webhook →", "https://developers.google.com/chat/how-tos/webhooks"),
+            "slack"      => ("Slack app dashboard →",              "https://api.slack.com/apps"),
+            "nostr"      => ("About Nostr →",                      "https://nostr.com/"),
+            _ => (null, null),
+        };
 
     /// <summary>
     /// Channel-specific setup content. Returns (null, null) for channels we
@@ -516,39 +561,317 @@ public sealed partial class ChannelsPage : Page
             {
                 "Open Telegram and send a message to @BotFather.",
                 "Send /newbot and follow the prompts. Copy the bot token at the end.",
-                "Click \"Open Config page\" below and paste the token under channels.telegram.token.",
-                "Save the config. The channel will start automatically.",
+                "Paste the token into the Configuration form below.",
+                "Click \"Save and start\". The channel will start automatically.",
             }),
             "discord" => ("Connect Discord via a webhook", new[]
             {
                 "Open your Discord server settings → Integrations → Webhooks.",
                 "Click \"New Webhook\", give it a name, and copy the webhook URL.",
-                "Click \"Open Config page\" below and paste the URL under channels.discord.webhookUrl.",
-                "Save the config.",
+                "Paste the URL into the Configuration form below.",
+                "Click \"Save and start\".",
             }),
             "googlechat" => ("Connect Google Chat via a webhook", new[]
             {
                 "In Google Chat, open the space → Manage webhooks → Add webhook.",
                 "Copy the webhook URL.",
-                "Click \"Open Config page\" below and paste the URL under channels.googlechat.webhookUrl.",
-                "Save the config.",
+                "Paste the URL into the Configuration form below.",
+                "Click \"Save and start\".",
             }),
             "slack" => ("Connect Slack via an app", new[]
             {
                 "Create a Slack app at api.slack.com/apps and install it to your workspace.",
                 "Copy the bot token (xoxb-…) and the signing secret.",
-                "Click \"Open Config page\" below and paste both under channels.slack.",
-                "Save the config.",
+                "Paste both into the Configuration form below.",
+                "Click \"Save and start\".",
             }),
             "nostr" => ("Connect Nostr via relays", new[]
             {
                 "Generate or paste a private key (nsec).",
                 "Pick one or more relay URLs (e.g. wss://relay.damus.io).",
-                "Click \"Open Config page\" below and paste both under channels.nostr.",
-                "Save the config.",
+                "Paste both into the Configuration form below.",
+                "Click \"Save and start\".",
             }),
             _ => (null, null),
         };
+
+    // ─── Inline credential form (no Config page detour) ─────────────────────
+
+    /// <summary>One field rendered in the inline config form.</summary>
+    private sealed record ConfigField(
+        string Path,
+        string Label,
+        string Placeholder,
+        bool Sensitive,
+        bool Required,
+        bool Multiline = false,
+        string? HelpText = null);
+
+    /// <summary>
+    /// Per-channel inline-form schema. Fields were validated against the
+    /// gateway test fixtures (src/cli/config-cli.test.ts and related tests
+    /// confirm channels.telegram.botToken, channels.slack.botToken/signingSecret,
+    /// channels.discord.webhookUrl, etc.). Returns null for channels without an
+    /// inline form — those still get the "Open Config page" stub.
+    /// </summary>
+    private static IReadOnlyList<ConfigField>? ResolveConfigFields(string channelId) =>
+        channelId.ToLowerInvariant() switch
+        {
+            "telegram" => new[]
+            {
+                new ConfigField(
+                    "channels.telegram.botToken",
+                    "Bot token",
+                    "123456:ABCdef...",
+                    Sensitive: true,
+                    Required: true,
+                    HelpText: "Get from @BotFather (/newbot)."),
+            },
+            "discord" => new[]
+            {
+                new ConfigField(
+                    "channels.discord.webhookUrl",
+                    "Webhook URL",
+                    "https://discord.com/api/webhooks/...",
+                    Sensitive: true,
+                    Required: true,
+                    HelpText: "Server Settings → Integrations → Webhooks → New Webhook."),
+            },
+            "googlechat" => new[]
+            {
+                new ConfigField(
+                    "channels.googlechat.webhookUrl",
+                    "Webhook URL",
+                    "https://chat.googleapis.com/v1/spaces/...",
+                    Sensitive: true,
+                    Required: true,
+                    HelpText: "Open a space → Manage webhooks → Add webhook."),
+            },
+            "slack" => new[]
+            {
+                new ConfigField(
+                    "channels.slack.botToken",
+                    "Bot token",
+                    "xoxb-...",
+                    Sensitive: true,
+                    Required: true,
+                    HelpText: "OAuth tokens from your Slack app."),
+                new ConfigField(
+                    "channels.slack.signingSecret",
+                    "Signing secret",
+                    "",
+                    Sensitive: true,
+                    Required: true,
+                    HelpText: "Basic Information → App Credentials."),
+            },
+            "nostr" => new[]
+            {
+                new ConfigField(
+                    "channels.nostr.nsec",
+                    "Private key (nsec)",
+                    "nsec1...",
+                    Sensitive: true,
+                    Required: true),
+                new ConfigField(
+                    "channels.nostr.relays",
+                    "Relay URLs",
+                    "wss://relay.damus.io",
+                    Sensitive: false,
+                    Required: true,
+                    Multiline: true,
+                    HelpText: "One per line."),
+            },
+            _ => null,
+        };
+
+    /// <summary>
+    /// Build the Configuration body for a channel. For channels in
+    /// <see cref="ResolveConfigFields"/> we render an inline form that writes
+    /// directly to the gateway via <c>config.set</c> — no Config page detour.
+    /// For unknown channels we fall back to the generic "Open Config page" stub.
+    /// </summary>
+    private FrameworkElement BuildInlineConfigForm(ChannelRecord record)
+    {
+        var fields = ResolveConfigFields(record.Id);
+        if (fields == null) return BuildConfigPlaceholder(record);
+
+        var stack = new StackPanel { Spacing = 10 };
+
+        // Status banner (set on Save success/failure, or by Test action).
+        var statusBar = new InfoBar
+        {
+            IsClosable = false,
+            IsOpen = false,
+            Severity = InfoBarSeverity.Informational,
+        };
+        stack.Children.Add(statusBar);
+
+        // Field inputs — track the FrameworkElement (TextBox / PasswordBox) so
+        // Save can read the value and validate "required".
+        var inputs = new Dictionary<string, FrameworkElement>();
+
+        foreach (var field in fields)
+        {
+            var row = new StackPanel { Spacing = 4 };
+
+            // Label with optional "required" marker.
+            var label = new TextBlock
+            {
+                Text = field.Required ? $"{field.Label} *" : field.Label,
+                FontSize = 13,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            };
+            row.Children.Add(label);
+
+            // Input: PasswordBox for sensitive, multi-line TextBox for relay lists,
+            // single-line TextBox otherwise.
+            FrameworkElement input;
+            if (field.Sensitive)
+            {
+                input = new PasswordBox
+                {
+                    PlaceholderText = field.Placeholder,
+                    PasswordRevealMode = PasswordRevealMode.Peek,
+                };
+            }
+            else if (field.Multiline)
+            {
+                input = new TextBox
+                {
+                    PlaceholderText = field.Placeholder,
+                    AcceptsReturn = true,
+                    TextWrapping = TextWrapping.Wrap,
+                    MinHeight = 70,
+                };
+            }
+            else
+            {
+                input = new TextBox { PlaceholderText = field.Placeholder };
+            }
+            row.Children.Add(input);
+            inputs[field.Path] = input;
+
+            // Help text.
+            if (!string.IsNullOrEmpty(field.HelpText))
+            {
+                row.Children.Add(new TextBlock
+                {
+                    Text = field.HelpText,
+                    FontSize = 11,
+                    Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
+                    TextWrapping = TextWrapping.Wrap,
+                });
+            }
+
+            stack.Children.Add(row);
+        }
+
+        // Save row.
+        var actionRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 4, 0, 0) };
+        var saveBtn = new Button
+        {
+            Content = record.IsConfigured ? "Save changes" : "Save and start",
+            Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+        };
+        var openConfigBtn = new Button
+        {
+            Content = "Open Config page",
+        };
+        openConfigBtn.Click += (_, _) => ((IAppCommands)CurrentApp).Navigate("config");
+        actionRow.Children.Add(saveBtn);
+        actionRow.Children.Add(openConfigBtn);
+        stack.Children.Add(actionRow);
+
+        async Task SaveAsync()
+        {
+            var client = CurrentApp.GatewayClient;
+            if (client == null)
+            {
+                statusBar.Severity = InfoBarSeverity.Error;
+                statusBar.Title = "Not connected";
+                statusBar.Message = "Connect to a gateway before saving channel config.";
+                statusBar.IsOpen = true;
+                return;
+            }
+
+            // Validate required + collect values from the inputs.
+            var values = new List<(string Path, string Value)>();
+            foreach (var field in fields)
+            {
+                var raw = inputs[field.Path] switch
+                {
+                    PasswordBox pb => pb.Password,
+                    TextBox tb => tb.Text,
+                    _ => string.Empty,
+                };
+                if (field.Required && string.IsNullOrWhiteSpace(raw))
+                {
+                    statusBar.Severity = InfoBarSeverity.Error;
+                    statusBar.Title = "Missing field";
+                    statusBar.Message = $"{field.Label} is required.";
+                    statusBar.IsOpen = true;
+                    return;
+                }
+                if (string.IsNullOrWhiteSpace(raw)) continue; // skip empty optional fields
+                values.Add((field.Path, raw.Trim()));
+            }
+
+            if (values.Count == 0) return;
+
+            saveBtn.IsEnabled = false;
+            try
+            {
+                statusBar.Severity = InfoBarSeverity.Informational;
+                statusBar.Title = "Saving…";
+                statusBar.Message = $"Writing {values.Count} field(s) to {record.Id} config.";
+                statusBar.IsOpen = true;
+
+                // For multi-line relay-style fields we send the array form;
+                // otherwise send the string as-is. The gateway schema accepts
+                // both for these specific paths in our catalog.
+                var failures = new List<string>();
+                foreach (var (path, value) in values)
+                {
+                    object payload = value;
+                    if (fields.FirstOrDefault(f => f.Path == path) is { Multiline: true })
+                    {
+                        // Treat each non-empty line as a list entry.
+                        var lines = value.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                            .Select(s => s.Trim())
+                            .Where(s => s.Length > 0)
+                            .ToArray();
+                        payload = lines;
+                    }
+
+                    var ok = await client.SetConfigAsync(path, payload);
+                    if (!ok) failures.Add(path);
+                }
+
+                if (failures.Count > 0)
+                {
+                    statusBar.Severity = InfoBarSeverity.Error;
+                    statusBar.Title = "Save failed";
+                    statusBar.Message = $"The gateway rejected: {string.Join(", ", failures)}";
+                }
+                else
+                {
+                    statusBar.Severity = InfoBarSeverity.Success;
+                    statusBar.Title = "Saved";
+                    statusBar.Message = $"{record.Id} config updated. Refreshing channel state…";
+                    // Re-fetch the snapshot so the page reflects the new
+                    // "configured" state and any auto-start behavior.
+                    await RefreshAsync(probe: true);
+                }
+            }
+            finally
+            {
+                saveBtn.IsEnabled = true;
+            }
+        }
+        saveBtn.Click += async (_, _) => await SaveAsync();
+
+        return stack;
+    }
 
     private static FrameworkElement BuildStatusKv(ChannelRecord record)
     {
@@ -713,6 +1036,29 @@ public sealed partial class ChannelsPage : Page
             TextWrapping = TextWrapping.Wrap,
         };
 
+        // Collapsed diagnostic detail — populated by StartLinkingAsync when a
+        // call fails so the user can see exactly what the gateway said
+        // instead of just our paraphrased error message.
+        var diagnostic = new Expander
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            IsExpanded = false,
+            Header = "Why isn't this working?",
+            Visibility = Visibility.Collapsed,
+        };
+        var diagnosticBody = new TextBlock
+        {
+            Text = "",
+            FontFamily = new FontFamily("Cascadia Mono, Consolas, monospace"),
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+            Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+            Margin = new Thickness(0, 8, 0, 0),
+        };
+        diagnostic.Content = diagnosticBody;
+
         var buttonsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         var showQrBtn = new Button { Content = "Show QR", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
         var relinkBtn = new Button { Content = "Relink" };
@@ -727,7 +1073,7 @@ public sealed partial class ChannelsPage : Page
             relinkBtn.IsEnabled = false;
             try
             {
-                await StartLinkingAsync(qrImage, messageBlock, record.Id, force);
+                await StartLinkingAsync(qrImage, messageBlock, diagnostic, diagnosticBody, record.Id, force);
             }
             finally
             {
@@ -740,25 +1086,57 @@ public sealed partial class ChannelsPage : Page
 
         stack.Children.Add(qrImage);
         stack.Children.Add(messageBlock);
+        stack.Children.Add(diagnostic);
         stack.Children.Add(buttonsRow);
         return stack;
     }
 
-    private async Task StartLinkingAsync(Image qrImage, TextBlock messageBlock, string channelId, bool force)
+    private async Task StartLinkingAsync(
+        Image qrImage,
+        TextBlock messageBlock,
+        Expander diagnostic,
+        TextBlock diagnosticBody,
+        string channelId,
+        bool force)
     {
+        // Local helper: show the diagnostic disclosure with method/params/response
+        // info so the user can see *exactly* what the gateway did or didn't do.
+        void ShowDiagnostic(string method, object @params, string? error, string? rawResponse)
+        {
+            var parts = new List<string>
+            {
+                $"Method:   {method}",
+                $"Channel:  {channelId}",
+                $"Params:   {System.Text.Json.JsonSerializer.Serialize(@params)}",
+            };
+            if (!string.IsNullOrEmpty(error)) parts.Add($"Error:    {error}");
+            if (!string.IsNullOrEmpty(rawResponse))
+            {
+                // Trim verbose stack traces; keep first 1000 chars (plenty for diagnosis,
+                // small enough to read in the disclosure).
+                var trimmed = rawResponse.Length > 1000 ? rawResponse[..1000] + "…" : rawResponse;
+                parts.Add($"Response: {trimmed}");
+            }
+            diagnosticBody.Text = string.Join("\n", parts);
+            diagnostic.Visibility = Visibility.Visible;
+        }
+        void HideDiagnostic()
+        {
+            diagnostic.IsExpanded = false;
+            diagnostic.Visibility = Visibility.Collapsed;
+            diagnosticBody.Text = "";
+        }
+
         var client = CurrentApp.GatewayClient;
         if (client == null)
         {
-            // Don't silently bail — give the user a clear reason why nothing
-            // happened, and a hint about where to fix it.
             qrImage.Visibility = Visibility.Collapsed;
             messageBlock.Text = "Not connected to a gateway. Open Connection settings to connect first.";
+            HideDiagnostic();
             return;
         }
 
-        // Cancel any previous linking session before starting a new one. The
-        // token is checked between awaits and before applying UI updates so
-        // navigation-during-link does not poke a detached visual tree.
+        // Cancel any previous linking session before starting a new one.
         var oldLinking = _linkingCts;
         _linkingCts = new CancellationTokenSource();
         var ct = _linkingCts.Token;
@@ -768,18 +1146,26 @@ public sealed partial class ChannelsPage : Page
         }
 
         messageBlock.Text = "Requesting QR code from the gateway…";
+        HideDiagnostic();
 
+        var startParams = new { force, timeoutMs = 30000 };
         var start = await client.WebLoginStartAsync(force);
         if (ct.IsCancellationRequested) return;
+
         if (start == null)
         {
-            // WebLoginStartAsync returns null on either: not-IsConnected,
-            // method-not-supported by gateway, or transport error. Don't
-            // dump wire-method names ("plugin not installed") on the user —
-            // they can't do anything about gateway-side state from the tray.
-            // Steer them to actions they CAN take.
+            // Only happens when the websocket is not connected; no gateway response
+            // to surface.
             qrImage.Visibility = Visibility.Collapsed;
-            messageBlock.Text = $"Couldn't link {channelId}. The gateway didn't accept the request — try Refresh, or check that this gateway supports {channelId}.";
+            messageBlock.Text = $"Couldn't link {channelId}. Not connected to the gateway.";
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(start.Error))
+        {
+            qrImage.Visibility = Visibility.Collapsed;
+            messageBlock.Text = $"Couldn't link {channelId}. The gateway returned an error — see details below.";
+            ShowDiagnostic("web.login.start", startParams, start.Error, start.RawResponse);
             return;
         }
         if (start.Connected)
@@ -793,29 +1179,40 @@ public sealed partial class ChannelsPage : Page
         }
         if (string.IsNullOrEmpty(start.QrDataUrl))
         {
-            // Gateway accepted the call but returned no QR and not "connected".
-            // Surface the gateway's own message if it gave us one, otherwise
-            // a non-jargon fallback.
+            // Gateway accepted the call (no Error) but returned no QR — show the
+            // raw response so the user can see what it did say.
             qrImage.Visibility = Visibility.Collapsed;
             messageBlock.Text = !string.IsNullOrEmpty(start.Message)
                 ? start.Message
-                : $"Gateway didn't return a QR for {channelId}. Try Refresh, or check that this gateway supports {channelId}.";
+                : $"Gateway didn't return a QR for {channelId}. See details below for what it returned.";
+            ShowDiagnostic("web.login.start", startParams, null, start.RawResponse);
             return;
         }
 
         await RenderQrAsync(qrImage, messageBlock, start.QrDataUrl);
         if (ct.IsCancellationRequested) return;
-        // Channel-specific instruction text now that the QR is on screen.
         messageBlock.Text = !string.IsNullOrEmpty(start.Message)
             ? start.Message
             : channelId.Equals("whatsapp", StringComparison.OrdinalIgnoreCase)
                 ? "Open WhatsApp on your phone → Settings → Linked devices → scan this QR."
                 : "Open the mobile app's linked-devices screen and scan this QR.";
 
-        // Long-poll once for completion (best-effort; full polling loop is Phase 3 polish)
+        // Long-poll once for completion
+        var waitParams = new { currentQrDataUrl = start.QrDataUrl, timeoutMs = 30000 };
         var waitResult = await client.WebLoginWaitAsync(start.QrDataUrl, timeoutMs: 30000);
         if (ct.IsCancellationRequested) return;
-        if (waitResult != null && waitResult.Connected)
+        if (waitResult == null)
+        {
+            messageBlock.Text = "Still waiting — click Show QR again if the code has expired.";
+            return;
+        }
+        if (!string.IsNullOrEmpty(waitResult.Error))
+        {
+            messageBlock.Text = $"Link wait failed for {channelId}. See details below.";
+            ShowDiagnostic("web.login.wait", waitParams, waitResult.Error, waitResult.RawResponse);
+            return;
+        }
+        if (waitResult.Connected)
         {
             messageBlock.Text = !string.IsNullOrEmpty(waitResult.Message)
                 ? waitResult.Message
@@ -823,7 +1220,7 @@ public sealed partial class ChannelsPage : Page
             qrImage.Visibility = Visibility.Collapsed;
             await RefreshAsync(probe: false);
         }
-        else if (waitResult != null && !string.IsNullOrEmpty(waitResult.QrDataUrl) && waitResult.QrDataUrl != start.QrDataUrl)
+        else if (!string.IsNullOrEmpty(waitResult.QrDataUrl) && waitResult.QrDataUrl != start.QrDataUrl)
         {
             // QR rotated; show the new one.
             await RenderQrAsync(qrImage, messageBlock, waitResult.QrDataUrl);
@@ -831,10 +1228,8 @@ public sealed partial class ChannelsPage : Page
             if (!string.IsNullOrEmpty(waitResult.Message))
                 messageBlock.Text = waitResult.Message;
         }
-        else if (waitResult == null)
+        else
         {
-            // Wait timed out or transport error — leave the QR visible so the
-            // user can still scan it; clarify in the message.
             messageBlock.Text = "Still waiting — click Show QR again if the code has expired.";
         }
     }
