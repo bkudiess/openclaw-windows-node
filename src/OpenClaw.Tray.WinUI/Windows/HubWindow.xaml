@@ -91,29 +91,29 @@
             SelectionChanged="NavView_SelectionChanged">
 
         <NavigationView.MenuItems>
-            <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_82" Tag="chat" Content="Chat">
+            <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_82" x:Name="NavChat" Tag="chat" Content="Chat">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE8BD;"/></NavigationViewItem.Icon>
             </NavigationViewItem>
             <NavigationViewItemSeparator/>
 
-            <NavigationViewItemHeader x:Uid="HubWindow_NavigationViewItemHeader_87" Content="Gateway"/>
+            <NavigationViewItemHeader x:Uid="HubWindow_NavigationViewItemHeader_87" x:Name="NavGatewayHeader" Content="Gateway"/>
             <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_88" Tag="connection" Content="Connection">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE839;"/></NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_91" Tag="sessions" Content="Sessions">
+            <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_91" x:Name="NavSessions" Tag="sessions" Content="Sessions">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE8F2;"/></NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_97" Tag="skills" Content="Skills">
+            <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_97" x:Name="NavSkills" Tag="skills" Content="Skills">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE945;"/></NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_109" Tag="channels" Content="Channels">
+            <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_109" x:Name="NavChannels" Tag="channels" Content="Channels">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xEC05;"/></NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_112" Tag="instances" Content="Instances">
+            <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_112" x:Name="NavInstances" Tag="instances" Content="Instances">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE977;"/></NavigationViewItem.Icon>
             </NavigationViewItem>
             <!-- Advanced — consolidates gateway-oriented pages -->
-            <NavigationViewItem Content="Advanced" SelectsOnInvoked="False">
+            <NavigationViewItem x:Name="NavAdvanced" Content="Advanced" SelectsOnInvoked="False">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE950;"/></NavigationViewItem.Icon>
                 <NavigationViewItem.MenuItems>
                     <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_94" Tag="agentevents" Content="Agent Events">
@@ -141,7 +141,7 @@
                     </NavigationViewItem>
                 </NavigationViewItem.MenuItems>
             </NavigationViewItem>
-            <NavigationViewItemSeparator/>
+            <NavigationViewItemSeparator x:Name="NavGatewaySeparator"/>
 
             <NavigationViewItemHeader x:Uid="HubWindow_NavigationViewItemHeader_129" Content="This Computer"/>
             <NavigationViewItem Tag="voice" Content="Voice &amp; Audio">

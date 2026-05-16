@@ -29,7 +29,6 @@ public sealed partial class ChannelsPage : Page
     {
         _appState = CurrentApp.AppState;
         _appState.PropertyChanged += OnAppStateChanged;
-        ConnectionWarning.Visibility = CurrentApp.GatewayClient != null ? Visibility.Collapsed : Visibility.Visible;
         if (CurrentApp.GatewayClient != null)
         {
             // Apply cached data immediately
@@ -163,7 +162,7 @@ public sealed partial class ChannelsPage : Page
         if (sender is Button btn && btn.Tag is string name)
         {
             var client = CurrentApp.GatewayClient;
-            if (client == null) { ConnectionWarning.Visibility = Visibility.Visible; return; }
+            if (client == null) return;
             btn.IsEnabled = false;
             try
             {
@@ -180,7 +179,7 @@ public sealed partial class ChannelsPage : Page
         if (sender is Button btn && btn.Tag is string name)
         {
             var client = CurrentApp.GatewayClient;
-            if (client == null) { ConnectionWarning.Visibility = Visibility.Visible; return; }
+            if (client == null) return;
             btn.IsEnabled = false;
             try
             {

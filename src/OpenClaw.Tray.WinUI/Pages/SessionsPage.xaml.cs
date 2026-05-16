@@ -38,13 +38,10 @@ public sealed partial class SessionsPage : Page
 
         if (CurrentApp.GatewayClient == null)
         {
-            ConnectionWarning.IsOpen = true;
             EmptyState.Visibility = Visibility.Collapsed;
             SessionListView.ItemsSource = null;
             return;
         }
-
-        ConnectionWarning.IsOpen = false;
 
         if (_appState?.Sessions != null)
             UpdateSessions(_appState.Sessions);

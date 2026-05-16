@@ -40,15 +40,6 @@
                 </Button>
             </Grid>
 
-            <InfoBar x:Uid="InstancesPage_ConnectionWarning"
-                     x:Name="ConnectionWarning"
-                     Title="Not connected"
-                     Message="Connect to a gateway to see live instance data."
-                     Severity="Warning"
-                     IsOpen="True"
-                     IsClosable="False"
-                     Visibility="Collapsed"/>
-
             <StackPanel x:Name="EmptyState"
                         Spacing="8"
                         HorizontalAlignment="Center"

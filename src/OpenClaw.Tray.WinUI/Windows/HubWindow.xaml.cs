@@ -56,6 +56,7 @@ public sealed partial class HubWindow : WindowEx
         if (AppModel != null)
         {
             AppModel.PropertyChanged += OnAppModelChanged;
+            UpdateGatewayNavVisibility(AppModel.Status == ConnectionStatus.Connected);
         }
     }
 
@@ -71,7 +72,9 @@ public sealed partial class HubWindow : WindowEx
                     {
                         if (IsClosed) return;
                         _cachedCommands = null;
-                        UpdateTitleBarStatus(AppModel!.Status);
+                        var status = AppModel!.Status;
+                        UpdateTitleBarStatus(status);
+                        UpdateGatewayNavVisibility(status == ConnectionStatus.Connected);
                 });
                 break;
             case nameof(AppState.GatewaySelf):
@@ -229,6 +232,37 @@ public sealed partial class HubWindow : WindowEx
             new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Red),
         _ => new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Gray),
     };
+
+    private void UpdateGatewayNavVisibility(bool connected)
+    {
+        var vis = connected ? Visibility.Visible : Visibility.Collapsed;
+        NavChat.Visibility = vis;
+        NavSessions.Visibility = vis;
+        NavSkills.Visibility = vis;
+        NavChannels.Visibility = vis;
+        NavInstances.Visibility = vis;
+        NavAdvanced.Visibility = vis;
+        NavGatewaySeparator.Visibility = vis;
+        // Keep NavGatewayHeader visible always (Connection is under it)
+
+        // If currently viewing a hidden page, navigate to Connection
+        if (!connected)
+        {
+            var currentTag = (NavView?.SelectedItem as NavigationViewItem)?.Tag as string;
+            var gatewayTags = new HashSet<string> { "chat", "sessions", "skills", "channels", "instances", "agentevents", "bindings", "config", "usage", "cron", "workspace" };
+            if (currentTag != null && (gatewayTags.Contains(currentTag) || currentTag.StartsWith("agent:")))
+            {
+                foreach (NavigationViewItem item in NavView.MenuItems.OfType<NavigationViewItem>())
+                {
+                    if (item.Tag as string == "connection")
+                    {
+                        NavView.SelectedItem = item;
+                        break;
+                    }
+                }
+            }
+        }
+    }
 
     public GatewaySelfInfo? LastGatewaySelf => AppModel?.GatewaySelf;
 

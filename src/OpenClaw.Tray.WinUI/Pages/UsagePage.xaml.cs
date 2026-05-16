@@ -30,7 +30,6 @@ public sealed partial class UsagePage : Page
     {
         _appState = CurrentApp.AppState;
         _appState.PropertyChanged += OnAppStateChanged;
-        ConnectionWarning.Visibility = CurrentApp.GatewayClient != null ? Visibility.Collapsed : Visibility.Visible;
         if (CurrentApp.GatewayClient != null)
         {
             // Apply cached data immediately, then request fresh.
@@ -59,13 +58,13 @@ public sealed partial class UsagePage : Page
         switch (e.PropertyName)
         {
             case nameof(AppState.Usage):
-                if (_appState!.Usage != null) UpdateUsage(_appState.Usage);
+                if (_appState?.Usage != null) UpdateUsage(_appState.Usage);
                 break;
             case nameof(AppState.UsageCost):
-                if (_appState!.UsageCost != null) UpdateUsageCost(_appState.UsageCost);
+                if (_appState?.UsageCost != null) UpdateUsageCost(_appState.UsageCost);
                 break;
             case nameof(AppState.UsageStatus):
-                if (_appState!.UsageStatus != null) UpdateUsageStatus(_appState.UsageStatus);
+                if (_appState?.UsageStatus != null) UpdateUsageStatus(_appState.UsageStatus);
                 break;
         }
     }

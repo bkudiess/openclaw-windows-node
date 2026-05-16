@@ -42,12 +42,10 @@ public sealed partial class InstancesPage : Page
     {
         _appState = CurrentApp.AppState;
         _appState.PropertyChanged += OnAppStateChanged;
-        var connected = CurrentApp.GatewayClient != null;
-        ConnectionWarning.Visibility = connected ? Visibility.Collapsed : Visibility.Visible;
 
         Rerender();
 
-        if (connected)
+        if (CurrentApp.GatewayClient != null)
         {
             _ = RequestNodesWithSpinnerAsync();
         }
@@ -61,7 +59,7 @@ public sealed partial class InstancesPage : Page
                 UpdateNodes(_appState!.Nodes);
                 break;
             case nameof(AppState.Presence):
-                if (_appState!.Presence != null) UpdatePresence(_appState.Presence);
+                UpdatePresence(_appState!.Presence ?? Array.Empty<PresenceEntry>());
                 break;
         }
     }
@@ -120,8 +118,7 @@ public sealed partial class InstancesPage : Page
 
     private void Rerender()
     {
-        var connected = CurrentApp.GatewayClient != null;
-        ConnectionWarning.Visibility = connected ? Visibility.Collapsed : Visibility.Visible;
+        InstancesList.Children.Clear();
 
         // Single timestamp shared by merge classification AND age formatting so
         // a row's status word (e.g. "Active") never disagrees with the relative
