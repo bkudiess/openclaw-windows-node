@@ -96,15 +96,18 @@ public sealed partial class ConnectionPage : Page
 
         // Local-WSL install entry points. The hub only exposes
         // OpenSetupAction on platforms where WSL tooling is wired up; if
-        // it's null we hide both cards so the user isn't offered a button
-        // that does nothing. This is the V2 setup path master added — we
-        // surface the same affordance from the rebuilt Welcome and Cockpit
-        // surfaces instead of the legacy LocalWslSetupCard slot.
-        var localSetupVisibility = hub.OpenSetupAction is null
-            ? Visibility.Collapsed
-            : Visibility.Visible;
+        // it's null we hide the entry points so the user isn't offered a
+        // button that does nothing.
+        //   • WelcomeLocalWslSetupCard — get-started CTA on the empty-state
+        //     Welcome screen for first-run users.
+        //   • AddLocalWslItem — third method tab inside the Add Gateway
+        //     form, alongside Direct and Setup code.
+        var localSetupAvailable = hub.OpenSetupAction is not null;
+        var localSetupVisibility = localSetupAvailable
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         WelcomeLocalWslSetupCard.Visibility = localSetupVisibility;
-        CockpitLocalWslSetupCard.Visibility = localSetupVisibility;
+        AddLocalWslItem.Visibility = localSetupVisibility;
 
         if (_connectionManager != null)
             _connectionManager.StateChanged += OnManagerStateChanged;
@@ -328,10 +331,17 @@ public sealed partial class ConnectionPage : Page
         StripSub.Text = plan.StripSub ?? "";
         StripSub.Visibility = string.IsNullOrEmpty(plan.StripSub) ? Visibility.Collapsed : Visibility.Visible;
 
-        // Primary action button — suppress in AddGateway since the form has
-        // its own Save & Connect button (else "Retry" / "Cancel" from a
-        // background error state would compete with the Add form CTA).
-        bool suppressStripCta = plan.Mode == ConnectionPageMode.AddGateway;
+        // Primary action button — show only for actions the connection
+        // toggle can't already do (CopyApproveCommand, Rep, RestartTunnel).
+        // Connect / Reconnect / Retry / Cancel are all reachable by
+        // tapping the toggle, so surfacing a redundant button next to it
+        // was noisy. Also suppress in AddGateway since the form has its
+        // own Save & Connect CTA.
+        bool suppressStripCta = plan.Mode == ConnectionPageMode.AddGateway
+            || plan.StripPrimaryAction is ConnectionPrimaryAction.Connect
+                                       or ConnectionPrimaryAction.Reconnect
+                                       or ConnectionPrimaryAction.Retry
+                                       or ConnectionPrimaryAction.Cancel;
         if (!suppressStripCta &&
             plan.StripPrimaryAction != ConnectionPrimaryAction.None &&
             plan.StripPrimaryLabel != null)
@@ -1292,13 +1302,22 @@ public sealed partial class ConnectionPage : Page
     {
         AddDirectPane.Visibility = (tag == "direct") ? Visibility.Visible : Visibility.Collapsed;
         AddSetupCodePane.Visibility = (tag == "setup") ? Visibility.Visible : Visibility.Collapsed;
+        AddLocalWslPane.Visibility = (tag == "local") ? Visibility.Visible : Visibility.Collapsed;
         // Scan pane is dead code now (kept for back-compat); always hidden.
         AddScanPane.Visibility = Visibility.Collapsed;
+
+        // SSH tunnel + Save/Cancel row only apply to Direct and Setup-code
+        // methods. The Local-WSL pane drives the install via its own
+        // button and doesn't need a per-gateway form to submit.
+        bool isFormMethod = (tag == "direct") || (tag == "setup");
+        AddSshExpander.Visibility = isFormMethod ? Visibility.Visible : Visibility.Collapsed;
+        AddSaveButton.Visibility = isFormMethod ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private string ActiveAddPaneTag()
     {
         if (AddSetupCodeItem.IsSelected) return "setup";
+        if (AddLocalWslItem.IsSelected) return "local";
         return "direct"; // default
     }
 

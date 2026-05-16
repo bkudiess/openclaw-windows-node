@@ -578,37 +578,6 @@
                         </Grid>
                         <StackPanel x:Name="GatewaysDiscoveredList" Spacing="6"/>
                     </StackPanel>
-
-                    <!-- Install a local WSL gateway — same entry point as
-                         the Welcome variant. Surfaced in Cockpit so users
-                         with existing saved gateways can also add a local
-                         one. Visibility flips on whether the hub exposed
-                         OpenSetupAction. -->
-                    <Border x:Name="CockpitLocalWslSetupCard"
-                            Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            BorderThickness="1" CornerRadius="6" Padding="12"
-                            Visibility="Collapsed">
-                        <Grid ColumnSpacing="12">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
-                                <TextBlock Text="Install a local WSL gateway"
-                                           Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                                <TextBlock Text="Adds a WSL-hosted gateway on this PC."
-                                           Style="{StaticResource CaptionTextBlockStyle}"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                           TextWrapping="Wrap"/>
-                            </StackPanel>
-                            <Button Grid.Column="1"
-                                    Content="Install"
-                                    VerticalAlignment="Center"
-                                    Click="OnInstallLocalWslGateway"
-                                    AutomationProperties.AutomationId="CockpitInstallLocalGateway"/>
-                        </Grid>
-                    </Border>
                 </StackPanel>
             </Border>
 
@@ -628,6 +597,42 @@
                     <TextBlock Text="Add a gateway"
                                Style="{StaticResource BodyStrongTextBlockStyle}"
                                AutomationProperties.HeadingLevel="Level2"/>
+
+                    <!-- Get-started CTA: lead with local-WSL install for
+                         first-run users with no saved gateway and nothing
+                         discovered on the network yet. Hidden when the
+                         hub doesn't expose OpenSetupAction (no WSL tooling
+                         on this machine). -->
+                    <Border x:Name="WelcomeLocalWslSetupCard"
+                            Background="{ThemeResource AccentFillColorTertiaryBrush}"
+                            BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                            BorderThickness="1" CornerRadius="6" Padding="14"
+                            Visibility="Collapsed">
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="Get started — install a local gateway"
+                                           Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                                <TextBlock Text="The fastest way to start: sets up a WSL-hosted gateway on this PC and makes it the active connection."
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Content="Install"
+                                    VerticalAlignment="Center"
+                                    Click="OnInstallLocalWslGateway"
+                                    AutomationProperties.AutomationId="WelcomeInstallLocalGateway"/>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock x:Name="WelcomeOrDivider"
+                               Text="Or connect to an existing one:"
+                               Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
 
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
@@ -685,36 +690,6 @@
                     <TextBlock Text="Each method supports an optional SSH tunnel."
                                Style="{StaticResource CaptionTextBlockStyle}"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-
-                    <!-- Install a local WSL gateway — entry point into the
-                         V2 setup flow. Visibility flips on whether the hub
-                         exposed an OpenSetupAction (only true when WSL
-                         tooling is available on this machine). -->
-                    <Border x:Name="WelcomeLocalWslSetupCard"
-                            Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            BorderThickness="1" CornerRadius="6" Padding="12"
-                            Visibility="Collapsed">
-                        <Grid ColumnSpacing="12">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
-                                <TextBlock Text="No gateway yet? Install one locally"
-                                           Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                                <TextBlock Text="Sets up a WSL-hosted gateway on this PC and makes it the active connection."
-                                           Style="{StaticResource CaptionTextBlockStyle}"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                           TextWrapping="Wrap"/>
-                            </StackPanel>
-                            <Button Grid.Column="1"
-                                    Content="Install local gateway"
-                                    VerticalAlignment="Center"
-                                    Click="OnInstallLocalWslGateway"
-                                    AutomationProperties.AutomationId="WelcomeInstallLocalGateway"/>
-                        </Grid>
-                    </Border>
 
                     <!-- Inline scan — also surfaces here for first-run users
                          since the Gateways section isn't visible in Welcome. -->
@@ -790,6 +765,10 @@
                         <controls:SelectorBarItem x:Name="AddSetupCodeItem"
                                                   Text="Setup code"
                                                   Tag="setup"/>
+                        <controls:SelectorBarItem x:Name="AddLocalWslItem"
+                                                  Text="Local WSL"
+                                                  Tag="local"
+                                                  Visibility="Collapsed"/>
                     </controls:SelectorBar>
 
                     <!-- Direct pane (default selected) -->
@@ -846,6 +825,27 @@
                         <Button x:Name="AddScanStartButton" Visibility="Collapsed"/>
                         <ProgressBar x:Name="AddScanProgressBar" Visibility="Collapsed"/>
                         <StackPanel x:Name="AddScanResultsPanel" Visibility="Collapsed"/>
+                    </StackPanel>
+
+                    <!-- Local WSL pane — third method. Hands off to the V2
+                         setup flow via OpenSetupAction. No URL/token form
+                         needed: the install wizard creates the gateway,
+                         pairs this PC into it, and saves the record. -->
+                    <StackPanel x:Name="AddLocalWslPane" Spacing="12" Visibility="Collapsed">
+                        <TextBlock Text="Install a new WSL gateway on this PC and make it the active connection. The setup wizard will install WSL if needed, provision the gateway, and pair this device automatically."
+                                   Style="{StaticResource BodyTextBlockStyle}"
+                                   TextWrapping="Wrap"/>
+                        <Button x:Name="AddLocalWslInstallButton"
+                                Content="Install local gateway"
+                                HorizontalAlignment="Left"
+                                Click="OnInstallLocalWslGateway"
+                                AutomationProperties.AutomationId="AddInstallLocalGateway"/>
+                        <TextBlock x:Name="AddLocalWslUnavailableText"
+                                   Text="Local-WSL setup isn't available on this machine — the install wizard couldn't be initialized."
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                   TextWrapping="Wrap"
+                                   Visibility="Collapsed"/>
                     </StackPanel>
 
                     <!-- Per-gateway SSH tunnel — saved with the gateway record -->
