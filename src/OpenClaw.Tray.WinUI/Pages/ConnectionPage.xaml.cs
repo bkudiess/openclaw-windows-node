@@ -332,11 +332,14 @@ public sealed partial class ConnectionPage : Page
         StripSub.Visibility = string.IsNullOrEmpty(plan.StripSub) ? Visibility.Collapsed : Visibility.Visible;
 
         // Primary action button — show only for actions the connection
-        // toggle can't already do (CopyApproveCommand, Rep, RestartTunnel).
-        // Connect / Reconnect / Retry / Cancel are all reachable by
-        // tapping the toggle, so surfacing a redundant button next to it
-        // was noisy. Also suppress in AddGateway since the form has its
-        // own Save & Connect CTA.
+        // toggle can't already do. The toggle covers Connect / Reconnect /
+        // Retry / Cancel; CopyApproveCommand and Rep were removed because
+        // their visible UI (inline Copy button next to the command, plus
+        // RecoveryAuthPasteBlock for re-pair) already exposes the action
+        // beneath the strip. After this clean-up, RestartTunnel is the
+        // only action that actually surfaces here in practice.
+        // Also suppress in AddGateway since the form has its own
+        // Save & Connect CTA.
         bool suppressStripCta = plan.Mode == ConnectionPageMode.AddGateway
             || plan.StripPrimaryAction is ConnectionPrimaryAction.Connect
                                        or ConnectionPrimaryAction.Reconnect
@@ -431,12 +434,7 @@ public sealed partial class ConnectionPage : Page
         var hostname = Environment.MachineName;
         int? presence = self?.PresenceCount;
         int channelTotal = channels?.Length ?? 0;
-        int channelOk = channels is { Length: > 0 }
-            ? channels.Count(c => c.IsLinked && (
-                string.Equals(c.Status, "ready", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(c.Status, "ok", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(c.Status, "connected", StringComparison.OrdinalIgnoreCase)))
-            : 0;
+        int channelOk = ConnectionPageChannelMetrics.CountHealthyChannels(channels);
         double todayAmount = 0d;
         if (cost?.Daily is { Count: > 0 })
         {
@@ -1045,9 +1043,69 @@ public sealed partial class ConnectionPage : Page
         return list;
     }
 
+    /// <summary>
+    /// Returns the inline status badge to render on the active gateway row
+    /// in the saved-gateways list, or <c>null</c> when the row should fall
+    /// back to a [Connect] button. The badge tracks the *real* overall
+    /// state — historically Connecting and PairingRequired were collapsed
+    /// into "Connected", which told users they were connected while the
+    /// page was actually mid-handshake or awaiting an approval.
+    /// </summary>
+    private FrameworkElement? BuildActiveRowBadge(OverallConnectionState state)
+    {
+        // (glyph, brushKey, label) per state. Connected/Ready/Degraded all
+        // mean "operator is online" — the only case that warrants the
+        // affirmative "Connected" badge.
+        (string glyph, string brushKey, string label)? badge = state switch
+        {
+            OverallConnectionState.Connected or
+            OverallConnectionState.Ready or
+            OverallConnectionState.Degraded =>
+                (Helpers.FluentIconCatalog.StatusOk, "SystemFillColorSuccessBrush", "Connected"),
+
+            OverallConnectionState.Connecting =>
+                (Helpers.FluentIconCatalog.Sync, "SystemFillColorCautionBrush", "Connecting…"),
+
+            OverallConnectionState.PairingRequired =>
+                (Helpers.FluentIconCatalog.Lock, "SystemFillColorCautionBrush", "Awaiting approval"),
+
+            OverallConnectionState.Disconnecting =>
+                (Helpers.FluentIconCatalog.Sync, "TextFillColorSecondaryBrush", "Disconnecting…"),
+
+            // Idle / Error → no badge; caller renders [Connect].
+            _ => null,
+        };
+
+        if (badge is null) return null;
+        var (glyph, brushKey, label) = badge.Value;
+
+        var stack = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 4,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        stack.Children.Add(new FontIcon
+        {
+            Glyph = glyph,
+            FontSize = 12,
+            Foreground = ResolveBrush(brushKey),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        stack.Children.Add(new TextBlock
+        {
+            Text = label,
+            FontSize = 11,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = ResolveBrush(brushKey),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        return stack;
+    }
+
     private Border BuildSavedGatewayRowControl(SavedGatewayRow row)
     {
-        // All rows use neutral card chrome. The "Connected" badge alone communicates
+        // All rows use neutral card chrome. The status badge alone communicates
         // which row is the active/live gateway; tinting the whole row was visually noisy.
         var card = new Border
         {
@@ -1111,45 +1169,21 @@ public sealed partial class ConnectionPage : Page
         Grid.SetColumn(info, 0);
         grid.Children.Add(info);
 
-        // Active badge OR Connect button.
-        //   Connected (active + live)       → "Connected" green badge (no clickable Connect)
-        //   Active but currently disconnected → [Connect] button
-        //   Inactive                         → [Connect] button
-        bool isCurrentlyConnected = row.IsActive && _lastSnapshot.OverallState is
-            OverallConnectionState.Connected
-            or OverallConnectionState.Ready
-            or OverallConnectionState.Degraded
-            or OverallConnectionState.Connecting
-            or OverallConnectionState.PairingRequired;
-
-        if (isCurrentlyConnected)
+        // Per-row right-hand affordance: a status badge when the row is the
+        // *active* gateway and the snapshot has something live-ish to report,
+        // otherwise a [Connect] button to (re)activate the row.
+        //
+        // The badge label must follow real state — previously this branch
+        // collapsed Connecting and PairingRequired into "Connected", which
+        // told users they were connected while the page was actually
+        // mid-handshake or waiting for the gateway operator to approve a
+        // pairing request.
+        var badge = row.IsActive ? BuildActiveRowBadge(_lastSnapshot.OverallState) : null;
+        bool hasLiveAffordance = badge != null;
+        if (hasLiveAffordance)
         {
-            // Inline "✓ Connected" — checkmark glyph + text, no boxed badge,
-            // no second green dot. The active row no longer needs a heavy badge
-            // since the page already carries a top-level status indicator.
-            var badgeStack = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 4,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            badgeStack.Children.Add(new FontIcon
-            {
-                Glyph = Helpers.FluentIconCatalog.StatusOk,
-                FontSize = 12,
-                Foreground = ResolveBrush("SystemFillColorSuccessBrush"),
-                VerticalAlignment = VerticalAlignment.Center,
-            });
-            badgeStack.Children.Add(new TextBlock
-            {
-                Text = "Connected",
-                FontSize = 11,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = ResolveBrush("SystemFillColorSuccessBrush"),
-                VerticalAlignment = VerticalAlignment.Center,
-            });
-            Grid.SetColumn(badgeStack, 1);
-            grid.Children.Add(badgeStack);
+            Grid.SetColumn(badge!, 1);
+            grid.Children.Add(badge!);
         }
         else
         {
@@ -1189,8 +1223,11 @@ public sealed partial class ConnectionPage : Page
         var openDashboard = new MenuFlyoutItem { Text = "Open dashboard", Tag = row.Id };
         openDashboard.Click += OnSavedRowOpenDashboard;
         flyout.Items.Add(openDashboard);
-        if (isCurrentlyConnected)
+        if (hasLiveAffordance)
         {
+            // Whenever the row has a status badge (Connected / Connecting…
+            // / Awaiting approval / Disconnecting…) we offer Disconnect as
+            // the corresponding teardown / cancel action.
             var disconnect = new MenuFlyoutItem { Text = "Disconnect", Tag = row.Id };
             disconnect.Click += OnDisconnect;
             flyout.Items.Add(disconnect);
@@ -1336,25 +1373,13 @@ public sealed partial class ConnectionPage : Page
             case ConnectionPrimaryAction.Cancel:
                 _ = _connectionManager?.DisconnectAsync();
                 break;
-            case ConnectionPrimaryAction.CopyApproveCommand:
-                if (!string.IsNullOrEmpty(plan.RecoveryApproveCommand))
-                    ClipboardHelper.CopyText(plan.RecoveryApproveCommand);
-                else if (!string.IsNullOrEmpty(plan.NodeApproveCommand))
-                    ClipboardHelper.CopyText(plan.NodeApproveCommand);
-                break;
             case ConnectionPrimaryAction.RestartTunnel:
                 OnRestartTunnel(sender, e);
                 break;
-            case ConnectionPrimaryAction.Rep:
-                _editingGatewayId = null;
-                _userIntent = UserIntent.None;
-                // Surface Recovery's paste textbox is already on screen for Auth recovery.
-                // For Pairing-type Rep, take the user to Add → Setup code as a fast path.
-                _userIntent = UserIntent.AddingGateway;
-                ShowAddPane("setup");
-                AddSetupCodeItem.IsSelected = true;
-                RefreshFromSnapshot(_lastSnapshot);
-                break;
+            // CopyApproveCommand and Rep arms were removed: the inline Copy
+            // button (RecoveryApproveCmdBlock / NodeApproveCmdBox) and the
+            // paste-setup-code block (RecoveryAuthPasteBlock) own those
+            // flows now. Both enum values are retired in ConnectionPagePlan.
         }
     }
 
@@ -2311,6 +2336,38 @@ public sealed partial class ConnectionPage : Page
             : $"{total} approvals waiting on you";
     }
 
+    /// <summary>
+    /// Builds a per-row pairing decision button (Approve / Deny). The button
+    /// stays a plain <see cref="Button"/> — accent style is intentionally
+    /// avoided so we comply with the Fluent "one accent per view" rule when
+    /// several pending requests are stacked. The affirmative or negative
+    /// cue comes from a leading glyph painted in a theme brush
+    /// (success / critical), which works correctly in light, dark, and
+    /// high-contrast modes.
+    /// </summary>
+    private Button BuildPairingDecisionButton(string glyph, string glyphBrushKey, string label,
+        string automationName, string automationId)
+    {
+        var stack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+        stack.Children.Add(new FontIcon
+        {
+            Glyph = glyph,
+            FontSize = 12,
+            Foreground = ResolveBrush(glyphBrushKey),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        stack.Children.Add(new TextBlock
+        {
+            Text = label,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        var btn = new Button { Content = stack };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(btn, automationName);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(btn, automationId);
+        ToolTipService.SetToolTip(btn, label);
+        return btn;
+    }
+
     private Border BuildDevicePairingCard(DevicePairingRequest req, bool canPair)
     {
         var card = new Border
@@ -2348,10 +2405,28 @@ public sealed partial class ConnectionPage : Page
             // approve/deny click can call into the gateway client even on
             // legacy snapshots; if neither id is present, leave the buttons
             // disabled so the user isn't tricked into a no-op.
+            // Per-row Approve/Deny: per Fluent guidance ("at most one accent
+            // button per view"), don't paint the affirmative half accent —
+            // when several pending requests are stacked, multiple accent
+            // buttons compete and dilute the cue. The outer
+            // PendingApprovalsBanner (caution-yellow, bold count, live
+            // region) already carries the page-level attention. We signal
+            // affirmative/negative per row via leading glyphs in success /
+            // critical brushes instead of button chrome.
             var capturedId = req.RequestId ?? req.DeviceId;
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
-            var approveBtn = new Button { Content = "Approve", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
-            var rejectBtn = new Button { Content = "Deny" };
+            var approveBtn = BuildPairingDecisionButton(
+                glyph: Helpers.FluentIconCatalog.Check,
+                glyphBrushKey: "SystemFillColorSuccessBrush",
+                label: "Approve",
+                automationName: "Approve pairing request",
+                automationId: "DevicePairApproveAction");
+            var rejectBtn = BuildPairingDecisionButton(
+                glyph: Helpers.FluentIconCatalog.Exit,
+                glyphBrushKey: "SystemFillColorCriticalBrush",
+                label: "Deny",
+                automationName: "Deny pairing request",
+                automationId: "DevicePairDenyAction");
             if (string.IsNullOrEmpty(capturedId))
             {
                 approveBtn.IsEnabled = false;
@@ -2440,13 +2515,24 @@ public sealed partial class ConnectionPage : Page
 
         if (canPair)
         {
-            // Same fallback as device pairing: legacy gateways may omit
-            // RequestId, so prefer NodeId. If neither is present, disable
-            // the buttons so the user can't trigger a no-op call.
+            // Same per-row treatment as device pairing (see BuildDevicePairingCard).
+            // Affirmative/negative cues come from leading glyphs, not button
+            // chrome, to keep the page within the "one accent per view" rule
+            // even when several pending requests are stacked.
             var capturedId = req.RequestId ?? req.NodeId;
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
-            var approveBtn = new Button { Content = "Approve", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
-            var rejectBtn = new Button { Content = "Deny" };
+            var approveBtn = BuildPairingDecisionButton(
+                glyph: Helpers.FluentIconCatalog.Check,
+                glyphBrushKey: "SystemFillColorSuccessBrush",
+                label: "Approve",
+                automationName: "Approve pairing request",
+                automationId: "NodePairApproveAction");
+            var rejectBtn = BuildPairingDecisionButton(
+                glyph: Helpers.FluentIconCatalog.Exit,
+                glyphBrushKey: "SystemFillColorCriticalBrush",
+                label: "Deny",
+                automationName: "Deny pairing request",
+                automationId: "NodePairDenyAction");
             if (string.IsNullOrEmpty(capturedId))
             {
                 approveBtn.IsEnabled = false;
