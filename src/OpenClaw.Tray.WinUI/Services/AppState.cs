@@ -1,6 +1,3 @@
-using Microsoft.UI.Dispatching;
-using OpenClaw.Connection;
-using OpenClaw.Shared;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -8,6 +5,11 @@ using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using OpenClaw.Connection;
+using OpenClaw.Shared;
+#if !OPENCLAW_TRAY_TESTS
+using Microsoft.UI.Dispatching;
+#endif
 
 namespace OpenClawTray.Services;
 
@@ -18,16 +20,21 @@ namespace OpenClawTray.Services;
 /// </summary>
 internal sealed class AppState : INotifyPropertyChanged
 {
+#if !OPENCLAW_TRAY_TESTS
     private readonly DispatcherQueue? _dispatcher;
-
     public AppState(DispatcherQueue? dispatcher = null) => _dispatcher = dispatcher;
+#else
+    public AppState() { }
+#endif
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? name = null)
     {
+#if !OPENCLAW_TRAY_TESTS
         Debug.Assert(_dispatcher == null || _dispatcher.HasThreadAccess,
             $"AppState.{name} must be written on UI thread");
+#endif
         if (EqualityComparer<T>.Default.Equals(field, value)) return false;
         field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
@@ -143,8 +150,10 @@ internal sealed class AppState : INotifyPropertyChanged
 
     public void AddAgentEvent(AgentEventInfo evt)
     {
+#if !OPENCLAW_TRAY_TESTS
         Debug.Assert(_dispatcher == null || _dispatcher.HasThreadAccess,
             "AppState.AddAgentEvent must be called on UI thread");
+#endif
         _agentEvents.Insert(0, evt);
         if (_agentEvents.Count > MaxAgentEvents)
             _agentEvents.RemoveRange(MaxAgentEvents, _agentEvents.Count - MaxAgentEvents);
