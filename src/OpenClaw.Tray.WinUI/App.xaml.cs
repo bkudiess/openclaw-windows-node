@@ -1249,8 +1249,8 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
     private void LocalDisconnectCleanup()
     {
         _appState?.ClearCachedData();
+        if (_appState != null) _appState.Status = ConnectionStatus.Disconnected;
         UpdateTrayIcon();
-        _hubWindow?.UpdateStatus(ConnectionStatus.Disconnected);
         RefreshTrayMenuIfOpen();
     }
 
@@ -1647,11 +1647,6 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         {
             if (_appState != null)
                 _appState.GatewaySelf = null;
-            if (_hubWindow != null && !_hubWindow.IsClosed)
-            {
-                _hubWindow.GatewayClient = _connectionManager?.OperatorClient;
-                _hubWindow.CurrentStatus = _appState!.Status;
-            }
         });
     }
 
@@ -1684,7 +1679,6 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         OnUiThread(() =>
         {
             if (_appState != null) _appState.Status = mapped;
-            _hubWindow?.UpdateStatus(mapped);
             UpdateTrayIcon();
             SyncConnectionToggle(mapped);
             if (mapped is ConnectionStatus.Connected or ConnectionStatus.Disconnected or ConnectionStatus.Error)
@@ -1905,13 +1899,9 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         if (_settings?.EnableNodeMode == true)
         {
             // Status field is maintained by OnManagerStateChanged — no write needed here.
-            _hubWindow?.UpdateStatus(status);
             UpdateTrayIcon();
             OnUiThread(UpdateStatusDetailWindow);
         }
-
-        // Keep hub node state in sync for ConnectionPage
-        SyncHubNodeState();
         
         // Don't show "connected" toast if waiting for pairing - we'll show pairing status instead
         var nodeService = _nodeService;
@@ -2014,32 +2004,12 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             }
         }
         catch { /* ignore */ }
-
-        SyncHubNodeState();
     }
 
     /// <summary>
     /// Pushes current node service state to hub window so ConnectionPage reflects live pairing/identity.
+    /// Now a no-op — pages read App properties directly via CurrentApp.
     /// </summary>
-    private void SyncHubNodeState()
-    {
-        if (_hubWindow == null || _hubWindow.IsClosed) return;
-        if (_nodeService != null)
-        {
-            _hubWindow.NodeIsConnected = _nodeService.IsConnected;
-            _hubWindow.NodeIsPaired = _nodeService.IsPaired;
-            _hubWindow.NodeIsPendingApproval = _nodeService.IsPendingApproval;
-            _hubWindow.NodeShortDeviceId = _nodeService.ShortDeviceId;
-            _hubWindow.NodeFullDeviceId = _nodeService.FullDeviceId;
-            _hubWindow.VoiceServiceInstance = _nodeService.VoiceService;
-        }
-        else
-        {
-            _hubWindow.NodeIsConnected = false;
-            _hubWindow.NodeIsPaired = false;
-            _hubWindow.NodeIsPendingApproval = false;
-        }
-    }
 
     public static string BuildPairingApprovalCommand(string deviceId) =>
         $"openclaw devices approve {deviceId}";
@@ -2122,11 +2092,9 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
 
     private void OnGatewayConnectionStatusChanged(object? sender, ConnectionStatus status)
     {
-        _hubWindow?.UpdateStatus(status);
-        if (status == ConnectionStatus.Connected)
+        if (status == ConnectionStatus.Connected && _appState != null)
         {
-            if (_hubWindow != null && !_hubWindow.IsClosed)
-                _hubWindow.LastAuthError = null;
+            _appState.AuthFailureMessage = null;
         }
 
         UpdateTrayIcon();
@@ -2150,11 +2118,10 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
     {
         UpdateTrayIcon();
 
-        // Forward to hub/connection page
-        if (_hubWindow != null && !_hubWindow.IsClosed)
+        // Store auth failure in AppState — HubWindow observes it via PropertyChanged
+        if (_appState != null)
         {
-            _hubWindow.LastAuthError = message;
-            _hubWindow.UpdateStatus(_appState!.Status);
+            _appState.AuthFailureMessage = message;
         }
     }
 
@@ -2265,7 +2232,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         }
     }
 
-    // ── AppState → App-level side effects (title bar, tray, status detail) ──
+    // ── AppState → tray-level side effects (tray icon, tray menu, status detail) ──
 
     private void OnAppStateChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
@@ -2273,13 +2240,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
 
         switch (e.PropertyName)
         {
-            case nameof(AppState.Status):
-                if (_hubWindow != null && !_hubWindow.IsClosed)
-                    _hubWindow.UpdateStatus(_appState.Status);
-                break;
             case nameof(AppState.GatewaySelf):
-                if (_hubWindow != null && !_hubWindow.IsClosed && _appState.GatewaySelf != null)
-                    _hubWindow.UpdateGatewaySelf(_appState.GatewaySelf);
                 UpdateStatusDetailWindow();
                 RefreshTrayMenuIfOpen();
                 break;
@@ -2288,8 +2249,6 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
                 RefreshTrayMenuIfOpen();
                 break;
             case nameof(AppState.Channels):
-                if (_hubWindow != null && !_hubWindow.IsClosed)
-                    _hubWindow.UpdateStatus(_appState.Status);
                 RefreshTrayMenuIfOpen();
                 break;
             case nameof(AppState.UsageCost):
@@ -2299,10 +2258,6 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             case nameof(AppState.Nodes):
                 UpdateStatusDetailWindow();
                 RefreshTrayMenuIfOpen();
-                break;
-            case nameof(AppState.AgentsList):
-                if (_hubWindow != null && !_hubWindow.IsClosed && _appState.AgentsList.HasValue)
-                    _hubWindow.UpdateAgentsList(_appState.AgentsList.Value);
                 break;
             case nameof(AppState.CurrentActivity):
                 UpdateTrayIcon();
@@ -2549,42 +2504,9 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         if (_hubWindow == null || _hubWindow.IsClosed)
         {
             _hubWindow = new HubWindow();
-            _hubWindow.Settings = _settings;
             _hubWindow.AppModel = _appState;
-            _hubWindow.GatewayClient = _connectionManager?.OperatorClient;
-            _hubWindow.CurrentStatus = _appState!.Status;
-            _hubWindow.OpenDashboardAction = OpenDashboard;
-            _hubWindow.CheckForUpdatesAction = () => _ = CheckForUpdatesUserInitiatedAsync();
+            _hubWindow.ApplyNavPaneState(_settings!);
             _hubWindow.QuickSendAction = () => ShowQuickSend();
-            _hubWindow.OpenSetupAction = () => _ = ShowOnboardingAsync();
-            _hubWindow.OpenConnectionStatusAction = ShowConnectionStatusWindow;
-            _hubWindow.OpenVoiceAction = () => ShowVoiceOverlay();
-            _hubWindow.ConnectionManager = _connectionManager;
-            _hubWindow.GatewayRegistry = _gatewayRegistry;
-            _hubWindow.ConnectAction = () =>
-            {
-                _ = _connectionManager?.ReconnectAsync();
-            };
-            _hubWindow.DisconnectAction = () =>
-            {
-                _ = _connectionManager?.DisconnectAsync();
-                // Status is updated by OnManagerStateChanged when disconnect completes.
-                UpdateTrayIcon();
-                _hubWindow?.UpdateStatus(ConnectionStatus.Disconnected);
-            };
-            _hubWindow.ReconnectAction = () =>
-            {
-                _ = _connectionManager?.ReconnectAsync();
-            };
-            if (_nodeService != null)
-            {
-                _hubWindow.NodeIsConnected = _nodeService.IsConnected;
-                _hubWindow.NodeIsPaired = _nodeService.IsPaired;
-                _hubWindow.NodeIsPendingApproval = _nodeService.IsPendingApproval;
-                _hubWindow.NodeShortDeviceId = _nodeService.ShortDeviceId;
-                _hubWindow.NodeFullDeviceId = _nodeService.FullDeviceId;
-            }
-            _hubWindow.VoiceServiceInstance = _nodeService?.VoiceService ?? _standaloneVoiceService;
             _hubWindow.SettingsSaved += OnSettingsSaved;
             _hubWindow.Closed += (s, e) =>
             {
@@ -2592,28 +2514,11 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
                 _hubWindow = null;
             };
 
-            // Seed ALL cached data BEFORE first navigation so pages see data in Initialize()
-            SeedHubCachedData();
+            _hubWindow.BindToAppState();
 
-            // Navigate to default page now that properties and data are set
+            // Navigate to default page now that AppModel is set
             _hubWindow.NavigateToDefault();
         }
-        // Always update live state
-        _hubWindow.Settings = _settings;
-        _hubWindow.GatewayClient = _connectionManager?.OperatorClient;
-        _hubWindow.CurrentStatus = _appState!.Status;
-        _hubWindow.VoiceServiceInstance = _nodeService?.VoiceService ?? _standaloneVoiceService;
-        if (_nodeService != null)
-        {
-            _hubWindow.NodeIsConnected = _nodeService.IsConnected;
-            _hubWindow.NodeIsPaired = _nodeService.IsPaired;
-            _hubWindow.NodeIsPendingApproval = _nodeService.IsPendingApproval;
-            _hubWindow.NodeShortDeviceId = _nodeService.ShortDeviceId;
-            _hubWindow.NodeFullDeviceId = _nodeService.FullDeviceId;
-        }
-
-        // Seed cached data into hub (also on re-show)
-        SeedHubCachedData();
 
         if (navigateTo != null)
         {
@@ -2644,14 +2549,6 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         }
     }
 
-    private void SeedHubCachedData()
-    {
-        if (_hubWindow == null) return;
-        // Seed only what HubWindow itself needs (nav sidebar + title bar)
-        if (_appState!.GatewaySelf != null) _hubWindow.UpdateGatewaySelf(_appState!.GatewaySelf);
-        if (_appState!.AgentsList.HasValue) _hubWindow.UpdateAgentsList(_appState!.AgentsList.Value);
-    }
-
     private void ShowSettings()
     {
         ShowHub("settings");
@@ -2680,7 +2577,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
                     _sshTunnelService?.Stop();
                 }
                 // Status is updated by OnManagerStateChanged when reconnect starts.
-                _hubWindow?.UpdateStatus(ConnectionStatus.Disconnected);
+                if (_appState != null) _appState.Status = ConnectionStatus.Disconnected;
                 UpdateTrayIcon();
 
                 // Reset chat window — it has a stale URL/token
@@ -2723,14 +2620,6 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         }
 
         AutoStartManager.SetAutoStart(_settings.AutoStart);
-
-        // Keep hub window in sync
-        if (_hubWindow != null && !_hubWindow.IsClosed)
-        {
-            _hubWindow.Settings = _settings;
-            _hubWindow.GatewayClient = _connectionManager?.OperatorClient;
-            _hubWindow.CurrentStatus = _appState!.Status;
-        }
 
         // Notify ad-hoc listeners (e.g. ChatWindow may be alive but not
         // owned by the hub) that settings have changed.
@@ -2890,7 +2779,8 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
 
     private void UpdateStatusDetailWindow()
     {
-        _hubWindow?.UpdateStatus(_appState!.Status);
+        // No-op — hub window observes AppState.PropertyChanged directly.
+        // Tray status detail window reads from AppState too.
     }
 
     private GatewayCommandCenterState BuildCommandCenterState() =>
@@ -2977,13 +2867,8 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
                 TryStartLocalMcpOnlyNode();
             }
 
-            // Keep hub window in sync with new client
-            if (_hubWindow != null && !_hubWindow.IsClosed)
-            {
-                _hubWindow.Settings = _settings;
-                _hubWindow.GatewayClient = _connectionManager?.OperatorClient;
-                _hubWindow.CurrentStatus = _appState!.Status;
-            }
+            // Keep hub window in sync with new client — no shadow state to push,
+            // hub observes AppState directly.
         };
         _onboardingWindow.Closed += (s, e) =>
         {
@@ -3106,7 +2991,6 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
     {
         _ = _connectionManager?.DisconnectAsync();
         UpdateTrayIcon();
-        _hubWindow?.UpdateStatus(ConnectionStatus.Disconnected);
     }
     void IAppCommands.ShowVoiceOverlay() => ShowVoiceOverlay();
     void IAppCommands.ShowChat() => ShowChatWindow();
@@ -3668,7 +3552,6 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             {
                 Logger.Warn("SSH tunnel is enabled but settings are incomplete");
                 _appState!.Status = ConnectionStatus.Error;
-                _hubWindow?.UpdateStatus(_appState!.Status);
                 UpdateTrayIcon();
                 return false;
             }
@@ -3697,7 +3580,6 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             {
                 Logger.Error($"Failed to start SSH tunnel: {ex.Message}");
                 _appState!.Status = ConnectionStatus.Error;
-                _hubWindow?.UpdateStatus(_appState!.Status);
                 UpdateTrayIcon();
                 return false;
             }

@@ -72,49 +72,40 @@ public sealed partial class UsagePage : Page
 
     public void UpdateUsage(GatewayUsageInfo usage)
     {
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            RequestCountText.Text = usage.RequestCount.ToString();
-            // Note: TotalCostText and TokenCountText are owned by UpdateUsageCost
-            // (period-scoped), not UpdateUsage (all-time). Writing them from both
-            // sources caused a race where the last response to arrive won — see
-            // Hanselman review #1 (HIGH).
-        });
+        RequestCountText.Text = usage.RequestCount.ToString();
+        // Note: TotalCostText and TokenCountText are owned by UpdateUsageCost
+        // (period-scoped), not UpdateUsage (all-time). Writing them from both
+        // sources caused a race where the last response to arrive won — see
+        // Hanselman review #1 (HIGH).
     }
 
     public void UpdateUsageCost(GatewayCostUsageInfo cost)
     {
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            TotalCostText.Text = $"${cost.Totals.TotalCost:F2}";
-            TokenCountText.Text = FormatLargeNumber(cost.Totals.TotalTokens);
+        TotalCostText.Text = $"${cost.Totals.TotalCost:F2}";
+        TokenCountText.Text = FormatLargeNumber(cost.Totals.TotalTokens);
 
-            DailyListView.ItemsSource = cost.Daily.Select(d => new DailyRow
-            {
-                Date = d.Date,
-                Cost = $"${d.TotalCost:F2}",
-            }).ToList();
-        });
+        DailyListView.ItemsSource = cost.Daily.Select(d => new DailyRow
+        {
+            Date = d.Date,
+            Cost = $"${d.TotalCost:F2}",
+        }).ToList();
     }
 
     public void UpdateUsageStatus(GatewayUsageStatusInfo status)
     {
-        DispatcherQueue?.TryEnqueue(() =>
+        ProviderCountText.Text = status.Providers.Count.ToString();
+        ProviderListView.ItemsSource = status.Providers.Select(p => new ProviderRow
         {
-            ProviderCountText.Text = status.Providers.Count.ToString();
-            ProviderListView.ItemsSource = status.Providers.Select(p => new ProviderRow
-            {
-                Name = p.DisplayName,
-                Plan = p.Plan ?? "",
-                Usage = p.Windows.Count > 0 ? $"{p.Windows[0].UsedPercent:F0}% used" : "",
-                Status = p.Error ?? "",
-            }).ToList();
+            Name = p.DisplayName,
+            Plan = p.Plan ?? "",
+            Usage = p.Windows.Count > 0 ? $"{p.Windows[0].UsedPercent:F0}% used" : "",
+            Status = p.Error ?? "",
+        }).ToList();
 
-            bool hasProviders = status.Providers.Count > 0;
-            ProviderLoadingPanel.Visibility = Visibility.Collapsed;
-            ProviderListView.Visibility = hasProviders ? Visibility.Visible : Visibility.Collapsed;
-            ProviderEmptyText.Visibility = hasProviders ? Visibility.Collapsed : Visibility.Visible;
-        });
+        bool hasProviders = status.Providers.Count > 0;
+        ProviderLoadingPanel.Visibility = Visibility.Collapsed;
+        ProviderListView.Visibility = hasProviders ? Visibility.Visible : Visibility.Collapsed;
+        ProviderEmptyText.Visibility = hasProviders ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void OnPeriodSelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)

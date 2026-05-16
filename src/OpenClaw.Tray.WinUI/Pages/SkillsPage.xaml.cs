@@ -177,11 +177,8 @@ public sealed partial class SkillsPage : Page
         // Sort alphabetically
         skills.Sort((a, b) => string.Compare(a.Name, b.Name, System.StringComparison.OrdinalIgnoreCase));
 
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            _allSkills = skills;
-            RebuildCards();
-        });
+        _allSkills = skills;
+        RebuildCards();
     }
 
     private bool _enabledExpanded = true;

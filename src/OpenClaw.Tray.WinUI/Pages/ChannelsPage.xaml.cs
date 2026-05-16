@@ -52,32 +52,29 @@ public sealed partial class ChannelsPage : Page
 
     public void UpdateChannels(ChannelHealth[] channels)
     {
-        DispatcherQueue?.TryEnqueue(() =>
+        if (channels.Length == 0)
         {
-            if (channels.Length == 0)
-            {
-                ChannelsList.Children.Clear();
-                EmptyState.Visibility = Visibility.Visible;
-                return;
-            }
+            ChannelsList.Children.Clear();
+            EmptyState.Visibility = Visibility.Visible;
+            return;
+        }
 
-            EmptyState.Visibility = Visibility.Collapsed;
-            var vms = new List<ChannelViewModel>();
-            foreach (var ch in channels)
+        EmptyState.Visibility = Visibility.Collapsed;
+        var vms = new List<ChannelViewModel>();
+        foreach (var ch in channels)
+        {
+            var isHealthy = ChannelHealth.IsHealthyStatus(ch.Status);
+            var isIntermediate = ChannelHealth.IsIntermediateStatus(ch.Status);
+            vms.Add(new ChannelViewModel
             {
-                var isHealthy = ChannelHealth.IsHealthyStatus(ch.Status);
-                var isIntermediate = ChannelHealth.IsIntermediateStatus(ch.Status);
-                vms.Add(new ChannelViewModel
-                {
-                    Name = ch.Name,
-                    Status = ch.Error != null ? $"Error: {ch.Error}" : ch.Status,
-                    StatusColor = isHealthy ? "Green" : (isIntermediate ? "Yellow" : "Red"),
-                    IsRunning = isHealthy,
-                    ProbeInfo = ch.AuthAge != null ? $"Auth age: {ch.AuthAge}" : null,
-                });
-            }
-            RenderChannels(vms);
-        });
+                Name = ch.Name,
+                Status = ch.Error != null ? $"Error: {ch.Error}" : ch.Status,
+                StatusColor = isHealthy ? "Green" : (isIntermediate ? "Yellow" : "Red"),
+                IsRunning = isHealthy,
+                ProbeInfo = ch.AuthAge != null ? $"Auth age: {ch.AuthAge}" : null,
+            });
+        }
+        RenderChannels(vms);
     }
 
     private void RenderChannels(List<ChannelViewModel> channels)

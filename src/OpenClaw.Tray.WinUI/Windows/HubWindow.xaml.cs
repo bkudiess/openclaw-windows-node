@@ -7,6 +7,7 @@ using OpenClawTray.Pages;
 using OpenClawTray.Services;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using WinUIEx;
 
@@ -16,50 +17,11 @@ public sealed partial class HubWindow : WindowEx
 {
     public bool IsClosed { get; private set; }
 
-    // Shared state accessible by pages
-    private SettingsManager? _settings;
-    public SettingsManager? Settings
-    {
-        get => _settings;
-        set
-        {
-            _settings = value;
-            // Apply persisted nav-pane state. NavView starts with its XAML
-            // default of IsPaneOpen=true; honor the user's last preference
-            // here so they don't re-toggle on every Hub open.
-            if (value != null && NavView != null)
-            {
-                NavView.IsPaneOpen = value.HubNavPaneOpen;
-            }
-        }
-    }
-    public IOperatorGatewayClient? GatewayClient { get; set; }
-    public ConnectionStatus CurrentStatus { get; set; }
+    private static App CurrentApp => (App)Application.Current;
+
     internal AppState? AppModel { get; set; }
     private string _currentAgentId = "main";
     public string CurrentAgentId => _currentAgentId;
-
-    // Legacy compatibility alias
-    public string SelectedAgentId => _currentAgentId;
-    public Action<string?>? OpenDashboardAction { get; set; }
-    public Action? CheckForUpdatesAction { get; set; }
-    public Action? ConnectAction { get; set; }
-    public Action? DisconnectAction { get; set; }
-    public Action? ReconnectAction { get; set; }
-    public Action? OpenSetupAction { get; set; }
-    public Action? OpenConnectionStatusAction { get; set; }
-    public Action? OpenVoiceAction { get; set; }
-    public OpenClaw.Connection.IGatewayConnectionManager? ConnectionManager { get; set; }
-    public OpenClaw.Connection.GatewayRegistry? GatewayRegistry { get; set; }
-
-    // Node service state (set by App.xaml.cs in ShowHub)
-    public bool NodeIsConnected { get; set; }
-    public bool NodeIsPaired { get; set; }
-    public bool NodeIsPendingApproval { get; set; }
-    public string? LastAuthError { get; set; }
-    public string? NodeShortDeviceId { get; set; }
-    public VoiceService? VoiceServiceInstance { get; set; }
-    public string? NodeFullDeviceId { get; set; }
 
     // Event for settings saved (App.xaml.cs subscribes)
     public event EventHandler? SettingsSaved;
@@ -71,16 +33,73 @@ public sealed partial class HubWindow : WindowEx
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
-        Closed += (s, e) => IsClosed = true;
+        Closed += (s, e) =>
+        {
+            IsClosed = true;
+            if (AppModel != null)
+                AppModel.PropertyChanged -= OnAppModelChanged;
+        };
 
         this.SetWindowSize(900, 650);
         this.CenterOnScreen();
         this.SetIcon(IconHelper.GetStatusIconPath(ConnectionStatus.Connected));
 
         RootGrid.SizeChanged += OnRootGridSizeChanged;
+    }
 
-        // Don't select a nav item here — Settings/GatewayClient aren't set yet.
-        // ShowHub() in App.xaml.cs calls NavigateToDefault() after setting properties.
+    /// <summary>
+    /// Subscribe to AppState property changes for title bar and nav updates.
+    /// Called from App.ShowHub() after setting AppModel.
+    /// </summary>
+    internal void BindToAppState()
+    {
+        if (AppModel != null)
+        {
+            AppModel.PropertyChanged += OnAppModelChanged;
+        }
+    }
+
+    private void OnAppModelChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(AppState.Status):
+                DispatcherQueue?.TryEnqueue(() =>
+                {
+                    if (IsClosed) return;
+                    _cachedCommands = null;
+                    UpdateTitleBarStatus(AppModel!.Status);
+                });
+                break;
+            case nameof(AppState.GatewaySelf):
+                DispatcherQueue?.TryEnqueue(() =>
+                {
+                    if (IsClosed) return;
+                    UpdateTitleBarStatus(AppModel!.Status);
+                    if (ContentFrame?.Content is AboutPage about)
+                        about.RefreshGatewayInfo();
+                });
+                break;
+            case nameof(AppState.AgentsList):
+                DispatcherQueue?.TryEnqueue(() =>
+                {
+                    if (IsClosed) return;
+                    if (AppModel!.AgentsList.HasValue)
+                        RebuildAgentNavItems(AppModel.AgentsList.Value);
+                });
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Apply persisted nav-pane state. Called from App.ShowHub() after creating the window.
+    /// </summary>
+    internal void ApplyNavPaneState(SettingsManager settings)
+    {
+        if (NavView != null)
+        {
+            NavView.IsPaneOpen = settings.HubNavPaneOpen;
+        }
     }
 
     private void OnRootGridSizeChanged(object sender, SizeChangedEventArgs e)
@@ -99,14 +118,12 @@ public sealed partial class HubWindow : WindowEx
     }
 
     /// <summary>
-    /// Navigate to the default page. Call after setting Settings/GatewayClient.
+    /// Navigate to the default page. Call after setting AppModel.
     /// </summary>
     public void NavigateToDefault()
     {
         if (ContentFrame.Content == null)
         {
-            // Connection is the landing page (Home was removed; legacy
-            // "home"/"general" tags alias to "connection" in NavigateTo).
             NavigateTo("connection");
         }
     }
@@ -157,25 +174,6 @@ public sealed partial class HubWindow : WindowEx
         return false;
     }
 
-    public void UpdateStatus(ConnectionStatus status)
-    {
-        try
-        {
-            DispatcherQueue?.TryEnqueue(() =>
-            {
-                if (IsClosed) return;
-                CurrentStatus = status;
-                _cachedCommands = null;
-                UpdateTitleBarStatus(status);
-                if (ContentFrame?.Content is ConnectionPage connectionPage)
-                {
-                    connectionPage.UpdateStatus(status);
-                }
-            });
-        }
-        catch { }
-    }
-
     private void UpdateTitleBarStatus(ConnectionStatus status)
     {
         var (color, text) = status switch
@@ -195,7 +193,7 @@ public sealed partial class HubWindow : WindowEx
             TitleStatusText.Text = text;
 
         // Update role indicator dots
-        var snapshot = ConnectionManager?.CurrentSnapshot;
+        var snapshot = CurrentApp.ConnectionManager?.CurrentSnapshot;
         if (snapshot != null)
         {
             TitleOpDot.Fill = RoleDotBrush(snapshot.OperatorState);
@@ -225,35 +223,6 @@ public sealed partial class HubWindow : WindowEx
     };
 
     public GatewaySelfInfo? LastGatewaySelf => AppModel?.GatewaySelf;
-
-    public void UpdateGatewaySelf(GatewaySelfInfo self)
-    {
-        try
-        {
-            DispatcherQueue?.TryEnqueue(() =>
-            {
-                if (IsClosed) return;
-                UpdateTitleBarStatus(CurrentStatus);
-                if (ContentFrame?.Content is AboutPage about)
-                    about.RefreshGatewayInfo();
-            });
-        }
-        catch { }
-    }
-
-    public void UpdateAgentsList(System.Text.Json.JsonElement data)
-    {
-        try
-        {
-            DispatcherQueue?.TryEnqueue(() =>
-            {
-                if (IsClosed) return;
-                // Rebuild nav sidebar agent items
-                RebuildAgentNavItems(data);
-            });
-        }
-        catch { }
-    }
 
     private void RebuildAgentNavItems(System.Text.Json.JsonElement data)
     {
@@ -307,14 +276,15 @@ public sealed partial class HubWindow : WindowEx
     /// </summary>
     private void OnNavPaneStateChanged(NavigationView sender, object args)
     {
-        if (_settings == null) return;
+        var settings = CurrentApp.Settings;
+        if (settings == null) return;
         // PaneOpening fires BEFORE IsPaneOpen flips, PaneClosing fires
         // BEFORE it flips the other way. Use the event identity to know
         // the new state rather than reading IsPaneOpen.
         var newState = args is NavigationViewPaneClosingEventArgs ? false : true;
-        if (_settings.HubNavPaneOpen == newState) return;
-        _settings.HubNavPaneOpen = newState;
-        try { _settings.Save(); } catch { /* swallow — don't block UI */ }
+        if (settings.HubNavPaneOpen == newState) return;
+        settings.HubNavPaneOpen = newState;
+        try { settings.Save(); } catch { /* swallow — don't block UI */ }
     }
 
     private void InitializeCurrentPage()
@@ -338,7 +308,7 @@ public sealed partial class HubWindow : WindowEx
             case InstancesPage instances: instances.Initialize(); break;
             case PermissionsPage permissions: permissions.Initialize(); break;
             case SandboxPage sandbox: sandbox.Initialize(); break;
-            case VoiceSettingsPage voice: voice.Initialize(VoiceServiceInstance); break;
+            case VoiceSettingsPage voice: voice.Initialize(CurrentApp.VoiceService); break;
             case ActivityPage activity: activity.Initialize(); break;
             case AgentEventsPage agentEvents:
                 agentEvents.Initialize(this);
@@ -521,42 +491,43 @@ public sealed partial class HubWindow : WindowEx
 
             // Actions
             new() { Icon = "💬", Title = "Open Chat Window", Subtitle = "Open standalone chat", Tag = "chat" },
-            new() { Icon = "🌐", Title = "Open Dashboard", Subtitle = "Open web dashboard", Execute = () => OpenDashboardAction?.Invoke(null) },
+            new() { Icon = "🌐", Title = "Open Dashboard", Subtitle = "Open web dashboard", Execute = () => ((IAppCommands)Application.Current).OpenDashboard(null) },
             new() { Icon = "📤", Title = "Quick Send", Subtitle = "Send a quick message", Execute = () => QuickSendAction?.Invoke() },
         };
 
         // Toggle commands
-        if (Settings != null)
+        var settings = CurrentApp.Settings;
+        if (settings != null)
         {
             commands.Add(new CommandItem
             {
                 Icon = "🔌", Title = "Toggle Node Mode",
-                Subtitle = Settings.EnableNodeMode ? "Currently ON" : "Currently OFF",
-                Execute = () => { Settings.EnableNodeMode = !Settings.EnableNodeMode; Settings.Save(); RaiseSettingsSaved(); }
+                Subtitle = settings.EnableNodeMode ? "Currently ON" : "Currently OFF",
+                Execute = () => { settings.EnableNodeMode = !settings.EnableNodeMode; settings.Save(); RaiseSettingsSaved(); }
             });
             commands.Add(new CommandItem
             {
                 Icon = "📷", Title = "Toggle Camera",
-                Subtitle = Settings.NodeCameraEnabled ? "Currently ON" : "Currently OFF",
-                Execute = () => { Settings.NodeCameraEnabled = !Settings.NodeCameraEnabled; Settings.Save(); RaiseSettingsSaved(); }
+                Subtitle = settings.NodeCameraEnabled ? "Currently ON" : "Currently OFF",
+                Execute = () => { settings.NodeCameraEnabled = !settings.NodeCameraEnabled; settings.Save(); RaiseSettingsSaved(); }
             });
             commands.Add(new CommandItem
             {
                 Icon = "🎨", Title = "Toggle Canvas",
-                Subtitle = Settings.NodeCanvasEnabled ? "Currently ON" : "Currently OFF",
-                Execute = () => { Settings.NodeCanvasEnabled = !Settings.NodeCanvasEnabled; Settings.Save(); RaiseSettingsSaved(); }
+                Subtitle = settings.NodeCanvasEnabled ? "Currently ON" : "Currently OFF",
+                Execute = () => { settings.NodeCanvasEnabled = !settings.NodeCanvasEnabled; settings.Save(); RaiseSettingsSaved(); }
             });
             commands.Add(new CommandItem
             {
                 Icon = "🖥️", Title = "Toggle Screen Capture",
-                Subtitle = Settings.NodeScreenEnabled ? "Currently ON" : "Currently OFF",
-                Execute = () => { Settings.NodeScreenEnabled = !Settings.NodeScreenEnabled; Settings.Save(); RaiseSettingsSaved(); }
+                Subtitle = settings.NodeScreenEnabled ? "Currently ON" : "Currently OFF",
+                Execute = () => { settings.NodeScreenEnabled = !settings.NodeScreenEnabled; settings.Save(); RaiseSettingsSaved(); }
             });
             commands.Add(new CommandItem
             {
                 Icon = "🌐", Title = "Toggle Browser Control",
-                Subtitle = Settings.NodeBrowserProxyEnabled ? "Currently ON" : "Currently OFF",
-                Execute = () => { Settings.NodeBrowserProxyEnabled = !Settings.NodeBrowserProxyEnabled; Settings.Save(); RaiseSettingsSaved(); }
+                Subtitle = settings.NodeBrowserProxyEnabled ? "Currently ON" : "Currently OFF",
+                Execute = () => { settings.NodeBrowserProxyEnabled = !settings.NodeBrowserProxyEnabled; settings.Save(); RaiseSettingsSaved(); }
             });
         }
 
@@ -571,7 +542,7 @@ public sealed partial class HubWindow : WindowEx
                 {
                     Icon = "🧠", Title = $"Go to session: {key}",
                     Subtitle = "Open in dashboard",
-                    Execute = () => OpenDashboardAction?.Invoke($"sessions/{key}")
+                    Execute = () => ((IAppCommands)Application.Current).OpenDashboard($"sessions/{key}")
                 });
             }
         }

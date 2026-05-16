@@ -56,16 +56,8 @@ public sealed partial class SessionsPage : Page
     public void UpdateSessions(SessionInfo[] sessions)
     {
         _allSessions = sessions;
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            RebuildChannelTabs();
-            ApplyFilter();
-        });
-    }
-
-    public void UpdateModelsList(ModelsListInfo data)
-    {
-        // Models data received — re-render in case we want it later
+        RebuildChannelTabs();
+        ApplyFilter();
     }
 
     private void RebuildChannelTabs()
@@ -130,9 +122,6 @@ public sealed partial class SessionsPage : Page
         {
             case nameof(AppState.Sessions):
                 UpdateSessions(_appState!.Sessions);
-                break;
-            case nameof(AppState.ModelsList):
-                if (_appState!.ModelsList != null) UpdateModelsList(_appState.ModelsList);
                 break;
         }
     }

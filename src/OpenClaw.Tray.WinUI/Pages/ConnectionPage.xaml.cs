@@ -165,14 +165,6 @@ public sealed partial class ConnectionPage : Page
         });
     }
 
-    /// <summary>Legacy bridge from HubWindow's ConnectionStatus-based pumps.</summary>
-    public void UpdateStatus(ConnectionStatus status)
-    {
-        var snapshot = _connectionManager?.CurrentSnapshot ?? GatewayConnectionSnapshot.Idle;
-        _lastSnapshot = snapshot;
-        RefreshFromSnapshot(snapshot);
-    }
-
     // ─── Plan apply ───────────────────────────────────────────────────
 
     private void RefreshFromSnapshot(GatewayConnectionSnapshot snapshot)
@@ -2323,7 +2315,9 @@ public sealed partial class ConnectionPage : Page
         switch (e.PropertyName)
         {
             case nameof(AppState.Status):
-                UpdateStatus(_appState!.Status);
+                var snapshot = _connectionManager?.CurrentSnapshot ?? GatewayConnectionSnapshot.Idle;
+                _lastSnapshot = snapshot;
+                RefreshFromSnapshot(snapshot);
                 break;
             case nameof(AppState.NodePairList):
                 if (_appState!.NodePairList != null) UpdatePairingRequests(_appState.NodePairList);

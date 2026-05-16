@@ -52,48 +52,45 @@ public sealed partial class ConfigPage : Page
     public void UpdateConfig(JsonElement config)
     {
         var configSnapshot = config.Clone();
-        DispatcherQueue?.TryEnqueue(() =>
+        try
         {
-            try
+            OpenClawTray.Services.Logger.Info("[ConfigPage] UpdateConfig received");
+            _lastConfig = configSnapshot;
+
+            // Get baseHash from the config.get response
+            // The gateway returns a 'hash' field which is SHA256 of the raw file content
+            if (configSnapshot.TryGetProperty("baseHash", out var bh) && bh.ValueKind == JsonValueKind.String)
             {
-                OpenClawTray.Services.Logger.Info("[ConfigPage] UpdateConfig received");
-                _lastConfig = configSnapshot;
-
-                // Get baseHash from the config.get response
-                // The gateway returns a 'hash' field which is SHA256 of the raw file content
-                if (configSnapshot.TryGetProperty("baseHash", out var bh) && bh.ValueKind == JsonValueKind.String)
-                {
-                    _baseHash = bh.GetString();
-                }
-                else if (configSnapshot.TryGetProperty("hash", out var hashEl) && hashEl.ValueKind == JsonValueKind.String)
-                {
-                    _baseHash = hashEl.GetString();
-                }
-                else if (configSnapshot.TryGetProperty("raw", out var rawEl) && rawEl.ValueKind == JsonValueKind.String)
-                {
-                    // Fallback: compute from raw content
-                    var rawContent = rawEl.GetString();
-                    if (rawContent != null)
-                    {
-                        var bytes = System.Text.Encoding.UTF8.GetBytes(rawContent);
-                        var hash = System.Security.Cryptography.SHA256.HashData(bytes);
-                        _baseHash = Convert.ToHexStringLower(hash);
-                    }
-                }
-
-                // Show file path in subtitle if available
-                if (configSnapshot.TryGetProperty("path", out var pathEl))
-                    ConfigSubtitle.Text = $"Editing {pathEl.GetString()} via schema-driven form";
-
-                RenderTree();
-                UpdateRawJson();
+                _baseHash = bh.GetString();
             }
-            catch (Exception ex)
+            else if (configSnapshot.TryGetProperty("hash", out var hashEl) && hashEl.ValueKind == JsonValueKind.String)
             {
-                OpenClawTray.Services.Logger.Error($"[ConfigPage] Failed to render config: {ex}");
-                ShowConfigRenderError();
+                _baseHash = hashEl.GetString();
             }
-        });
+            else if (configSnapshot.TryGetProperty("raw", out var rawEl) && rawEl.ValueKind == JsonValueKind.String)
+            {
+                // Fallback: compute from raw content
+                var rawContent = rawEl.GetString();
+                if (rawContent != null)
+                {
+                    var bytes = System.Text.Encoding.UTF8.GetBytes(rawContent);
+                    var hash = System.Security.Cryptography.SHA256.HashData(bytes);
+                    _baseHash = Convert.ToHexStringLower(hash);
+                }
+            }
+
+            // Show file path in subtitle if available
+            if (configSnapshot.TryGetProperty("path", out var pathEl))
+                ConfigSubtitle.Text = $"Editing {pathEl.GetString()} via schema-driven form";
+
+            RenderTree();
+            UpdateRawJson();
+        }
+        catch (Exception ex)
+        {
+            OpenClawTray.Services.Logger.Error($"[ConfigPage] Failed to render config: {ex}");
+            ShowConfigRenderError();
+        }
     }
 
     private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
@@ -112,21 +109,18 @@ public sealed partial class ConfigPage : Page
     public void UpdateConfigSchema(JsonElement schema)
     {
         var schemaSnapshot = schema.Clone();
-        DispatcherQueue?.TryEnqueue(() =>
+        try
         {
-            try
-            {
-                _lastSchema = schemaSnapshot;
-                // Re-render tree if config is already loaded
-                if (_lastConfig.HasValue)
-                    RenderTree();
-            }
-            catch (Exception ex)
-            {
-                OpenClawTray.Services.Logger.Error($"[ConfigPage] Failed to render config schema: {ex}");
-                ShowConfigRenderError();
-            }
-        });
+            _lastSchema = schemaSnapshot;
+            // Re-render tree if config is already loaded
+            if (_lastConfig.HasValue)
+                RenderTree();
+        }
+        catch (Exception ex)
+        {
+            OpenClawTray.Services.Logger.Error($"[ConfigPage] Failed to render config schema: {ex}");
+            ShowConfigRenderError();
+        }
     }
 
     private void RenderTree()

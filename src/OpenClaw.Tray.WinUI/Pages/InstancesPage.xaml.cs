@@ -27,8 +27,6 @@ public sealed partial class InstancesPage : Page
 {
     private static App CurrentApp => (App)Microsoft.UI.Xaml.Application.Current;
     private AppState? _appState;
-    private GatewayNodeInfo[]? _lastNodes;
-    private PresenceEntry[]? _lastPresence;
 
     public InstancesPage()
     {
@@ -47,8 +45,6 @@ public sealed partial class InstancesPage : Page
         var connected = CurrentApp.GatewayClient != null;
         ConnectionWarning.Visibility = connected ? Visibility.Collapsed : Visibility.Visible;
 
-        _lastNodes = _appState?.Nodes;
-        _lastPresence = _appState?.Presence;
         Rerender();
 
         if (connected)
@@ -72,26 +68,15 @@ public sealed partial class InstancesPage : Page
 
     public void UpdateNodes(GatewayNodeInfo[] nodes)
     {
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            _lastNodes = nodes;
-            // A node push satisfies an in-flight refresh request.
-            SetRefreshing(false);
-            Rerender();
-        });
+        // A node push satisfies an in-flight refresh request.
+        SetRefreshing(false);
+        Rerender();
     }
 
     public void UpdatePresence(PresenceEntry[] entries)
     {
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            _lastPresence = entries;
-            Rerender();
-        });
+        Rerender();
     }
-
-    // Legacy alias kept for HubWindow's older fan-out signature.
-    public void UpdatePresenceData(PresenceEntry[] entries) => UpdatePresence(entries);
 
     private void OnRefreshClicked(object sender, RoutedEventArgs e)
     {
@@ -144,8 +129,8 @@ public sealed partial class InstancesPage : Page
         var nowUtc = DateTime.UtcNow;
 
         var merged = InstanceMerger.Merge(
-            _lastNodes,
-            _lastPresence,
+            _appState?.Nodes,
+            _appState?.Presence,
             new InstanceMergeOptions
             {
                 LocalNodeId = CurrentApp.NodeFullDeviceId,
