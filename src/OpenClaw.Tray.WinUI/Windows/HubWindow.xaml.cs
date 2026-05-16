@@ -74,7 +74,12 @@ public sealed partial class HubWindow : WindowEx
                         _cachedCommands = null;
                         var status = AppModel!.Status;
                         UpdateTitleBarStatus(status);
-                        UpdateGatewayNavVisibility(status == ConnectionStatus.Connected);
+                        // Defer nav visibility to avoid stowed exceptions during NavigationView layout
+                        DispatcherQueue?.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+                        {
+                            if (IsClosed) return;
+                            UpdateGatewayNavVisibility(AppModel!.Status == ConnectionStatus.Connected);
+                        });
                 });
                 break;
             case nameof(AppState.GatewaySelf):
@@ -99,6 +104,7 @@ public sealed partial class HubWindow : WindowEx
         catch (Exception ex)
         {
             Services.Logger.Warn($"[HubWindow] OnAppModelChanged({e.PropertyName}) failed: {ex.Message}");
+            throw;
         }
     }
 
@@ -235,32 +241,38 @@ public sealed partial class HubWindow : WindowEx
 
     private void UpdateGatewayNavVisibility(bool connected)
     {
-        var vis = connected ? Visibility.Visible : Visibility.Collapsed;
-        NavChat.Visibility = vis;
-        NavSessions.Visibility = vis;
-        NavSkills.Visibility = vis;
-        NavChannels.Visibility = vis;
-        NavInstances.Visibility = vis;
-        NavAdvanced.Visibility = vis;
-        NavGatewaySeparator.Visibility = vis;
-        // Keep NavGatewayHeader visible always (Connection is under it)
-
-        // If currently viewing a hidden page, navigate to Connection
-        if (!connected)
+        try
         {
-            var currentTag = (NavView?.SelectedItem as NavigationViewItem)?.Tag as string;
-            var gatewayTags = new HashSet<string> { "chat", "sessions", "skills", "channels", "instances", "agentevents", "bindings", "config", "usage", "cron", "workspace" };
-            if (currentTag != null && (gatewayTags.Contains(currentTag) || currentTag.StartsWith("agent:")))
+            var vis = connected ? Visibility.Visible : Visibility.Collapsed;
+            NavChat.Visibility = vis;
+            NavSessions.Visibility = vis;
+            NavSkills.Visibility = vis;
+            NavChannels.Visibility = vis;
+            NavInstances.Visibility = vis;
+            NavAdvanced.Visibility = vis;
+            NavGatewaySeparator.Visibility = vis;
+
+            if (!connected)
             {
-                foreach (NavigationViewItem item in NavView.MenuItems.OfType<NavigationViewItem>())
+                var currentTag = (NavView?.SelectedItem as NavigationViewItem)?.Tag as string;
+                var gatewayTags = new HashSet<string> { "chat", "sessions", "skills", "channels", "instances", "agentevents", "bindings", "config", "usage", "cron", "workspace" };
+                if (currentTag != null && (gatewayTags.Contains(currentTag) || currentTag.StartsWith("agent:")))
                 {
-                    if (item.Tag as string == "connection")
+                    foreach (NavigationViewItem item in NavView.MenuItems.OfType<NavigationViewItem>())
                     {
-                        NavView.SelectedItem = item;
-                        break;
+                        if (item.Tag as string == "connection")
+                        {
+                            NavView.SelectedItem = item;
+                            break;
+                        }
                     }
                 }
             }
+        }
+        catch (Exception ex)
+        {
+            Services.Logger.Warn($"[HubWindow] UpdateGatewayNavVisibility failed: {ex.Message}");
+            throw;
         }
     }
 

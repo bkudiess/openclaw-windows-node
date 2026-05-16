@@ -2338,6 +2338,7 @@ public sealed partial class ConnectionPage : Page
         catch (Exception ex)
         {
             Services.Logger.Warn($"[ConnectionPage] OnAppStateChanged({e.PropertyName}) failed: {ex.Message}");
+            throw;
         }
     }
 
