@@ -1251,7 +1251,8 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         _appState?.ClearCachedData();
         if (_appState != null) _appState.Status = ConnectionStatus.Disconnected;
         UpdateTrayIcon();
-        RefreshTrayMenuIfOpen();
+        // Dismiss the tray menu on disconnect — it will capture fresh data on next open
+        _trayMenuWindow?.HideCascade();
     }
 
     private void BuildTrayMenuPopup(TrayMenuWindow menu)
@@ -1683,7 +1684,8 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             SyncConnectionToggle(mapped);
             if (mapped is ConnectionStatus.Connected or ConnectionStatus.Disconnected or ConnectionStatus.Error)
             {
-                RefreshTrayMenuIfOpen();
+                // Dismiss the tray menu on state change — it will capture fresh data on next open
+                _trayMenuWindow?.HideCascade();
             }
         });
     }
@@ -2104,7 +2106,8 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             SyncConnectionToggle(status);
             if (status is ConnectionStatus.Connected or ConnectionStatus.Disconnected or ConnectionStatus.Error)
             {
-                RefreshTrayMenuIfOpen();
+                // Dismiss the tray menu on state change — it will capture fresh data on next open
+                _trayMenuWindow?.HideCascade();
             }
         });
 
@@ -2232,7 +2235,10 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         }
     }
 
-    // ── AppState → tray-level side effects (tray icon, tray menu, status detail) ──
+    // ── AppState → tray-level side effects (tray icon, status detail) ──
+    // The tray menu is NOT refreshed live while open — data is frozen at
+    // open time via TrayMenuSnapshot to avoid WinUI layout races that cause
+    // blank subflyouts. The menu captures a fresh snapshot on every open.
 
     private void OnAppStateChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
@@ -2241,78 +2247,17 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         switch (e.PropertyName)
         {
             case nameof(AppState.GatewaySelf):
-                UpdateStatusDetailWindow();
-                RefreshTrayMenuIfOpen();
-                break;
             case nameof(AppState.Sessions):
-                UpdateStatusDetailWindow();
-                RefreshTrayMenuIfOpen();
-                break;
-            case nameof(AppState.Channels):
-                RefreshTrayMenuIfOpen();
-                break;
             case nameof(AppState.UsageCost):
-                UpdateStatusDetailWindow();
-                RefreshTrayMenuIfOpen();
-                break;
             case nameof(AppState.Nodes):
                 UpdateStatusDetailWindow();
-                RefreshTrayMenuIfOpen();
                 break;
             case nameof(AppState.CurrentActivity):
                 UpdateTrayIcon();
                 break;
-            case nameof(AppState.Usage):
-            case nameof(AppState.UsageStatus):
-            case nameof(AppState.Presence):
-            case nameof(AppState.NodePairList):
-            case nameof(AppState.DevicePairList):
-                RefreshTrayMenuIfOpen();
-                break;
         }
     }
 
-    private bool _trayMenuRefreshPending;
-
-    private void RefreshTrayMenuIfOpen()
-    {
-        if (_trayMenuWindow == null || !_trayMenuWindow.IsShown)
-            return;
-
-        // Debounce: multiple AppState properties change in rapid succession
-        // (sessions, nodes, usage, channels all arrive on connect).
-        // Coalesce into a single rebuild on the next dispatcher tick.
-        if (_trayMenuRefreshPending)
-            return;
-        _trayMenuRefreshPending = true;
-        _dispatcherQueue?.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
-        {
-            _trayMenuRefreshPending = false;
-            RefreshTrayMenuNow();
-        });
-    }
-
-    private void RefreshTrayMenuNow()
-    {
-        try
-        {
-            if (_trayMenuWindow == null || !_trayMenuWindow.IsShown)
-                return;
-
-            var openCascadeTag = _trayMenuWindow.ActiveFlyoutTag;
-            _trayMenuWindow.ClearItems();
-            BuildTrayMenuPopup(_trayMenuWindow);
-            _trayMenuWindow.SizeToContentKeepBottom();
-            if (!string.IsNullOrEmpty(openCascadeTag))
-            {
-                _trayMenuWindow.TryRestoreCascade(openCascadeTag);
-            }
-        }
-        catch (Exception ex)
-        {
-            LogCrash("RefreshTrayMenuIfOpen", ex);
-        }
-    }
 
     private void SyncConnectionToggle(ConnectionStatus status)
     {
