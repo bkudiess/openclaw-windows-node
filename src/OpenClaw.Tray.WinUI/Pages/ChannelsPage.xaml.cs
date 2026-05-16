@@ -391,9 +391,14 @@ public sealed partial class ChannelsPage : Page
     {
         var stack = new StackPanel { Spacing = 16, Margin = new Thickness(0, 8, 0, 0) };
 
+        // iMessage and other Windows-incompatible channels: show the setup
+        // guide (which explains *why* and points at relevant docs) but skip
+        // Status/Linking/Configuration since nothing here will actually work.
         if (record.IsUnavailableOnWindows)
         {
-            stack.Children.Add(BuildInfoText(
+            var unavailableGuide = BuildSetupGuide(record);
+            if (unavailableGuide != null) stack.Children.Add(unavailableGuide);
+            else stack.Children.Add(BuildInfoText(
                 "This channel requires a macOS host. It can't be configured from a Windows machine."));
             return stack;
         }
@@ -522,18 +527,23 @@ public sealed partial class ChannelsPage : Page
     }
 
     /// <summary>
-    /// External help URL for the third-party service a channel needs credentials
-    /// from. Where there's no canonical page (e.g. WhatsApp/Signal use a phone
-    /// app, not a website), returns (null, null).
+    /// External help URL for each channel. Where the credentials come from a
+    /// phone app (WhatsApp / Signal) we point at the canonical "Linked devices"
+    /// help page — useful when the user doesn't know where the toggle lives.
+    /// Where the channel is Windows-incompatible (iMessage) we link to a doc
+    /// explaining why.
     /// </summary>
     private static (string? Text, string? Url) ResolveExternalHelpLink(string channelId) =>
         channelId.ToLowerInvariant() switch
         {
+            "whatsapp"   => ("WhatsApp Linked devices help →",     "https://faq.whatsapp.com/378279004439436/"),
+            "signal"     => ("Signal Linked devices help →",       "https://support.signal.org/hc/en-us/articles/360007320551"),
             "telegram"   => ("How to create a Telegram bot →",     "https://core.telegram.org/bots/features#botfather"),
             "discord"    => ("How to create a Discord webhook →",  "https://support.discord.com/hc/en-us/articles/228383668"),
             "googlechat" => ("How to add a Google Chat webhook →", "https://developers.google.com/chat/how-tos/webhooks"),
             "slack"      => ("Slack app dashboard →",              "https://api.slack.com/apps"),
             "nostr"      => ("About Nostr →",                      "https://nostr.com/"),
+            "imessage"   => ("About macOS Messages →",             "https://support.apple.com/guide/messages/welcome/mac"),
             _ => (null, null),
         };
 
@@ -592,7 +602,21 @@ public sealed partial class ChannelsPage : Page
                 "Paste both into the Configuration form below.",
                 "Click \"Save and start\".",
             }),
-            _ => (null, null),
+            "imessage" => ("iMessage is macOS-only", new[]
+            {
+                "iMessage reads the local Messages.app database, which only exists on macOS.",
+                "To use iMessage with OpenClaw, run the gateway on a Mac instead of this Windows host.",
+                "All other channels in this list work fine from a Windows-hosted gateway.",
+            }),
+            // Generic fallback for plugin channels we don't have explicit
+            // guidance for. Better than leaving the section blank — at least
+            // the user knows it's a plugin and where to find its settings.
+            _ => ("Connect this channel", new[]
+            {
+                $"\"{channelId}\" is a plugin channel. Refer to its documentation for the fields it needs.",
+                $"Use \"Open Config page\" in the Configuration section below to add settings under channels.{channelId}.",
+                "Save the config; OpenClaw will start the channel automatically.",
+            }),
         };
 
     // ─── Inline credential form (no Config page detour) ─────────────────────
