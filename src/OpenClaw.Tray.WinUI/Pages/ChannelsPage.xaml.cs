@@ -50,6 +50,22 @@ public sealed partial class ChannelsPage : Page
     private readonly HashSet<string> _expandedIds = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Per-channel form input cache. Survives the tear-down-and-rebuild that
+    /// happens on every snapshot refresh, so a user who types a token + clicks
+    /// Save still sees their values after Render() rebuilds the expander tree.
+    /// Cleared for a given channel only after a successful save completes.
+    /// </summary>
+    private readonly Dictionary<string, Dictionary<string, string>> _formValuesByChannel =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Most recent save outcome surfaced at the page level (above the channel
+    /// list) so it survives the per-channel Expander rebuild that fires after
+    /// each Save → Refresh cycle.
+    /// </summary>
+    private (string ChannelId, string Title, string Message, InfoBarSeverity Severity)? _pendingSaveBanner;
+
+    /// <summary>
     /// Gates concurrent refreshes so a burst of channel-health pushes plus a user
     /// click don't trigger overlapping <c>channels.status</c> requests. The CTS
     /// only suppresses stale UI updates — the semaphore prevents duplicate calls.
@@ -67,6 +83,9 @@ public sealed partial class ChannelsPage : Page
     {
         InitializeComponent();
         Unloaded += OnUnloaded;
+        // User-dismiss of the save banner clears the pending state so it
+        // doesn't reappear on the next snapshot refresh.
+        SaveBanner.Closed += (_, _) => _pendingSaveBanner = null;
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -247,6 +266,44 @@ public sealed partial class ChannelsPage : Page
         else
         {
             GatewayMissingChannelsBar.IsOpen = false;
+        }
+
+        // Re-paint any pending save banner. Lives at page level so it survives
+        // the per-channel Expander rebuild that just happened. If the save was
+        // successful AND the channel did transition to configured, upgrade the
+        // banner to "running" so the user gets confirmation; if it didn't,
+        // change to a warning so the user knows the gateway accepted config
+        // but didn't actually start the channel.
+        if (_pendingSaveBanner is { } pending)
+        {
+            var record = records.FirstOrDefault(r => string.Equals(r.Id, pending.ChannelId, StringComparison.OrdinalIgnoreCase));
+            if (pending.Severity == InfoBarSeverity.Success && record != null && !record.IsConfigured)
+            {
+                // Gateway accepted config.set but the channel still isn't
+                // configured/running. Don't lie about it.
+                SaveBanner.Severity = InfoBarSeverity.Warning;
+                SaveBanner.Title = $"{pending.ChannelId}: config saved, but not running yet";
+                SaveBanner.Message = "The gateway accepted the settings but didn't start the channel. Expand the channel below — the Status section and the diagnostic disclosure will show why.";
+            }
+            else if (pending.Severity == InfoBarSeverity.Success && record != null && record.IsConfigured)
+            {
+                SaveBanner.Severity = InfoBarSeverity.Success;
+                SaveBanner.Title = $"{pending.ChannelId} is running";
+                SaveBanner.Message = "Configuration saved and the channel is up.";
+                // Clear the cached form values now that we're confirmed running.
+                _formValuesByChannel.Remove(pending.ChannelId);
+            }
+            else
+            {
+                SaveBanner.Severity = pending.Severity;
+                SaveBanner.Title = pending.Title;
+                SaveBanner.Message = pending.Message;
+            }
+            SaveBanner.IsOpen = true;
+        }
+        else
+        {
+            SaveBanner.IsOpen = false;
         }
 
         MetaText.Text = records.Count == 0
@@ -744,14 +801,14 @@ public sealed partial class ChannelsPage : Page
 
         var stack = new StackPanel { Spacing = 10 };
 
-        // Status banner (set on Save success/failure, or by Test action).
-        var statusBar = new InfoBar
+        // Cached form state for THIS channel — survives the Expander rebuild
+        // that fires after every snapshot refresh (Save → Refresh → Render →
+        // new Expander instance). Without this the user's typed token vanishes.
+        if (!_formValuesByChannel.TryGetValue(record.Id, out var cached))
         {
-            IsClosable = false,
-            IsOpen = false,
-            Severity = InfoBarSeverity.Informational,
-        };
-        stack.Children.Add(statusBar);
+            cached = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            _formValuesByChannel[record.Id] = cached;
+        }
 
         // Field inputs — track the FrameworkElement (TextBox / PasswordBox) so
         // Save can read the value and validate "required".
@@ -773,27 +830,48 @@ public sealed partial class ChannelsPage : Page
             // Input: PasswordBox for sensitive, multi-line TextBox for relay lists,
             // single-line TextBox otherwise.
             FrameworkElement input;
+            var restored = cached.TryGetValue(field.Path, out var prior) ? prior : null;
             if (field.Sensitive)
             {
-                input = new PasswordBox
+                var pb = new PasswordBox
                 {
                     PlaceholderText = field.Placeholder,
                     PasswordRevealMode = PasswordRevealMode.Peek,
                 };
+                if (!string.IsNullOrEmpty(restored)) pb.Password = restored;
+                // Mirror PasswordChanged events into the cache so the value
+                // survives the next rebuild.
+                pb.PasswordChanged += (s, _) =>
+                {
+                    if (s is PasswordBox box) cached[field.Path] = box.Password;
+                };
+                input = pb;
             }
             else if (field.Multiline)
             {
-                input = new TextBox
+                var tb = new TextBox
                 {
                     PlaceholderText = field.Placeholder,
                     AcceptsReturn = true,
                     TextWrapping = TextWrapping.Wrap,
                     MinHeight = 70,
                 };
+                if (!string.IsNullOrEmpty(restored)) tb.Text = restored;
+                tb.TextChanged += (s, _) =>
+                {
+                    if (s is TextBox box) cached[field.Path] = box.Text;
+                };
+                input = tb;
             }
             else
             {
-                input = new TextBox { PlaceholderText = field.Placeholder };
+                var tb = new TextBox { PlaceholderText = field.Placeholder };
+                if (!string.IsNullOrEmpty(restored)) tb.Text = restored;
+                tb.TextChanged += (s, _) =>
+                {
+                    if (s is TextBox box) cached[field.Path] = box.Text;
+                };
+                input = tb;
             }
             row.Children.Add(input);
             inputs[field.Path] = input;
@@ -834,10 +912,10 @@ public sealed partial class ChannelsPage : Page
             var client = CurrentApp.GatewayClient;
             if (client == null)
             {
-                statusBar.Severity = InfoBarSeverity.Error;
-                statusBar.Title = "Not connected";
-                statusBar.Message = "Connect to a gateway before saving channel config.";
-                statusBar.IsOpen = true;
+                _pendingSaveBanner = (record.Id, "Not connected",
+                    "Connect to a gateway before saving channel config.",
+                    InfoBarSeverity.Error);
+                ApplyPendingSaveBanner();
                 return;
             }
 
@@ -853,13 +931,13 @@ public sealed partial class ChannelsPage : Page
                 };
                 if (field.Required && string.IsNullOrWhiteSpace(raw))
                 {
-                    statusBar.Severity = InfoBarSeverity.Error;
-                    statusBar.Title = "Missing field";
-                    statusBar.Message = $"{field.Label} is required.";
-                    statusBar.IsOpen = true;
+                    _pendingSaveBanner = (record.Id, "Missing field",
+                        $"{field.Label} is required.",
+                        InfoBarSeverity.Error);
+                    ApplyPendingSaveBanner();
                     return;
                 }
-                if (string.IsNullOrWhiteSpace(raw)) continue; // skip empty optional fields
+                if (string.IsNullOrWhiteSpace(raw)) continue;
                 values.Add((field.Path, raw.Trim()));
             }
 
@@ -868,45 +946,56 @@ public sealed partial class ChannelsPage : Page
             saveBtn.IsEnabled = false;
             try
             {
-                statusBar.Severity = InfoBarSeverity.Informational;
-                statusBar.Title = "Saving…";
-                statusBar.Message = $"Writing {values.Count} field(s) to {record.Id} config.";
-                statusBar.IsOpen = true;
+                _pendingSaveBanner = (record.Id, $"Saving {record.Id}…",
+                    $"Writing {values.Count} field(s) and enabling the channel.",
+                    InfoBarSeverity.Informational);
+                ApplyPendingSaveBanner();
 
-                // For multi-line relay-style fields we send the array form;
-                // otherwise send the string as-is. The gateway schema accepts
-                // both for these specific paths in our catalog.
                 var failures = new List<string>();
                 foreach (var (path, value) in values)
                 {
                     object payload = value;
                     if (fields.FirstOrDefault(f => f.Path == path) is { Multiline: true })
                     {
-                        // Treat each non-empty line as a list entry.
                         var lines = value.Split('\n', StringSplitOptions.RemoveEmptyEntries)
                             .Select(s => s.Trim())
                             .Where(s => s.Length > 0)
                             .ToArray();
                         payload = lines;
                     }
-
                     var ok = await client.SetConfigAsync(path, payload);
                     if (!ok) failures.Add(path);
                 }
 
+                // Gateway tests in the openclaw repo show channel configs
+                // commonly need `enabled: true` alongside credentials before
+                // the gateway will actually start the channel
+                // (e.g. src/commands/channels.adds-non-default-telegram-account.test.ts
+                // sets `telegram: { botToken, enabled: true }`). Write it
+                // after the credentials so the gateway sees a complete config.
+                if (failures.Count == 0)
+                {
+                    var enabledPath = $"channels.{record.Id}.enabled";
+                    var enabledOk = await client.SetConfigAsync(enabledPath, true);
+                    if (!enabledOk) failures.Add(enabledPath);
+                }
+
                 if (failures.Count > 0)
                 {
-                    statusBar.Severity = InfoBarSeverity.Error;
-                    statusBar.Title = "Save failed";
-                    statusBar.Message = $"The gateway rejected: {string.Join(", ", failures)}";
+                    _pendingSaveBanner = (record.Id, $"Save failed for {record.Id}",
+                        $"The gateway rejected: {string.Join(", ", failures)}. Try the Config page for direct JSON editing.",
+                        InfoBarSeverity.Error);
+                    ApplyPendingSaveBanner();
                 }
                 else
                 {
-                    statusBar.Severity = InfoBarSeverity.Success;
-                    statusBar.Title = "Saved";
-                    statusBar.Message = $"{record.Id} config updated. Refreshing channel state…";
-                    // Re-fetch the snapshot so the page reflects the new
-                    // "configured" state and any auto-start behavior.
+                    _pendingSaveBanner = (record.Id, $"{record.Id} config saved",
+                        "Waiting for the gateway to confirm the channel is running…",
+                        InfoBarSeverity.Success);
+                    ApplyPendingSaveBanner();
+                    // Re-fetch the snapshot; Render() will upgrade the banner
+                    // to "running" if the channel transitioned, or downgrade
+                    // to "config saved but not running yet" if it didn't.
                     await RefreshAsync(probe: true);
                 }
             }
@@ -918,6 +1007,25 @@ public sealed partial class ChannelsPage : Page
         saveBtn.Click += async (_, _) => await SaveAsync();
 
         return stack;
+    }
+
+    /// <summary>
+    /// Push <see cref="_pendingSaveBanner"/> to the page-level
+    /// <c>SaveBanner</c> InfoBar. Used as a stand-alone update when we don't
+    /// want to trigger a full Render() (e.g. validation errors before any
+    /// gateway call).
+    /// </summary>
+    private void ApplyPendingSaveBanner()
+    {
+        if (_pendingSaveBanner is not { } p)
+        {
+            SaveBanner.IsOpen = false;
+            return;
+        }
+        SaveBanner.Severity = p.Severity;
+        SaveBanner.Title = p.Title;
+        SaveBanner.Message = p.Message;
+        SaveBanner.IsOpen = true;
     }
 
     private static FrameworkElement BuildStatusKv(ChannelRecord record)

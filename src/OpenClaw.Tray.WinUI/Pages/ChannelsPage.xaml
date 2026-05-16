@@ -86,6 +86,15 @@
                          x:Name="ErrorBar"
                          Severity="Warning" IsOpen="False" IsClosable="True"/>
 
+                <!-- Persistent save-result banner. Survives the Render() rebuild
+                     that fires after every snapshot refresh, so a user who saves
+                     a channel config still sees the outcome (and a hint at the
+                     channel's new state) after the page re-paints. -->
+                <InfoBar x:Uid="ChannelsPage_SaveBanner"
+                         x:Name="SaveBanner"
+                         IsOpen="False"
+                         IsClosable="True"/>
+
                 <!-- Shown when the gateway is connected but its channels.status
                      response was empty. The list below is then a preview of
                      common channels the user can attempt to configure. -->
