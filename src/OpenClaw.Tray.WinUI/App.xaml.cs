@@ -2316,7 +2316,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         // For now, use the app icon for all notifications
         // In the future, we could create category-specific icons
         var appDir = AppContext.BaseDirectory;
-        var iconPath = System.IO.Path.Combine(appDir, "Assets", "claw.ico");
+        var iconPath = System.IO.Path.Combine(appDir, "Assets", "openclaw.ico");
         return System.IO.File.Exists(iconPath) ? iconPath : null;
     }
 
