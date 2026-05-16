@@ -34,7 +34,12 @@ public sealed partial class ChannelsPage : Page
     private static App CurrentApp => (App)Microsoft.UI.Xaml.Application.Current;
     private AppState? _appState;
 
-    private ChannelsStatusSnapshot? _latestSnapshot;
+    /// <summary>
+    /// When we last received a snapshot from the gateway. The snapshot itself
+    /// lives on <see cref="AppState.ChannelsSnapshot"/> so other surfaces can
+    /// observe it — only the receive-timestamp is page-local because
+    /// <see cref="ChannelsAggregator"/> needs it to stamp records.
+    /// </summary>
     private DateTime _latestSnapshotAt;
     private CancellationTokenSource? _refreshCts;
 
@@ -94,24 +99,38 @@ public sealed partial class ChannelsPage : Page
 
         NotConnectedBar.IsOpen = CurrentApp.GatewayClient == null;
 
-        // Show whatever we already had cached while we kick off a fresh fetch.
-        if (_latestSnapshot != null)
-            Render(_latestSnapshot);
+        // Render whatever AppState already holds (lets the user re-enter the
+        // page without a gateway round-trip) and then kick off a fresh fetch
+        // so the snapshot stays current.
+        var cached = _appState?.ChannelsSnapshot;
+        if (cached != null)
+            Render(cached);
 
         _ = RefreshAsync();
     }
 
     /// <summary>
-    /// React to <see cref="AppState"/> updates. The slim <see cref="AppState.Channels"/>
-    /// push (driven by the gateway's <c>health</c> event) signals that something
-    /// changed; we re-fetch the rich <c>channels.status</c> snapshot to refresh
-    /// metadata that the slim push doesn't carry.
+    /// React to <see cref="AppState"/> updates. Two properties matter:
+    /// <list type="bullet">
+    /// <item><see cref="AppState.ChannelsSnapshot"/> — the rich snapshot
+    /// (Updated by us after a <c>channels.status</c> fetch; other surfaces
+    /// may write to it too). Re-render directly.</item>
+    /// <item><see cref="AppState.Channels"/> — slim per-event health array
+    /// pushed by the gateway. Signals something changed; refresh the rich
+    /// snapshot to keep metadata current.</item>
+    /// </list>
     /// </summary>
     private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(AppState.Channels))
+        switch (e.PropertyName)
         {
-            _ = RefreshAsync(probe: false);
+            case nameof(AppState.ChannelsSnapshot):
+                if (_appState?.ChannelsSnapshot is { } snap)
+                    Render(snap);
+                break;
+            case nameof(AppState.Channels):
+                _ = RefreshAsync(probe: false);
+                break;
         }
     }
 
@@ -159,9 +178,14 @@ public sealed partial class ChannelsPage : Page
                 return;
             }
             ErrorBar.IsOpen = false;
-            _latestSnapshot = snapshot;
             _latestSnapshotAt = DateTime.UtcNow;
-            Render(snapshot);
+            // Publish into AppState — single source of truth. Setting the
+            // property fires PropertyChanged which calls Render via
+            // OnAppStateChanged; no need to call Render directly here.
+            if (_appState != null)
+                _appState.ChannelsSnapshot = snapshot;
+            else
+                Render(snapshot); // tests / scenarios with no AppState
         }
         finally
         {
