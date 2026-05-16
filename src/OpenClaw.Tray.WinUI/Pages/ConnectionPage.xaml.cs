@@ -61,6 +61,13 @@ public sealed partial class ConnectionPage : Page
     private GatewayConnectionSnapshot? _lastStableSnapshot;
     private DateTime _suppressReconnectVisualsUntilUtc = DateTime.MinValue;
     private Microsoft.UI.Xaml.DispatcherTimer? _reconnectMaskTimer;
+    // Set true by the snapshot-event path the moment we observe a transient
+    // state while the mask is armed; consumed by the stable-state branch to
+    // know "the reconnect actually happened, drop the mask early". Without
+    // this flag, RefreshFromSnapshot(_lastSnapshot) called immediately after
+    // BeginReconnectMask() would disarm the mask before any transient
+    // snapshot ever arrives, so the flicker fix never engaged.
+    private bool _maskHasObservedTransient;
 
     // ─── Fingerprint caches ───
     // ItemsSource swaps re-template every item even when the content is
@@ -163,10 +170,23 @@ public sealed partial class ConnectionPage : Page
         if (IsStableState(snapshot.OverallState))
         {
             _lastStableSnapshot = snapshot;
-            // Once the connection has actually re-stabilized, drop the mask
-            // immediately — no need to wait out the rest of the timeout.
-            _suppressReconnectVisualsUntilUtc = DateTime.MinValue;
-            _reconnectMaskTimer?.Stop();
+            // Only drop the mask early once the transient reconnect we were
+            // waiting for has actually started AND completed. Without this
+            // guard the very first refresh that happens immediately after
+            // BeginReconnectMask() (still carrying the pre-toggle stable
+            // snapshot) would disarm the mask before any transient state
+            // arrives — defeating the entire fix.
+            if (_maskHasObservedTransient)
+            {
+                _suppressReconnectVisualsUntilUtc = DateTime.MinValue;
+                _reconnectMaskTimer?.Stop();
+                _maskHasObservedTransient = false;
+            }
+        }
+        else if (IsTransientState(snapshot.OverallState)
+                 && DateTime.UtcNow < _suppressReconnectVisualsUntilUtc)
+        {
+            _maskHasObservedTransient = true;
         }
 
         bool maskActive = _lastStableSnapshot != null
@@ -402,7 +422,12 @@ public sealed partial class ConnectionPage : Page
             var entry = cost.Daily.FirstOrDefault(d => d.Date == today);
             todayAmount = entry?.TotalCost ?? 0d;
         }
-        var fp = $"{topology}|{hostname}|{presence}|{channelOk}/{channelTotal}|${todayAmount:0.00}";
+        // Include cost-data presence (daily count) separately from the
+        // amount so the chip correctly appears/disappears on $0.00 days
+        // — without this the fingerprint can be identical when daily list
+        // appears/empties at $0.00, leaving a stale chip state.
+        int dailyCount = cost?.Daily?.Count ?? 0;
+        var fp = $"{topology}|{hostname}|{presence}|{channelOk}/{channelTotal}|{dailyCount}|${todayAmount:0.00}";
         if (_glanceChipsFingerprint == fp) return;
         _glanceChipsFingerprint = fp;
 
@@ -691,8 +716,10 @@ public sealed partial class ConnectionPage : Page
 
         // Capability chips — skip the rebuild if the rendered output would
         // be identical (e.g. mid-reconnect snapshot ticks where settings and
-        // node state haven't actually changed).
-        var capFp = $"{plan.NodeCard}|{settings?.NodeBrowserProxyEnabled}|{settings?.NodeCameraEnabled}|{settings?.NodeCanvasEnabled}|{settings?.NodeScreenEnabled}";
+        // node state haven't actually changed). Includes ALL 7 capabilities
+        // because BuildCapabilityChips renders all of them — missing any
+        // here would silently swallow that capability's toggle.
+        var capFp = $"{plan.NodeCard}|{settings?.NodeBrowserProxyEnabled}|{settings?.NodeCameraEnabled}|{settings?.NodeCanvasEnabled}|{settings?.NodeScreenEnabled}|{settings?.NodeLocationEnabled}|{settings?.NodeTtsEnabled}|{settings?.NodeSttEnabled}";
         if (_capabilityChipsFingerprint != capFp)
         {
             _capabilityChipsFingerprint = capFp;
@@ -954,13 +981,15 @@ public sealed partial class ConnectionPage : Page
 
         // Fingerprint to skip ItemsSource swap when nothing observable
         // changed — see field comment. Includes overall connection state
-        // because that drives the per-row "Connected" badge.
+        // because that drives the per-row "Connected" badge, and Url
+        // because the row's sub-line shows it.
         var sb = new System.Text.StringBuilder(items.Count * 64);
         sb.Append(_lastSnapshot.OverallState).Append('|');
         foreach (var r in items)
         {
             sb.Append(r.Id).Append('/').Append(r.IsActive ? '1' : '0').Append('/')
-              .Append(r.DisplayName).Append('/').Append(r.LastConnectedRelative ?? "")
+              .Append(r.DisplayName).Append('/').Append(r.Url ?? "").Append('/')
+              .Append(r.LastConnectedRelative ?? "")
               .Append('/').Append(r.HasSshTunnel ? '1' : '0').Append('/')
               .Append(r.AuthModeLabel ?? "").Append(';');
         }
@@ -1394,15 +1423,41 @@ public sealed partial class ConnectionPage : Page
 
     // ─── Saved-gateway row actions ───────────────────────────────────
 
-    private void OnConnectSavedGateway(object sender, RoutedEventArgs e)
+    private async void OnConnectSavedGateway(object sender, RoutedEventArgs e)
     {
         if (sender is not Button btn || btn.Tag is not string gwId) return;
         if (_gatewayRegistry == null || _connectionManager == null) return;
-        _gatewayRegistry.SetActive(gwId);
-        _ = _connectionManager.SwitchGatewayAsync(gwId);
-        _userIntent = UserIntent.None;
-        LoadSavedGateways();
-        RefreshFromSnapshot(_lastSnapshot);
+        btn.IsEnabled = false;
+        try
+        {
+            _gatewayRegistry.SetActive(gwId);
+            _userIntent = UserIntent.None;
+            LoadSavedGateways();
+            RefreshFromSnapshot(_lastSnapshot);
+            // Await the switch so any failure surfaces in the strip via the
+            // catch below rather than becoming a silent unobserved task
+            // exception. The state-change events that drive the rest of the
+            // UI continue to fire while this awaits.
+            await _connectionManager.SwitchGatewayAsync(gwId);
+        }
+        catch (Exception ex)
+        {
+            // Strip status will read the snapshot's terminal state next tick;
+            // surface the immediate error in the auth-error bar so the user
+            // gets feedback even if the snapshot is briefly silent.
+            try
+            {
+                AuthErrorBar.Title = "Connect failed";
+                AuthErrorBar.Message = ex.Message;
+                AuthErrorBar.Severity = Microsoft.UI.Xaml.Controls.InfoBarSeverity.Error;
+                AuthErrorBar.IsOpen = true;
+            }
+            catch { /* last-ditch */ }
+        }
+        finally
+        {
+            try { btn.IsEnabled = true; } catch { /* control may be detached */ }
+        }
     }
 
     private void OnSavedRowOpenDashboard(object sender, RoutedEventArgs e)
@@ -1570,8 +1625,14 @@ public sealed partial class ConnectionPage : Page
 
         // Hoisted out of the try block so the catch handler can pass the
         // backup to RollbackDirectConnect for credential restore.
+        // identityBackupSentinel = file size + last-write-time captured at
+        // backup time. Rollback uses it to skip the restore if the file was
+        // touched in the meantime (e.g. successful late pairing wrote a new
+        // valid token while the connect attempt was still failing).
         string? identityKeyPath = null;
         string? identityBackup = null;
+        long identityBackupLength = -1;
+        DateTime identityBackupMtimeUtc = DateTime.MinValue;
         bool identityCleared = false;
 
         try
@@ -1609,7 +1670,12 @@ public sealed partial class ConnectionPage : Page
             try
             {
                 if (File.Exists(identityKeyPath))
+                {
                     identityBackup = File.ReadAllText(identityKeyPath);
+                    var info = new FileInfo(identityKeyPath);
+                    identityBackupLength = info.Length;
+                    identityBackupMtimeUtc = info.LastWriteTimeUtc;
+                }
             }
             catch { /* backup is best-effort; rollback simply skips restore */ }
 
@@ -1658,7 +1724,9 @@ public sealed partial class ConnectionPage : Page
                 previousSettings, prevGatewayUrl, prevUseSsh, prevSshUser, prevSshHost,
                 prevSshRemotePort, prevSshLocalPort,
                 identityCleared ? identityKeyPath : null,
-                identityCleared ? identityBackup : null);
+                identityCleared ? identityBackup : null,
+                identityCleared ? identityBackupLength : -1,
+                identityCleared ? identityBackupMtimeUtc : DateTime.MinValue);
         }
         finally
         {
@@ -1728,7 +1796,8 @@ public sealed partial class ConnectionPage : Page
         GatewayRecord? existingRecordSnapshot, SettingsManager? settings,
         string? prevGatewayUrl, bool prevUseSsh, string? prevSshUser,
         string? prevSshHost, int prevSshRemotePort, int prevSshLocalPort,
-        string? identityKeyPath = null, string? identityBackup = null)
+        string? identityKeyPath = null, string? identityBackup = null,
+        long identityBackupLength = -1, DateTime identityBackupMtimeUtc = default)
     {
         if (_gatewayRegistry == null) return;
 
@@ -1746,10 +1815,31 @@ public sealed partial class ConnectionPage : Page
         // connect after the user had typed a (possibly wrong) shared token
         // would permanently destroy the device token earned during the
         // last successful pairing — forcing a full re-pair the user never
-        // asked for.
+        // asked for. Skip the restore if the file changed since backup
+        // (e.g. a late-arriving successful pairing wrote a fresh token in
+        // the meantime — that token is more valuable than our backup).
         if (!string.IsNullOrEmpty(identityKeyPath) && identityBackup != null)
         {
-            try { File.WriteAllText(identityKeyPath, identityBackup); }
+            try
+            {
+                bool fileUnchanged = false;
+                if (File.Exists(identityKeyPath))
+                {
+                    var info = new FileInfo(identityKeyPath);
+                    fileUnchanged = info.Length == identityBackupLength
+                                    && info.LastWriteTimeUtc == identityBackupMtimeUtc;
+                }
+                else
+                {
+                    // ClearStoredTokens may have rewritten the file with a
+                    // smaller body — that's the expected post-clear state,
+                    // so treat as unchanged-from-clear and restore.
+                    fileUnchanged = true;
+                }
+                if (fileUnchanged)
+                    File.WriteAllText(identityKeyPath, identityBackup);
+                // else: another writer touched the file; preserve it.
+            }
             catch { /* best-effort restore; failure cannot regress further */ }
         }
 
@@ -2063,6 +2153,10 @@ public sealed partial class ConnectionPage : Page
         // in 1-3s; this gives slow networks headroom without leaving the UI
         // showing a stale "connected" state forever if the reconnect fails.
         _suppressReconnectVisualsUntilUtc = DateTime.UtcNow.AddSeconds(8);
+        // Reset the "transient observed" flag for this arming cycle so the
+        // stable-branch in RefreshFromSnapshot waits for a real transient
+        // snapshot before dropping the mask.
+        _maskHasObservedTransient = false;
         if (_reconnectMaskTimer == null)
         {
             _reconnectMaskTimer = new Microsoft.UI.Xaml.DispatcherTimer
@@ -2079,6 +2173,7 @@ public sealed partial class ConnectionPage : Page
     {
         _reconnectMaskTimer?.Stop();
         _suppressReconnectVisualsUntilUtc = DateTime.MinValue;
+        _maskHasObservedTransient = false;
         if (_connectionManager != null)
             RefreshFromSnapshot(_connectionManager.CurrentSnapshot);
     }
@@ -2094,9 +2189,20 @@ public sealed partial class ConnectionPage : Page
         {
             var scopes = _hub?.GatewayClient?.GrantedOperatorScopes ?? (IReadOnlyList<string>)Array.Empty<string>();
             var canPair = OperatorScopeHelper.CanApproveDevices(scopes);
+            // Build the set of fallback ids that collide across multiple
+            // pending requests. When a legacy gateway omits RequestId we
+            // fall back to DeviceId; if two pending requests share the
+            // same DeviceId, approving from the UI would be ambiguous and
+            // could act on the wrong one — disable those rows so the user
+            // is forced to approve via the gateway-host CLI instead.
+            var ambiguousIds = ComputeAmbiguousFallbackIds(
+                data.Pending.Select(r => (r.RequestId, r.DeviceId)));
             foreach (var req in data.Pending)
             {
-                DevicePairingListPanel.Children.Add(BuildDevicePairingCard(req, canPair));
+                bool ambiguous = req.RequestId == null
+                                 && !string.IsNullOrEmpty(req.DeviceId)
+                                 && ambiguousIds.Contains(req.DeviceId!);
+                DevicePairingListPanel.Children.Add(BuildDevicePairingCard(req, canPair && !ambiguous));
             }
         }
         UpdatePendingApprovalsVisibility();
@@ -2111,12 +2217,41 @@ public sealed partial class ConnectionPage : Page
         {
             var scopes = _hub?.GatewayClient?.GrantedOperatorScopes ?? (IReadOnlyList<string>)Array.Empty<string>();
             var canPair = OperatorScopeHelper.CanApproveDevices(scopes);
+            // Same ambiguity guard as UpdateDevicePairingRequests above:
+            // if a legacy gateway sends multiple node-pair requests with
+            // the same NodeId and no RequestId, disable approve/deny on
+            // those rows so the user can't pick the wrong target.
+            var ambiguousIds = ComputeAmbiguousFallbackIds(
+                data.Pending.Select(r => (r.RequestId, NodeId: r.NodeId)));
             foreach (var req in data.Pending)
             {
-                NodePairingListPanel.Children.Add(BuildNodePairingCard(req, canPair));
+                bool ambiguous = req.RequestId == null
+                                 && !string.IsNullOrEmpty(req.NodeId)
+                                 && ambiguousIds.Contains(req.NodeId!);
+                NodePairingListPanel.Children.Add(BuildNodePairingCard(req, canPair && !ambiguous));
             }
         }
         UpdatePendingApprovalsVisibility();
+    }
+
+    /// <summary>
+    /// Returns the set of fallback ids (DeviceId / NodeId) that appear in
+    /// 2+ pending requests where RequestId is missing — i.e. the cases
+    /// where approve/deny via the fallback id would be ambiguous.
+    /// </summary>
+    private static HashSet<string> ComputeAmbiguousFallbackIds(IEnumerable<(string? RequestId, string? FallbackId)> rows)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var r in rows)
+        {
+            if (r.RequestId != null) continue;
+            if (string.IsNullOrEmpty(r.FallbackId)) continue;
+            counts[r.FallbackId!] = counts.TryGetValue(r.FallbackId!, out var n) ? n + 1 : 1;
+        }
+        var ambiguous = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var kv in counts)
+            if (kv.Value > 1) ambiguous.Add(kv.Key);
+        return ambiguous;
     }
 
     private void UpdatePendingApprovalsVisibility()

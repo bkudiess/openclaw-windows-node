@@ -294,7 +294,7 @@ internal sealed record ConnectionPagePlan
             Mode = ConnectionPageMode.Cockpit,
             StripGlyph = OpenClawTray.Helpers.FluentIconCatalog.StatusOk,
             StripAccent = ConnectionAccent.Success,
-            StripHeadline = "Gateway connected",
+            StripHeadline = "Connected",
             StripSub = sub,
             OperatorCard = OperatorCardState.Active,
             NodeCard = BuildNodeCardState(snap, settings),
