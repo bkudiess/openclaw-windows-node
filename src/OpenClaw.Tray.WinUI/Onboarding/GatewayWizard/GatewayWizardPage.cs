@@ -610,14 +610,22 @@ public sealed class GatewayWizardPage : Component<GatewayWizardState>
             // Top heading is driven by the wizard's current step title (or
             // local lifecycle title for loading/error/complete/offline). The
             // hosting V2 page suppresses its own heading when this wizard
-            // is embedded so we don't show two titles.
+            // is embedded so we don't show two titles. Capped at 2 lines
+            // with ellipsis so a long server-supplied step title can't push
+            // the device-code block or "Open in browser" button off-screen.
             TextBlock(string.IsNullOrEmpty(displayTitle)
                     ? LocalizationHelper.GetString("Onboarding_Wizard_Title")
                     : displayTitle)
                 .FontSize(28)
                 .SemiBold()
                 .HAlign(HorizontalAlignment.Center)
-                .TextWrapping(),
+                .TextWrapping()
+                .Set(t =>
+                {
+                    t.MaxLines = 2;
+                    t.TextTrimming = Microsoft.UI.Xaml.TextTrimming.CharacterEllipsis;
+                    t.TextAlignment = Microsoft.UI.Xaml.TextAlignment.Center;
+                }),
 
             Border(
                 ScrollView(
