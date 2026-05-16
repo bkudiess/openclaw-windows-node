@@ -94,6 +94,18 @@ public sealed partial class ConnectionPage : Page
         var settings = hub.Settings;
         if (settings == null) return;
 
+        // Local-WSL install entry points. The hub only exposes
+        // OpenSetupAction on platforms where WSL tooling is wired up; if
+        // it's null we hide both cards so the user isn't offered a button
+        // that does nothing. This is the V2 setup path master added — we
+        // surface the same affordance from the rebuilt Welcome and Cockpit
+        // surfaces instead of the legacy LocalWslSetupCard slot.
+        var localSetupVisibility = hub.OpenSetupAction is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        WelcomeLocalWslSetupCard.Visibility = localSetupVisibility;
+        CockpitLocalWslSetupCard.Visibility = localSetupVisibility;
+
         if (_connectionManager != null)
             _connectionManager.StateChanged += OnManagerStateChanged;
         if (_gatewayRegistry != null)
@@ -1339,6 +1351,18 @@ public sealed partial class ConnectionPage : Page
             _ = global::Windows.System.Launcher.LaunchUriAsync(new Uri(http));
         }
         catch { }
+    }
+
+    /// <summary>
+    /// Handler for both the Welcome and Cockpit "Install local WSL gateway"
+    /// buttons. Hands off to the hub's OpenSetupAction (which the App wires
+    /// to the V2 onboarding flow) — same wiring master added on the legacy
+    /// ConnectionPage; the cards live in different slots in the rebuilt
+    /// page but the user-facing behavior is identical.
+    /// </summary>
+    private void OnInstallLocalWslGateway(object sender, RoutedEventArgs e)
+    {
+        _hub?.OpenSetupAction?.Invoke();
     }
 
     // ─── Operator card navigation ────────────────────────────────────

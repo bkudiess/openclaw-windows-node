@@ -1050,6 +1050,33 @@ public sealed class LocalGatewayUninstallTests
         Assert.True(result.Postconditions.LocalGatewayRecordsAbsent);
     }
 
+    [WindowsFact]
+    public async Task Run_PreservesRootDeviceTokens_WhenExternalGatewayRecordsRemainAndOptionEnabled()
+    {
+        using var env = new UninstallTestEnv();
+        env.WriteDeviceKey("legacy-external-operator-token", "legacy-external-node-token");
+        var registry = env.SeedRegistry([
+            LocalRecord("local-1"),
+            RemoteRecord("remote-1"),
+        ]);
+
+        var engine = env.BuildEngine(registry: registry);
+        var result = await engine.RunAsync(new LocalGatewayUninstallOptions
+        {
+            DryRun = false,
+            ConfirmDestructive = true,
+            PreserveRootDeviceTokensWhenExternalGatewaysExist = true
+        });
+
+        Assert.True(result.Success, "expected Success=true; errors=" + string.Join(" | ", result.Errors));
+        Assert.Equal("legacy-external-operator-token", DeviceIdentity.TryReadStoredDeviceToken(env.DataDir));
+        Assert.True(DeviceIdentity.HasStoredDeviceTokenForRole(env.DataDir, "node"));
+        Assert.True(result.Postconditions.DeviceTokenCleared);
+        var step = result.Steps.FirstOrDefault(s => s.Name == "Null device tokens");
+        Assert.NotNull(step);
+        Assert.Equal(UninstallStepStatus.Skipped, step.Status);
+    }
+
     // -----------------------------------------------------------------------
     // Run_LocalAndRemoteWithSameUrl_OnlyIsLocalRemoved
     // -----------------------------------------------------------------------

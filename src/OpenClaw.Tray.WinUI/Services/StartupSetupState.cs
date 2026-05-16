@@ -1,5 +1,6 @@
 using OpenClaw.Shared;
 using OpenClawTray.Onboarding.Services;
+using OpenClaw.Connection;
 
 namespace OpenClawTray.Services;
 
@@ -53,7 +54,10 @@ internal static class StartupSetupState
         return HasStoredNodeDeviceToken(dataPath);
     }
 
-    public static bool RequiresSetup(SettingsManager settings, string dataPath)
+    public static bool RequiresSetup(SettingsManager settings, string dataPath) =>
+        RequiresSetup(settings, dataPath, registry: null);
+
+    public static bool RequiresSetup(SettingsManager settings, string dataPath, GatewayRegistry? registry)
     {
         // MCP-only mode doesn't require an authenticated gateway. Checked first
         // so that an MCP-server user with EnableNodeMode accidentally left on
@@ -68,6 +72,15 @@ internal static class StartupSetupState
         if (settings.EnableNodeMode)
         {
             return !HasStoredNodeDeviceToken(dataPath);
+        }
+
+        // Any usable saved gateway record means this is not first-run setup.
+        // The setup dialog now only installs a new local WSL gateway; returning
+        // users manage existing/external gateways from the Connections page.
+        if (registry is not null
+            && SetupExistingGatewayClassifier.HasAnyExistingGatewayConnection(registry, settings, dataPath))
+        {
+            return false;
         }
 
         // Operator mode: returning users with any operator device token AND a

@@ -76,7 +76,13 @@ public sealed class OnboardingExistingConfigGuard
 
     /// <summary>
     /// Scans both the legacy root identity and per-gateway identity directories
-    /// for a device token for the specified role.
+    /// for a device token for the specified role. Symmetric across operator and
+    /// node roles so both the setup guard and the startup auto-launch
+    /// decision agree on whether a returning user is paired (Scott Hanselman
+    /// repro: a local node-mode profile with the node token stored only under
+    /// <c>gateways/&lt;id&gt;/device-key-ed25519.json</c> incorrectly re-opened
+    /// onboarding on every relaunch because only the operator side was checked
+    /// per-gateway).
     /// </summary>
     public static bool HasAnyDeviceTokenForRole(string dataPath, string role)
     {
