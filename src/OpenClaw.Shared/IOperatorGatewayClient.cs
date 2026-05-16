@@ -94,5 +94,13 @@ public interface IOperatorGatewayClient
     Task<bool> DevicePairRejectAsync(string requestId);
     Task<bool> StartChannelAsync(string channelName);
     Task<bool> StopChannelAsync(string channelName);
+    /// <summary>Fetch the rich channels.status snapshot from the gateway. Mac/web canonical wire method.</summary>
+    Task<ChannelsStatusSnapshot?> GetChannelsStatusAsync(bool probe = false, int timeoutMs = 12000);
+    /// <summary>Log out / unlink a channel (whatsapp, telegram). Sends channels.logout { channel }.</summary>
+    Task<bool> LogoutChannelAsync(string channelName, int timeoutMs = 12000);
+    /// <summary>Begin a QR linking flow (whatsapp, signal). Sends web.login.start { force, timeoutMs }.</summary>
+    Task<WebLoginStartResult?> WebLoginStartAsync(bool force = false, int timeoutMs = 30000);
+    /// <summary>Long-poll for QR linking completion. Sends web.login.wait { currentQrDataUrl, timeoutMs }.</summary>
+    Task<WebLoginWaitResult?> WebLoginWaitAsync(string? currentQrDataUrl = null, int timeoutMs = 30000);
     Task<JsonElement> SendWizardRequestAsync(string method, object? parameters = null, int timeoutMs = 30000);
 }

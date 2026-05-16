@@ -473,7 +473,6 @@ public sealed partial class HubWindow : WindowEx
             case PermissionsPage permissions: permissions.Initialize(); break;
             case SandboxPage sandbox: sandbox.Initialize(); break;
             case VoiceSettingsPage voice: voice.Initialize(CurrentApp.VoiceService); break;
-            case ActivityPage activity: activity.Initialize(); break;
             case AgentEventsPage agentEvents:
                 agentEvents.Initialize(this);
                 agentEvents.ClearCentralCache = () => AppModel?.ClearAgentEvents();
@@ -506,12 +505,9 @@ public sealed partial class HubWindow : WindowEx
 
     public void SetActivityFilter(string? filter)
     {
-        if (IsClosed) return;
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            if (ContentFrame?.Content is ActivityPage activity)
-                activity.SetFilter(filter);
-        });
+        // ActivityPage has been removed; the method is kept as a no-op so any
+        // remaining external callers (e.g. legacy deep links) don't NRE.
+        _ = filter;
     }
 
     private static Type? TagToPageType(string? tag) => tag switch
@@ -528,7 +524,9 @@ public sealed partial class HubWindow : WindowEx
         "voice" => typeof(VoiceSettingsPage),
         "permissions" => typeof(PermissionsPage),
         "sandbox" => typeof(SandboxPage),
-        "activity" => typeof(ActivityPage),
+        // ActivityPage has been removed; legacy "activity"/"history" deep links
+        // redirect to ChannelsPage via DeepLinkHandler.
+        "activity" => typeof(ChannelsPage),
         "settings" => typeof(SettingsPage),
         "debug" => typeof(DebugPage),
         "info" => typeof(AboutPage),
@@ -653,7 +651,6 @@ public sealed partial class HubWindow : WindowEx
             new() { Icon = "📡", Title = "Go to Usage", Subtitle = "Usage statistics", Tag = "usage" },
             new() { Icon = "📡", Title = "Go to Bindings", Subtitle = "Gateway bindings", Tag = "bindings" },
             new() { Icon = "🛡️", Title = "Go to Permissions", Subtitle = "Capabilities, exec policy & allowlists", Tag = "permissions" },
-            new() { Icon = "🕐", Title = "Go to Activity", Subtitle = "Activity stream", Tag = "activity" },
             new() { Icon = "⚙️", Title = "Go to Settings", Subtitle = "Application settings", Tag = "settings" },
             new() { Icon = "🐛", Title = "Go to Diagnostics", Subtitle = "Logs, support bundle, device identity, developer tools", Tag = "debug" },
             new() { Icon = "ℹ️", Title = "Go to Info", Subtitle = "About this app", Tag = "info" },

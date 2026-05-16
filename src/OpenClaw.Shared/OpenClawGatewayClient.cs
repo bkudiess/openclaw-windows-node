@@ -855,6 +855,99 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
         }
     }
 
+    /// <summary>
+    /// Fetch the rich channels.status snapshot — the canonical channel-status API
+    /// used by macOS and the web UI. Returns null on failure.
+    /// The <paramref name="timeoutMs"/> is propagated to the gateway so slow
+    /// environments can extend the probe budget without recompiling.
+    /// </summary>
+    public async Task<ChannelsStatusSnapshot?> GetChannelsStatusAsync(bool probe = false, int timeoutMs = 12000)
+    {
+        if (!IsConnected) return null;
+        try
+        {
+            // Pass the caller's timeoutMs through to the gateway. We give the
+            // request envelope a slightly larger overall budget than the probe
+            // budget so a slow but successful probe still returns in time.
+            var probeTimeoutMs = Math.Max(1000, timeoutMs - 2000);
+            var response = await SendWizardRequestAsync(
+                "channels.status",
+                new { probe, timeoutMs = probeTimeoutMs },
+                timeoutMs);
+            return ChannelsStatusParser.Parse(response);
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"channels.status request failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>Log out / unlink a channel. Sends <c>channels.logout { channel }</c>.</summary>
+    public async Task<bool> LogoutChannelAsync(string channelName, int timeoutMs = 12000)
+    {
+        if (!IsConnected) return false;
+        try
+        {
+            await SendWizardRequestAsync("channels.logout", new { channel = channelName }, timeoutMs);
+            _logger.Info($"channels.logout {channelName} succeeded");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"channels.logout {channelName} failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>Begin a web/QR linking flow for the current default linking channel.</summary>
+    public async Task<WebLoginStartResult?> WebLoginStartAsync(bool force = false, int timeoutMs = 30000)
+    {
+        if (!IsConnected) return null;
+        try
+        {
+            var response = await SendWizardRequestAsync(
+                "web.login.start",
+                new { force, timeoutMs },
+                timeoutMs + 5000);
+            return new WebLoginStartResult
+            {
+                Message = response.ValueKind == JsonValueKind.Object && response.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String ? m.GetString() : null,
+                QrDataUrl = response.ValueKind == JsonValueKind.Object && response.TryGetProperty("qrDataUrl", out var q) && q.ValueKind == JsonValueKind.String ? q.GetString() : null,
+                Connected = response.ValueKind == JsonValueKind.Object && response.TryGetProperty("connected", out var c) && c.ValueKind == JsonValueKind.True,
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"web.login.start failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>Long-poll for QR linking completion.</summary>
+    public async Task<WebLoginWaitResult?> WebLoginWaitAsync(string? currentQrDataUrl = null, int timeoutMs = 30000)
+    {
+        if (!IsConnected) return null;
+        try
+        {
+            var response = await SendWizardRequestAsync(
+                "web.login.wait",
+                new { currentQrDataUrl, timeoutMs },
+                timeoutMs + 5000);
+            return new WebLoginWaitResult
+            {
+                Message = response.ValueKind == JsonValueKind.Object && response.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String ? m.GetString() : null,
+                QrDataUrl = response.ValueKind == JsonValueKind.Object && response.TryGetProperty("qrDataUrl", out var q) && q.ValueKind == JsonValueKind.String ? q.GetString() : null,
+                Connected = response.ValueKind == JsonValueKind.Object && response.TryGetProperty("connected", out var c) && c.ValueKind == JsonValueKind.True,
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"web.login.wait failed: {ex.Message}");
+            return null;
+        }
+    }
+
     private async Task SendConnectMessageAsync(string? nonce = null)
     {
         var requestId = Guid.NewGuid().ToString();

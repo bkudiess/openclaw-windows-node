@@ -57,6 +57,10 @@ public static class FluentIconCatalog
     public const string Plug = "\uE839";           // Plug/PC1 — Direct connection tile (alias of System; same glyph)
     public const string MoreOverflow = "\uE712";   // More — saved-row overflow ⋯ button
 
+    // ── Channel actions ────────────────────────────────────────────
+    public const string ChannelRefresh = "\uE72C";  // Refresh (alias of Sync; per-channel + global Refresh)
+    public const string ChannelLogout = "\uF3B1";   // SignOut — per-channel logout (WhatsApp/Telegram)
+
     // ── Glance chips (Connection page) ─────────────────────────────
     public const string People = "\uE716";         // People — N clients chip
     public const string Money = "\uE9D9";          // Money — $today chip

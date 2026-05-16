@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <root xmlns:ns1="urn:schemas-microsoft-com:xml-msdata" xmlns:xs="http://www.w3.org/2001/XMLSchema">
   <xs:schema id="root">
     <xs:element name="root" ns1:IsDataSet="true">
@@ -1527,33 +1527,6 @@ Voer op uw gateway-host (Mac/Linux) uit:
   <data name="AboutPage_HyperlinkButton_96.Content" xml:space="preserve">
     <value>Dashboard → openclaw://dashboard</value>
   </data>
-  <data name="ActivityPage_TextBlock_17.Text" xml:space="preserve">
-    <value>Activiteit</value>
-  </data>
-  <data name="FilterAllButton.Content" xml:space="preserve">
-    <value>Alles</value>
-  </data>
-  <data name="FilterSessionsButton.Content" xml:space="preserve">
-    <value>Sessies</value>
-  </data>
-  <data name="FilterUsageButton.Content" xml:space="preserve">
-    <value>Gebruik</value>
-  </data>
-  <data name="FilterNodesButton.Content" xml:space="preserve">
-    <value>Knooppunten</value>
-  </data>
-  <data name="FilterNotificationsButton.Content" xml:space="preserve">
-    <value>Meldingen</value>
-  </data>
-  <data name="ActivityPage_TextBlock_86.Text" xml:space="preserve">
-    <value>Nog geen activiteit</value>
-  </data>
-  <data name="ActivityPage_TextBlock_89.Text" xml:space="preserve">
-    <value>Activiteit van sessies, meldingen en knooppuntgebeurtenissen wordt hier weergegeven.</value>
-  </data>
-  <data name="ClearAllButton.Content" xml:space="preserve">
-    <value>Alles wissen</value>
-  </data>
   <data name="AgentEventsPage_TextBlock_18.Text" xml:space="preserve">
     <value>Agentgebeurtenissen</value>
   </data>
@@ -2249,9 +2222,6 @@ Voer op uw gateway-host (Mac/Linux) uit:
   </data>
   <data name="HubWindow_NavigationViewItem_136.Content" xml:space="preserve">
     <value>Machtigingen</value>
-  </data>
-  <data name="HubWindow_NavigationViewItem_139.Content" xml:space="preserve">
-    <value>Activiteit</value>
   </data>
   <data name="HubWindow_NavigationViewItem_145.Content" xml:space="preserve">
     <value>Foutopsporing</value>
@@ -3150,7 +3120,6 @@ Voer op uw gateway-host (Mac/Linux) uit:
   <data name="InstancesPage_TimeAgo_Days_Format" xml:space="preserve">
     <value>{0}d geleden</value>
   </data>
-
   <data name="V2_Window_Title" xml:space="preserve">
     <value>OpenClaw Setup</value>
   </data>

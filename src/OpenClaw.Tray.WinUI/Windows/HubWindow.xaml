@@ -193,9 +193,6 @@
             <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_Sandbox" Tag="sandbox" Content="Sandbox">
                 <NavigationViewItem.Icon><ImageIcon Source="{StaticResource Sandbox_Icon}"/></NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_139" Tag="activity" Content="Activity">
-                <NavigationViewItem.Icon><ImageIcon Source="{StaticResource Activity_Icon}"/></NavigationViewItem.Icon>
-            </NavigationViewItem>
         </NavigationView.MenuItems>
 
         <NavigationView.FooterMenuItems>

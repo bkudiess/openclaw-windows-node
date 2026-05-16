@@ -72,11 +72,24 @@ public static class DeepLinkHandler
                 break;
 
             case "activity":
-                actions.OpenActivityStream?.Invoke(result.Parameters.GetValueOrDefault("filter"));
+                // ActivityPage was removed. Redirect by filter: channel events
+                // now live on the Channels page; sessions/usage/nodes have their
+                // own dedicated pages; notifications fall through to Channels.
+                {
+                    var filter = result.Parameters.GetValueOrDefault("filter");
+                    actions.OpenHub?.Invoke(filter switch
+                    {
+                        "session" => "sessions",
+                        "usage" => "usage",
+                        "node" => "instances",
+                        _ => "channels",
+                    });
+                }
                 break;
 
             case "history":
-                actions.OpenActivityStream?.Invoke("notification");
+                // Legacy notification-history alias — Channels page is the closest match.
+                actions.OpenHub?.Invoke("channels");
                 break;
 
             case "commandcenter":
@@ -199,11 +212,9 @@ public static class DeepLinkHandler
 
             case "notifications":
             case "notification-history":
-                actions.OpenHub?.Invoke("activity");
-                break;
-
             case "activity-stream":
-                actions.OpenHub?.Invoke("activity");
+                // ActivityPage removed — channel events now live on the Channels page.
+                actions.OpenHub?.Invoke("channels");
                 break;
             case "dashboard":
                 actions.OpenDashboard?.Invoke(null);

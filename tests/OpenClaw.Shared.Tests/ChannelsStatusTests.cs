@@ -1,0 +1,320 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.Json;
+using OpenClaw.Shared;
+using Xunit;
+
+namespace OpenClaw.Shared.Tests;
+
+public class ChannelsStatusParserTests
+{
+    private static JsonElement Json(string raw) => JsonDocument.Parse(raw).RootElement;
+
+    [Fact]
+    public void Parse_ReturnsEmptySnapshot_ForNonObjectInput()
+    {
+        var snap = ChannelsStatusParser.Parse(Json("[]"));
+        Assert.Empty(snap.ChannelOrder);
+        Assert.Empty(snap.Channels);
+    }
+
+    [Fact]
+    public void Parse_ExtractsChannelOrderAndLabels()
+    {
+        var json = """
+            {
+              "ts": 1716000000.5,
+              "channelOrder": ["whatsapp", "telegram"],
+              "channelLabels": { "whatsapp": "WhatsApp", "telegram": "Telegram" },
+              "channels": {}
+            }
+            """;
+        var snap = ChannelsStatusParser.Parse(Json(json));
+        Assert.Equal(new[] { "whatsapp", "telegram" }, snap.ChannelOrder);
+        Assert.Equal("WhatsApp", snap.ChannelLabels["whatsapp"]);
+        Assert.Equal(1716000000.5, snap.Ts);
+    }
+
+    [Fact]
+    public void Parse_PrefersChannelMetaOverLabels()
+    {
+        var json = """
+            {
+              "channelOrder": ["whatsapp"],
+              "channelLabels": { "whatsapp": "Legacy Label" },
+              "channelMeta": [
+                { "id": "whatsapp", "label": "WhatsApp", "detailLabel": "WhatsApp Business", "systemImage": "message.fill" }
+              ],
+              "channels": {}
+            }
+            """;
+        var snap = ChannelsStatusParser.Parse(Json(json));
+        Assert.Equal("WhatsApp", snap.ResolveLabel("whatsapp"));
+        Assert.Equal("WhatsApp Business", snap.ResolveDetailLabel("whatsapp"));
+        Assert.Equal("message.fill", snap.ResolveSystemImage("whatsapp"));
+    }
+
+    [Fact]
+    public void Parse_FallsBackToIdWhenLabelMissing()
+    {
+        var snap = ChannelsStatusParser.Parse(Json("""{ "channelOrder": ["custom-plugin"], "channelLabels": {} }"""));
+        Assert.Equal("custom-plugin", snap.ResolveLabel("custom-plugin"));
+        Assert.Equal("custom-plugin", snap.ResolveDetailLabel("custom-plugin"));
+        Assert.Null(snap.ResolveSystemImage("custom-plugin"));
+    }
+
+    [Fact]
+    public void Parse_ExtractsChannelsAndKeepsRawJson()
+    {
+        var json = """
+            {
+              "channelOrder": ["telegram"],
+              "channels": {
+                "telegram": { "configured": true, "running": true, "botUsername": "openclaw_bot" }
+              }
+            }
+            """;
+        var snap = ChannelsStatusParser.Parse(Json(json));
+        Assert.True(snap.Channels.ContainsKey("telegram"));
+        var tg = snap.Channels["telegram"];
+        Assert.Equal(JsonValueKind.True, tg.GetProperty("configured").ValueKind);
+        Assert.Equal("openclaw_bot", tg.GetProperty("botUsername").GetString());
+    }
+
+    [Fact]
+    public void Parse_ExtractsChannelAccounts()
+    {
+        var json = """
+            {
+              "channelOrder": ["whatsapp"],
+              "channels": {},
+              "channelAccounts": {
+                "whatsapp": [
+                  { "id": "primary", "configured": true, "running": true, "lastInboundAt": 1716000000000 },
+                  { "id": "secondary", "configured": false }
+                ]
+              },
+              "channelDefaultAccountId": { "whatsapp": "primary" }
+            }
+            """;
+        var snap = ChannelsStatusParser.Parse(Json(json));
+        var accs = snap.ChannelAccounts["whatsapp"];
+        Assert.Equal(2, accs.Count);
+        Assert.Equal("primary", accs[0].Id);
+        Assert.True(accs[0].Configured);
+        Assert.Equal(1716000000000d, accs[0].LastInboundAt);
+        Assert.False(accs[1].Configured);
+        Assert.Equal("primary", snap.ChannelDefaultAccountId["whatsapp"]);
+    }
+
+    [Fact]
+    public void ExtractWhatsApp_PopulatesAllFields()
+    {
+        var json = """
+            {
+              "configured": true, "running": true, "connected": true, "linked": true,
+              "self": { "e164": "+44...", "jid": "44...@s.whatsapp.net" },
+              "authAgeMs": 86400000, "lastConnectedAt": 1716000000000, "lastMessageAt": 1716000005000,
+              "reconnectAttempts": 2,
+              "lastDisconnect": { "at": 1715999000000, "status": 1006, "error": "timeout", "loggedOut": false }
+            }
+            """;
+        var status = ChannelsStatusParser.ExtractWhatsApp(Json(json));
+        Assert.NotNull(status);
+        Assert.True(status!.Connected);
+        Assert.Equal("+44...", status.Self!.E164);
+        Assert.Equal(2, status.ReconnectAttempts);
+        Assert.Equal("timeout", status.LastDisconnect!.Error);
+        Assert.False(status.LastDisconnect.LoggedOut);
+    }
+
+    [Fact]
+    public void ExtractGeneric_ParsesProbe()
+    {
+        var json = """
+            { "configured": true, "running": true, "probe": { "ok": true, "status": 200, "elapsedMs": 91, "version": "1.2" } }
+            """;
+        var generic = ChannelsStatusParser.ExtractGeneric(Json(json));
+        Assert.NotNull(generic);
+        Assert.True(generic!.Configured);
+        Assert.True(generic.Probe!.Ok);
+        Assert.Equal(200, generic.Probe.Status);
+        Assert.Equal(91d, generic.Probe.ElapsedMs);
+        Assert.Equal("1.2", generic.Probe.Version);
+    }
+
+    [Fact]
+    public void ExtractGeneric_FallsBackToErrorWhenLastErrorMissing()
+    {
+        var json = """{ "configured": false, "error": "boom" }""";
+        var generic = ChannelsStatusParser.ExtractGeneric(Json(json));
+        Assert.Equal("boom", generic!.LastError);
+    }
+}
+
+public class ChannelsAggregatorTests
+{
+    private static JsonElement Json(string raw) => JsonDocument.Parse(raw).RootElement;
+
+    private static ChannelsStatusSnapshot SnapshotWith(string order, params (string id, string statusJson)[] channels)
+    {
+        var ids = order.Split(',', StringSplitOptions.RemoveEmptyEntries);
+        var map = new Dictionary<string, JsonElement>();
+        foreach (var (id, statusJson) in channels)
+            map[id] = Json(statusJson);
+        return new ChannelsStatusSnapshot { ChannelOrder = ids, Channels = map };
+    }
+
+    [Fact]
+    public void Aggregate_FallsBackToBuiltInOrder_WhenSnapshotEmpty()
+    {
+        var records = ChannelsAggregator.Aggregate(null, DateTime.UtcNow);
+        Assert.Equal(ChannelsAggregator.BuiltInChannelOrder.Count, records.Count);
+        var ids = records.Select(r => r.Id).ToHashSet();
+        Assert.Contains("whatsapp", ids);
+        Assert.Contains("telegram", ids);
+        Assert.Contains("nostr", ids);
+    }
+
+    [Fact]
+    public void Aggregate_PutsConfiguredFirst()
+    {
+        var snap = SnapshotWith(
+            "whatsapp,telegram,discord",
+            ("whatsapp", """{ "configured": false }"""),
+            ("telegram", """{ "configured": true, "running": true }"""),
+            ("discord", """{ "configured": false }"""));
+        var records = ChannelsAggregator.Aggregate(snap, DateTime.UtcNow);
+        Assert.Equal("telegram", records[0].Id);
+        Assert.True(records[0].IsConfigured);
+        Assert.False(records[1].IsConfigured);
+        Assert.False(records[2].IsConfigured);
+    }
+
+    [Fact]
+    public void Aggregate_MultiAccount_OneActiveCountsAsConfigured()
+    {
+        var snap = new ChannelsStatusSnapshot
+        {
+            ChannelOrder = new[] { "whatsapp" },
+            Channels = new Dictionary<string, JsonElement> { ["whatsapp"] = Json("""{ "configured": false }""") },
+            ChannelAccounts = new Dictionary<string, IReadOnlyList<ChannelAccountSnapshot>>
+            {
+                ["whatsapp"] = new[]
+                {
+                    new ChannelAccountSnapshot { Id = "primary", Configured = true, Running = true },
+                }
+            },
+        };
+        var records = ChannelsAggregator.Aggregate(snap, DateTime.UtcNow);
+        Assert.True(records[0].IsConfigured);
+    }
+
+    [Fact]
+    public void Aggregate_CapabilitiesAreInferredFromId()
+    {
+        var snap = SnapshotWith(
+            "whatsapp,telegram,discord,signal",
+            ("whatsapp", "{}"), ("telegram", "{}"), ("discord", "{}"), ("signal", "{}"));
+        var records = ChannelsAggregator.Aggregate(snap, DateTime.UtcNow).ToDictionary(r => r.Id);
+
+        Assert.True(records["whatsapp"].Capabilities.HasFlag(ChannelCapabilities.CanLogout));
+        Assert.True(records["whatsapp"].Capabilities.HasFlag(ChannelCapabilities.CanShowQr));
+        Assert.True(records["telegram"].Capabilities.HasFlag(ChannelCapabilities.CanLogout));
+        Assert.False(records["telegram"].Capabilities.HasFlag(ChannelCapabilities.CanShowQr));
+        Assert.False(records["discord"].Capabilities.HasFlag(ChannelCapabilities.CanLogout));
+        Assert.True(records["signal"].Capabilities.HasFlag(ChannelCapabilities.CanShowQr));
+    }
+
+    [Fact]
+    public void Aggregate_iMessageIsUnavailableOnWindows()
+    {
+        var snap = SnapshotWith("imessage", ("imessage", "{}"));
+        var records = ChannelsAggregator.Aggregate(snap, DateTime.UtcNow);
+        Assert.True(records[0].IsUnavailableOnWindows);
+    }
+
+    [Fact]
+    public void Aggregate_UsesGatewayLabelsWhenProvided()
+    {
+        var snap = new ChannelsStatusSnapshot
+        {
+            ChannelOrder = new[] { "custom-plugin" },
+            ChannelLabels = new Dictionary<string, string> { ["custom-plugin"] = "Custom Plugin" },
+            Channels = new Dictionary<string, JsonElement>(),
+        };
+        var records = ChannelsAggregator.Aggregate(snap, DateTime.UtcNow);
+        Assert.Equal("Custom Plugin", records[0].Label);
+    }
+
+    [Fact]
+    public void IsChannelConfigured_TrueWhenRunningOrConnected()
+    {
+        Assert.True(ChannelsAggregator.IsChannelConfigured(Json("""{ "running": true }"""), null));
+        Assert.True(ChannelsAggregator.IsChannelConfigured(Json("""{ "connected": true }"""), null));
+        Assert.True(ChannelsAggregator.IsChannelConfigured(Json("""{ "configured": true }"""), null));
+        Assert.False(ChannelsAggregator.IsChannelConfigured(Json("""{ }"""), null));
+        Assert.False(ChannelsAggregator.IsChannelConfigured(Json("""{ "configured": false }"""), null));
+    }
+
+    [Fact]
+    public void Aggregate_SurfacesChannelsMissingFromChannelOrder()
+    {
+        // Older gateways or plugin-only setups may omit channelOrder while still
+        // populating channels/channelMeta. The aggregator must still surface
+        // those channels — dropping them silently is a regression.
+        var snap = new ChannelsStatusSnapshot
+        {
+            ChannelOrder = new[] { "telegram" }, // only one in order
+            Channels = new Dictionary<string, JsonElement>
+            {
+                ["telegram"] = Json("""{ "configured": true, "running": true }"""),
+                ["custom-plugin"] = Json("""{ "configured": true, "running": true }"""),
+            },
+        };
+        var records = ChannelsAggregator.Aggregate(snap, DateTime.UtcNow);
+        var ids = records.Select(r => r.Id).ToList();
+        Assert.Contains("telegram", ids);
+        Assert.Contains("custom-plugin", ids);
+        // The order-list entry sorts before the appended union entry; both are configured.
+        Assert.True(records.All(r => r.IsConfigured));
+    }
+
+    [Fact]
+    public void Aggregate_UnionsChannelsAndMetaWhenChannelOrderEmpty()
+    {
+        var snap = new ChannelsStatusSnapshot
+        {
+            // No channelOrder at all
+            Channels = new Dictionary<string, JsonElement>
+            {
+                ["plugin-a"] = Json("""{ "configured": true }"""),
+            },
+            ChannelMeta = new[] { new ChannelUiMetaEntry { Id = "plugin-b", Label = "Plugin B" } },
+        };
+        var records = ChannelsAggregator.Aggregate(snap, DateTime.UtcNow);
+        var ids = records.Select(r => r.Id).ToHashSet();
+        // Both should surface; built-in fallback should NOT fire because we had data.
+        Assert.Contains("plugin-a", ids);
+        Assert.Contains("plugin-b", ids);
+        Assert.DoesNotContain("whatsapp", ids); // built-in fallback didn't kick in
+    }
+
+    [Fact]
+    public void Aggregate_AccountsKeysAlsoCountAsKnownIds()
+    {
+        var snap = new ChannelsStatusSnapshot
+        {
+            // No channelOrder, no channels — only multi-account info present.
+            ChannelAccounts = new Dictionary<string, IReadOnlyList<ChannelAccountSnapshot>>
+            {
+                ["acct-only"] = new[] { new ChannelAccountSnapshot { Id = "primary", Configured = true } }
+            },
+        };
+        var records = ChannelsAggregator.Aggregate(snap, DateTime.UtcNow);
+        Assert.Single(records);
+        Assert.Equal("acct-only", records[0].Id);
+        Assert.True(records[0].IsConfigured);
+    }
+}

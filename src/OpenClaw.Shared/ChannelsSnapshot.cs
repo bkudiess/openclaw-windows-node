@@ -1,0 +1,239 @@
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.Json;
+
+namespace OpenClaw.Shared;
+
+/// <summary>
+/// Strongly-typed snapshot returned by <c>channels.status</c>.
+/// Mirrors the shape used by the macOS app (<c>ChannelsStatusSnapshot</c>) and the
+/// web UI (<c>ChannelsStatusSnapshot</c> in <c>ui/src/ui/types.ts</c>).
+///
+/// The gateway is the source of truth for channel metadata: <see cref="ChannelOrder"/>,
+/// <see cref="ChannelLabels"/>, <see cref="ChannelDetailLabels"/>,
+/// <see cref="ChannelSystemImages"/>, and <see cref="ChannelMeta"/> all come from the
+/// gateway's plugin registry. The tray UI renders whatever is reported; it does not
+/// maintain its own list.
+/// </summary>
+public sealed class ChannelsStatusSnapshot
+{
+    /// <summary>Server timestamp (epoch seconds, fractional).</summary>
+    public double Ts { get; init; }
+
+    /// <summary>Canonical ordered list of channel ids the gateway is aware of.</summary>
+    public IReadOnlyList<string> ChannelOrder { get; init; } = [];
+
+    /// <summary>Sidebar label per id (e.g. <c>"whatsapp" → "WhatsApp"</c>).</summary>
+    public IReadOnlyDictionary<string, string> ChannelLabels { get; init; }
+        = new Dictionary<string, string>();
+
+    /// <summary>Detail-pane title per id (falls back to <see cref="ChannelLabels"/>).</summary>
+    public IReadOnlyDictionary<string, string>? ChannelDetailLabels { get; init; }
+
+    /// <summary>SF Symbol name per id. Windows maps these to Fluent glyphs.</summary>
+    public IReadOnlyDictionary<string, string>? ChannelSystemImages { get; init; }
+
+    /// <summary>Richer per-channel UI metadata. When present, takes precedence over the *Labels maps.</summary>
+    public IReadOnlyList<ChannelUiMetaEntry>? ChannelMeta { get; init; }
+
+    /// <summary>
+    /// Per-channel raw status JSON. Keys are channel ids; values are arbitrary channel-specific
+    /// status documents (typed records like <see cref="WhatsAppChannelStatus"/> available for
+    /// built-ins; plugin channels use the generic shape).
+    /// </summary>
+    public IReadOnlyDictionary<string, JsonElement> Channels { get; init; }
+        = new Dictionary<string, JsonElement>();
+
+    /// <summary>Per-channel account list. Channels with multi-account support (e.g. WhatsApp Business).</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<ChannelAccountSnapshot>> ChannelAccounts { get; init; }
+        = new Dictionary<string, IReadOnlyList<ChannelAccountSnapshot>>();
+
+    /// <summary>Per-channel default account id (when multi-account).</summary>
+    public IReadOnlyDictionary<string, string> ChannelDefaultAccountId { get; init; }
+        = new Dictionary<string, string>();
+
+    /// <summary>Resolve the sidebar label for a channel id, falling back through the precedence list Mac uses.</summary>
+    public string ResolveLabel(string id)
+    {
+        if (ChannelMeta is { } meta)
+        {
+            var entry = meta.FirstOrDefault(e => e.Id == id);
+            if (entry != null && !string.IsNullOrEmpty(entry.Label)) return entry.Label;
+        }
+        if (ChannelLabels.TryGetValue(id, out var label) && !string.IsNullOrEmpty(label)) return label;
+        return id;
+    }
+
+    /// <summary>Resolve the detail-pane title for a channel id.</summary>
+    public string ResolveDetailLabel(string id)
+    {
+        if (ChannelMeta is { } meta)
+        {
+            var entry = meta.FirstOrDefault(e => e.Id == id);
+            if (entry != null && !string.IsNullOrEmpty(entry.DetailLabel)) return entry.DetailLabel;
+        }
+        if (ChannelDetailLabels is { } details && details.TryGetValue(id, out var detail) && !string.IsNullOrEmpty(detail))
+            return detail;
+        return ResolveLabel(id);
+    }
+
+    /// <summary>Resolve the SF Symbol name for a channel id (callers map to Fluent glyphs).</summary>
+    public string? ResolveSystemImage(string id)
+    {
+        if (ChannelMeta is { } meta)
+        {
+            var entry = meta.FirstOrDefault(e => e.Id == id);
+            if (entry != null && !string.IsNullOrEmpty(entry.SystemImage)) return entry.SystemImage;
+        }
+        if (ChannelSystemImages is { } sys && sys.TryGetValue(id, out var symbol) && !string.IsNullOrEmpty(symbol))
+            return symbol;
+        return null;
+    }
+}
+
+/// <summary>Per-channel UI metadata entry from <c>channelMeta</c>.</summary>
+public sealed class ChannelUiMetaEntry
+{
+    public string Id { get; init; } = "";
+    public string Label { get; init; } = "";
+    public string DetailLabel { get; init; } = "";
+    public string? SystemImage { get; init; }
+}
+
+/// <summary>One account belonging to a channel (for channels with multi-account support).</summary>
+public sealed class ChannelAccountSnapshot
+{
+    public string Id { get; init; } = "";
+    public bool? Configured { get; init; }
+    public bool? Running { get; init; }
+    public bool? Connected { get; init; }
+    /// <summary>Last inbound message timestamp (epoch ms).</summary>
+    public double? LastInboundAt { get; init; }
+    /// <summary>Last outbound message timestamp (epoch ms).</summary>
+    public double? LastOutboundAt { get; init; }
+}
+
+/// <summary>Generic channel status fields surfaced by virtually every channel plugin.</summary>
+public sealed class GenericChannelStatus
+{
+    public bool Configured { get; init; }
+    public bool Running { get; init; }
+    public bool Connected { get; init; }
+    public bool Linked { get; init; }
+    public string? LastError { get; init; }
+    public ChannelProbe? Probe { get; init; }
+    /// <summary>Last probe completion timestamp (epoch ms).</summary>
+    public double? LastProbeAt { get; init; }
+}
+
+/// <summary>Probe sub-record common to most channel statuses.</summary>
+public sealed class ChannelProbe
+{
+    public bool? Ok { get; init; }
+    public int? Status { get; init; }
+    public double? ElapsedMs { get; init; }
+    public string? Version { get; init; }
+    public string? Error { get; init; }
+}
+
+// ─── Typed status records for built-in channels ─────────────────────────────
+// These cover the fields Mac surfaces in its detail-pane "details line"; plugin
+// channels (e.g. nostr) use the generic shape above.
+
+public sealed class WhatsAppChannelStatus
+{
+    public bool Configured { get; init; }
+    public bool Running { get; init; }
+    public bool Connected { get; init; }
+    public bool Linked { get; init; }
+    public string? LastError { get; init; }
+    public WhatsAppSelf? Self { get; init; }
+    public double? AuthAgeMs { get; init; }
+    public double? LastConnectedAt { get; init; }
+    public double? LastMessageAt { get; init; }
+    public int ReconnectAttempts { get; init; }
+    public WhatsAppLastDisconnect? LastDisconnect { get; init; }
+}
+
+public sealed class WhatsAppSelf
+{
+    public string? E164 { get; init; }
+    public string? Jid { get; init; }
+}
+
+public sealed class WhatsAppLastDisconnect
+{
+    public double? At { get; init; }
+    public int? Status { get; init; }
+    public string? Error { get; init; }
+    public bool? LoggedOut { get; init; }
+}
+
+public sealed class TelegramChannelStatus
+{
+    public bool Configured { get; init; }
+    public bool Running { get; init; }
+    public string? LastError { get; init; }
+    public ChannelProbe? Probe { get; init; }
+    public double? LastProbeAt { get; init; }
+    public string? BotUsername { get; init; }
+}
+
+public sealed class DiscordChannelStatus
+{
+    public bool Configured { get; init; }
+    public bool Running { get; init; }
+    public string? LastError { get; init; }
+    public ChannelProbe? Probe { get; init; }
+    public double? LastProbeAt { get; init; }
+    public string? WebhookUrl { get; init; }
+}
+
+public sealed class GoogleChatChannelStatus
+{
+    public bool Configured { get; init; }
+    public bool Running { get; init; }
+    public string? LastError { get; init; }
+    public ChannelProbe? Probe { get; init; }
+    public double? LastProbeAt { get; init; }
+    public string? WebhookUrl { get; init; }
+}
+
+public sealed class SignalChannelStatus
+{
+    public bool Configured { get; init; }
+    public bool Running { get; init; }
+    public string? LastError { get; init; }
+    public ChannelProbe? Probe { get; init; }
+    public double? LastProbeAt { get; init; }
+    public string? BaseUrl { get; init; }
+}
+
+public sealed class IMessageChannelStatus
+{
+    public bool Configured { get; init; }
+    public bool Running { get; init; }
+    public string? LastError { get; init; }
+    public ChannelProbe? Probe { get; init; }
+    public double? LastProbeAt { get; init; }
+    public string? CliPath { get; init; }
+    public string? DbPath { get; init; }
+}
+
+// ─── Web login (QR linking) ──────────────────────────────────────────────────
+
+/// <summary>Result of <c>web.login.start</c> — a QR or status for a channel.</summary>
+public sealed class WebLoginStartResult
+{
+    public string? Message { get; init; }
+    public string? QrDataUrl { get; init; }
+    public bool Connected { get; init; }
+}
+
+/// <summary>Result of <c>web.login.wait</c> — long-poll outcome.</summary>
+public sealed class WebLoginWaitResult
+{
+    public string? Message { get; init; }
+    public string? QrDataUrl { get; init; }
+    public bool Connected { get; init; }
+}

@@ -1050,8 +1050,8 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
                     ShowHub();
                 break;
             case "quicksend": ShowQuickSend(); break;
-            case "history": ShowNotificationHistory(); break;
-            case "activity": ShowActivityStream(); break;
+            case "history": ShowHub("channels"); break;
+            case "activity": ShowHub("channels"); break;
             case "healthcheck": _ = RunHealthCheckAsync(userInitiated: true); break;
             case "checkupdates": _ = CheckForUpdatesUserInitiatedAsync(); break;
             case "settings": ShowSettings(); break;
@@ -1105,7 +1105,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
                 else if (action.StartsWith("dashboard:", StringComparison.Ordinal))
                     OpenDashboard(action["dashboard:".Length..]);
                 else if (action.StartsWith("activity:", StringComparison.Ordinal))
-                    ShowActivityStream(action["activity:".Length..]);
+                    ShowHub("channels");
                 else if (action.StartsWith("channel:", StringComparison.Ordinal))
                     ToggleChannel(action[8..]);
                 else
@@ -2795,13 +2795,15 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
 
     private void ShowNotificationHistory()
     {
-        ShowActivityStream("notification");
+        // ActivityPage removed; legacy callers now land on the Channels page.
+        ShowHub("channels");
     }
 
     private void ShowActivityStream(string? filter = null)
     {
-        ShowHub("activity");
-        _hubWindow?.SetActivityFilter(filter);
+        // ActivityPage removed; legacy callers now land on the Channels page.
+        _ = filter;
+        ShowHub("channels");
     }
 
     private OnboardingWindow? _onboardingWindow;
@@ -3401,7 +3403,8 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
                         ShowWebChat();
                         break;
                     case "open_activity":
-                        ShowActivityStream();
+                        // ActivityPage removed — redirect to Channels.
+                        ShowHub("channels");
                         break;
                     case "copy_pairing_command" when arguments.TryGetValue("command", out var command):
                         CopyTextToClipboard(command);
