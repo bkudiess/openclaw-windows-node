@@ -31,7 +31,7 @@ public static class FluentIconCatalog
     // ── Capabilities (per-permission glyphs) ───────────────────────
     public const string Browser = "\uE774";        // Globe
     public const string Camera = "\uE722";         // Camera
-    public const string Canvas = "\uE70F";         // Edit
+    public const string Canvas = "\uE790";         // Color (palette) - generated art canvas
     public const string Screen = "\uEB91";         // ScreenTime (screen capture/recording)
     public const string Location = "\uE707";       // MapPin (Globe2 alt)
     public const string Voice = "\uE767";          // Volume (speaker, for TTS)
@@ -43,7 +43,7 @@ public static class FluentIconCatalog
     public const string Dashboard = "\uE774";      // Globe
     public const string OpenInBrowser = "\uE8A7";  // OpenInNewWindow — top-right dashboard launcher icon
     public const string Chat = "\uE8BD";           // Message
-    public const string CanvasAct = "\uE70F";      // Edit
+    public const string CanvasAct = "\uE790";      // Color (palette) - matches Canvas permission glyph
     public const string VoiceAct = "\uE720";       // Microphone
     public const string Settings = "\uE713";       // Settings
     public const string QuickSend = "\uE724";      // Send (Mail variant) — closest universal Send glyph
