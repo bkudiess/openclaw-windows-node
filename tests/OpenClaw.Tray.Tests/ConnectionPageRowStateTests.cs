@@ -18,7 +18,6 @@ public sealed class ConnectionPageRowStateTests
     [InlineData(OverallConnectionState.Degraded)]
     [InlineData(OverallConnectionState.Connecting)]
     [InlineData(OverallConnectionState.PairingRequired)]
-    [InlineData(OverallConnectionState.Error)]
     public void CanDisconnectFromBadge_TrueForLiveAndPendingStates(OverallConnectionState state)
     {
         Assert.True(ConnectionPageRowState.CanDisconnectFromBadge(state),
@@ -43,6 +42,17 @@ public sealed class ConnectionPageRowStateTests
             "Idle rows render [Connect]; Disconnect is meaningless.");
     }
 
+    [Fact]
+    public void CanDisconnectFromBadge_FalseInErrorState()
+    {
+        // In Error the row renders [Connect] so the user can retry. The
+        // status strip up top already shouts "Can't reach gateway" and
+        // the Recovery card right beneath it offers Disconnect — adding
+        // it to the row overflow too would duplicate the action.
+        Assert.False(ConnectionPageRowState.CanDisconnectFromBadge(OverallConnectionState.Error),
+            "Error rows render [Connect]; Disconnect lives on the Recovery card above.");
+    }
+
     [Theory]
     [InlineData(OverallConnectionState.Connected)]
     [InlineData(OverallConnectionState.Ready)]
@@ -50,12 +60,8 @@ public sealed class ConnectionPageRowStateTests
     [InlineData(OverallConnectionState.Connecting)]
     [InlineData(OverallConnectionState.PairingRequired)]
     [InlineData(OverallConnectionState.Disconnecting)]
-    [InlineData(OverallConnectionState.Error)]
-    public void HasActiveRowBadge_TrueForNonIdleStates(OverallConnectionState state)
+    public void HasActiveRowBadge_TrueForLiveAndTransientStates(OverallConnectionState state)
     {
-        // The Error case is the regression added in this commit pass: an
-        // active row in Error used to render [Connect] indistinguishably
-        // from an inactive row, hiding the failure.
         Assert.True(ConnectionPageRowState.HasActiveRowBadge(state),
             $"{state} should render a status badge so the user can see the live state.");
     }
@@ -64,6 +70,17 @@ public sealed class ConnectionPageRowStateTests
     public void HasActiveRowBadge_FalseWhenIdle()
     {
         Assert.False(ConnectionPageRowState.HasActiveRowBadge(OverallConnectionState.Idle),
-            "Idle is the only state without a badge — the row falls back to [Connect].");
+            "Idle has no live connection — the row falls back to [Connect].");
+    }
+
+    [Fact]
+    public void HasActiveRowBadge_FalseInErrorState()
+    {
+        // Error explicitly falls back to [Connect] so the user has an
+        // actionable retry per gateway. The strip + Recovery card up top
+        // already carry the failure signal; the row should be the action
+        // surface, not a redundant status surface.
+        Assert.False(ConnectionPageRowState.HasActiveRowBadge(OverallConnectionState.Error),
+            "Error rows render [Connect] so the user can explicitly retry.");
     }
 }

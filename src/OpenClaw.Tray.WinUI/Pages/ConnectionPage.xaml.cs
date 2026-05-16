@@ -1078,18 +1078,16 @@ public sealed partial class ConnectionPage : Page
             OverallConnectionState.PairingRequired =>
                 (Helpers.FluentIconCatalog.Lock, "SystemFillColorCautionBrush", "Awaiting approval"),
 
-            // Error: surface as a critical-colored badge so the user can
-            // distinguish "active gateway is broken" from "this row is just
-            // not active". Without this, an Error active row fell through
-            // to [Connect], indistinguishable from any inactive row, and
-            // the overflow menu lost the Disconnect/teardown affordance.
-            OverallConnectionState.Error =>
-                (Helpers.FluentIconCatalog.StatusErr, "SystemFillColorCriticalBrush", "Error"),
-
             OverallConnectionState.Disconnecting =>
                 (Helpers.FluentIconCatalog.Sync, "TextFillColorSecondaryBrush", "Disconnecting…"),
 
-            // Idle → no badge; caller renders [Connect].
+            // Idle and Error → no badge; caller renders [Connect].
+            // The status strip up top already carries the "broken / can't
+            // reach gateway" signal (with the URL and category), and the
+            // Recovery card right beneath it offers Disconnect. Adding an
+            // "Error" badge here would duplicate that signal and remove the
+            // [Connect] retry affordance — which is the one actionable
+            // thing the row should offer in an Error state.
             _ => null,
         };
 
