@@ -203,15 +203,20 @@ public sealed partial class ChannelsPage : Page
 
     private void Render(ChannelsStatusSnapshot snapshot)
     {
-        // When connected to a gateway, show ONLY what the gateway reports — no
-        // built-in fallback list. Fake-listing channels the gateway doesn't
-        // expose causes clicks-into-nothing on Show QR. When disconnected,
-        // fall back to the built-in list so the page isn't empty.
-        var useFallback = CurrentApp.GatewayClient == null;
+        // Always allow the built-in fallback. Reasoning: showing the user
+        // common channels they can attempt to set up is more useful than
+        // honest emptiness — when their gateway truly doesn't support a
+        // channel, the inline form / Show QR error path will surface the
+        // failure with a real diagnostic. Empty-page-when-connected is the
+        // worst of both worlds: no path forward AND no error to act on.
+        //
+        // A small banner below (GatewayMissingChannelsBar) tells the user
+        // when their gateway returned an empty list so they know the
+        // preview channels may not all work.
         var records = ChannelsAggregator.Aggregate(
             snapshot,
             _latestSnapshotAt == default ? DateTime.UtcNow : _latestSnapshotAt,
-            useBuiltInFallback: useFallback);
+            useBuiltInFallback: true);
         var configured = records.Where(r => r.IsConfigured).ToList();
         var available = records.Where(r => !r.IsConfigured).ToList();
 
@@ -228,11 +233,29 @@ public sealed partial class ChannelsPage : Page
         AvailableSection.Visibility = available.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         EmptyState.Visibility = records.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
+        // Surface the "connected-but-empty-response" case so the user knows
+        // the channels below are a generic preview rather than a definitive
+        // list of what their gateway supports.
+        var connected = CurrentApp.GatewayClient != null;
+        var gatewayReportedSomething = snapshot.ChannelOrder.Count > 0
+            || snapshot.Channels.Count > 0
+            || (snapshot.ChannelMeta?.Count ?? 0) > 0;
+        if (connected && !gatewayReportedSomething && records.Count > 0)
+        {
+            GatewayMissingChannelsBar.IsOpen = true;
+        }
+        else
+        {
+            GatewayMissingChannelsBar.IsOpen = false;
+        }
+
         MetaText.Text = records.Count == 0
-            ? (useFallback
-                ? "connect to a gateway to see what channels are available"
-                : "this gateway didn't report any channels")
-            : $"{records.Count} channels · {configured.Count} configured · last check just now";
+            ? (connected
+                ? "this gateway didn't report any channels"
+                : "connect to a gateway to see what channels are available")
+            : (connected && !gatewayReportedSomething
+                ? $"showing {records.Count} common channels (your gateway didn't list any — some may not work)"
+                : $"{records.Count} channels · {configured.Count} configured · last check just now");
     }
 
     // ─── Expander construction ─────────────────────────────────────────────

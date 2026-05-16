@@ -54,6 +54,26 @@
                     </Button>
                 </Grid>
 
+                <!-- Single canonical "what is this page / where do I go for help"
+                     orienting line. Channels are gateway-side state; the form
+                     below writes to the gateway's config. Docs link is THE
+                     authoritative answer to "how do I set this up". -->
+                <Border Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="14,10">
+                    <StackPanel Spacing="6">
+                        <TextBlock x:Uid="ChannelsPage_Intro"
+                                   Text="Channels are configured on your gateway. To add one, expand it below and fill in its credentials. The form saves directly to your gateway's config."
+                                   TextWrapping="Wrap"
+                                   FontSize="13"/>
+                        <HyperlinkButton x:Uid="ChannelsPage_DocsLink"
+                                         Content="Read the channels guide →"
+                                         NavigateUri="https://docs.openclaw.ai/channels"
+                                         Padding="0"
+                                         AutomationProperties.Name="Open the OpenClaw channels documentation"/>
+                    </StackPanel>
+                </Border>
+
                 <!-- "Not connected to gateway" InfoBar -->
                 <InfoBar x:Uid="ChannelsPage_NotConnected"
                          x:Name="NotConnectedBar"
@@ -65,6 +85,17 @@
                 <InfoBar x:Uid="ChannelsPage_ErrorBar"
                          x:Name="ErrorBar"
                          Severity="Warning" IsOpen="False" IsClosable="True"/>
+
+                <!-- Shown when the gateway is connected but its channels.status
+                     response was empty. The list below is then a preview of
+                     common channels the user can attempt to configure. -->
+                <InfoBar x:Uid="ChannelsPage_GatewayMissingChannelsBar"
+                         x:Name="GatewayMissingChannelsBar"
+                         Severity="Informational"
+                         IsOpen="False"
+                         IsClosable="False"
+                         Title="Your gateway didn't list any channels"
+                         Message="Showing common channel types as a preview. Some may not be supported by your gateway — try one, and the error message will tell you if so."/>
 
                 <!-- ═════════════════════════════════════════════════════════
                      CONFIGURED GROUP — channels with active state
