@@ -120,18 +120,21 @@ public sealed partial class HubWindow : WindowEx
     {
         if (ContentFrame.Content == null)
         {
-            // Navigate to Home (first item)
-            NavView.SelectedItem = NavView.MenuItems[0];
+            // Connection is the landing page (Home was removed; legacy
+            // "home"/"general" tags alias to "connection" in NavigateTo).
+            NavigateTo("connection");
         }
     }
 
     /// <summary>
-    /// Navigate to a specific page by tag name (e.g. "home", "sessions", "channels").
+    /// Navigate to a specific page by tag name (e.g. "connection", "sessions", "channels").
     /// </summary>
     public void NavigateTo(string tag)
     {
-        // Map legacy tags
-        if (tag == "general") tag = "home";
+        // Map legacy tags — Home page was retired in favor of the Lobby/Cockpit
+        // layout on Connection. Any caller still using "home" or "general"
+        // (deep links, persisted nav state, command palette) lands here.
+        if (tag == "home" || tag == "general") tag = "connection";
         if (tag == "about") tag = "info";
         if (tag == "nodes") tag = "instances";
         // Map legacy agent-scoped workspace/cron tags
@@ -181,10 +184,6 @@ public sealed partial class HubWindow : WindowEx
                 if (status == ConnectionStatus.Disconnected)
                     _lastGatewaySelf = null;
                 UpdateTitleBarStatus(status);
-                if (ContentFrame?.Content is HomePage homePage)
-                {
-                    homePage.UpdateConnectionStatus(status, Settings?.GetEffectiveGatewayUrl());
-                }
                 if (ContentFrame?.Content is ConnectionPage connectionPage)
                 {
                     connectionPage.UpdateStatus(status);
@@ -268,7 +267,7 @@ public sealed partial class HubWindow : WindowEx
         DispatcherQueue?.TryEnqueue(() =>
         {
             if (ContentFrame?.Content is SessionsPage sp) sp.UpdateSessions(sessions);
-            else if (ContentFrame?.Content is HomePage home) home.UpdateSessions(sessions);
+            else if (ContentFrame?.Content is ConnectionPage cp) cp.OnGlanceDataChanged();
         });
     }
 
@@ -279,6 +278,7 @@ public sealed partial class HubWindow : WindowEx
         DispatcherQueue?.TryEnqueue(() =>
         {
             if (ContentFrame?.Content is ChannelsPage cp) cp.UpdateChannels(channels);
+            else if (ContentFrame?.Content is ConnectionPage connection) connection.OnGlanceDataChanged();
         });
     }
 
@@ -299,6 +299,7 @@ public sealed partial class HubWindow : WindowEx
         DispatcherQueue?.TryEnqueue(() =>
         {
             if (ContentFrame?.Content is UsagePage up) up.UpdateUsageCost(cost);
+            else if (ContentFrame?.Content is ConnectionPage cp) cp.OnGlanceDataChanged();
         });
     }
 
@@ -319,7 +320,6 @@ public sealed partial class HubWindow : WindowEx
         DispatcherQueue?.TryEnqueue(() =>
         {
             if (ContentFrame?.Content is InstancesPage ip) ip.UpdateNodes(nodes);
-            else if (ContentFrame?.Content is HomePage home) home.UpdateNodes(nodes);
         });
     }
 
@@ -431,7 +431,6 @@ public sealed partial class HubWindow : WindowEx
                 if (IsClosed) return;
                 // Rebuild nav sidebar agent items
                 RebuildAgentNavItems(data);
-                if (ContentFrame?.Content is HomePage home) home.UpdateAgentsList(data);
             });
         }
         catch { }
@@ -675,7 +674,6 @@ public sealed partial class HubWindow : WindowEx
     {
         switch (ContentFrame.Content)
         {
-            case HomePage home: home.Initialize(this); break;
             case ChatPage chat: chat.Initialize(this); break;
             case SessionsPage sessions:
                 sessions.Initialize(this);
@@ -762,7 +760,6 @@ public sealed partial class HubWindow : WindowEx
 
     private static Type? TagToPageType(string? tag) => tag switch
     {
-        "home" => typeof(HomePage),
         "chat" => typeof(ChatPage),
         "connection" => typeof(ConnectionPage),
         "channels" => typeof(ChannelsPage),
@@ -780,7 +777,8 @@ public sealed partial class HubWindow : WindowEx
         "debug" => typeof(DebugPage),
         "info" => typeof(AboutPage),
         // Legacy tags
-        "general" => typeof(HomePage),
+        "home" => typeof(ConnectionPage),
+        "general" => typeof(ConnectionPage),
         "conversations" => typeof(SessionsPage), // legacy redirect
         "sessions" => typeof(SessionsPage),
         "agentevents" => typeof(AgentEventsPage),
@@ -886,7 +884,7 @@ public sealed partial class HubWindow : WindowEx
         var commands = new List<CommandItem>
         {
             // Navigation
-            new() { Icon = "🏠", Title = "Go to Home", Subtitle = "Home page", Tag = "home" },
+            new() { Icon = "🔌", Title = "Go to Connection", Subtitle = "Gateway, node, saved gateways", Tag = "connection" },
             new() { Icon = "💬", Title = "Go to Chat", Subtitle = "Open chat", Tag = "chat" },
             new() { Icon = "🧠", Title = "Go to Sessions", Subtitle = "All sessions", Tag = "sessions" },
             new() { Icon = "🧠", Title = "Go to Agent Events", Subtitle = "Agent event log", Tag = "agentevents" },

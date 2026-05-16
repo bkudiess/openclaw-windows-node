@@ -1026,10 +1026,10 @@ public partial class App : Application
             case "webchat": ShowWebChat(); break;
             case "hub": ShowHub(); break;
             case "companion":
-                // If disconnected, open General page (has connection settings + discovery)
+                // If disconnected, open Connection page (status, gateways, add flow)
                 // If connected, open Hub at default page
                 if (_currentStatus != ConnectionStatus.Connected)
-                    ShowHub("general");
+                    ShowHub("connection");
                 else
                     ShowHub();
                 break;
@@ -4304,7 +4304,7 @@ public partial class App : Application
 
     private void ShowStatusDetail()
     {
-        ShowHub("general");
+        ShowHub("connection");
     }
 
     private void ShowConnectionStatusWindow()

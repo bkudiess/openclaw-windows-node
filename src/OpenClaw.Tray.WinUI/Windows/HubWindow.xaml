@@ -91,9 +91,6 @@
             SelectionChanged="NavView_SelectionChanged">
 
         <NavigationView.MenuItems>
-            <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_79" Tag="home" Content="Home">
-                <NavigationViewItem.Icon><FontIcon Glyph="&#xE80F;"/></NavigationViewItem.Icon>
-            </NavigationViewItem>
             <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_82" Tag="chat" Content="Chat">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE8BD;"/></NavigationViewItem.Icon>
             </NavigationViewItem>

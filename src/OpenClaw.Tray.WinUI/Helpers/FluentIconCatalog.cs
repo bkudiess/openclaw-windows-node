@@ -24,7 +24,8 @@ public static class FluentIconCatalog
     // ── Sections / categories ──────────────────────────────────────
     public const string Sessions = "\uE8BD";       // Message
     public const string Approvals = "\uE7BA";      // Warning (re-use)
-    public const string Devices = "\uE772";        // Devices
+    public const string Devices = "\uE772";        // Devices (two devices — section header)
+    public const string Hostname = "\uE977";       // Devices/IT — single hostname/system info pill
     public const string Permissions = "\uEA18";    // Shield
 
     // ── Capabilities (per-permission glyphs) ───────────────────────
@@ -35,18 +36,32 @@ public static class FluentIconCatalog
     public const string Location = "\uE707";       // MapPin (Globe2 alt)
     public const string Voice = "\uE767";          // Volume (speaker, for TTS)
     public const string Speech = "\uF12E";         // Dictate (speech-to-text)
-    public const string System = "\uE7F4";         // TVMonitor (Windows node = this desktop)
+    public const string System = "\uE839";         // PC1 — "this PC as a node" (per CDR-0001 — was TVMonitor \uE7F4)
+    public const string Operator = "\uE77B";       // ContactInfo — operator role (a human controlling agents)
 
     // ── Actions ────────────────────────────────────────────────────
     public const string Dashboard = "\uE774";      // Globe
+    public const string OpenInBrowser = "\uE8A7";  // OpenInNewWindow — top-right dashboard launcher icon
     public const string Chat = "\uE8BD";           // Message
     public const string CanvasAct = "\uE70F";      // Edit
     public const string VoiceAct = "\uE720";       // Microphone
     public const string Settings = "\uE713";       // Settings
     public const string QuickSend = "\uE724";      // Send (Mail variant) — closest universal Send glyph
-    public const string Setup = "\uE825";          // MapPin (compass glyph U+E1D3 isn't reliably in Segoe Fluent; MapPin is safer)
+    public const string Setup = "\uE825";          // Bank — Reconfigure / Setup wizard launcher
     public const string About = "\uE946";          // Info
     public const string Exit = "\uE711";           // Cancel (X) — used for "Close" menu item
+    public const string Add = "\uE710";            // Add — "+ Add gateway" header button
+    public const string Back = "\uE72B";           // Back — leading chevron on Back hyperlink
+    public const string Sync = "\uE895";           // Sync — Connecting / Disconnecting transient
+    public const string Lock = "\uE192";           // Lock — Setup code / pairing waiting
+    public const string Plug = "\uE839";           // Plug/PC1 — Direct connection tile (alias of System; same glyph)
+    public const string MoreOverflow = "\uE712";   // More — saved-row overflow ⋯ button
+
+    // ── Glance chips (Connection page) ─────────────────────────────
+    public const string People = "\uE716";         // People — N clients chip
+    public const string Money = "\uE9D9";          // Money — $today chip
+    public const string ServerEnvironment = "\uE968"; // ServerEnvironment — topology chip
+    public const string CapabilityOff = "\uE894";  // RemoveFrom — disabled capability state
 
     // ── Affordances ────────────────────────────────────────────────
     public const string ChevronR = "\uE76C";       // ChevronRight
