@@ -214,17 +214,63 @@ public class ChannelsAggregatorTests
     [Fact]
     public void Aggregate_CapabilitiesAreInferredFromId()
     {
+        // All four channels are configured here, so their full capability set
+        // (Logout for whatsapp/telegram, ShowQr+Relink for whatsapp/signal)
+        // should be reported. CanLogout/CanRelink are gated on "configured" —
+        // see Aggregate_NotConfigured_HidesLogoutAndRelink for the negative case.
         var snap = SnapshotWith(
             "whatsapp,telegram,discord,signal",
-            ("whatsapp", "{}"), ("telegram", "{}"), ("discord", "{}"), ("signal", "{}"));
+            ("whatsapp", """{ "configured": true, "running": true }"""),
+            ("telegram", """{ "configured": true, "running": true }"""),
+            ("discord",  """{ "configured": true, "running": true }"""),
+            ("signal",   """{ "configured": true, "running": true }"""));
         var records = ChannelsAggregator.Aggregate(snap, DateTime.UtcNow).ToDictionary(r => r.Id);
 
         Assert.True(records["whatsapp"].Capabilities.HasFlag(ChannelCapabilities.CanLogout));
         Assert.True(records["whatsapp"].Capabilities.HasFlag(ChannelCapabilities.CanShowQr));
+        Assert.True(records["whatsapp"].Capabilities.HasFlag(ChannelCapabilities.CanRelink));
         Assert.True(records["telegram"].Capabilities.HasFlag(ChannelCapabilities.CanLogout));
         Assert.False(records["telegram"].Capabilities.HasFlag(ChannelCapabilities.CanShowQr));
         Assert.False(records["discord"].Capabilities.HasFlag(ChannelCapabilities.CanLogout));
         Assert.True(records["signal"].Capabilities.HasFlag(ChannelCapabilities.CanShowQr));
+    }
+
+    [Fact]
+    public void Aggregate_NotConfigured_HidesLogoutAndRelink_KeepsShowQr()
+    {
+        // Regression: unconfigured WhatsApp / Telegram used to surface a
+        // Logout header action because CanLogout was id-driven only. We now
+        // gate CanLogout AND CanRelink on IsConfigured so the page doesn't
+        // show "Logout" on a channel the user has never signed into.
+        // CanShowQr stays available on QR channels because it's the bootstrap
+        // path — that's how the user *first* configures WhatsApp/Signal.
+        var snap = SnapshotWith(
+            "whatsapp,telegram,signal",
+            ("whatsapp", """{ "configured": false }"""),
+            ("telegram", """{ "configured": false }"""),
+            ("signal",   """{ "configured": false }"""));
+        var records = ChannelsAggregator.Aggregate(snap, DateTime.UtcNow).ToDictionary(r => r.Id);
+
+        Assert.False(records["whatsapp"].IsConfigured);
+        Assert.False(records["telegram"].IsConfigured);
+        Assert.False(records["signal"].IsConfigured);
+
+        // CanLogout must be absent on every unconfigured channel.
+        Assert.False(records["whatsapp"].Capabilities.HasFlag(ChannelCapabilities.CanLogout));
+        Assert.False(records["telegram"].Capabilities.HasFlag(ChannelCapabilities.CanLogout));
+        Assert.False(records["signal"].Capabilities.HasFlag(ChannelCapabilities.CanLogout));
+
+        // CanRelink (rotate an existing link) is meaningless when there's no link.
+        Assert.False(records["whatsapp"].Capabilities.HasFlag(ChannelCapabilities.CanRelink));
+        Assert.False(records["signal"].Capabilities.HasFlag(ChannelCapabilities.CanRelink));
+
+        // CanShowQr stays — it's the bootstrap path for QR channels.
+        Assert.True(records["whatsapp"].Capabilities.HasFlag(ChannelCapabilities.CanShowQr));
+        Assert.True(records["signal"].Capabilities.HasFlag(ChannelCapabilities.CanShowQr));
+
+        // Refresh is always available.
+        Assert.True(records["whatsapp"].Capabilities.HasFlag(ChannelCapabilities.CanRefresh));
+        Assert.True(records["telegram"].Capabilities.HasFlag(ChannelCapabilities.CanRefresh));
     }
 
     [Fact]

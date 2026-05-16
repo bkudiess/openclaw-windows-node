@@ -98,9 +98,27 @@ public static class ChannelsAggregator
             snapshot.ChannelDefaultAccountId.TryGetValue(id, out var defaultAccountId);
 
             var configured = IsChannelConfigured(raw, accounts);
+
+            // Capability gating:
+            //   CanRefresh — always available; refresh is a global action.
+            //   CanShowQr  — QR channels (WhatsApp/Signal): available even when
+            //                unconfigured because the QR scan IS how you
+            //                configure them. Show-QR is the bootstrap path.
+            //   CanRelink  — QR channels, only once already configured: relink
+            //                rotates the device link; meaningless before there's
+            //                a device to relink.
+            //   CanLogout  — only on channels that have a session to end, AND
+            //                only when actually configured. Hardcoding logout to
+            //                the channel id alone shows a Logout button on
+            //                "not configured" rows, which confuses users.
             var caps = ChannelCapabilities.CanRefresh;
-            if (LogoutChannels.Contains(id)) caps |= ChannelCapabilities.CanLogout;
-            if (QrLinkChannels.Contains(id)) caps |= ChannelCapabilities.CanShowQr | ChannelCapabilities.CanRelink;
+            if (QrLinkChannels.Contains(id))
+            {
+                caps |= ChannelCapabilities.CanShowQr;
+                if (configured) caps |= ChannelCapabilities.CanRelink;
+            }
+            if (configured && LogoutChannels.Contains(id))
+                caps |= ChannelCapabilities.CanLogout;
 
             records.Add(new ChannelRecord
             {
