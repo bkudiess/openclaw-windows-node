@@ -2312,25 +2312,32 @@ public sealed partial class ConnectionPage : Page
 
     private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
     {
-        switch (e.PropertyName)
+        try
         {
-            case nameof(AppState.Status):
-                var snapshot = _connectionManager?.CurrentSnapshot ?? GatewayConnectionSnapshot.Idle;
-                _lastSnapshot = snapshot;
-                RefreshFromSnapshot(snapshot);
-                break;
-            case nameof(AppState.NodePairList):
-                if (_appState!.NodePairList != null) UpdatePairingRequests(_appState.NodePairList);
-                break;
-            case nameof(AppState.DevicePairList):
-                if (_appState!.DevicePairList != null) UpdateDevicePairingRequests(_appState.DevicePairList);
-                break;
-            case nameof(AppState.Channels):
-            case nameof(AppState.UsageCost):
-            case nameof(AppState.Sessions):
-            case nameof(AppState.GatewaySelf):
-                OnGlanceDataChanged();
-                break;
+            switch (e.PropertyName)
+            {
+                case nameof(AppState.Status):
+                    var snapshot = _connectionManager?.CurrentSnapshot ?? GatewayConnectionSnapshot.Idle;
+                    _lastSnapshot = snapshot;
+                    RefreshFromSnapshot(snapshot);
+                    break;
+                case nameof(AppState.NodePairList):
+                    if (_appState?.NodePairList != null) UpdatePairingRequests(_appState.NodePairList);
+                    break;
+                case nameof(AppState.DevicePairList):
+                    if (_appState?.DevicePairList != null) UpdateDevicePairingRequests(_appState.DevicePairList);
+                    break;
+                case nameof(AppState.Channels):
+                case nameof(AppState.UsageCost):
+                case nameof(AppState.Sessions):
+                case nameof(AppState.GatewaySelf):
+                    OnGlanceDataChanged();
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Services.Logger.Warn($"[ConnectionPage] OnAppStateChanged({e.PropertyName}) failed: {ex.Message}");
         }
     }
 

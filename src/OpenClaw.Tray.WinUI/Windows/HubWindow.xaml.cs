@@ -61,14 +61,17 @@ public sealed partial class HubWindow : WindowEx
 
     private void OnAppModelChanged(object? sender, PropertyChangedEventArgs e)
     {
-        switch (e.PropertyName)
+        if (IsClosed || AppModel == null) return;
+        try
         {
-            case nameof(AppState.Status):
-                DispatcherQueue?.TryEnqueue(() =>
-                {
-                    if (IsClosed) return;
-                    _cachedCommands = null;
-                    UpdateTitleBarStatus(AppModel!.Status);
+            switch (e.PropertyName)
+            {
+                case nameof(AppState.Status):
+                    DispatcherQueue?.TryEnqueue(() =>
+                    {
+                        if (IsClosed) return;
+                        _cachedCommands = null;
+                        UpdateTitleBarStatus(AppModel!.Status);
                 });
                 break;
             case nameof(AppState.GatewaySelf):
@@ -88,6 +91,11 @@ public sealed partial class HubWindow : WindowEx
                         RebuildAgentNavItems(AppModel.AgentsList.Value);
                 });
                 break;
+        }
+        }
+        catch (Exception ex)
+        {
+            Services.Logger.Warn($"[HubWindow] OnAppModelChanged({e.PropertyName}) failed: {ex.Message}");
         }
     }
 
