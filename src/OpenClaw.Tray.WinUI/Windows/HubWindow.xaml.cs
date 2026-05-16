@@ -182,8 +182,6 @@ public sealed partial class HubWindow : WindowEx
                 if (IsClosed) return;
                 CurrentStatus = status;
                 _cachedCommands = null;
-                if (status == ConnectionStatus.Disconnected && AppModel != null)
-                    AppModel.GatewaySelf = null;
                 UpdateTitleBarStatus(status);
                 if (ContentFrame?.Content is ConnectionPage connectionPage)
                 {

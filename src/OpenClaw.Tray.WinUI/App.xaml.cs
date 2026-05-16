@@ -609,6 +609,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         _gatewayService.SessionCommandCompleted += OnGatewaySessionCommandCompleted;
         _gatewayService.NotificationReceived += OnGatewayNotificationReceived;
         _appState.PropertyChanged += OnAppStateChanged;
+        _appState.AgentEventAdded += evt => _hubWindow?.UpdateAgentEvent(evt);
 
         _diagnosticsClipboard = new DiagnosticsClipboardService(BuildCommandCenterState);
         _toastService = new ToastService(() => _settings);
@@ -2595,7 +2596,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             {
                 _ = _connectionManager?.ReconnectAsync();
             };
-            _hubWindow.ClearAppAgentEventsCache = () => _appState!.ClearAgentEvents();
+            _hubWindow.ClearAppAgentEventsCache = null; // AppModel.ClearAgentEvents() already called by HubWindow
             if (_nodeService != null)
             {
                 _hubWindow.NodeIsConnected = _nodeService.IsConnected;
