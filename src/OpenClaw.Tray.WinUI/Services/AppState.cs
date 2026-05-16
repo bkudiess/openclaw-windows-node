@@ -225,8 +225,9 @@ internal sealed class AppState : INotifyPropertyChanged
     public void ClearCachedData()
     {
         // Status is NOT reset — it is managed by OnManagerStateChanged.
+        // AuthFailureMessage is NOT reset — it's set by OnAuthenticationFailed
+        // and cleared explicitly on Connected (not on disconnect/error).
         CurrentActivity = null;
-        AuthFailureMessage = null;
         Channels = Array.Empty<ChannelHealth>();
         Sessions = Array.Empty<SessionInfo>();
         Nodes = Array.Empty<GatewayNodeInfo>();

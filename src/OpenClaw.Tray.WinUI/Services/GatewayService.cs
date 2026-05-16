@@ -295,14 +295,15 @@ internal sealed class GatewayService
 
         var activeKeys = new HashSet<string>(sessions.Select(s => s.Key), StringComparer.Ordinal);
 
-        // Throttled preview request
-        if (_currentClient != null &&
+        // Throttled preview request (capture client ref for safety)
+        var client = _currentClient;
+        if (client != null &&
             sessions.Length > 0 &&
             DateTime.UtcNow - _lastPreviewRequestUtc > TimeSpan.FromSeconds(5))
         {
             _lastPreviewRequestUtc = DateTime.UtcNow;
             var keys = sessions.Take(5).Select(s => s.Key).ToArray();
-            _ = _currentClient.RequestSessionPreviewAsync(keys, limit: 3, maxChars: 140);
+            _ = client.RequestSessionPreviewAsync(keys, limit: 3, maxChars: 140);
         }
 
         EnqueueModelUpdate(() =>

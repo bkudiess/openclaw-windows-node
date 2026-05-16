@@ -103,7 +103,8 @@ public class AppStateTests
         Assert.Null(state.Usage);
         Assert.Null(state.GatewaySelf);
         Assert.Null(state.NodePairList);
-        Assert.Null(state.AuthFailureMessage);
+        // AuthFailureMessage is NOT cleared by ClearCachedData (preserved for UI display)
+        Assert.Equal("test error", state.AuthFailureMessage);
         Assert.Null(state.CurrentActivity);
         Assert.Null(state.Config);
         Assert.Null(state.AgentsList);
@@ -112,7 +113,8 @@ public class AppStateTests
         Assert.Contains(nameof(AppState.Sessions), fired);
         Assert.Contains(nameof(AppState.Channels), fired);
         Assert.Contains(nameof(AppState.GatewaySelf), fired);
-        Assert.Contains(nameof(AppState.AuthFailureMessage), fired);
+        // AuthFailureMessage is NOT cleared by ClearCachedData
+        Assert.DoesNotContain(nameof(AppState.AuthFailureMessage), fired);
     }
 
     // ── AddAgentEvent ring buffer ───────────────────────────────────────

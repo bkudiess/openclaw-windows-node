@@ -60,7 +60,11 @@ public sealed partial class AgentEventsPage : Page
         _initialized = true;
         Unloaded += (_, _) =>
         {
-            if (_appState != null) _appState.AgentEventAdded -= OnAgentEventAdded;
+            if (_appState != null)
+            {
+                _appState.AgentEventAdded -= OnAgentEventAdded;
+                _appState.PropertyChanged -= OnAppStateChanged;
+            }
         };
     }
 
@@ -68,7 +72,17 @@ public sealed partial class AgentEventsPage : Page
     {
         _appState = ((App)Application.Current).AppState;
         _appState.AgentEventAdded += OnAgentEventAdded;
+        _appState.PropertyChanged += OnAppStateChanged;
         PopulateAgentFilter(hub);
+    }
+
+    private void OnAppStateChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(AppState.AgentEvents) && _appState?.AgentEvents.Count == 0)
+        {
+            _allEvents.Clear();
+            ApplyFilter();
+        }
     }
 
     private void OnAgentEventAdded(AgentEventInfo evt)
