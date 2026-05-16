@@ -15,7 +15,9 @@ namespace OpenClawTray.Services;
 
 internal sealed record TrayMenuCallbacks(
     Action<string> DispatchAction,
-    Action SaveAndReconnect);
+    Action SaveAndReconnect,
+    Action<ToggleSwitch> TrackConnectionToggle,
+    Func<bool> IsConnectionToggleSuspended);
 
 internal sealed class TrayMenuStateBuilder
 {
@@ -58,7 +60,7 @@ internal sealed class TrayMenuStateBuilder
         // ── Brand Header with Disconnect/Connect on the right ──
         var brandGrid = new Grid
         {
-            Padding = new Thickness(14, 10, 14, 8),
+            Padding = new Thickness(12, 10, 12, 8),
             ColumnSpacing = 8
         };
         brandGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -92,24 +94,33 @@ internal sealed class TrayMenuStateBuilder
         Grid.SetColumn(brandRow, 0);
         brandGrid.Children.Add(brandRow);
 
-        var brandBtn = new Button
+        var connectionToggle = new ToggleSwitch
         {
-            Content = isConnected ? "Disconnect" : "Connect",
+            IsOn = isConnected,
+            OnContent = string.Empty,
+            OffContent = string.Empty,
             VerticalAlignment = VerticalAlignment.Center,
-            Padding = new Thickness(12, 4, 12, 4),
-            MinHeight = 0,
             MinWidth = 0,
-            FontSize = 12
+            Width = 40,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0),
+            IsEnabled = _snapshot.CurrentStatus == ConnectionStatus.Connected
+                || _snapshot.CurrentStatus == ConnectionStatus.Disconnected
+                || _snapshot.CurrentStatus == ConnectionStatus.Error
         };
-        AutomationProperties.SetName(brandBtn, isConnected ? "Disconnect from gateway" : "Connect to gateway");
-        ToolTipService.SetToolTip(brandBtn, isConnected ? "Disconnect from gateway" : "Connect to gateway");
-        brandBtn.Click += (s, ev) =>
+        AutomationProperties.SetName(connectionToggle, "Gateway connection");
+        ToolTipService.SetToolTip(connectionToggle,
+            isConnected ? "Connected - toggle off to disconnect" : "Disconnected - toggle on to connect");
+        connectionToggle.Toggled += (s, ev) =>
         {
-            menu.HideCascade();
-            _callbacks.DispatchAction(isConnected ? "disconnect" : "reconnect");
+            if (_callbacks.IsConnectionToggleSuspended())
+                return;
+
+            _callbacks.DispatchAction(connectionToggle.IsOn ? "reconnect" : "disconnect");
         };
-        Grid.SetColumn(brandBtn, 2);
-        brandGrid.Children.Add(brandBtn);
+        _callbacks.TrackConnectionToggle(connectionToggle);
+        Grid.SetColumn(connectionToggle, 2);
+        brandGrid.Children.Add(connectionToggle);
 
         menu.AddCustomElement(brandGrid);
 
@@ -236,7 +247,7 @@ internal sealed class TrayMenuStateBuilder
             });
         }
 
-        gwOuter.Padding = new Thickness(14, 6, 14, 8);
+        gwOuter.Padding = new Thickness(12, 6, 12, 8);
 
         AutomationProperties.SetName(gwOuter,
             $"Gateway {statusText}. Activate to open connection settings.");
@@ -336,9 +347,10 @@ internal sealed class TrayMenuStateBuilder
     {
         var p = Math.Min(100.0, Math.Max(0.0, percent));
         var resources = Application.Current.Resources;
-        // Two-tier color: green by default, red only once usage nearly maxed
-        // (≥ 95%). No amber middle band — keeps the signal binary and clear.
+        // Tri-state color matches gateway dot semantics: green by default,
+        // amber when nearing the cap, red near the limit.
         string accentKey = p >= 95 ? "SystemFillColorCriticalBrush"
+                                   : p >= 80 ? "SystemFillColorCautionBrush"
                                    : "SystemFillColorSuccessBrush";
         var accent = (Microsoft.UI.Xaml.Media.Brush)resources[accentKey];
         var track = (Microsoft.UI.Xaml.Media.Brush)resources["ControlAltFillColorTertiaryBrush"];
@@ -599,6 +611,7 @@ internal sealed class TrayMenuStateBuilder
                 items.Add(BuildKvRow("Devices", devicePending.ToString(), secondaryText, captionStyle));
         }
 
+        items.Add(new() { CustomContent = new Border { Height = 10 } });
         return items;
     }
 
@@ -664,8 +677,9 @@ internal sealed class TrayMenuStateBuilder
 
         var outer = new StackPanel
         {
-            Padding = new Thickness(12, 6, 12, 8),
+            Padding = new Thickness(12, 8, 12, 10),
             Spacing = 4,
+            Margin = new Thickness(0, 0, 0, 4),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             MinWidth = 260
         };
@@ -934,6 +948,7 @@ internal sealed class TrayMenuStateBuilder
             }
         }
 
+        items.Add(new() { CustomContent = new Border { Height = 10 } });
         return items;
     }
 
@@ -1095,7 +1110,7 @@ internal sealed class TrayMenuStateBuilder
         {
             var totalsCard = new StackPanel
             {
-                Padding = new Thickness(12, 6, 12, 8),
+                Padding = new Thickness(12, 8, 12, 10),
                 Spacing = 2,
                 MinWidth = 260
             };
@@ -1140,7 +1155,7 @@ internal sealed class TrayMenuStateBuilder
             {
                 var provCard = new StackPanel
                 {
-                    Padding = new Thickness(12, 4, 12, 6),
+                    Padding = new Thickness(12, 6, 12, 8),
                     Spacing = 3,
                     MinWidth = 260
                 };
@@ -1226,7 +1241,7 @@ internal sealed class TrayMenuStateBuilder
             {
                 var row = new Grid
                 {
-                    Padding = new Thickness(12, 2, 12, 2),
+                    Padding = new Thickness(12, 4, 12, 4),
                     ColumnSpacing = 8,
                     MinWidth = 260
                 };
@@ -1254,6 +1269,7 @@ internal sealed class TrayMenuStateBuilder
             }
         }
 
+        items.Add(new() { CustomContent = new Border { Height = 10 } });
         return items;
     }
 
@@ -1294,6 +1310,7 @@ internal sealed class TrayMenuStateBuilder
             "Dictate input by speaking",
             () => settings.NodeSttEnabled, v => settings.NodeSttEnabled = v);
 
+        items.Add(new() { CustomContent = new Border { Height = 10 } });
         return items;
     }
 

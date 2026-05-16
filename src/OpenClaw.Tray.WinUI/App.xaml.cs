@@ -186,6 +186,8 @@ public partial class App : Application
     /// SSH tunnel errors in EnsureSshTunnelConfigured also write this temporarily (Phase 3 moves tunnel to manager).
     /// </summary>
     private ConnectionStatus _currentStatus = ConnectionStatus.Disconnected;
+    private WeakReference<ToggleSwitch>? _connectionToggleRef;
+    private bool _suspendConnectionToggleEvent;
     private AgentActivity? _currentActivity;
     private ChannelHealth[] _lastChannels = Array.Empty<ChannelHealth>();
     private SessionInfo[] _lastSessions = Array.Empty<SessionInfo>();
@@ -1010,13 +1012,7 @@ public partial class App : Application
             case "reconnect": _ = _connectionManager?.ReconnectAsync(); break;
             case "disconnect":
                 _ = _connectionManager?.DisconnectAsync();
-                _lastSessions = Array.Empty<SessionInfo>();
-                _lastNodePairList = null;
-                _lastDevicePairList = null;
-                _lastModelsList = null;
-                _agentEventsCache.Clear();
-                UpdateTrayIcon();
-                _hubWindow?.UpdateStatus(ConnectionStatus.Disconnected);
+                LocalDisconnectCleanup();
                 break;
             case "connection": ShowHub("connection"); break;
             case "permissions": ShowHub("permissions"); break;
@@ -1260,6 +1256,22 @@ public partial class App : Application
             .ToList();
     }
 
+    private void LocalDisconnectCleanup()
+    {
+        _lastSessions = Array.Empty<SessionInfo>();
+        _lastNodes = Array.Empty<GatewayNodeInfo>();
+        _lastPresence = Array.Empty<PresenceEntry>();
+        _lastChannels = Array.Empty<ChannelHealth>();
+        _lastNodePairList = null;
+        _lastDevicePairList = null;
+        _lastModelsList = null;
+        _lastGatewaySelf = null;
+        _agentEventsCache.Clear();
+        UpdateTrayIcon();
+        _hubWindow?.UpdateStatus(ConnectionStatus.Disconnected);
+        RefreshTrayMenuIfOpen();
+    }
+
     private void BuildTrayMenuPopup(TrayMenuWindow menu)
     {
         // Preview data must be applied before snapshot capture so the injected
@@ -1268,7 +1280,9 @@ public partial class App : Application
         var snapshot = CaptureTrayMenuSnapshot();
         var callbacks = new TrayMenuCallbacks(
             DispatchAction: action => OnTrayMenuItemClicked(null, action),
-            SaveAndReconnect: () => { _settings?.Save(); _ = _connectionManager?.ReconnectAsync(); });
+            SaveAndReconnect: () => { _settings?.Save(); _ = _connectionManager?.ReconnectAsync(); },
+            TrackConnectionToggle: toggle => _connectionToggleRef = new WeakReference<ToggleSwitch>(toggle),
+            IsConnectionToggleSuspended: () => _suspendConnectionToggleEvent);
         var builder = new TrayMenuStateBuilder(snapshot, _permToggleActions, callbacks);
 
         // Render the whole menu inside a single update batch so layout
@@ -1743,6 +1757,11 @@ public partial class App : Application
         {
             _hubWindow?.UpdateStatus(mapped);
             UpdateTrayIcon();
+            SyncConnectionToggle(mapped);
+            if (mapped is ConnectionStatus.Connected or ConnectionStatus.Disconnected or ConnectionStatus.Error)
+            {
+                RefreshTrayMenuIfOpen();
+            }
         });
     }
 
@@ -2198,11 +2217,75 @@ public partial class App : Application
         }
 
         UpdateTrayIcon();
-        OnUiThread(UpdateStatusDetailWindow);
+        OnUiThread(() =>
+        {
+            UpdateStatusDetailWindow();
+            SyncConnectionToggle(status);
+            if (status is ConnectionStatus.Connected or ConnectionStatus.Disconnected or ConnectionStatus.Error)
+            {
+                RefreshTrayMenuIfOpen();
+            }
+        });
         
         if (status == ConnectionStatus.Connected)
         {
             _ = RunHealthCheckAsync();
+        }
+    }
+
+    private void RefreshTrayMenuIfOpen()
+    {
+        try
+        {
+            if (_trayMenuWindow == null || !_trayMenuWindow.IsShown)
+                return;
+
+            var openCascadeTag = _trayMenuWindow.ActiveFlyoutTag;
+            _trayMenuWindow.ClearItems();
+            BuildTrayMenuPopup(_trayMenuWindow);
+            _trayMenuWindow.SizeToContentKeepBottom();
+            if (!string.IsNullOrEmpty(openCascadeTag))
+            {
+                _trayMenuWindow.TryRestoreCascade(openCascadeTag);
+            }
+        }
+        catch (Exception ex)
+        {
+            LogCrash("RefreshTrayMenuIfOpen", ex);
+        }
+    }
+
+    private void SyncConnectionToggle(ConnectionStatus status)
+    {
+        if (_connectionToggleRef == null)
+            return;
+
+        if (!_connectionToggleRef.TryGetTarget(out var toggle))
+            return;
+
+        if (toggle.XamlRoot == null)
+        {
+            _connectionToggleRef = null;
+            return;
+        }
+
+        var shouldBeOn = status == ConnectionStatus.Connected;
+        var canToggle = status is ConnectionStatus.Connected or ConnectionStatus.Disconnected or ConnectionStatus.Error;
+        _suspendConnectionToggleEvent = true;
+        try
+        {
+            if (toggle.IsOn != shouldBeOn)
+                toggle.IsOn = shouldBeOn;
+
+            toggle.IsEnabled = canToggle;
+            ToolTipService.SetToolTip(toggle,
+                shouldBeOn ? "Connected - toggle off to disconnect"
+                    : status == ConnectionStatus.Connecting ? "Connecting..."
+                    : "Disconnected - toggle on to connect");
+        }
+        finally
+        {
+            _suspendConnectionToggleEvent = false;
         }
     }
 
