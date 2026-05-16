@@ -502,14 +502,12 @@ public sealed partial class ChannelsPage : Page
         {
             "whatsapp" => ("Link your WhatsApp phone", new[]
             {
-                "Make sure the gateway has the WhatsApp plugin installed.",
                 "Click \"Show QR\" in the Linking section below.",
                 "On your phone: WhatsApp → Settings → Linked devices → Link a device.",
                 "Scan the QR code that appears here.",
             }),
             "signal" => ("Link your Signal phone", new[]
             {
-                "Make sure the gateway has the Signal plugin installed.",
                 "Click \"Show QR\" in the Linking section below.",
                 "On your phone: Signal → Settings → Linked devices → Link new device.",
                 "Scan the QR code that appears here.",
@@ -776,11 +774,12 @@ public sealed partial class ChannelsPage : Page
         if (start == null)
         {
             // WebLoginStartAsync returns null on either: not-IsConnected,
-            // method-not-supported by gateway, or transport error. Point the
-            // user back at the setup guide instead of dropping a wire-method
-            // name on them.
+            // method-not-supported by gateway, or transport error. Don't
+            // dump wire-method names ("plugin not installed") on the user —
+            // they can't do anything about gateway-side state from the tray.
+            // Steer them to actions they CAN take.
             qrImage.Visibility = Visibility.Collapsed;
-            messageBlock.Text = $"Couldn't start the {channelId} link flow. The gateway didn't respond — check the setup steps above (you may need to install the {channelId} plugin on the gateway).";
+            messageBlock.Text = $"Couldn't link {channelId}. The gateway didn't accept the request — try Refresh, or check that this gateway supports {channelId}.";
             return;
         }
         if (start.Connected)
@@ -794,13 +793,13 @@ public sealed partial class ChannelsPage : Page
         }
         if (string.IsNullOrEmpty(start.QrDataUrl))
         {
-            // Gateway accepted the call but returned no QR and no "connected"
-            // — surface whatever message the gateway gave us, fall back to a
-            // user-actionable explanation that points back to the guide.
+            // Gateway accepted the call but returned no QR and not "connected".
+            // Surface the gateway's own message if it gave us one, otherwise
+            // a non-jargon fallback.
             qrImage.Visibility = Visibility.Collapsed;
             messageBlock.Text = !string.IsNullOrEmpty(start.Message)
                 ? start.Message
-                : $"Gateway didn't return a QR for {channelId}. Check the setup steps above.";
+                : $"Gateway didn't return a QR for {channelId}. Try Refresh, or check that this gateway supports {channelId}.";
             return;
         }
 
