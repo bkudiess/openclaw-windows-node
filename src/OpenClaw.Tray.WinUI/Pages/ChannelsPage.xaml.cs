@@ -388,6 +388,14 @@ public sealed partial class ChannelsPage : Page
             return stack;
         }
 
+        // Getting started — only for unconfigured channels. The user doesn't
+        // need to read setup instructions for something that's already running.
+        if (!record.IsConfigured)
+        {
+            var guide = BuildSetupGuide(record);
+            if (guide != null) stack.Children.Add(guide);
+        }
+
         // Status section
         stack.Children.Add(BuildSection("Status", BuildStatusKv(record)));
 
@@ -416,6 +424,133 @@ public sealed partial class ChannelsPage : Page
         panel.Children.Add(content);
         return panel;
     }
+
+    /// <summary>
+    /// Per-channel "Getting started" card. Shown only for unconfigured channels
+    /// so the user has a concrete, channel-specific path forward instead of a
+    /// generic "Open Config page" stub. Each guide is a short numbered list
+    /// describing exactly what to do for that channel.
+    /// </summary>
+    private FrameworkElement? BuildSetupGuide(ChannelRecord record)
+    {
+        var (headline, steps) = ResolveSetupGuide(record.Id);
+        if (headline == null) return null;
+
+        var card = new Border
+        {
+            Background = (Brush)Application.Current.Resources["CardBackgroundFillColorSecondaryBrush"],
+            BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(14, 12, 14, 14),
+        };
+
+        var stack = new StackPanel { Spacing = 6 };
+
+        var headerRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var icon = FluentIconCatalog.Build("\uE946", 16); // Info glyph
+        icon.VerticalAlignment = VerticalAlignment.Center;
+        icon.Foreground = (Brush)Application.Current.Resources["AccentTextFillColorPrimaryBrush"];
+        headerRow.Children.Add(icon);
+        headerRow.Children.Add(new TextBlock
+        {
+            Text = headline,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        stack.Children.Add(headerRow);
+
+        for (int i = 0; i < steps!.Length; i++)
+        {
+            var stepRow = new Grid();
+            stepRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
+            stepRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var num = new TextBlock
+            {
+                Text = (i + 1).ToString() + ".",
+                FontSize = 13,
+                Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                VerticalAlignment = VerticalAlignment.Top,
+            };
+            Grid.SetColumn(num, 0);
+            stepRow.Children.Add(num);
+
+            var body = new TextBlock
+            {
+                Text = steps[i],
+                FontSize = 13,
+                TextWrapping = TextWrapping.Wrap,
+            };
+            Grid.SetColumn(body, 1);
+            stepRow.Children.Add(body);
+
+            stack.Children.Add(stepRow);
+        }
+
+        card.Child = stack;
+        return card;
+    }
+
+    /// <summary>
+    /// Channel-specific setup content. Returns (null, null) for channels we
+    /// don't have explicit guidance for — the generic Configuration section
+    /// still renders, so plugin channels aren't left without any signposting.
+    /// </summary>
+    private static (string? Headline, string[]? Steps) ResolveSetupGuide(string channelId) =>
+        channelId.ToLowerInvariant() switch
+        {
+            "whatsapp" => ("Link your WhatsApp phone", new[]
+            {
+                "Make sure the gateway has the WhatsApp plugin installed.",
+                "Click \"Show QR\" in the Linking section below.",
+                "On your phone: WhatsApp → Settings → Linked devices → Link a device.",
+                "Scan the QR code that appears here.",
+            }),
+            "signal" => ("Link your Signal phone", new[]
+            {
+                "Make sure the gateway has the Signal plugin installed.",
+                "Click \"Show QR\" in the Linking section below.",
+                "On your phone: Signal → Settings → Linked devices → Link new device.",
+                "Scan the QR code that appears here.",
+            }),
+            "telegram" => ("Connect Telegram via a bot", new[]
+            {
+                "Open Telegram and send a message to @BotFather.",
+                "Send /newbot and follow the prompts. Copy the bot token at the end.",
+                "Click \"Open Config page\" below and paste the token under channels.telegram.token.",
+                "Save the config. The channel will start automatically.",
+            }),
+            "discord" => ("Connect Discord via a webhook", new[]
+            {
+                "Open your Discord server settings → Integrations → Webhooks.",
+                "Click \"New Webhook\", give it a name, and copy the webhook URL.",
+                "Click \"Open Config page\" below and paste the URL under channels.discord.webhookUrl.",
+                "Save the config.",
+            }),
+            "googlechat" => ("Connect Google Chat via a webhook", new[]
+            {
+                "In Google Chat, open the space → Manage webhooks → Add webhook.",
+                "Copy the webhook URL.",
+                "Click \"Open Config page\" below and paste the URL under channels.googlechat.webhookUrl.",
+                "Save the config.",
+            }),
+            "slack" => ("Connect Slack via an app", new[]
+            {
+                "Create a Slack app at api.slack.com/apps and install it to your workspace.",
+                "Copy the bot token (xoxb-…) and the signing secret.",
+                "Click \"Open Config page\" below and paste both under channels.slack.",
+                "Save the config.",
+            }),
+            "nostr" => ("Connect Nostr via relays", new[]
+            {
+                "Generate or paste a private key (nsec).",
+                "Pick one or more relay URLs (e.g. wss://relay.damus.io).",
+                "Click \"Open Config page\" below and paste both under channels.nostr.",
+                "Save the config.",
+            }),
+            _ => (null, null),
+        };
 
     private static FrameworkElement BuildStatusKv(ChannelRecord record)
     {
@@ -641,11 +776,11 @@ public sealed partial class ChannelsPage : Page
         if (start == null)
         {
             // WebLoginStartAsync returns null on either: not-IsConnected,
-            // method-not-supported by gateway, or transport error. The wire
-            // method logs the underlying reason; the user gets a single
-            // actionable message.
+            // method-not-supported by gateway, or transport error. Point the
+            // user back at the setup guide instead of dropping a wire-method
+            // name on them.
             qrImage.Visibility = Visibility.Collapsed;
-            messageBlock.Text = $"The gateway didn't respond to web.login.start for {channelId}. The channel plugin may not be installed.";
+            messageBlock.Text = $"Couldn't start the {channelId} link flow. The gateway didn't respond — check the setup steps above (you may need to install the {channelId} plugin on the gateway).";
             return;
         }
         if (start.Connected)
@@ -661,11 +796,11 @@ public sealed partial class ChannelsPage : Page
         {
             // Gateway accepted the call but returned no QR and no "connected"
             // — surface whatever message the gateway gave us, fall back to a
-            // generic explanation otherwise.
+            // user-actionable explanation that points back to the guide.
             qrImage.Visibility = Visibility.Collapsed;
             messageBlock.Text = !string.IsNullOrEmpty(start.Message)
                 ? start.Message
-                : "Gateway didn't return a QR code. The channel plugin may not be installed.";
+                : $"Gateway didn't return a QR for {channelId}. Check the setup steps above.";
             return;
         }
 
@@ -760,7 +895,9 @@ public sealed partial class ChannelsPage : Page
         var stack = new StackPanel { Spacing = 8 };
         stack.Children.Add(new TextBlock
         {
-            Text = $"Channel configuration lives in the gateway config. Open the Config page to edit the channels.{record.Id} subtree.",
+            Text = record.IsConfigured
+                ? $"Edit this channel's settings in the gateway Config page."
+                : $"After following the steps above, save the config to start the channel.",
             FontSize = 13,
             Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
             TextWrapping = TextWrapping.Wrap,
