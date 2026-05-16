@@ -568,11 +568,13 @@ public sealed partial class ChannelsPage : Page
             HorizontalAlignment = HorizontalAlignment.Left,
             Visibility = Visibility.Collapsed,
         };
+
+        // Initial message is a call-to-action, not "scan this QR" — the QR
+        // doesn't exist yet. RenderQrAsync (and the success path) replace this
+        // text with the real instructions once a QR is on screen.
         var messageBlock = new TextBlock
         {
-            Text = record.Id.Equals("whatsapp", StringComparison.OrdinalIgnoreCase)
-                ? "Open WhatsApp on your phone → Settings → Linked devices → scan this QR."
-                : "Open the mobile app's linked-devices screen and scan this QR.",
+            Text = "Click \"Show QR\" to start linking your phone to this device.",
             Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
             FontSize = 13,
             TextWrapping = TextWrapping.Wrap,
@@ -592,7 +594,7 @@ public sealed partial class ChannelsPage : Page
             relinkBtn.IsEnabled = false;
             try
             {
-                await StartLinkingAsync(qrImage, messageBlock, force);
+                await StartLinkingAsync(qrImage, messageBlock, record.Id, force);
             }
             finally
             {
@@ -609,10 +611,17 @@ public sealed partial class ChannelsPage : Page
         return stack;
     }
 
-    private async Task StartLinkingAsync(Image qrImage, TextBlock messageBlock, bool force)
+    private async Task StartLinkingAsync(Image qrImage, TextBlock messageBlock, string channelId, bool force)
     {
         var client = CurrentApp.GatewayClient;
-        if (client == null) return;
+        if (client == null)
+        {
+            // Don't silently bail — give the user a clear reason why nothing
+            // happened, and a hint about where to fix it.
+            qrImage.Visibility = Visibility.Collapsed;
+            messageBlock.Text = "Not connected to a gateway. Open Connection settings to connect first.";
+            return;
+        }
 
         // Cancel any previous linking session before starting a new one. The
         // token is checked between awaits and before applying UI updates so
@@ -625,34 +634,58 @@ public sealed partial class ChannelsPage : Page
             try { oldLinking.Cancel(); oldLinking.Dispose(); } catch { }
         }
 
+        messageBlock.Text = "Requesting QR code from the gateway…";
+
         var start = await client.WebLoginStartAsync(force);
         if (ct.IsCancellationRequested) return;
         if (start == null)
         {
-            messageBlock.Text = "Couldn't start linking. Try again.";
+            // WebLoginStartAsync returns null on either: not-IsConnected,
+            // method-not-supported by gateway, or transport error. The wire
+            // method logs the underlying reason; the user gets a single
+            // actionable message.
+            qrImage.Visibility = Visibility.Collapsed;
+            messageBlock.Text = $"The gateway didn't respond to web.login.start for {channelId}. The channel plugin may not be installed.";
             return;
         }
         if (start.Connected)
         {
-            messageBlock.Text = "Linked.";
+            messageBlock.Text = !string.IsNullOrEmpty(start.Message)
+                ? start.Message
+                : $"{channelId} is already linked.";
             qrImage.Visibility = Visibility.Collapsed;
             await RefreshAsync(probe: false);
             return;
         }
-        if (!string.IsNullOrEmpty(start.QrDataUrl))
+        if (string.IsNullOrEmpty(start.QrDataUrl))
         {
-            await RenderQrAsync(qrImage, messageBlock, start.QrDataUrl);
-            if (ct.IsCancellationRequested) return;
-            if (!string.IsNullOrEmpty(start.Message))
-                messageBlock.Text = start.Message;
+            // Gateway accepted the call but returned no QR and no "connected"
+            // — surface whatever message the gateway gave us, fall back to a
+            // generic explanation otherwise.
+            qrImage.Visibility = Visibility.Collapsed;
+            messageBlock.Text = !string.IsNullOrEmpty(start.Message)
+                ? start.Message
+                : "Gateway didn't return a QR code. The channel plugin may not be installed.";
+            return;
         }
+
+        await RenderQrAsync(qrImage, messageBlock, start.QrDataUrl);
+        if (ct.IsCancellationRequested) return;
+        // Channel-specific instruction text now that the QR is on screen.
+        messageBlock.Text = !string.IsNullOrEmpty(start.Message)
+            ? start.Message
+            : channelId.Equals("whatsapp", StringComparison.OrdinalIgnoreCase)
+                ? "Open WhatsApp on your phone → Settings → Linked devices → scan this QR."
+                : "Open the mobile app's linked-devices screen and scan this QR.";
 
         // Long-poll once for completion (best-effort; full polling loop is Phase 3 polish)
         var waitResult = await client.WebLoginWaitAsync(start.QrDataUrl, timeoutMs: 30000);
         if (ct.IsCancellationRequested) return;
         if (waitResult != null && waitResult.Connected)
         {
-            messageBlock.Text = "Linked.";
+            messageBlock.Text = !string.IsNullOrEmpty(waitResult.Message)
+                ? waitResult.Message
+                : $"{channelId} linked.";
             qrImage.Visibility = Visibility.Collapsed;
             await RefreshAsync(probe: false);
         }
@@ -663,6 +696,12 @@ public sealed partial class ChannelsPage : Page
             if (ct.IsCancellationRequested) return;
             if (!string.IsNullOrEmpty(waitResult.Message))
                 messageBlock.Text = waitResult.Message;
+        }
+        else if (waitResult == null)
+        {
+            // Wait timed out or transport error — leave the QR visible so the
+            // user can still scan it; clarify in the message.
+            messageBlock.Text = "Still waiting — click Show QR again if the code has expired.";
         }
     }
 
@@ -742,7 +781,13 @@ public sealed partial class ChannelsPage : Page
     private async Task LogoutAsync(string channelId)
     {
         var client = CurrentApp.GatewayClient;
-        if (client == null) return;
+        if (client == null)
+        {
+            ErrorBar.Title = "Not connected";
+            ErrorBar.Message = "Connect to a gateway before logging out.";
+            ErrorBar.IsOpen = true;
+            return;
+        }
         var dialog = new ContentDialog
         {
             Title = $"Log out of {channelId}?",
