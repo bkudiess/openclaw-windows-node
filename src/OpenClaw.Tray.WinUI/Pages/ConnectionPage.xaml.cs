@@ -42,6 +42,7 @@ public sealed partial class ConnectionPage : Page
         // Populate manual connection fields
         GatewayUrlTextBox.Text = settings.GatewayUrl ?? "";
         SshToggle.IsOn = settings.UseSshTunnel;
+        LocalWslSetupCard.Visibility = hub.OpenSetupAction is null ? Visibility.Collapsed : Visibility.Visible;
         SshUserBox.Text = settings.SshTunnelUser ?? "";
         SshHostBox.Text = settings.SshTunnelHost ?? "";
         SshRemotePortBox.Text = settings.SshTunnelRemotePort.ToString();
@@ -575,6 +576,11 @@ public sealed partial class ConnectionPage : Page
     {
         _connectionAttempts = 0;
         _hub?.ReconnectAction?.Invoke();
+    }
+
+    private void OnInstallNewWslGateway(object sender, RoutedEventArgs e)
+    {
+        _hub?.OpenSetupAction?.Invoke();
     }
 
     private void OnSshToggled(object sender, RoutedEventArgs e)

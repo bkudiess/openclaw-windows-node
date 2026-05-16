@@ -143,6 +143,31 @@
                 </StackPanel>
             </Border>
 
+            <!-- ═══ Section 1.25: Local WSL Gateway Setup ═══ -->
+            <Border x:Name="LocalWslSetupCard" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16"
+                    Visibility="Collapsed">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Center">
+                        <TextBlock Text="🐧 Local WSL Gateway" Style="{StaticResource BodyStrongTextBlockStyle}"/>
+                        <TextBlock Text="Install a new app-owned WSL gateway and make it the active connection."
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <Button Grid.Column="1"
+                            Content="Install new WSL Gateway"
+                            Style="{ThemeResource AccentButtonStyle}"
+                            VerticalAlignment="Center"
+                            Click="OnInstallNewWslGateway"/>
+                </Grid>
+            </Border>
+
             <!-- ═══ Section 1.5: Pending Device Pairing ═══ -->
             <Border x:Name="DevicePairingCard" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"

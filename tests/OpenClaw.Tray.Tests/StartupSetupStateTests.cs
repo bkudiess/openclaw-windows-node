@@ -1,5 +1,7 @@
 using OpenClaw.Shared;
 using OpenClawTray.Services;
+using OpenClaw.Connection;
+using OpenClawTray.Services.LocalGatewaySetup;
 
 namespace OpenClaw.Tray.Tests;
 
@@ -149,6 +151,161 @@ public class StartupSetupStateTests
     }
 
     [Fact]
+    public void RequiresSetup_ReturnsFalse_WhenRegistryHasExternalGatewayToken()
+    {
+        using var temp = TempSettings.Create();
+        var settings = new SettingsManager(temp.Path);
+        var registry = new GatewayRegistry(temp.Path);
+        registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "external-gateway",
+            Url = "wss://remote.example.com",
+            SharedGatewayToken = "shared-token"
+        });
+
+        Assert.False(StartupSetupState.RequiresSetup(settings, temp.Path, registry));
+    }
+
+    [Fact]
+    public void RequiresSetup_ReturnsTrue_WhenRegistryRecordHasNoCredential()
+    {
+        using var temp = TempSettings.Create();
+        var settings = new SettingsManager(temp.Path);
+        var registry = new GatewayRegistry(temp.Path);
+        registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "stale-gateway",
+            Url = "wss://remote.example.com"
+        });
+
+        Assert.True(StartupSetupState.RequiresSetup(settings, temp.Path, registry));
+    }
+
+    [Fact]
+    public void RequiresSetup_ReturnsFalse_WhenStaleRegistryRecordAndLegacyOperatorConfigExist()
+    {
+        using var temp = TempSettings.Create();
+        StoreDeviceToken(temp.Path);
+        var settings = new SettingsManager(temp.Path) { GatewayUrl = "wss://remote.example.com" };
+        var registry = new GatewayRegistry(temp.Path);
+        registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "stale-gateway",
+            Url = "wss://old.example.com"
+        });
+
+        Assert.False(StartupSetupState.RequiresSetup(settings, temp.Path, registry));
+    }
+
+    [Fact]
+    public void RequiresSetup_ReturnsFalse_WhenRegistryRecordHasPerGatewayIdentity()
+    {
+        using var temp = TempSettings.Create();
+        var settings = new SettingsManager(temp.Path);
+        var registry = new GatewayRegistry(temp.Path);
+        registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "paired-gateway",
+            Url = "wss://remote.example.com"
+        });
+        Directory.CreateDirectory(registry.GetIdentityDirectory("paired-gateway"));
+        StoreDeviceToken(registry.GetIdentityDirectory("paired-gateway"));
+
+        Assert.False(StartupSetupState.RequiresSetup(settings, temp.Path, registry));
+    }
+
+    [Fact]
+    public void RequiresSetup_PreservesNodeModePrecedence_WhenRegistryHasExternalGatewayToken()
+    {
+        using var temp = TempSettings.Create();
+        var settings = new SettingsManager(temp.Path) { EnableNodeMode = true };
+        var registry = new GatewayRegistry(temp.Path);
+        registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "external-gateway",
+            Url = "wss://remote.example.com",
+            SharedGatewayToken = "shared-token"
+        });
+
+        Assert.True(StartupSetupState.RequiresSetup(settings, temp.Path, registry));
+    }
+
+    [Fact]
+    public async Task ClassifyAsync_ReturnsAppOwnedLocalWsl_WhenDistroAndLocalRegistryEvidenceExist()
+    {
+        using var temp = TempSettings.Create();
+        var settings = new SettingsManager(temp.Path);
+        var registry = new GatewayRegistry(temp.Path);
+        registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "local-gateway",
+            Url = "ws://localhost:18789",
+            IsLocal = true,
+            SharedGatewayToken = "shared-token"
+        });
+        var wsl = new FakeWslCommandRunner([new WslDistroInfo("OpenClawGateway", "Stopped", 2)]);
+
+        var kind = await SetupExistingGatewayClassifier.ClassifyAsync(registry, settings, temp.Path, wsl);
+
+        Assert.Equal(SetupExistingGatewayKind.AppOwnedLocalWsl, kind);
+    }
+
+    [Fact]
+    public async Task ClassifyAsync_StaleOpenClawDistroWithoutLocalEvidence_DoesNotTriggerLocalReplacementWarning()
+    {
+        using var temp = TempSettings.Create();
+        var settings = new SettingsManager(temp.Path);
+        var registry = new GatewayRegistry(temp.Path);
+        registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "external-gateway",
+            Url = "wss://remote.example.com",
+            SharedGatewayToken = "shared-token"
+        });
+        var wsl = new FakeWslCommandRunner([new WslDistroInfo("OpenClawGateway", "Stopped", 2)]);
+
+        var kind = await SetupExistingGatewayClassifier.ClassifyAsync(registry, settings, temp.Path, wsl);
+
+        Assert.Equal(SetupExistingGatewayKind.ExternalOnly, kind);
+    }
+
+    [Fact]
+    public async Task ClassifyAsync_StaleOpenClawDistroOnFreshAppState_ReturnsNone()
+    {
+        using var temp = TempSettings.Create();
+        var settings = new SettingsManager(temp.Path);
+        var registry = new GatewayRegistry(temp.Path);
+        var wsl = new FakeWslCommandRunner([new WslDistroInfo("OpenClawGateway", "Stopped", 2)]);
+
+        var kind = await SetupExistingGatewayClassifier.ClassifyAsync(registry, settings, temp.Path, wsl);
+
+        Assert.Equal(SetupExistingGatewayKind.None, kind);
+    }
+
+    [Fact]
+    public async Task ClassifyAsync_UsesProvidedLocalDataPath_WhenWslProbeFails()
+    {
+        using var temp = TempSettings.Create();
+        var localDataPath = Path.Combine(temp.Path, "local-data");
+        Directory.CreateDirectory(localDataPath);
+        File.WriteAllText(
+            Path.Combine(localDataPath, "setup-state.json"),
+            """{"DistroName":"OpenClawGateway","Phase":"Complete"}""");
+        var settings = new SettingsManager(temp.Path);
+        var registry = new GatewayRegistry(temp.Path);
+        var wsl = new ThrowingWslCommandRunner();
+
+        var kind = await SetupExistingGatewayClassifier.ClassifyAsync(
+            registry,
+            settings,
+            temp.Path,
+            wsl,
+            localDataPath: localDataPath);
+
+        Assert.Equal(SetupExistingGatewayKind.AppOwnedLocalWsl, kind);
+    }
+
+    [Fact]
     public void RequiresSetup_ReturnsFalse_WhenMcpEnabledEvenWithNodeModeAndNoNodeToken()
     {
         // Regression guard: the original code returned !EnableMcpServer as the
@@ -214,5 +371,41 @@ public class StartupSetupStateTests
                 Directory.Delete(Path, true);
             }
         }
+    }
+
+    private sealed class FakeWslCommandRunner(IReadOnlyList<WslDistroInfo> distros) : IWslCommandRunner
+    {
+        public Task<IReadOnlyList<WslDistroInfo>> ListDistrosAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(distros);
+
+        public Task<WslCommandResult> RunAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken = default, IReadOnlyDictionary<string, string>? environment = null) =>
+            Task.FromResult(new WslCommandResult(0, "", ""));
+
+        public Task<WslCommandResult> TerminateDistroAsync(string name, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new WslCommandResult(0, "", ""));
+
+        public Task<WslCommandResult> UnregisterDistroAsync(string name, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new WslCommandResult(0, "", ""));
+
+        public Task<WslCommandResult> RunInDistroAsync(string name, IReadOnlyList<string> command, CancellationToken cancellationToken = default, IReadOnlyDictionary<string, string>? environment = null) =>
+            Task.FromResult(new WslCommandResult(0, "", ""));
+    }
+
+    private sealed class ThrowingWslCommandRunner : IWslCommandRunner
+    {
+        public Task<IReadOnlyList<WslDistroInfo>> ListDistrosAsync(CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("WSL unavailable");
+
+        public Task<WslCommandResult> RunAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken = default, IReadOnlyDictionary<string, string>? environment = null) =>
+            Task.FromResult(new WslCommandResult(0, "", ""));
+
+        public Task<WslCommandResult> TerminateDistroAsync(string name, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new WslCommandResult(0, "", ""));
+
+        public Task<WslCommandResult> UnregisterDistroAsync(string name, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new WslCommandResult(0, "", ""));
+
+        public Task<WslCommandResult> RunInDistroAsync(string name, IReadOnlyList<string> command, CancellationToken cancellationToken = default, IReadOnlyDictionary<string, string>? environment = null) =>
+            Task.FromResult(new WslCommandResult(0, "", ""));
     }
 }

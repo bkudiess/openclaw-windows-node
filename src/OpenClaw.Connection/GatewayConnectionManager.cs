@@ -112,6 +112,12 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 return;
             }
 
+            if (!_stateMachine.CanTransition(ConnectionTrigger.ConnectRequested))
+            {
+                _logger.Warn($"[ConnMgr] Cannot connect from state {_stateMachine.Current.OperatorState}");
+                return;
+            }
+
             // Cancel any in-flight operation
             var gen = Interlocked.Increment(ref _generation);
             var oldCts = Interlocked.Exchange(ref _operationCts, new CancellationTokenSource());
@@ -152,11 +158,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
 
             // Transition to Connecting
             var prevState = _stateMachine.Current.OverallState;
-            if (!_stateMachine.TryTransition(ConnectionTrigger.ConnectRequested))
-            {
-                _logger.Warn($"[ConnMgr] Cannot connect from state {_stateMachine.Current.OperatorState}");
-                return;
-            }
+            _stateMachine.TryTransition(ConnectionTrigger.ConnectRequested);
             _diagnostics.RecordStateChange(prevState, _stateMachine.Current.OverallState);
             EmitStateChanged(prevState);
 

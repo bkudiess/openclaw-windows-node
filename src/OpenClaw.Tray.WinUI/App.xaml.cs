@@ -76,7 +76,7 @@ public partial class App : Application
 
     /// <summary>
     /// Ensures the managed SSH tunnel is started using the current settings.
-    /// Used by the onboarding ConnectionPage when the user picks the SSH topology.
+    /// Used by connection settings when the user picks the SSH topology.
     /// </summary>
     public void EnsureSshTunnelStarted()
     {
@@ -107,7 +107,7 @@ public partial class App : Application
 
     /// <summary>
     /// Creates the WSL local gateway setup engine using the current tray settings.
-    /// Onboarding pages (Phase 5) call this to drive the local-WSL setup flow;
+    /// The V2 setup bridge calls this to drive the local-WSL setup flow;
     /// the engine pairs the operator + Windows tray node into the gateway it
     /// installs, so we eagerly materialize the NodeService when needed.
     /// </summary>
@@ -668,6 +668,9 @@ public partial class App : Application
         OpenClawTray.Chat.Explorations.ChatExplorationPresetStore.ApplyDefaultIfPresent();
         ShowSurfaceImprovementsTipIfNeeded();
 
+        _gatewayRegistry = new GatewayRegistry(SettingsManager.SettingsDirectoryPath);
+        _gatewayRegistry.Load();
+
         // First-run check (also supports forced onboarding for testing).
         // Wrapped in try/catch so a wizard construction failure cannot tear
         // down the tray; user can retry via the Setup Guide menu item.
@@ -685,8 +688,6 @@ public partial class App : Application
         }
 
         // Initialize connection manager (north star architecture)
-        _gatewayRegistry = new GatewayRegistry(SettingsManager.SettingsDirectoryPath);
-        _gatewayRegistry.Load();
         var credentialResolver = new CredentialResolver(DeviceIdentityFileReader.Instance);
         var clientFactory = new GatewayClientFactory();
         var appLogger = new AppLogger();
@@ -3187,9 +3188,9 @@ public partial class App : Application
         };
     }
 
-    private static bool RequiresSetup(SettingsManager settings)
+    private bool RequiresSetup(SettingsManager settings)
     {
-        return StartupSetupState.RequiresSetup(settings, IdentityDataPath);
+        return StartupSetupState.RequiresSetup(settings, IdentityDataPath, _gatewayRegistry);
     }
 
     private bool ShouldInitializeNodeService()
