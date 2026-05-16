@@ -602,32 +602,23 @@
                          first-run users with no saved gateway and nothing
                          discovered on the network yet. Hidden when the
                          hub doesn't expose OpenSetupAction (no WSL tooling
-                         on this machine). -->
-                    <Border x:Name="WelcomeLocalWslSetupCard"
-                            Background="{ThemeResource AccentFillColorTertiaryBrush}"
-                            BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
-                            BorderThickness="1" CornerRadius="6" Padding="14"
-                            Visibility="Collapsed">
-                        <Grid ColumnSpacing="12">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
-                                <TextBlock Text="Get started — install a local gateway"
-                                           Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                                <TextBlock Text="The fastest way to start: sets up a WSL-hosted gateway on this PC and makes it the active connection."
-                                           Style="{StaticResource CaptionTextBlockStyle}"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                           TextWrapping="Wrap"/>
-                            </StackPanel>
-                            <Button Grid.Column="1"
-                                    Content="Install"
-                                    VerticalAlignment="Center"
+                         on this machine). Uses InfoBar (Informational) as
+                         the WinUI-canonical "featured callout" surface —
+                         soft blue tint + info icon are theme-aware and
+                         match tokens.md guidance (no custom brushes). -->
+                    <InfoBar x:Name="WelcomeLocalWslSetupCard"
+                             Severity="Informational"
+                             IsOpen="True"
+                             IsClosable="False"
+                             Visibility="Collapsed"
+                             Title="Get started — install a local gateway"
+                             Message="The fastest way to start: sets up a WSL-hosted gateway on this PC and makes it the active connection.">
+                        <InfoBar.ActionButton>
+                            <Button Content="Install"
                                     Click="OnInstallLocalWslGateway"
                                     AutomationProperties.AutomationId="WelcomeInstallLocalGateway"/>
-                        </Grid>
-                    </Border>
+                        </InfoBar.ActionButton>
+                    </InfoBar>
 
                     <TextBlock x:Name="WelcomeOrDivider"
                                Text="Or connect to an existing one:"
