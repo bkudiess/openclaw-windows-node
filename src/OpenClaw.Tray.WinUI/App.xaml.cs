@@ -213,13 +213,8 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
     private ChatWindow? _chatWindow;
     private ConnectionStatusWindow? _connectionStatusWindow;
 
-    // Bug 3: per-device idempotencyfor "Node paired" toast. WindowsNodeClient.HandleHelloOk
-    // re-fires PairingStatusChanged(Paired) on every WS reconnect; we only want one toast
-    // per device per session. (Source-side suppression also exists in WindowsNodeClient as
-    // defense-in-depth.)
-    private readonly HashSet<string> _shownPairedToasts = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, DateTime> _recentToastKeys = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly TimeSpan ToastDedupeWindow = TimeSpan.FromSeconds(30);
+    private DiagnosticsClipboardService? _diagnosticsClipboard;
+    private ToastService? _toastService;
     
     // Node service (optional, enabled in settings)
     private NodeService? _nodeService;
@@ -614,6 +609,9 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         _gatewayService.SessionCommandCompleted += OnGatewaySessionCommandCompleted;
         _gatewayService.NotificationReceived += OnGatewayNotificationReceived;
         _appState.PropertyChanged += OnAppStateChanged;
+
+        _diagnosticsClipboard = new DiagnosticsClipboardService(BuildCommandCenterState);
+        _toastService = new ToastService(() => _settings);
 
         DiagnosticsJsonlService.Write("app.start", new
         {
@@ -1028,15 +1026,15 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             case "configfolder": OpenConfigFolder(); break;
             case "diagnosticsfolder": OpenDiagnosticsFolder(); break;
             case "connectionstatus": ShowConnectionStatusWindow(); break;
-            case "supportcontext": CopySupportContext(); break;
-            case "debugbundle": CopyDebugBundle(); break;
-            case "browsersetup": CopyBrowserSetupGuidance(); break;
-            case "portdiagnostics": CopyPortDiagnostics(); break;
-            case "capabilitydiagnostics": CopyCapabilityDiagnostics(); break;
-            case "nodeinventory": CopyNodeInventory(); break;
-            case "channelsummary": CopyChannelSummary(); break;
-            case "activitysummary": CopyActivitySummary(); break;
-            case "extensibilitysummary": CopyExtensibilitySummary(); break;
+            case "supportcontext": _diagnosticsClipboard!.CopySupportContext(); break;
+            case "debugbundle": _diagnosticsClipboard!.CopyDebugBundle(); break;
+            case "browsersetup": _diagnosticsClipboard!.CopyBrowserSetupGuidance(); break;
+            case "portdiagnostics": _diagnosticsClipboard!.CopyPortDiagnostics(); break;
+            case "capabilitydiagnostics": _diagnosticsClipboard!.CopyCapabilityDiagnostics(); break;
+            case "nodeinventory": _diagnosticsClipboard!.CopyNodeInventory(); break;
+            case "channelsummary": _diagnosticsClipboard!.CopyChannelSummary(); break;
+            case "activitysummary": _diagnosticsClipboard!.CopyActivitySummary(); break;
+            case "extensibilitysummary": _diagnosticsClipboard!.CopyExtensibilitySummary(); break;
             case "restartsshtunnel": RestartSshTunnel(); break;
             case "copydeviceid": CopyDeviceIdToClipboard(); break;
             case "copynodesummary": CopyNodeSummaryToClipboard(); break;
@@ -1090,7 +1088,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             CopyTextToClipboard(_nodeService.FullDeviceId);
             
             // Show toast confirming copy
-            ShowToast(new ToastContentBuilder()
+            _toastService!.ShowToast(new ToastContentBuilder()
                 .AddText(LocalizationHelper.GetString("Toast_DeviceIdCopied"))
                 .AddText(string.Format(LocalizationHelper.GetString("Toast_DeviceIdCopiedDetail"), _nodeService.ShortDeviceId)));
         }
@@ -1116,7 +1114,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
 
             CopyTextToClipboard(summary);
 
-            ShowToast(new ToastContentBuilder()
+            _toastService!.ShowToast(new ToastContentBuilder()
                 .AddText(LocalizationHelper.GetString("Toast_NodeSummaryCopied"))
                 .AddText(string.Format(LocalizationHelper.GetString("Toast_NodeSummaryCopiedDetail"), _appState!.Nodes.Length)));
         }
@@ -1173,7 +1171,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
 
             if (!sent)
             {
-                ShowToast(new ToastContentBuilder()
+                _toastService!.ShowToast(new ToastContentBuilder()
                     .AddText(LocalizationHelper.GetString("Toast_SessionActionFailed"))
                     .AddText(LocalizationHelper.GetString("Toast_SessionActionFailedDetail")));
                 return;
@@ -1189,7 +1187,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             Logger.Warn($"Session action error ({action}): {ex.Message}");
             try
             {
-                ShowToast(new ToastContentBuilder()
+                _toastService!.ShowToast(new ToastContentBuilder()
                     .AddText(LocalizationHelper.GetString("Toast_SessionActionFailed"))
                     .AddText(ex.Message));
             }
@@ -1916,7 +1914,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         if (status == ConnectionStatus.Connected && nodeService?.IsPaired == true)
         {
             var deviceId = nodeService.FullDeviceId;
-            if (HasRecentToast("node-paired", deviceId))
+            if (_toastService!.HasRecentToast("node-paired", deviceId))
             {
                 Logger.Info($"[ToastDeduper] Suppressed node-connected toast after node-paired deviceId={deviceId}");
                 return;
@@ -1924,7 +1922,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
 
             try
             {
-                ShowToast(new ToastContentBuilder()
+                _toastService!.ShowToast(new ToastContentBuilder()
                     .AddText(LocalizationHelper.GetString("Toast_NodeModeActive"))
                     .AddText(LocalizationHelper.GetString("Toast_NodeModeActiveDetail")),
                     "node-connected",
@@ -1986,10 +1984,11 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
                 // Bug 3: idempotency guard — only show "Node paired" toast/activity once
                 // per device per session. WS reconnects re-fire Paired; suppress duplicates.
                 var deviceKey = args.DeviceId ?? string.Empty;
-                if (_shownPairedToasts.Add(deviceKey))
+                if (!_toastService!.HasShownPairedToast(deviceKey))
                 {
+                    _toastService!.MarkPairedToastShown(deviceKey);
                     AddRecentActivity("Node paired", category: "node", dashboardPath: "nodes", nodeId: args.DeviceId);
-                    ShowToast(new ToastContentBuilder()
+                    _toastService!.ShowToast(new ToastContentBuilder()
                         .AddText(LocalizationHelper.GetString("Toast_NodePaired"))
                         .AddText(LocalizationHelper.GetString("Toast_NodePairedDetail")),
                         "node-paired",
@@ -2003,7 +2002,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             else if (args.Status == OpenClaw.Shared.PairingStatus.Rejected)
             {
                 AddRecentActivity("Node pairing rejected", category: "node", dashboardPath: "nodes", nodeId: args.DeviceId, details: args.Message ?? LocalizationHelper.GetString("Toast_PairingRejectedDetail"));
-                ShowToast(new ToastContentBuilder()
+                _toastService!.ShowToast(new ToastContentBuilder()
                     .AddText(LocalizationHelper.GetString("Toast_PairingRejected"))
                     .AddText(LocalizationHelper.GetString("Toast_PairingRejectedDetail")),
                     "node-pairing-rejected",
@@ -2047,7 +2046,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         var shortDeviceId = deviceId.Length > 16 ? deviceId[..16] : deviceId;
 
         AddRecentActivity("Node pairing pending", category: "node", dashboardPath: "nodes", nodeId: deviceId);
-        ShowToast(new ToastContentBuilder()
+        _toastService!.ShowToast(new ToastContentBuilder()
             .AddText(LocalizationHelper.GetString("Toast_PairingPending"))
             .AddText(string.Format(LocalizationHelper.GetString("Toast_PairingPendingDetail"), shortDeviceId))
             .AddButton(new ToastButton()
@@ -2065,7 +2064,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         // Agent requested a notification via node.invoke system.notify
         try
         {
-            ShowToast(new ToastContentBuilder()
+            _toastService!.ShowToast(new ToastContentBuilder()
                 .AddText(args.Title)
                 .AddText(args.Body));
         }
@@ -2077,7 +2076,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
 
     private void OnNodeToastRequested(object? sender, Microsoft.Toolkit.Uwp.Notifications.ToastContentBuilder builder)
         => OnUiThread(() =>
-            NonFatalAction.Run(() => ShowToast(builder), msg => Logger.Warn($"Failed to show node toast: {msg}")));
+            NonFatalAction.Run(() => _toastService!.ShowToast(builder), msg => Logger.Warn($"Failed to show node toast: {msg}")));
 
     private void OnNodeInvokeCompleted(object? sender, NodeInvokeCompletedEventArgs args)
     {
@@ -2181,7 +2180,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
                     dashboardPath: !string.IsNullOrWhiteSpace(result.Key) ? $"sessions/{result.Key}" : "sessions",
                     sessionKey: result.Key);
 
-                ShowToast(new ToastContentBuilder()
+                _toastService!.ShowToast(new ToastContentBuilder()
                     .AddText(title)
                     .AddText(message));
             }
@@ -2254,7 +2253,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
                            .AddArgument("action", "open_chat"));
             }
 
-            ShowToast(builder);
+            _toastService!.ShowToast(builder);
         }
         catch (Exception ex)
         {
@@ -2462,7 +2461,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
                 OnUiThread(UpdateStatusDetailWindow);
                 if (userInitiated)
                 {
-                    ShowToast(new ToastContentBuilder()
+                    _toastService!.ShowToast(new ToastContentBuilder()
                         .AddText(LocalizationHelper.GetString("Toast_HealthCheck"))
                         .AddText("Node Mode is connected; gateway health is streaming."));
                 }
@@ -2471,7 +2470,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
 
             if (userInitiated)
             {
-                ShowToast(new ToastContentBuilder()
+                _toastService!.ShowToast(new ToastContentBuilder()
                     .AddText(LocalizationHelper.GetString("Toast_HealthCheck"))
                     .AddText(LocalizationHelper.GetString("Toast_HealthCheckNotConnected")));
             }
@@ -2484,7 +2483,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             await client.CheckHealthAsync();
             if (userInitiated)
             {
-                ShowToast(new ToastContentBuilder()
+                _toastService!.ShowToast(new ToastContentBuilder()
                     .AddText(LocalizationHelper.GetString("Toast_HealthCheck"))
                     .AddText(LocalizationHelper.GetString("Toast_HealthCheckSent")));
             }
@@ -2494,7 +2493,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             Logger.Warn($"Health check failed: {ex.Message}");
             if (userInitiated)
             {
-                ShowToast(new ToastContentBuilder()
+                _toastService!.ShowToast(new ToastContentBuilder()
                     .AddText(LocalizationHelper.GetString("Toast_HealthCheckFailed"))
                     .AddText(ex.Message));
             }
@@ -2858,7 +2857,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
     {
         if (_settings?.UseSshTunnel != true)
         {
-            ShowToast(new ToastContentBuilder()
+            _toastService!.ShowToast(new ToastContentBuilder()
                 .AddText("SSH tunnel")
                 .AddText("Managed SSH tunnel mode is not enabled."));
             return;
@@ -2880,7 +2879,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             if (!EnsureSshTunnelConfigured())
             {
                 UpdateStatusDetailWindow();
-                ShowToast(new ToastContentBuilder()
+                _toastService!.ShowToast(new ToastContentBuilder()
                     .AddText("SSH tunnel restart failed")
                     .AddText(_sshTunnelService?.LastError ?? "Check SSH tunnel settings and logs."));
                 return;
@@ -2889,7 +2888,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             _ = _connectionManager?.ReconnectAsync();
 
             UpdateStatusDetailWindow();
-            ShowToast(new ToastContentBuilder()
+            _toastService!.ShowToast(new ToastContentBuilder()
                 .AddText("SSH tunnel")
                 .AddText("Restarted; reconnecting to gateway."));
         }
@@ -2897,7 +2896,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         {
             Logger.Error($"SSH tunnel restart request failed: {ex.Message}");
             DiagnosticsJsonlService.Write("tunnel.restart_request_failed", new { ex.Message });
-            ShowToast(new ToastContentBuilder()
+            _toastService!.ShowToast(new ToastContentBuilder()
                 .AddText("SSH tunnel restart failed")
                 .AddText(ex.Message));
         }
@@ -3034,7 +3033,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
 
         try
         {
-            ShowToast(new ToastContentBuilder()
+            _toastService!.ShowToast(new ToastContentBuilder()
                 .AddText(LocalizationHelper.GetString("Toast_ActivityStreamTip"))
                 .AddText(LocalizationHelper.GetString("Toast_ActivityStreamTipDetail"))
                 .AddButton(new ToastButton()
@@ -3048,65 +3047,6 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
     }
 
     #endregion
-
-    private void ShowToast(ToastContentBuilder builder, string? toastTag = null, string? deviceId = null)
-    {
-        if (!ShouldShowToast(toastTag, deviceId))
-            return;
-
-        var sound = _settings?.NotificationSound;
-        if (string.Equals(sound, "None", StringComparison.OrdinalIgnoreCase))
-        {
-            builder.AddAudio(new ToastAudio { Silent = true });
-        }
-        else if (string.Equals(sound, "Subtle", StringComparison.OrdinalIgnoreCase))
-        {
-            builder.AddAudio(new Uri("ms-winsoundevent:Notification.IM"), silent: false);
-        }
-        builder.Show();
-    }
-
-    private bool ShouldShowToast(string? toastTag, string? deviceId)
-    {
-        if (string.IsNullOrWhiteSpace(toastTag))
-            return true;
-
-        var normalizedDeviceId = NormalizeToastDeviceId(deviceId);
-        var dedupeKey = BuildToastKey(toastTag, normalizedDeviceId);
-        var now = DateTime.UtcNow;
-
-        foreach (var staleKey in _recentToastKeys
-            .Where(pair => now - pair.Value >= ToastDedupeWindow)
-            .Select(pair => pair.Key)
-            .ToArray())
-        {
-            _recentToastKeys.Remove(staleKey);
-        }
-
-        if (_recentToastKeys.TryGetValue(dedupeKey, out var lastShown) &&
-            now - lastShown < ToastDedupeWindow)
-        {
-            Logger.Info($"[ToastDeduper] Suppressed duplicate toast tag={toastTag} deviceId={normalizedDeviceId}");
-            return false;
-        }
-
-        _recentToastKeys[dedupeKey] = now;
-        Logger.Info($"[ToastDeduper] Showing toast tag={toastTag} deviceId={normalizedDeviceId}");
-        return true;
-    }
-
-    private bool HasRecentToast(string toastTag, string? deviceId)
-    {
-        var normalizedDeviceId = NormalizeToastDeviceId(deviceId);
-        return _recentToastKeys.TryGetValue(BuildToastKey(toastTag, normalizedDeviceId), out var lastShown) &&
-            DateTime.UtcNow - lastShown < ToastDedupeWindow;
-    }
-
-    private static string NormalizeToastDeviceId(string? deviceId) =>
-        string.IsNullOrWhiteSpace(deviceId) ? "global" : deviceId.Trim();
-
-    private static string BuildToastKey(string toastTag, string normalizedDeviceId) =>
-        $"{toastTag.Trim()}:{normalizedDeviceId}";
 
     private bool TryResolveChatCredentials(
         out string gatewayUrl,
@@ -3289,46 +3229,6 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             Logger.Warn($"Failed to open {label} folder {folderPath}: {ex.Message}");
         }
     }
-
-    private void CopyDiagnostic(string label, Func<GatewayCommandCenterState, string> format)
-    {
-        try
-        {
-            CopyTextToClipboard(format(BuildCommandCenterState()));
-            Logger.Info($"Copied {label} from deep link");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"Failed to copy {label} from deep link: {ex.Message}");
-        }
-    }
-
-    private void CopySupportContext() =>
-        CopyDiagnostic("support context", CommandCenterTextHelper.BuildSupportContext);
-
-    private void CopyDebugBundle() =>
-        CopyDiagnostic("debug bundle", CommandCenterTextHelper.BuildDebugBundle);
-
-    private void CopyBrowserSetupGuidance() =>
-        CopyDiagnostic("browser setup guidance", CommandCenterTextHelper.BuildBrowserSetupGuidance);
-
-    private void CopyPortDiagnostics() =>
-        CopyDiagnostic("port diagnostics", s => CommandCenterTextHelper.BuildPortDiagnosticsSummary(s.PortDiagnostics));
-
-    private void CopyCapabilityDiagnostics() =>
-        CopyDiagnostic("capability diagnostics", CommandCenterTextHelper.BuildCapabilityDiagnosticsSummary);
-
-    private void CopyNodeInventory() =>
-        CopyDiagnostic("node inventory", s => CommandCenterTextHelper.BuildNodeInventorySummary(s.Nodes));
-
-    private void CopyChannelSummary() =>
-        CopyDiagnostic("channel summary", s => CommandCenterTextHelper.BuildChannelSummaryText(s.Channels));
-
-    private void CopyActivitySummary() =>
-        CopyDiagnostic("activity summary", s => CommandCenterTextHelper.BuildActivitySummary(s.RecentActivity));
-
-    private void CopyExtensibilitySummary() =>
-        CopyDiagnostic("extensibility summary", s => CommandCenterTextHelper.BuildExtensibilitySummary(s.Channels));
 
     private void OnGlobalHotkeyPressed(object? sender, EventArgs e)
     {
@@ -3557,15 +3457,15 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             OpenConfigFolder = OpenConfigFolder,
             OpenDiagnosticsFolder = OpenDiagnosticsFolder,
             OpenConnectionStatus = ShowConnectionStatusWindow,
-            CopySupportContext = CopySupportContext,
-            CopyDebugBundle = CopyDebugBundle,
-            CopyBrowserSetupGuidance = CopyBrowserSetupGuidance,
-            CopyPortDiagnostics = CopyPortDiagnostics,
-            CopyCapabilityDiagnostics = CopyCapabilityDiagnostics,
-            CopyNodeInventory = CopyNodeInventory,
-            CopyChannelSummary = CopyChannelSummary,
-            CopyActivitySummary = CopyActivitySummary,
-            CopyExtensibilitySummary = CopyExtensibilitySummary,
+            CopySupportContext = _diagnosticsClipboard!.CopySupportContext,
+            CopyDebugBundle = _diagnosticsClipboard!.CopyDebugBundle,
+            CopyBrowserSetupGuidance = _diagnosticsClipboard!.CopyBrowserSetupGuidance,
+            CopyPortDiagnostics = _diagnosticsClipboard!.CopyPortDiagnostics,
+            CopyCapabilityDiagnostics = _diagnosticsClipboard!.CopyCapabilityDiagnostics,
+            CopyNodeInventory = _diagnosticsClipboard!.CopyNodeInventory,
+            CopyChannelSummary = _diagnosticsClipboard!.CopyChannelSummary,
+            CopyActivitySummary = _diagnosticsClipboard!.CopyActivitySummary,
+            CopyExtensibilitySummary = _diagnosticsClipboard!.CopyExtensibilitySummary,
             RestartSshTunnel = RestartSshTunnel,
             OpenChat = ShowWebChat,
             OpenCommandCenter = ShowStatusDetail,
@@ -3646,7 +3546,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
                         break;
                     case "copy_pairing_command" when arguments.TryGetValue("command", out var command):
                         CopyTextToClipboard(command);
-                        ShowToast(new ToastContentBuilder()
+                        _toastService!.ShowToast(new ToastContentBuilder()
                             .AddText(LocalizationHelper.GetString("Toast_PairingCommandCopied"))
                             .AddText(command));
                         break;
