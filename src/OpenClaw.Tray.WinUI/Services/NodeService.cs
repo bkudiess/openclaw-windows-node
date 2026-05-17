@@ -105,6 +105,13 @@ public sealed class NodeService : IDisposable
     private readonly List<INodeCapability> _capabilities = new();
     private readonly object _capabilitiesLock = new();
 
+    // Serializes AttachClient ↔ DisconnectAsync so a reconnect that overlaps a
+    // disconnect can't leave stale subscriptions on an old client or double-
+    // subscribe a re-attached client (Hanselman review #1). Held only for
+    // the synchronous subscription bookkeeping; capability registration uses
+    // its own lock above.
+    private readonly object _clientLock = new();
+
     // Local MCP server — exposes the same capabilities to local MCP clients.
     // TODO: when the port becomes user-configurable (see docs/MCP_MODE.md
     // "Deferred"), McpServerUrl needs to read the live port off the running
@@ -190,31 +197,11 @@ public sealed class NodeService : IDisposable
         _cameraCaptureService = new CameraCaptureService(logger);
     }
     
-    /// <summary>
-    /// Initialize and connect the node
-    /// </summary>
-    public async Task ConnectAsync(string gatewayUrl, string token, string? bootstrapToken = null)
-    {
-        if (_nodeClient != null)
-        {
-            await DisconnectAsync();
-        }
-
-        _logger.Info($"Starting Windows Node connection to {GatewayUrlHelper.SanitizeForDisplay(gatewayUrl)}");
-        _token = token;
-
-        _nodeClient = new WindowsNodeClient(gatewayUrl, token, _identityDataPath, _logger, bootstrapToken);
-        _nodeClient.StatusChanged += OnNodeStatusChanged;
-        _nodeClient.PairingStatusChanged += OnPairingStatusChanged;
-        _nodeClient.HealthReceived += OnNodeHealthReceived;
-        _nodeClient.GatewaySelfUpdated += OnGatewaySelfUpdated;
-        _nodeClient.InvokeCompleted += OnNodeInvokeCompleted;
-
-        // Register capabilities (also pushes them to _nodeClient and sets permissions)
-        RegisterCapabilities();
-
-        await _nodeClient.ConnectAsync();
-    }
+    // NodeService.ConnectAsync (gateway-connecting variant) was removed in
+    // phase 5 of the connection-unification rollout. Node lifecycle is owned by
+    // GatewayConnectionManager — call manager.EnsureNodeConnectedAsync (or
+    // ConnectionManagerWindowsNodeConnector for the easy-button setup engine).
+    // StartLocalOnlyAsync (MCP-only mode, no gateway) is unchanged.
 
     /// <summary>
     /// Bring up node capabilities and the local MCP server without opening a
@@ -235,17 +222,26 @@ public sealed class NodeService : IDisposable
     }
     
     /// <summary>
-    /// Disconnect the node
+    /// Detach from the manager-owned node client and tear down capability state.
+    /// Does NOT dispose <c>_nodeClient</c> — the client lifecycle is owned by
+    /// <see cref="OpenClawTray.Services.Connection.GatewayConnectionManager"/> /
+    /// <see cref="OpenClawTray.Services.Connection.NodeConnector"/>; call
+    /// <c>GatewayConnectionManager.DisconnectAsync</c> to actually close the WebSocket.
     /// </summary>
-    public async Task DisconnectAsync()
+    public Task DisconnectAsync()
     {
         StopMcpServer();
 
-        if (_nodeClient != null)
+        WindowsNodeClient? previous;
+        lock (_clientLock)
         {
-            await _nodeClient.DisconnectAsync();
-            _nodeClient.Dispose();
+            previous = _nodeClient;
             _nodeClient = null;
+        }
+        if (previous != null)
+        {
+            // Unsubscribe but don't dispose — the connector owns the client.
+            DetachClientHandlers(previous);
         }
 
         lock (_capabilitiesLock) { _capabilities.Clear(); }
@@ -262,6 +258,8 @@ public sealed class NodeService : IDisposable
             _dispatcherQueue.TryEnqueue(() => _a2uiCanvasWindow.Close());
             _a2uiCanvasWindow = null;
         }
+
+        return Task.CompletedTask;
     }
     
     private void RegisterCapabilities()
@@ -414,7 +412,43 @@ public sealed class NodeService : IDisposable
         if (client is null) return;
 
         _token = bearerToken;
-        _nodeClient = client;
+
+        // Hanselman review #1: serialize subscription bookkeeping so AttachClient ↔
+        // DisconnectAsync ↔ a follow-up AttachClient can't leave stale handlers on
+        // an old client or double-subscribe the same client. Unconditional
+        // unsubscribe-then-subscribe makes the wiring idempotent regardless of
+        // whether the previous client is the same instance or null.
+        WindowsNodeClient? previous;
+        lock (_clientLock)
+        {
+            previous = _nodeClient;
+            if (previous != null && !ReferenceEquals(previous, client))
+            {
+                DetachClientHandlers(previous);
+            }
+
+            _nodeClient = client;
+
+            // Wire NodeService event re-emitters to the manager-owned client.
+            // App.OnPairingStatusChanged + OnNodeStatusChanged subscribe to NodeService events;
+            // those subscriptions are stable across reconnects because the subscriptions are
+            // on NodeService, not on the underlying WindowsNodeClient. (Pre-unification this
+            // wiring lived in NodeService.ConnectAsync — moved here so the unified
+            // manager-owned lifecycle still drives NodeService's event surface.)
+            // -= before += so a re-attach of the same client (e.g. AttachClient called
+            // again after a DisconnectAsync that nulled _nodeClient) doesn't double-subscribe.
+            client.StatusChanged -= OnNodeStatusChanged;
+            client.PairingStatusChanged -= OnPairingStatusChanged;
+            client.HealthReceived -= OnNodeHealthReceived;
+            client.GatewaySelfUpdated -= OnGatewaySelfUpdated;
+            client.InvokeCompleted -= OnNodeInvokeCompleted;
+            client.StatusChanged += OnNodeStatusChanged;
+            client.PairingStatusChanged += OnPairingStatusChanged;
+            client.HealthReceived += OnNodeHealthReceived;
+            client.GatewaySelfUpdated += OnGatewaySelfUpdated;
+            client.InvokeCompleted += OnNodeInvokeCompleted;
+        }
+
         bool capabilitiesBuilt;
         lock (_capabilitiesLock)
         {
@@ -452,6 +486,15 @@ public sealed class NodeService : IDisposable
 
         // Log final registration state for diagnostics
         _logger.Info($"[NodeService] AttachClient DONE: client.Registration.Capabilities={client.RegisteredCapabilityCount}, client.Registration.Commands={client.RegisteredCommandCount}");
+    }
+
+    private void DetachClientHandlers(WindowsNodeClient client)
+    {
+        client.StatusChanged -= OnNodeStatusChanged;
+        client.PairingStatusChanged -= OnPairingStatusChanged;
+        client.HealthReceived -= OnNodeHealthReceived;
+        client.GatewaySelfUpdated -= OnGatewaySelfUpdated;
+        client.InvokeCompleted -= OnNodeInvokeCompleted;
     }
 
     /// <summary>
@@ -1795,9 +1838,16 @@ public sealed class NodeService : IDisposable
     {
         StopMcpServer();
 
-        var client = _nodeClient;
-        _nodeClient = null;
-        try { client?.Dispose(); } catch { /* ignore */ }
+        WindowsNodeClient? client;
+        lock (_clientLock)
+        {
+            client = _nodeClient;
+            _nodeClient = null;
+        }
+        if (client != null)
+        {
+            DetachClientHandlers(client);
+        }
 
         try { _cameraCaptureService?.Dispose(); } catch { /* ignore */ }
         try { _screenRecordingService?.Dispose(); } catch { /* ignore */ }
