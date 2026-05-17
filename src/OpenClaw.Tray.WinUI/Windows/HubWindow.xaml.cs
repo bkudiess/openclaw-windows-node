@@ -31,6 +31,7 @@ public sealed partial class HubWindow : WindowEx
     public HubWindow()
     {
         InitializeComponent();
+        ApplyHighContrastFallbackIfNeeded();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
         Closed += (s, e) =>
@@ -145,50 +146,133 @@ public sealed partial class HubWindow : WindowEx
         }
     }
 
+    // Canonical tag of the page currently shown in ContentFrame; tracked here
+    // (rather than relying on NavView.SelectedItem) so navigation identity
+    // includes the tag — important for agent-scoped pages where several tags
+    // map to the same Page type (e.g. "sessions" vs "agent:main:sessions"
+    // both → SessionsPage), and for the per-page "Back to ..." link logic
+    // that needs to know whether the user arrived via a cross-page link.
+    private string? _currentNavTag;
+
+    // Set true while a programmatic SelectedItem update is in flight, to
+    // suppress the resulting SelectionChanged from re-entering NavigateInternal.
+    private bool _syncingNavSelection;
+
+    // Set by NavigateTo(tag, originTag); consumed by OnContentFrameNavigated
+    // when the new page is initialized, then surfaced as LastNavigationOrigin
+    // so destination pages can decide whether to show an inline back link.
+    private string? _pendingNavigationOrigin;
+
+    /// <summary>
+    /// Tag of the page the user navigated FROM on the most recent navigation,
+    /// or <c>null</c> if the navigation didn't declare an origin (e.g. rail
+    /// click, deep link, app start). Destination pages read this in
+    /// <c>Initialize</c> to decide whether to surface a "Back to X" affordance.
+    /// </summary>
+    public string? LastNavigationOrigin { get; private set; }
+
     /// <summary>
     /// Navigate to a specific page by tag name (e.g. "connection", "sessions", "channels").
     /// </summary>
-    public void NavigateTo(string tag)
+    public void NavigateTo(string tag) => NavigateTo(tag, null);
+
+    /// <summary>
+    /// Navigate to a specific page by tag, declaring which logical surface
+    /// initiated the navigation. The destination page can read this via
+    /// <see cref="LastNavigationOrigin"/> to render an inline "Back to ..."
+    /// link — used by cross-page links on the Connection page so users have
+    /// a one-click return path without relying on the rail or a chrome back
+    /// button.
+    /// </summary>
+    public void NavigateTo(string tag, string? originTag)
+    {
+        _pendingNavigationOrigin = originTag;
+        NavigateInternal(NormalizeNavTag(tag));
+    }
+
+    private string NormalizeNavTag(string tag)
     {
         // Map legacy tags — Home page was retired in favor of the Lobby/Cockpit
         // layout on Connection. Any caller still using "home" or "general"
         // (deep links, persisted nav state, command palette) lands here.
-        if (tag == "home" || tag == "general") tag = "connection";
-        if (tag == "about") tag = "info";
-        if (tag == "nodes") tag = "instances";
+        if (tag == "home" || tag == "general") return "connection";
+        if (tag == "about") return "info";
+        if (tag == "nodes") return "instances";
         // Map legacy agent-scoped workspace/cron tags
-        if (tag == "cron") tag = $"agent:{_currentAgentId}:cron";
-        if (tag == "workspace") tag = $"agent:{_currentAgentId}:workspace";
-
-        // Search all nav items including nested
-        if (FindAndSelectNavItem(NavView.MenuItems, tag)) return;
-        if (FindAndSelectNavItem(NavView.FooterMenuItems, tag)) return;
-
-        // Fallback: navigate directly
-        if (tag.StartsWith("agent:")) { _currentAgentId = ParseAgentIdFromTag(tag); _cachedCommands = null; }
-        var pageType = TagToPageType(tag);
-        if (pageType != null)
-        {
-            ContentFrame.Navigate(pageType);
-            InitializeCurrentPage();
-        }
+        if (tag == "cron") return $"agent:{_currentAgentId}:cron";
+        if (tag == "workspace") return $"agent:{_currentAgentId}:workspace";
+        return tag;
     }
 
-    private bool FindAndSelectNavItem(IList<object> items, string tag)
+    private void NavigateInternal(string tag)
     {
-        foreach (var item in items)
+        var pageType = TagToPageType(tag);
+        if (pageType == null)
         {
-            if (item is NavigationViewItem navItem)
+            // Unknown tag: nothing to navigate, but we still need to discard
+            // any pending origin so it doesn't leak into the next real
+            // navigation (where it would surface a wrong "Back to ..." link).
+            _pendingNavigationOrigin = null;
+            return;
+        }
+
+        // Identity dedupe: navigation identity = (PageType, normalized tag).
+        // Page-type-only dedupe would collapse distinct logical destinations
+        // that share a Page (e.g. agent switching on WorkspacePage), and
+        // would also push duplicate back-stack entries when the user
+        // re-invokes the current page.
+        if (ContentFrame.SourcePageType == pageType && _currentNavTag == tag)
+        {
+            // Same as above: Frame.Navigate is skipped, so
+            // OnContentFrameNavigated won't run to consume the origin. If the
+            // caller changed origin context, refresh the active page so inline
+            // back-link state stays accurate.
+            var pendingOrigin = _pendingNavigationOrigin;
+            _pendingNavigationOrigin = null;
+            if (!string.Equals(LastNavigationOrigin, pendingOrigin, StringComparison.Ordinal))
             {
-                if (navItem.Tag as string == tag) { NavView.SelectedItem = navItem; return true; }
-                if (navItem.MenuItems.Count > 0 && FindAndSelectNavItem(navItem.MenuItems, tag))
+                LastNavigationOrigin = pendingOrigin;
+                InitializeCurrentPage();
+            }
+            return;
+        }
+
+        // Best-effort rail highlight. Suppress the selection-changed callback
+        // so this programmatic update doesn't re-enter NavigateInternal.
+        var item = FindNavItemForTag(NavView.MenuItems, tag)
+                ?? FindNavItemForTag(NavView.FooterMenuItems, tag);
+        if (item != null && !ReferenceEquals(NavView.SelectedItem, item))
+        {
+            _syncingNavSelection = true;
+            try { NavView.SelectedItem = item; }
+            finally { _syncingNavSelection = false; }
+        }
+
+        // Pass the tag as the navigation parameter so OnContentFrameNavigated
+        // can recover the canonical destination on Back/Forward.
+        ContentFrame.Navigate(pageType, tag);
+    }
+
+    private static NavigationViewItem? FindNavItemForTag(IList<object> items, string tag)
+    {
+        foreach (var raw in items)
+        {
+            if (raw is NavigationViewItem item)
+            {
+                if ((item.Tag as string) == tag) return item;
+                if (item.MenuItems.Count > 0)
                 {
-                    navItem.IsExpanded = true;
-                    return true;
+                    var nested = FindNavItemForTag(item.MenuItems, tag);
+                    if (nested != null)
+                    {
+                        // Expand parent so the user can see the selected child.
+                        item.IsExpanded = true;
+                        return nested;
+                    }
                 }
             }
         }
-        return false;
+        return null;
     }
 
     private void UpdateTitleBarStatus(ConnectionStatus status)
@@ -295,7 +379,7 @@ public sealed partial class HubWindow : WindowEx
             {
                 Content = name ?? id,
                 Tag = $"agent:{id}",
-                Icon = new FontIcon { Glyph = "\uE99A" }
+                Icon = BuildAgentItemIcon()
             };
 
             AgentsNavItem.MenuItems.Add(agentItem);
@@ -309,18 +393,44 @@ public sealed partial class HubWindow : WindowEx
 
     private void NavView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
-        if (args.SelectedItem is NavigationViewItem item)
+        // Skip when the selection was set programmatically by
+        // OnContentFrameNavigated reflecting a Back/Forward — the page
+        // is already showing and re-running NavigateInternal would push
+        // a duplicate back-stack entry.
+        if (_syncingNavSelection) return;
+
+        if (args.SelectedItem is NavigationViewItem item && item.Tag is string tag)
         {
-            var tag = item.Tag as string;
-            if (tag?.StartsWith("agent:") == true)
-            { _currentAgentId = ParseAgentIdFromTag(tag); _cachedCommands = null; }
-            var pageType = TagToPageType(tag);
-            if (pageType != null)
+            NavigateInternal(NormalizeNavTag(tag));
+        }
+    }
+
+    /// <summary>
+    /// Authoritative post-navigation hook. Runs for every successful
+    /// Frame.Navigate, so it's the single place that rebuilds
+    /// <see cref="_currentNavTag"/> / <see cref="_currentAgentId"/> /
+    /// <see cref="LastNavigationOrigin"/> and re-runs
+    /// <see cref="InitializeCurrentPage"/> for the page that's now visible.
+    /// </summary>
+    private void OnContentFrameNavigated(object sender, Microsoft.UI.Xaml.Navigation.NavigationEventArgs e)
+    {
+        var tag = e.Parameter as string;
+        _currentNavTag = tag;
+        LastNavigationOrigin = _pendingNavigationOrigin;
+        _pendingNavigationOrigin = null;
+
+        // Keep _currentAgentId aligned with the page that's now visible.
+        if (tag != null && tag.StartsWith("agent:"))
+        {
+            var newAgent = ParseAgentIdFromTag(tag);
+            if (newAgent != _currentAgentId)
             {
-                ContentFrame.Navigate(pageType);
-                InitializeCurrentPage();
+                _currentAgentId = newAgent;
+                _cachedCommands = null;
             }
         }
+
+        InitializeCurrentPage();
     }
 
     /// <summary>
@@ -368,8 +478,13 @@ public sealed partial class HubWindow : WindowEx
                 agentEvents.Initialize(this);
                 agentEvents.ClearCentralCache = () => AppModel?.ClearAgentEvents();
                 agentEvents.PopulateAgentFilter(this);
-                var agentEventsTag = (NavView?.SelectedItem as NavigationViewItem)?.Tag as string;
-                var eventsAgentFilter = agentEventsTag?.StartsWith("agent:") == true ? _currentAgentId : null;
+                // When navigated via top-level nav (tag "agentevents") show all
+                // agents; when reached via an agent-scoped tag (e.g.
+                // "agent:main:agentevents") scope to that agent. Reading
+                // _currentNavTag (set by OnContentFrameNavigated) is more
+                // reliable than peeking NavView.SelectedItem, which may briefly
+                // disagree during Back/Forward.
+                var eventsAgentFilter = _currentNavTag?.StartsWith("agent:") == true ? _currentAgentId : null;
                 agentEvents.SetAgentFilter(eventsAgentFilter);
                 // Seed existing events from AppState
                 if (agentEvents.EventCount == 0 && AppModel?.AgentEvents is { Count: > 0 } events)
@@ -620,4 +735,100 @@ public sealed partial class HubWindow : WindowEx
 
     /// <summary>Action to open the QuickSend dialog, set by App.xaml.cs.</summary>
     public Action? QuickSendAction { get; set; }
+
+    #region High Contrast icon fallback
+
+    // Maps NavigationViewItem.Tag -> Segoe Fluent Icons glyph used as fallback
+    // when Windows High Contrast is active. FontIcon uses the system foreground
+    // brush so it auto-adapts to every HC variant (HC Black/White/#1/#2); our
+    // multi-color SVGs don't, so we swap them out at construction. This mirrors
+    // the original gray Segoe Fluent Icons that were here before the colorful
+    // refresh — same glyphs as those Windows users learned in earlier builds.
+    private static readonly Dictionary<string, string> s_highContrastGlyphFallback = new()
+    {
+        { "chat",        "\uE8BD" },
+        { "connection",  "\uE839" },
+        { "sessions",    "\uE8F2" },
+        { "skills",      "\uE945" },
+        { "channels",    "\uEC05" },
+        { "instances",   "\uE977" },
+        { "agentevents", "\uE943" },
+        { "bindings",    "\uE8AD" },
+        { "config",      "\uE90F" },
+        { "usage",       "\uE9D9" },
+        { "cron",        "\uE787" },
+        { "voice",       "\uE720" },
+        { "settings",    "\uE713" },
+        { "permissions", "\uEA18" },
+        { "sandbox",     "\uE72E" },
+        { "activity",    "\uEA95" },
+        { "debug",       "\uEBE8" },
+        { "info",        "\uE946" },
+    };
+
+    // Glyphs for the two parent NavigationViewItems that don't carry a Tag
+    // ("Advanced" group and "Agents" group). These also feed the dynamic agent
+    // items added at runtime.
+    private const string AdvancedGroupGlyph = "\uE950";
+    private const string AgentsGroupGlyph = "\uE99A";
+
+    private bool _isHighContrast;
+
+    private void ApplyHighContrastFallbackIfNeeded()
+    {
+        try
+        {
+            var settings = new global::Windows.UI.ViewManagement.AccessibilitySettings();
+            _isHighContrast = settings.HighContrast;
+        }
+        catch
+        {
+            _isHighContrast = false;
+            return;
+        }
+        if (!_isHighContrast) return;
+        SwapToFontIcons(NavView.MenuItems);
+        SwapToFontIcons(NavView.FooterMenuItems);
+    }
+
+    private void SwapToFontIcons(IList<object> items)
+    {
+        foreach (var obj in items)
+        {
+            if (obj is not NavigationViewItem item) continue;
+            item.Icon = ResolveHighContrastIcon(item);
+            if (item.MenuItems.Count > 0)
+                SwapToFontIcons(item.MenuItems);
+        }
+    }
+
+    private IconElement ResolveHighContrastIcon(NavigationViewItem item)
+    {
+        if (item.Tag is string tag)
+        {
+            if (s_highContrastGlyphFallback.TryGetValue(tag, out var glyph))
+                return new FontIcon { Glyph = glyph };
+            if (tag.StartsWith("agent:", StringComparison.Ordinal))
+                return new FontIcon { Glyph = AgentsGroupGlyph };
+        }
+        if (item == AgentsNavItem)
+            return new FontIcon { Glyph = AgentsGroupGlyph };
+        if (item.Content is string content && content.Equals("Advanced", StringComparison.OrdinalIgnoreCase))
+            return new FontIcon { Glyph = AdvancedGroupGlyph };
+        // Fall back to whatever the XAML provided (keeps the colorful icon
+        // rather than blanking it out for unmapped items).
+        return item.Icon ?? new FontIcon { Glyph = "\uE700" };
+    }
+
+    private IconElement BuildAgentItemIcon()
+    {
+        if (_isHighContrast)
+            return new FontIcon { Glyph = AgentsGroupGlyph };
+        return new ImageIcon
+        {
+            Source = (Microsoft.UI.Xaml.Media.ImageSource)NavView.Resources["Agents_Icon"]
+        };
+    }
+
+    #endregion
 }
