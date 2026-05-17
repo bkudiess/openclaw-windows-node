@@ -1065,9 +1065,11 @@ public sealed class NodeService : IDisposable
     private async Task<string> OnCanvasEval(string script)
     {
         var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cts = new CancellationTokenSource();
 
         bool enqueued = _dispatcherQueue.TryEnqueue(async () =>
         {
+            if (cts.IsCancellationRequested) return;
             try
             {
                 if (_canvasWindow != null && !_canvasWindow.IsClosed)
@@ -1096,15 +1098,17 @@ public sealed class NodeService : IDisposable
         if (!enqueued)
             tcs.TrySetException(new InvalidOperationException("CANVAS_DISPATCHER_UNAVAILABLE: dispatcher queue rejected"));
 
-        return await WaitWithTimeout(tcs.Task, "canvas.eval");
+        return await WaitWithTimeout(tcs.Task, cts, "canvas.eval");
     }
 
     private async Task<string> OnCanvasSnapshot(CanvasSnapshotArgs args)
     {
         var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cts = new CancellationTokenSource();
 
         bool enqueued = _dispatcherQueue.TryEnqueue(async () =>
         {
+            if (cts.IsCancellationRequested) return;
             try
             {
                 if (_canvasWindow != null && !_canvasWindow.IsClosed)
@@ -1133,7 +1137,7 @@ public sealed class NodeService : IDisposable
         if (!enqueued)
             tcs.TrySetException(new InvalidOperationException("CANVAS_DISPATCHER_UNAVAILABLE: dispatcher queue rejected"));
 
-        return await WaitWithTimeout(tcs.Task, "canvas.snapshot");
+        return await WaitWithTimeout(tcs.Task, cts, "canvas.snapshot");
     }
 
     private Task<string> OnCanvasA2UIDumpAsync()
@@ -1208,12 +1212,14 @@ public sealed class NodeService : IDisposable
     /// <summary>
     /// Awaits a dispatcher-bridged TCS with a timeout so that canvas commands
     /// return a tool error instead of hanging indefinitely when the UI thread
-    /// dispatcher is not pumping (e.g. headless CI).
+    /// dispatcher is not pumping (e.g. headless CI). Cancels the CTS on timeout
+    /// so the enqueued callback skips execution.
     /// </summary>
-    private static async Task<string> WaitWithTimeout(Task<string> task, string command, int timeoutSeconds = 15)
+    private static async Task<string> WaitWithTimeout(Task<string> task, CancellationTokenSource cts, string command, int timeoutSeconds = 15)
     {
         if (await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(timeoutSeconds))) != task)
         {
+            cts.Cancel();
             throw new TimeoutException(
                 $"CANVAS_TIMEOUT: {command} did not complete within {timeoutSeconds}s — the UI dispatcher may not be pumping");
         }
