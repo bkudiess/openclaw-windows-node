@@ -241,11 +241,7 @@ public sealed class NodeService : IDisposable
         if (previous != null)
         {
             // Unsubscribe but don't dispose — the connector owns the client.
-            previous.StatusChanged -= OnNodeStatusChanged;
-            previous.PairingStatusChanged -= OnPairingStatusChanged;
-            previous.HealthReceived -= OnNodeHealthReceived;
-            previous.GatewaySelfUpdated -= OnGatewaySelfUpdated;
-            previous.InvokeCompleted -= OnNodeInvokeCompleted;
+            DetachClientHandlers(previous);
         }
 
         lock (_capabilitiesLock) { _capabilities.Clear(); }
@@ -428,11 +424,7 @@ public sealed class NodeService : IDisposable
             previous = _nodeClient;
             if (previous != null && !ReferenceEquals(previous, client))
             {
-                previous.StatusChanged -= OnNodeStatusChanged;
-                previous.PairingStatusChanged -= OnPairingStatusChanged;
-                previous.HealthReceived -= OnNodeHealthReceived;
-                previous.GatewaySelfUpdated -= OnGatewaySelfUpdated;
-                previous.InvokeCompleted -= OnNodeInvokeCompleted;
+                DetachClientHandlers(previous);
             }
 
             _nodeClient = client;
@@ -494,6 +486,15 @@ public sealed class NodeService : IDisposable
 
         // Log final registration state for diagnostics
         _logger.Info($"[NodeService] AttachClient DONE: client.Registration.Capabilities={client.RegisteredCapabilityCount}, client.Registration.Commands={client.RegisteredCommandCount}");
+    }
+
+    private void DetachClientHandlers(WindowsNodeClient client)
+    {
+        client.StatusChanged -= OnNodeStatusChanged;
+        client.PairingStatusChanged -= OnPairingStatusChanged;
+        client.HealthReceived -= OnNodeHealthReceived;
+        client.GatewaySelfUpdated -= OnGatewaySelfUpdated;
+        client.InvokeCompleted -= OnNodeInvokeCompleted;
     }
 
     /// <summary>
@@ -1837,9 +1838,16 @@ public sealed class NodeService : IDisposable
     {
         StopMcpServer();
 
-        var client = _nodeClient;
-        _nodeClient = null;
-        try { client?.Dispose(); } catch { /* ignore */ }
+        WindowsNodeClient? client;
+        lock (_clientLock)
+        {
+            client = _nodeClient;
+            _nodeClient = null;
+        }
+        if (client != null)
+        {
+            DetachClientHandlers(client);
+        }
 
         try { _cameraCaptureService?.Dispose(); } catch { /* ignore */ }
         try { _screenRecordingService?.Dispose(); } catch { /* ignore */ }

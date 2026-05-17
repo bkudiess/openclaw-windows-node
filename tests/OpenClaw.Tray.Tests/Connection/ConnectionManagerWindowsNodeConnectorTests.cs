@@ -61,15 +61,16 @@ public sealed class ConnectionManagerWindowsNodeConnectorTests : IDisposable
     }
 
     [Fact]
-    public async Task ConnectAsync_NoExistingRecord_CreatesOne()
+    public async Task ConnectAsync_NoExistingRecord_ThrowsWithoutMutatingActiveGateway()
     {
         const string url = "ws://localhost:18789";
         _resolver.OperatorCredential = new GatewayCredential("op", false, "test");
         _resolver.NodeCredential = new GatewayCredential("nd", false, "test");
 
-        // Pre-create gateway record so the manager can connect; the connector's job
-        // here is to ensure that even WITHOUT a record matching the URL, it creates one.
-        // To exercise that branch we point the manager at a different record.
+        // Pre-create a different gateway record so the manager can connect. If
+        // operator pairing failed to create a record for the setup gateway, the
+        // node phase must fail loudly rather than switching the active gateway
+        // behind GatewayConnectionManager's back.
         var seedRecord = new GatewayRecord { Id = "seed", Url = "wss://other", IsLocal = false };
         _registry.AddOrUpdate(seedRecord);
         _registry.SetActive("seed");
@@ -79,15 +80,12 @@ public sealed class ConnectionManagerWindowsNodeConnectorTests : IDisposable
         var connector = new ConnectionManagerWindowsNodeConnector(
             _manager, _registry, NullLogger.Instance);
 
-        // The connector will create a new record for `url` if none exists. Manager's
-        // EnsureNodeConnectedAsync uses the currently-active gateway, which is `seed`.
-        // The new record creation is independent of the active gateway.
-        await connector.ConnectAsync(url, "shared", bootstrapToken: null);
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => connector.ConnectAsync(url, "shared", bootstrapToken: null));
 
-        var created = _registry.FindByUrl(url);
-        Assert.NotNull(created);
-        Assert.Equal("shared", created!.SharedGatewayToken);
-        Assert.True(created.IsLocal);
+        Assert.Null(_registry.FindByUrl(url));
+        Assert.Equal("seed", _registry.GetActive()?.Id);
+        Assert.Equal(0, _node.ConnectCount);
     }
 
     [Fact]

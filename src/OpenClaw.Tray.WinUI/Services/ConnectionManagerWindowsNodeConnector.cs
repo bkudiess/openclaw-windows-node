@@ -49,34 +49,18 @@ public sealed class ConnectionManagerWindowsNodeConnector : IWindowsNodeConnecto
         var existing = _registry.FindByUrl(normalized);
         if (existing == null)
         {
-            // Defensive: the operator phase should always have created this record.
-            // If it didn't, create one now so the manager can resolve credentials.
-            // IsLocal is derived from the URL via LocalGatewayUrlClassifier so this
-            // doesn't silently misclassify a remote gateway if the connector is
-            // ever reused outside the local-loopback easy-button flow.
-            var fresh = new GatewayRecord
-            {
-                Id = Guid.NewGuid().ToString(),
-                Url = normalized,
-                SharedGatewayToken = !string.IsNullOrWhiteSpace(token) ? token : null,
-                BootstrapToken = !string.IsNullOrWhiteSpace(bootstrapToken) ? bootstrapToken : null,
-                IsLocal = LocalGatewayUrlClassifier.IsLocalGatewayUrl(normalized),
-            };
-            _registry.AddOrUpdate(fresh);
-            _registry.SetActive(fresh.Id);
-            _registry.Save();
+            throw new InvalidOperationException(
+                "Operator pairing did not create a gateway record for the setup gateway.");
         }
-        else
+
+        // Patch in any newly-supplied tokens — never overwrite a stored value with empty.
+        var updated = existing with
         {
-            // Patch in any newly-supplied tokens — never overwrite a stored value with empty.
-            var updated = existing with
-            {
-                SharedGatewayToken = !string.IsNullOrWhiteSpace(token) ? token : existing.SharedGatewayToken,
-                BootstrapToken = !string.IsNullOrWhiteSpace(bootstrapToken) ? bootstrapToken : existing.BootstrapToken,
-            };
-            _registry.AddOrUpdate(updated);
-            _registry.Save();
-        }
+            SharedGatewayToken = !string.IsNullOrWhiteSpace(token) ? token : existing.SharedGatewayToken,
+            BootstrapToken = !string.IsNullOrWhiteSpace(bootstrapToken) ? bootstrapToken : existing.BootstrapToken,
+        };
+        _registry.AddOrUpdate(updated);
+        _registry.Save();
 
         _logger.Info(
             $"[SetupNodeConnector] Driving node connection via manager to {GatewayUrlHelper.SanitizeForDisplay(normalized)}");

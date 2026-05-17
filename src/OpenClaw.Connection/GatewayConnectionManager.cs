@@ -653,16 +653,9 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         StateChanged += Handler;
         try
         {
-            await StartNodeConnectionAsync();
+            var startAttempted = await StartNodeConnectionAsync();
 
-            // Hanselman review #5: StartNodeConnectionAsync has three silent-return
-            // paths (null connector / missing gateway record / no node credential).
-            // If none of them fire a state transition, the post-start snapshot is
-            // still Idle (or Disabled). Surface that immediately rather than waiting
-            // 35s for a misleading TimeoutException — the actual diagnostic was
-            // already recorded via _diagnostics.Record("node", ...) by the start path.
-            var postStart = _stateMachine.Current;
-            if (postStart.NodeState is RoleConnectionState.Idle or RoleConnectionState.Disabled)
+            if (!startAttempted)
             {
                 tcs.TrySetException(new InvalidOperationException(
                     "Node connection could not be started — see ConnectionDiagnostics for the credential/record-resolution failure."));
@@ -671,7 +664,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             {
                 // Re-evaluate state in case the connector reached terminal state synchronously
                 // (test connectors may; production NodeConnector is async).
-                Handler(this, postStart);
+                Handler(this, _stateMachine.Current);
             }
 
             // Hanselman review #3: only apply the default 35s timeout when the caller
@@ -713,15 +706,15 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         return _isNodeEnabled?.Invoke() ?? false;
     }
 
-    private async Task StartNodeConnectionAsync()
+    private async Task<bool> StartNodeConnectionAsync()
     {
-        if (_nodeConnector == null || _activeGatewayRecordId == null || _activeIdentityPath == null) return;
+        if (_nodeConnector == null || _activeGatewayRecordId == null || _activeIdentityPath == null) return false;
 
         var record = _registry.GetById(_activeGatewayRecordId);
         if (record == null)
         {
             _logger.Warn("[ConnMgr] Cannot start node — gateway record not found");
-            return;
+            return false;
         }
 
         // Use root identity path — clients always read/write from root, not per-gateway
@@ -730,7 +723,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         {
             _logger.Warn("[ConnMgr] No node credential available — skipping node connection");
             _diagnostics.Record("node", "No node credential available");
-            return;
+            return false;
         }
 
         // Mark node as enabled in the state machine so UI reflects node state
@@ -762,6 +755,8 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             _logger.Error($"[ConnMgr] Node connect failed: {ex.Message}");
             _diagnostics.Record("node", "Node connect failed", ex.Message);
         }
+
+        return true;
     }
 
     private async void OnNodeStatusChanged(object? sender, ConnectionStatus status)
