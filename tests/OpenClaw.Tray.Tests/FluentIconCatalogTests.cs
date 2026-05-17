@@ -26,7 +26,7 @@ public sealed class FluentIconCatalogTests
         "ChevronR", "Check",
         "Brand",
         // Diagnostics surface (see src/OpenClaw.Tray.WinUI/Pages/DebugPage.xaml).
-        "Bug", "Briefcase", "Folder", "Copy", "Document", "Refresh", "Clear", "Develop",
+        "Bug", "Briefcase", "Folder", "Copy", "Document", "Refresh", "Reset", "Clear", "Develop",
     };
 
     private static string ReadCatalogSource()

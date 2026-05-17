@@ -15,10 +15,12 @@
         from SystemFill* tokens, and the page uses CommunityToolkit
         SettingsCard / SettingsExpander instead of hand-rolled rows.
 
-        Three task-oriented sections + an in-page detail view for
-        high-density diagnostic streams (event timeline / recent log).
-        The detail view follows the same Visibility-swap pattern as
-        ConnectionPage's AddGateway sub-view.
+        Three task-oriented sections + an in-page detail view for the
+        recent log. The connection event timeline opens in its own
+        ConnectionStatusWindow (same pattern as Chat explorations) so
+        live diagnostic streams don't push the rest of the page off-
+        screen. The recent-log detail view follows the same
+        Visibility-swap pattern as ConnectionPage's AddGateway sub-view.
     -->
 
     <Page.Resources>
@@ -45,12 +47,21 @@
              text is on its own. -->
 
             <!-- ─── MAIN VIEW ─────────────────────────────────────────── -->
+            <!-- Stretching outer Grid is REQUIRED: a StackPanel placed
+                 directly inside a ScrollViewer ignores MaxWidth on layouts
+                 wider than the cap (the ScrollViewer hands it the full
+                 width and Center alignment collapses to the content's
+                 natural width). Wrapping in a Grid with HorizontalAlignment
+                 =Stretch gives the StackPanel a known parent rect to
+                 center within. Mirrors PermissionsPage.xaml — historical
+                 pain across multiple sessions, do not "simplify". -->
             <ScrollViewer x:Name="MainView"
                           Padding="24,24,24,24"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollMode="Disabled">
+                <Grid HorizontalAlignment="Stretch">
                 <StackPanel HorizontalAlignment="Center"
-                            Width="900"
+                            MaxWidth="900"
                             Spacing="{StaticResource DiagSettingsCardSpacing}">
 
                     <!-- Title block (in-stack, same column as cards). -->
@@ -80,11 +91,6 @@
                             <StackPanel Orientation="Horizontal"
                                         Spacing="20"
                                         Margin="0,4,0,8">
-                                <HyperlinkButton x:Uid="DiagnosticsPage_OpenEventTimeline"
-                                                 Content="View event timeline"
-                                                 Click="OnShowEventTimeline"
-                                                 Padding="0"
-                                                 AutomationProperties.AutomationId="DiagnosticsViewEventTimeline"/>
                                 <HyperlinkButton x:Uid="DiagnosticsPage_ManageOnConnection"
                                                  Content="Manage on Connection page"
                                                  Click="OnManageOnConnection"
@@ -132,26 +138,65 @@
                                                   Header="Copy support context"
                                                   Description="Connection state, gateway URL, runtime, tunnel."
                                                   IsClickEnabled="True"
-                                                  Click="OnCopySupportContext"/>
+                                                  Click="OnCopySupportContext">
+                                <toolkit:SettingsCard.ActionIcon>
+                                    <FontIcon Glyph="{x:Bind helpers:FluentIconCatalog.Copy, Mode=OneTime}"
+                                              FontFamily="{ThemeResource SymbolThemeFontFamily}"/>
+                                </toolkit:SettingsCard.ActionIcon>
+                            </toolkit:SettingsCard>
                             <toolkit:SettingsCard x:Uid="DiagnosticsPage_Card_CopyDebugBundle"
                                                   Header="Copy full debug bundle"
                                                   Description="Everything the preview dialog produces, no preview."
                                                   IsClickEnabled="True"
-                                                  Click="OnCopyDebugBundle"/>
+                                                  Click="OnCopyDebugBundle">
+                                <toolkit:SettingsCard.ActionIcon>
+                                    <FontIcon Glyph="{x:Bind helpers:FluentIconCatalog.Copy, Mode=OneTime}"
+                                              FontFamily="{ThemeResource SymbolThemeFontFamily}"/>
+                                </toolkit:SettingsCard.ActionIcon>
+                            </toolkit:SettingsCard>
                             <toolkit:SettingsCard x:Uid="DiagnosticsPage_Card_CopyBrowserSetup"
                                                   Header="Copy browser setup guidance"
                                                   IsClickEnabled="True"
-                                                  Click="OnCopyBrowserSetup"/>
+                                                  Click="OnCopyBrowserSetup">
+                                <toolkit:SettingsCard.ActionIcon>
+                                    <FontIcon Glyph="{x:Bind helpers:FluentIconCatalog.Copy, Mode=OneTime}"
+                                              FontFamily="{ThemeResource SymbolThemeFontFamily}"/>
+                                </toolkit:SettingsCard.ActionIcon>
+                            </toolkit:SettingsCard>
                             <toolkit:SettingsCard x:Uid="DiagnosticsPage_Card_CopyPortDiagnostics"
                                                   Header="Copy port diagnostics"
                                                   IsClickEnabled="True"
-                                                  Click="OnCopyPortDiagnostics"/>
+                                                  Click="OnCopyPortDiagnostics">
+                                <toolkit:SettingsCard.ActionIcon>
+                                    <FontIcon Glyph="{x:Bind helpers:FluentIconCatalog.Copy, Mode=OneTime}"
+                                              FontFamily="{ThemeResource SymbolThemeFontFamily}"/>
+                                </toolkit:SettingsCard.ActionIcon>
+                            </toolkit:SettingsCard>
                             <toolkit:SettingsCard x:Uid="DiagnosticsPage_Card_CopyCapabilityDiagnostics"
                                                   Header="Copy capability diagnostics"
                                                   IsClickEnabled="True"
-                                                  Click="OnCopyCapabilityDiagnostics"/>
+                                                  Click="OnCopyCapabilityDiagnostics">
+                                <toolkit:SettingsCard.ActionIcon>
+                                    <FontIcon Glyph="{x:Bind helpers:FluentIconCatalog.Copy, Mode=OneTime}"
+                                              FontFamily="{ThemeResource SymbolThemeFontFamily}"/>
+                                </toolkit:SettingsCard.ActionIcon>
+                            </toolkit:SettingsCard>
                         </toolkit:SettingsExpander.Items>
                     </toolkit:SettingsExpander>
+
+                    <!-- Transient "Copied to clipboard" feedback. Opens
+                         when any of the Copy* handlers fires, auto-
+                         dismisses ~2.5 s later via a DispatcherTimer.
+                         InfoBar with IsOpen=False does not consume any
+                         vertical layout space, so this is a no-op when
+                         idle. -->
+                    <controls:InfoBar x:Name="CopyFeedbackInfoBar"
+                                      IsOpen="False"
+                                      IsClosable="False"
+                                      Severity="Success"
+                                      Title="Copied"
+                                      Margin="0,4,0,0"
+                                      AutomationProperties.AutomationId="DiagnosticsCopyFeedback"/>
 
                     <!-- Inspect local diagnostics -->
                     <TextBlock x:Uid="DiagnosticsPage_Section_Inspect"
@@ -167,21 +212,20 @@
                         </toolkit:SettingsCard.HeaderIcon>
                         <Button x:Uid="DiagnosticsPage_OpenEventTimelineButton"
                                 Content="Open"
-                                Click="OnShowEventTimeline"
+                                Click="OnOpenEventTimeline"
                                 AutomationProperties.AutomationId="DiagnosticsOpenEventTimeline"/>
                     </toolkit:SettingsCard>
 
                     <toolkit:SettingsCard x:Uid="DiagnosticsPage_Card_RecentLog"
                                           Header="Recent log"
-                                          Description="Last 200 lines of openclaw-tray.log, with severity coloring.">
+                                          Description="Last 200 lines of openclaw-tray.log, with severity coloring."
+                                          IsClickEnabled="True"
+                                          Click="OnShowRecentLog"
+                                          AutomationProperties.AutomationId="DiagnosticsOpenRecentLog">
                         <toolkit:SettingsCard.HeaderIcon>
                             <FontIcon Glyph="{x:Bind helpers:FluentIconCatalog.Document, Mode=OneTime}"
                                       FontFamily="{ThemeResource SymbolThemeFontFamily}"/>
                         </toolkit:SettingsCard.HeaderIcon>
-                        <Button x:Uid="DiagnosticsPage_OpenRecentLogButton"
-                                Content="Open"
-                                Click="OnShowRecentLog"
-                                AutomationProperties.AutomationId="DiagnosticsOpenRecentLog"/>
                     </toolkit:SettingsCard>
 
                     <toolkit:SettingsExpander x:Uid="DiagnosticsPage_Expander_Identity"
@@ -275,18 +319,15 @@
 
                     <toolkit:SettingsCard x:Uid="DiagnosticsPage_Card_ChatExplorations"
                                           Header="Open chat explorations"
-                                          Description="Engineering preview of chat bubble and tool-card rendering."
-                                          IsClickEnabled="True"
-                                          Click="OnOpenChatExplorations"
-                                          AutomationProperties.AutomationId="DebugPageOpenChatExplorations">
+                                          Description="Engineering preview of chat bubble and tool-card rendering.">
                         <toolkit:SettingsCard.HeaderIcon>
                             <FontIcon Glyph="{x:Bind helpers:FluentIconCatalog.Develop, Mode=OneTime}"
                                       FontFamily="{ThemeResource SymbolThemeFontFamily}"/>
                         </toolkit:SettingsCard.HeaderIcon>
-                        <toolkit:SettingsCard.ActionIcon>
-                            <FontIcon Glyph="{x:Bind helpers:FluentIconCatalog.OpenInBrowser, Mode=OneTime}"
-                                      FontFamily="{ThemeResource SymbolThemeFontFamily}"/>
-                        </toolkit:SettingsCard.ActionIcon>
+                        <Button x:Uid="DiagnosticsPage_OpenChatExplorationsButton"
+                                Content="Open"
+                                Click="OnOpenChatExplorations"
+                                AutomationProperties.AutomationId="DebugPageOpenChatExplorations"/>
                     </toolkit:SettingsCard>
 
                     <!-- Reconfigure… — canonical action verb per naming.md
@@ -297,7 +338,7 @@
                                           Header="Reconfigure…"
                                           Description="Reopens the OpenClaw onboarding wizard. You will be asked to confirm.">
                         <toolkit:SettingsCard.HeaderIcon>
-                            <FontIcon Glyph="{x:Bind helpers:FluentIconCatalog.Setup, Mode=OneTime}"
+                            <FontIcon Glyph="{x:Bind helpers:FluentIconCatalog.Reset, Mode=OneTime}"
                                       FontFamily="{ThemeResource SymbolThemeFontFamily}"/>
                         </toolkit:SettingsCard.HeaderIcon>
                         <Button x:Uid="DiagnosticsPage_ReconfigureButton"
@@ -306,22 +347,33 @@
                     </toolkit:SettingsCard>
 
                 </StackPanel>
+                </Grid>
             </ScrollViewer>
 
             <!-- ─── DETAIL VIEW ───────────────────────────────────────── -->
-            <!-- Hidden by default. Hosts two modes (timeline / log) that
-                 share the same RichTextBlock body so coloring is uniform.
-                 The body uses Border + RichTextBlock (not a SettingsCard)
-                 because it's a content reader, not a settings row.
+            <!-- Hidden by default. Hosts the recent-log reader; the
+                 connection event timeline opens in its own
+                 ConnectionStatusWindow instead. The body uses Border +
+                 RichTextBlock (not a SettingsCard) because it's a
+                 content reader, not a settings row.
 
-                 Outer Grid carries the 24,12,24,24 page padding (same as
-                 MainView's ScrollViewer); inner Grid caps content at
-                 MaxWidth=900 + HorizontalAlignment=Stretch so the
-                 detail-view width matches MainView's StackPanel exactly. -->
+                 Same wrapper pattern as MainView: outer Grid stretches to
+                 fill the available width (giving the inner Grid a known
+                 parent rect); inner Grid uses MaxWidth=900 + Center to
+                 center the 900-wide column within. WITHOUT the explicit
+                 Stretch on the outer Grid, the inner Grid's MaxWidth is
+                 ignored on wide windows (Center collapses to content
+                 width). Historical pain — do not "simplify". -->
+            <!-- Padding intentionally matches MainView's ScrollViewer
+                 padding (24 on all sides) so the column position and
+                 vertical inset don't shift when the user enters or
+                 leaves DetailView. Pinned by
+                 DebugPage_DetailViewMatchesMainViewPadding. -->
             <Grid x:Name="DetailView"
                   Visibility="Collapsed"
-                  Padding="24,12,24,24">
-                <Grid Width="900"
+                  Padding="24,24,24,24"
+                  HorizontalAlignment="Stretch">
+                <Grid MaxWidth="900"
                       HorizontalAlignment="Center"
                       RowSpacing="8">
                 <Grid.RowDefinitions>
@@ -375,16 +427,6 @@
                                       FontFamily="{ThemeResource SymbolThemeFontFamily}"
                                       FontSize="12"/>
                             <TextBlock Text="Copy"/>
-                        </StackPanel>
-                    </Button>
-                    <Button x:Name="DetailClearButton"
-                            Click="OnDetailClear"
-                            ToolTipService.ToolTip="Clear timeline buffer">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon Glyph="{x:Bind helpers:FluentIconCatalog.Clear, Mode=OneTime}"
-                                      FontFamily="{ThemeResource SymbolThemeFontFamily}"
-                                      FontSize="12"/>
-                            <TextBlock Text="Clear"/>
                         </StackPanel>
                     </Button>
                     <Button x:Name="DetailOpenFileButton"

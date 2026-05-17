@@ -82,6 +82,10 @@ public static class FluentIconCatalog
     public const string Copy = "\uE8C8";           // Copy — copy-to-clipboard affordance
     public const string Document = "\uE8A5";       // Document — recent log / log file
     public const string Refresh = "\uE72C";        // Refresh — re-read a snapshot (distinct from Sync E895)
+    // Reset aliases Refresh (U+E72C). Both share the "restart from scratch"
+    // metaphor; the named constant keeps Reconfigure call sites semantically
+    // distinct from data-refresh call sites even though the glyph is the same.
+    public const string Reset = "\uE72C";          // Refresh (alias) — Reconfigure / start over
     public const string Clear = "\uE74D";          // Delete — clear/reset a buffer
     public const string Develop = "\uE943";        // Code — engineering / explorations action
 

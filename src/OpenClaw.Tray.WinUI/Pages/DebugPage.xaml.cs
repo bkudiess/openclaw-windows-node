@@ -1,4 +1,3 @@
-using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
@@ -15,8 +14,6 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -30,9 +27,11 @@ namespace OpenClawTray.Pages;
 ///   2. Inspect local diagnostics
 ///   3. Developer tools
 ///
-/// High-density diagnostic streams (connection event timeline / recent log)
-/// open inside the page itself rather than in a separate window — the
-/// Visibility-swap pattern matches ConnectionPage.AddGatewayPanel.
+/// The connection event timeline opens in its own ConnectionStatusWindow
+/// (same pattern as the Chat explorations window) so the live event
+/// stream doesn't push the rest of the page off-screen. The recent-log
+/// reader stays in-page via a Visibility-swap DetailView, mirroring
+/// ConnectionPage.AddGatewayPanel.
 ///
 /// Observes the single application model (AppState) directly per
 /// docs/DATA_FLOW_ARCHITECTURE.md — no HubWindow dependency.
@@ -49,57 +48,37 @@ public sealed partial class DebugPage : Page
     private static readonly string LogPath = Path.Combine(LocalAppData, "openclaw-tray.log");
     private static readonly string DeviceKeyPath = Path.Combine(LocalAppData, "device-key-ed25519.json");
 
-    // Brushes for the colored timeline / log rendering. Use SystemFill*
-    // theme tokens (per docs/design/tokens.md) so the colors track
+    // Brushes for the colored log rendering. Use SystemFill* theme
+    // tokens (per docs/design/tokens.md) so the colors track
     // light/dark/HC themes and stay consistent with the ConnectionPage
-    // status dots. ConnectionStatusWindow:33-40 still uses ARGB literals
-    // — flagged as drift in docs/design (see surfaces/diagnostics-page.md
-    // "Drift candidates").
+    // status dots. (The connection event timeline lives in
+    // ConnectionStatusWindow, which still uses ARGB literals — flagged
+    // as drift in docs/design/surfaces/diagnostics-page.md "Drift
+    // candidates".)
     private static Brush ErrorTextBrush => (Brush)Application.Current.Resources["SystemFillColorCriticalBrush"];
     private static Brush WarnTextBrush  => (Brush)Application.Current.Resources["SystemFillColorCautionBrush"];
-    private static Brush AuthTextBrush  => (Brush)Application.Current.Resources["SystemFillColorAttentionBrush"];
-    private static Brush OkTextBrush    => (Brush)Application.Current.Resources["SystemFillColorSuccessBrush"];
     private static Brush DimTextBrush   => (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
 
     // Detail view mode tracking. Determines what the toolbar buttons do
     // and what content gets rendered into DetailRichText. Bumped on
-    // every EnterDetailView so deferred work (background log read,
-    // queued live-event handler) can skip updates that arrive after
-    // a mode switch or page navigation (Hanselman v2 review #5, #6).
-    private enum DetailMode { None, Timeline, Log }
+    // every EnterDetailView so deferred work (background log read) sees
+    // a stale generation and skips its UI write if the user has left
+    // the detail view in the meantime (Hanselman v2 review #5/#6).
+    // Kept as an enum (rather than a bool) so future detail modes can
+    // be added without rewriting the generation/race plumbing.
+    private enum DetailMode { None, Log }
     private DetailMode _detailMode = DetailMode.None;
     private int _detailGeneration;
 
-    // Hard cap on rows kept in the timeline / log RichTextBlock so a
-    // long-running session with high event churn doesn't grow the UI
-    // buffer without bound. Mirrors ConnectionDiagnostics.Capacity (500)
-    // so the visible buffer matches the upstream ring buffer.
-    // Hanselman v1 review finding #5.
-    private const int MaxTimelineRows = 500;
+    // Hard cap on rows kept in the log RichTextBlock / plain-text
+    // mirror. ReadLogTail returns 200 lines today; the 500 ceiling
+    // leaves headroom if that ever grows or future detail modes are
+    // added without forcing them to know this constant.
+    private const int MaxLogRows = 500;
 
-    // Plain-text mirror of timeline / log rows for the Copy toolbar
-    // action. Replaces the previous StringBuilder so we can cap the
-    // mirror to MaxTimelineRows in O(1).
+    // Plain-text mirror of log rows for the Copy toolbar action.
+    // Capped to MaxLogRows in O(1) via Queue.
     private readonly Queue<string> _detailPlainLines = new();
-
-    // Events seen during the initial snapshot pass. Only used as a
-    // dedupe set during the snapshot/subscribe overlap window — once
-    // LoadTimelineEvents() finishes, the set is cleared and the live
-    // handler is the sole writer (Hanselman v2 review #1, #2). This
-    // avoids two problems with keeping the set forever:
-    //   * unbounded growth on long-running sessions, and
-    //   * value-equality collisions when ConnectionDiagnosticEvent
-    //     records share (Timestamp, Category, Message, Detail) — DateTime
-    //     resolution is ~15.6 ms on Windows so reconnect-storm bursts
-    //     can produce records that compare equal.
-    private readonly HashSet<ConnectionDiagnosticEvent> _renderedEvents = new();
-    private bool _renderedEventsActive;
-
-    // Active subscription to live timeline events. Held so we can detach
-    // when leaving the detail view OR when navigating off the page —
-    // OnNavigatedFrom must call UnsubscribeTimeline or the handler
-    // pins the page in memory (Hanselman v1 review finding #1).
-    private ConnectionDiagnostics? _subscribedDiagnostics;
 
     public DebugPage()
     {
@@ -108,7 +87,7 @@ public sealed partial class DebugPage : Page
         {
             if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
             CurrentApp.SettingsChanged -= OnSettingsChanged;
-            UnsubscribeTimeline();
+            StopCopyFeedbackTimer();
         };
     }
 
@@ -146,16 +125,16 @@ public sealed partial class DebugPage : Page
     private void OnSettingsChanged(object? sender, EventArgs e) => UpdateStatusInfoBar();
 
     /// <summary>
-    /// Tear down any live ConnectionDiagnostics subscription when the
-    /// user navigates to a different page. Without this override the
-    /// timeline subscription survives navigation, pins this Page in
-    /// memory, and dispatches UI updates to a detached visual tree.
-    /// Hanselman review finding #1.
+    /// Reset detail-mode state when the user navigates to a different
+    /// page so any in-flight async log read becomes a no-op via the
+    /// generation counter. Also stops the copy-feedback timer so it
+    /// can't tick on a detached visual tree.
     /// </summary>
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
-        UnsubscribeTimeline();
         _detailMode = DetailMode.None;
+        _detailGeneration++;
+        StopCopyFeedbackTimer();
         base.OnNavigatedFrom(e);
     }
 
@@ -200,10 +179,10 @@ public sealed partial class DebugPage : Page
     private void OnManageOnConnection(object sender, RoutedEventArgs e)
         => ((IAppCommands)CurrentApp).Navigate("connection");
 
-    // ── In-page detail view (timeline / log) ─────────────────────────
+    // ── Detail view (recent log) ─────────────────────────────────────
 
-    private void OnShowEventTimeline(object sender, RoutedEventArgs e)
-        => EnterDetailView(DetailMode.Timeline);
+    private void OnOpenEventTimeline(object sender, RoutedEventArgs e)
+        => ((IAppCommands)CurrentApp).ShowConnectionStatus();
 
     private void OnShowRecentLog(object sender, RoutedEventArgs e)
         => EnterDetailView(DetailMode.Log);
@@ -215,34 +194,16 @@ public sealed partial class DebugPage : Page
     {
         _detailMode = mode;
         // Bump generation BEFORE clearing buffers so any in-flight
-        // queued live event handler or pending log-read continuation
-        // sees a stale generation and skips its UI write.
+        // pending log-read continuation sees a stale generation and
+        // skips its UI write.
         _detailGeneration++;
         _detailPlainLines.Clear();
-        _renderedEvents.Clear();
-        _renderedEventsActive = false;
         DetailRichText.Blocks.Clear();
 
-        if (mode == DetailMode.Timeline)
-        {
-            DetailTitle.Text = "Connection event timeline";
-            DetailCaption.Text = "Live diagnostics from the gateway connection manager. Newest entries appear at the bottom.";
-            DetailClearButton.Visibility = Visibility.Visible;
-            DetailOpenFileButton.Visibility = Visibility.Collapsed;
-            DetailRefreshButton.Visibility = Visibility.Collapsed;
-            // Subscribe BEFORE snapshotting so any event that arrives
-            // mid-load is captured by the live handler and either
-            // rendered by the snapshot path or skipped by the dedupe
-            // set. Avoids the gap that drops events on busy gateways
-            // (Hanselman v1 review finding #3).
-            SubscribeTimeline();
-            LoadTimelineEvents();
-        }
-        else if (mode == DetailMode.Log)
+        if (mode == DetailMode.Log)
         {
             DetailTitle.Text = "Recent log";
             DetailCaption.Text = $"Last 200 lines of {LogPath}. Severity is parsed from [info]/[warn]/[error] tags.";
-            DetailClearButton.Visibility = Visibility.Collapsed;
             DetailOpenFileButton.Visibility = Visibility.Visible;
             DetailRefreshButton.Visibility = Visibility.Visible;
             _ = LoadLogFileAsync(_detailGeneration);
@@ -258,15 +219,12 @@ public sealed partial class DebugPage : Page
 
     private void LeaveDetailView()
     {
-        UnsubscribeTimeline();
         _detailMode = DetailMode.None;
         _detailGeneration++;
-        _renderedEventsActive = false;
         DetailView.Visibility = Visibility.Collapsed;
         MainView.Visibility = Visibility.Visible;
         DetailRichText.Blocks.Clear();
         _detailPlainLines.Clear();
-        _renderedEvents.Clear();
     }
 
     private void OnDetailRefresh(object sender, RoutedEventArgs e)
@@ -277,18 +235,6 @@ public sealed partial class DebugPage : Page
     private void OnDetailCopy(object sender, RoutedEventArgs e)
     {
         ClipboardHelper.CopyText(string.Concat(_detailPlainLines));
-    }
-
-    private void OnDetailClear(object sender, RoutedEventArgs e)
-    {
-        if (_detailMode == DetailMode.Timeline)
-        {
-            // Same semantics as ConnectionStatusWindow.OnClearTimeline.
-            DetailRichText.Blocks.Clear();
-            _detailPlainLines.Clear();
-            _renderedEvents.Clear();
-            _subscribedDiagnostics?.Clear();
-        }
     }
 
     private void OnDetailOpenFile(object sender, RoutedEventArgs e)
@@ -302,164 +248,6 @@ public sealed partial class DebugPage : Page
         {
             Debug.WriteLine($"Open log file failed: {ex.Message}");
         }
-    }
-
-    // ── Detail mode: timeline ────────────────────────────────────────
-
-    private void LoadTimelineEvents()
-    {
-        var diagnostics = CurrentApp.ConnectionManager?.Diagnostics;
-        if (diagnostics == null)
-        {
-            AppendPlain("No connection diagnostics available.\n");
-            DetailRichText.Blocks.Add(new Paragraph
-            {
-                Inlines = { new Run { Text = "No connection diagnostics available.", Foreground = DimTextBrush } }
-            });
-            return;
-        }
-        // Dedupe set is live ONLY for the snapshot/subscribe overlap
-        // window. After the foreach completes the live handler is the
-        // sole writer and the set becomes pure overhead (and a risk:
-        // record value-equality can collide on same-millisecond reconnect
-        // bursts and silently drop legitimate events — Hanselman v2 #2).
-        _renderedEventsActive = true;
-        try
-        {
-            foreach (var evt in diagnostics.GetAll())
-            {
-                // Subscribe-first ordering means the live handler may have
-                // already rendered some of these; skip duplicates.
-                if (!_renderedEvents.Add(evt)) continue;
-                AppendTimelineEvent(evt);
-            }
-        }
-        finally
-        {
-            // Drop the dedupe set so it can't grow without bound and
-            // can't collide with future bursts.
-            _renderedEventsActive = false;
-            _renderedEvents.Clear();
-        }
-        ScrollDetailToEnd();
-    }
-
-    private void OnTimelineEventRecorded(object? sender, ConnectionDiagnosticEvent evt)
-    {
-        if (_detailMode != DetailMode.Timeline) return;
-        // Capture generation so a queued lambda that runs after a mode
-        // switch or LeaveDetailView is a no-op (Hanselman v2 #6).
-        var gen = _detailGeneration;
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            // Re-check mode AND generation inside the dispatched lambda
-            // — the view could have changed between Record() and now.
-            if (_detailMode != DetailMode.Timeline || _detailGeneration != gen) return;
-            // Skip if the snapshot path already rendered this event.
-            // Once the snapshot finishes, _renderedEventsActive flips
-            // off and the set is cleared — every live event is unique
-            // by construction from that point on.
-            if (_renderedEventsActive && !_renderedEvents.Add(evt)) return;
-            AppendTimelineEvent(evt);
-            ScrollDetailToEnd();
-        });
-    }
-
-    private void AppendTimelineEvent(ConnectionDiagnosticEvent evt)
-    {
-        DetailRichText.Blocks.Add(CreateTimelineParagraph(evt));
-        // Cap UI buffer (Hanselman v1 #5). Blocks + _detailPlainLines
-        // stay size-aligned via TrimRendered below + AppendPlain's own
-        // cap. _renderedEvents is NOT trimmed because it's cleared
-        // wholesale after the snapshot pass (Hanselman v2 #1).
-        var detail = evt.Detail != null ? $"\n    {evt.Detail.Replace("\n", "\n    ")}" : "";
-        AppendPlain($"{evt.Timestamp:HH:mm:ss.fff} [{evt.Category}] {evt.Message}{detail}\n");
-        TrimRendered();
-    }
-
-    private void TrimRendered()
-    {
-        while (DetailRichText.Blocks.Count > MaxTimelineRows)
-            DetailRichText.Blocks.RemoveAt(0);
-    }
-
-    private void SubscribeTimeline()
-    {
-        UnsubscribeTimeline();
-        var diagnostics = CurrentApp.ConnectionManager?.Diagnostics;
-        if (diagnostics == null) return;
-        _subscribedDiagnostics = diagnostics;
-        diagnostics.EventRecorded += OnTimelineEventRecorded;
-    }
-
-    private void UnsubscribeTimeline()
-    {
-        if (_subscribedDiagnostics != null)
-        {
-            _subscribedDiagnostics.EventRecorded -= OnTimelineEventRecorded;
-            _subscribedDiagnostics = null;
-        }
-    }
-
-    // Mirrors ConnectionStatusWindow.CreateTimelineParagraph so the two
-    // surfaces format events identically. If that helper ever moves to a
-    // shared place we should consolidate.
-    private static Paragraph CreateTimelineParagraph(ConnectionDiagnosticEvent evt)
-    {
-        var para = new Paragraph { Margin = new Thickness(0, 0, 0, 2) };
-
-        para.Inlines.Add(new Run
-        {
-            Text = evt.Timestamp.ToString("HH:mm:ss.fff") + " ",
-            Foreground = DimTextBrush
-        });
-
-        var direction = evt.Category switch
-        {
-            "handshake" when evt.Message.Contains("Sending") => "→ GW",
-            "handshake" when evt.Message.Contains("Received") || evt.Message.Contains("hello-ok") => "← GW",
-            "handshake" when evt.Message.Contains("Raw error") => "← GW",
-            "handshake" when evt.Message.Contains("Connect error") => "← GW",
-            "warning" when evt.Message.Contains("Connect error") || evt.Message.Contains("Gateway") => "← GW",
-            "warning" when evt.Message.Contains("authentication failed") => "← GW",
-            "error" when evt.Message.Contains("Authentication") || evt.Message.Contains("signature") => "← GW",
-            "websocket" when evt.Message.Contains("connecting") => "→ GW",
-            "websocket" when evt.Message.Contains("connected") => "← GW",
-            "websocket" when evt.Message.Contains("disconnected") || evt.Message.Contains("error") => "← GW",
-            _ => "    "
-        };
-        para.Inlines.Add(new Run { Text = direction + " ", Foreground = DimTextBrush });
-        para.Inlines.Add(new Run { Text = $"[{evt.Category}] ", Foreground = DimTextBrush });
-
-        Brush? brush = evt.Category switch
-        {
-            "error" or "warning" => ErrorTextBrush,
-            "credential" => AuthTextBrush,
-            "handshake" when evt.Message.Contains("hello-ok") => OkTextBrush,
-            "handshake" when evt.Message.Contains("error", StringComparison.OrdinalIgnoreCase) => ErrorTextBrush,
-            "handshake" => AuthTextBrush,
-            "state" when evt.Message.Contains("Connected") || evt.Message.Contains("Ready")
-                || evt.Message.Contains("hello-ok") => OkTextBrush,
-            "state" when evt.Message.Contains("Error") => ErrorTextBrush,
-            "websocket" when evt.Message.Contains("error", StringComparison.OrdinalIgnoreCase) => ErrorTextBrush,
-            "websocket" when evt.Message.Contains("connected", StringComparison.OrdinalIgnoreCase) => OkTextBrush,
-            _ => null
-        };
-
-        para.Inlines.Add(brush != null
-            ? new Run { Text = evt.Message, Foreground = brush }
-            : new Run { Text = evt.Message });
-
-        if (!string.IsNullOrEmpty(evt.Detail))
-        {
-            para.Inlines.Add(new Run
-            {
-                Text = "\n    " + evt.Detail.Replace("\n", "\n    "),
-                Foreground = DimTextBrush,
-                FontSize = 10
-            });
-        }
-        return para;
     }
 
     // ── Detail mode: recent log ──────────────────────────────────────
@@ -598,8 +386,8 @@ public sealed partial class DebugPage : Page
     {
         _detailPlainLines.Enqueue(text);
         // Keep plain-text mirror in lock-step with the visual buffer
-        // cap so Copy never serializes more than MaxTimelineRows.
-        while (_detailPlainLines.Count > MaxTimelineRows)
+        // cap so Copy never serializes more than MaxLogRows.
+        while (_detailPlainLines.Count > MaxLogRows)
             _detailPlainLines.Dequeue();
     }
 
@@ -667,31 +455,87 @@ public sealed partial class DebugPage : Page
     }
 
     private void OnCopySupportContext(object sender, RoutedEventArgs e)
-        => CopyDiagnosticText(CommandCenterTextHelper.BuildSupportContext);
+        => CopyDiagnosticText("Support context", CommandCenterTextHelper.BuildSupportContext);
 
     private void OnCopyDebugBundle(object sender, RoutedEventArgs e)
-        => CopyDiagnosticText(CommandCenterTextHelper.BuildDebugBundle);
+        => CopyDiagnosticText("Debug bundle", CommandCenterTextHelper.BuildDebugBundle);
 
     private void OnCopyBrowserSetup(object sender, RoutedEventArgs e)
-        => CopyDiagnosticText(CommandCenterTextHelper.BuildBrowserSetupGuidance);
+        => CopyDiagnosticText("Browser setup guidance", CommandCenterTextHelper.BuildBrowserSetupGuidance);
 
     private void OnCopyPortDiagnostics(object sender, RoutedEventArgs e)
-        => CopyDiagnosticText(s => CommandCenterTextHelper.BuildPortDiagnosticsSummary(s.PortDiagnostics));
+        => CopyDiagnosticText("Port diagnostics", s => CommandCenterTextHelper.BuildPortDiagnosticsSummary(s.PortDiagnostics));
 
     private void OnCopyCapabilityDiagnostics(object sender, RoutedEventArgs e)
-        => CopyDiagnosticText(CommandCenterTextHelper.BuildCapabilityDiagnosticsSummary);
+        => CopyDiagnosticText("Capability diagnostics", CommandCenterTextHelper.BuildCapabilityDiagnosticsSummary);
 
-    private void CopyDiagnosticText(Func<GatewayCommandCenterState, string> build)
+    private void CopyDiagnosticText(string label, Func<GatewayCommandCenterState, string> build)
     {
         var state = CurrentApp.BuildCommandCenterState();
         if (state == null) return;
         try
         {
             ClipboardHelper.CopyText(build(state) ?? string.Empty);
+            ShowCopyFeedback(label);
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"Copy diagnostic failed: {ex.Message}");
+        }
+    }
+
+    // ── Copy-to-clipboard feedback ───────────────────────────────────
+
+    // DispatcherTimer that auto-closes the inline "Copied" InfoBar so
+    // the success notice doesn't linger after the user has moved on.
+    // Reused across copy actions — Start() restarts the countdown if
+    // the user fires another copy before the previous tick.
+    //
+    // Lifecycle: created lazily on first ShowCopyFeedback, stopped + nulled
+    // by StopCopyFeedbackTimer() in Unloaded and OnNavigatedFrom so it
+    // can't tick on a detached visual tree. Mirrors the
+    // ConnectionPage._reconnectMaskTimer / PermissionsPage._execSavedHintTimer
+    // pattern (Hanselman dual-model review #1).
+    private DispatcherTimer? _copyFeedbackTimer;
+    private static readonly TimeSpan CopyFeedbackDuration = TimeSpan.FromSeconds(2.5);
+
+    private void ShowCopyFeedback(string label)
+    {
+        CopyFeedbackInfoBar.Message = $"{label} copied to clipboard.";
+        CopyFeedbackInfoBar.IsOpen = true;
+
+        if (_copyFeedbackTimer == null)
+        {
+            _copyFeedbackTimer = new DispatcherTimer { Interval = CopyFeedbackDuration };
+            _copyFeedbackTimer.Tick += (_, _) =>
+            {
+                // Use ?.Stop() rather than !.Stop() — StopCopyFeedbackTimer()
+                // may have nulled the field between queue-time and execute-time
+                // (DispatcherTimer.Stop in teardown does not cancel ticks
+                // already queued on the DispatcherQueue).
+                _copyFeedbackTimer?.Stop();
+                // IsLoaded guard: same reason — a tick queued before
+                // teardown can still fire after Unloaded. Touching IsOpen
+                // on a detached FrameworkElement is undefined in WinUI 3.
+                if (CopyFeedbackInfoBar.IsLoaded)
+                    CopyFeedbackInfoBar.IsOpen = false;
+            };
+        }
+        else
+        {
+            // Restart the countdown so back-to-back copies keep the
+            // notice visible for the full duration after the last one.
+            _copyFeedbackTimer.Stop();
+        }
+        _copyFeedbackTimer.Start();
+    }
+
+    private void StopCopyFeedbackTimer()
+    {
+        if (_copyFeedbackTimer != null)
+        {
+            _copyFeedbackTimer.Stop();
+            _copyFeedbackTimer = null;
         }
     }
 

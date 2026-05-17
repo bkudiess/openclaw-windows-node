@@ -93,21 +93,219 @@ public sealed class DiagnosticsPageContractTests
     }
 
     [Fact]
-    public void DebugPage_HasInPageDetailView_NotSeparateWindow()
+    public void DebugPage_TimelineOpensConnectionStatusWindow_AsPopup()
     {
         var xaml = Read("src", "OpenClaw.Tray.WinUI", "Pages", "DebugPage.xaml");
-        // We swap a MainView/DetailView pair via Visibility, mirroring
-        // ConnectionPage.AddGatewayPanel — not a separate Window.
+        var cs = Read("src", "OpenClaw.Tray.WinUI", "Pages", "DebugPage.xaml.cs");
+
+        // The "Connection event timeline" SettingsCard button wires to
+        // OnOpenEventTimeline, and that handler pops up the standalone
+        // ConnectionStatusWindow rather than swapping the in-page
+        // DetailView. Mirrors how "Open chat explorations" launches
+        // ChatExplorationsWindow, per the user's "bring it back as a
+        // popup" feedback on the redesign. The OnOpen* name matches
+        // the popup-launching convention used elsewhere on the page
+        // (OnOpenChatExplorations, OnOpenDiagnosticsFolder), while
+        // OnShow* is reserved for entering the in-page DetailView
+        // (OnShowRecentLog).
+        Assert.Contains("Click=\"OnOpenEventTimeline\"", xaml);
+        // The handler delegates to IAppCommands.ShowConnectionStatus,
+        // reusing App.ShowConnectionStatusWindow() (which already
+        // owns reuse-if-not-closed lifetime + Activate() behavior).
+        Assert.Matches(
+            new System.Text.RegularExpressions.Regex(
+                @"OnOpenEventTimeline[\s\S]{0,200}IAppCommands[\s\S]{0,80}ShowConnectionStatus"),
+            cs);
+        // The redundant "View event timeline" hyperlink that used to
+        // live inside the top Status InfoBar (alongside "Manage on
+        // Connection page") is gone — the user removed it as a dupe
+        // of the SettingsCard right below.
+        Assert.DoesNotContain("DiagnosticsPage_OpenEventTimeline\"", xaml);
+        Assert.DoesNotContain("DiagnosticsViewEventTimeline", xaml);
+        // The old handler name must not creep back; OnShow* implies
+        // in-page DetailView (the very thing the user rejected for
+        // the connection timeline).
+        Assert.DoesNotContain("OnShowEventTimeline", cs);
+        Assert.DoesNotContain("OnShowEventTimeline", xaml);
+        // Belt-and-suspenders: the dead in-page timeline plumbing
+        // must not creep back. These names belonged to the old
+        // DetailMode.Timeline path and would re-introduce the
+        // in-page render the user explicitly rejected.
+        Assert.DoesNotContain("DetailMode.Timeline", cs);
+        Assert.DoesNotContain("LoadTimelineEvents", cs);
+        Assert.DoesNotContain("OnTimelineEventRecorded", cs);
+        Assert.DoesNotContain("SubscribeTimeline", cs);
+    }
+
+    [Fact]
+    public void DebugPage_RecentLogCard_IsClickableWholeRow_NotButton()
+    {
+        // Per user feedback: the Recent log card just uses the
+        // standard SettingsCard chevron (whole row is the affordance);
+        // there's no separate "Open" Button. The Connection event
+        // timeline card keeps its Button because clicking it opens a
+        // popup window (heavier action that benefits from a distinct
+        // hit target). Pin both shapes here so they don't drift.
+        var xaml = Read("src", "OpenClaw.Tray.WinUI", "Pages", "DebugPage.xaml");
+
+        // Recent log: card-level IsClickEnabled + Click, NO inner Button.
+        Assert.Matches(
+            new System.Text.RegularExpressions.Regex(
+                @"x:Uid=""DiagnosticsPage_Card_RecentLog""[\s\S]{0,400}IsClickEnabled=""True""[\s\S]{0,200}Click=""OnShowRecentLog"""),
+            xaml);
+        Assert.DoesNotContain("DiagnosticsPage_OpenRecentLogButton", xaml);
+
+        // Open chat explorations: inner Button shape — the row is no
+        // longer the click target. Mirrors the popup-launching shape
+        // of the Connection event timeline card.
+        Assert.Matches(
+            new System.Text.RegularExpressions.Regex(
+                @"x:Uid=""DiagnosticsPage_Card_ChatExplorations""[\s\S]{0,600}<Button[\s\S]{0,200}Click=""OnOpenChatExplorations"""),
+            xaml);
+    }
+
+    [Fact]
+    public void DebugPage_CopySpecificCards_HaveCopyGlyph_NotChevron_AndFeedback()
+    {
+        // Per user feedback: the cards under "Copy specific diagnostic
+        // text" should not display the standard right-chevron
+        // ActionIcon — clicking them copies to the clipboard, so a
+        // Copy glyph telegraphs the action better. And there must be
+        // a visible "Copied to clipboard" feedback notice on success.
+        var xaml = Read("src", "OpenClaw.Tray.WinUI", "Pages", "DebugPage.xaml");
+
+        // Each Copy* SettingsCard must override ActionIcon with the
+        // FluentIconCatalog.Copy glyph. Match the structural pattern
+        // (Card → ActionIcon → FontIcon → FluentIconCatalog.Copy)
+        // rather than counting occurrences, since the SettingsExpander
+        // header itself uses the same glyph.
+        foreach (var cardUid in new[]
+        {
+            "DiagnosticsPage_Card_CopySupport",
+            "DiagnosticsPage_Card_CopyDebugBundle",
+            "DiagnosticsPage_Card_CopyBrowserSetup",
+            "DiagnosticsPage_Card_CopyPortDiagnostics",
+            "DiagnosticsPage_Card_CopyCapabilityDiagnostics",
+        })
+        {
+            Assert.Matches(
+                new System.Text.RegularExpressions.Regex(
+                    $@"x:Uid=""{cardUid}""[\s\S]{{0,600}}SettingsCard\.ActionIcon[\s\S]{{0,200}}FluentIconCatalog\.Copy"),
+                xaml);
+        }
+
+        // The transient "Copied to clipboard" feedback InfoBar must
+        // be on the page and start collapsed (IsOpen=False).
+        Assert.Contains("x:Name=\"CopyFeedbackInfoBar\"", xaml);
+        Assert.Matches(
+            new System.Text.RegularExpressions.Regex(
+                @"x:Name=""CopyFeedbackInfoBar""[\s\S]{0,400}IsOpen=""False"""),
+            xaml);
+
+        // The C# side opens the InfoBar after a successful copy and
+        // schedules an auto-dismiss via DispatcherTimer so it doesn't
+        // linger once the user has moved on.
+        var cs = Read("src", "OpenClaw.Tray.WinUI", "Pages", "DebugPage.xaml.cs");
+        Assert.Contains("ShowCopyFeedback", cs);
+        Assert.Contains("CopyFeedbackInfoBar.IsOpen = true", cs);
+        Assert.Contains("CopyFeedbackInfoBar.IsOpen = false", cs);
+        Assert.Contains("DispatcherTimer", cs);
+        // Each copy handler must pass a human-readable label that
+        // shows up in the feedback message.
+        Assert.Contains("CopyDiagnosticText(\"Support context\"", cs);
+        Assert.Contains("CopyDiagnosticText(\"Debug bundle\"", cs);
+        Assert.Contains("CopyDiagnosticText(\"Browser setup guidance\"", cs);
+        Assert.Contains("CopyDiagnosticText(\"Port diagnostics\"", cs);
+        Assert.Contains("CopyDiagnosticText(\"Capability diagnostics\"", cs);
+    }
+
+    [Fact]
+    public void DebugPage_CopyFeedbackTimer_IsStoppedOnTeardown()
+    {
+        // Hanselman dual-model review (Opus + Codex consensus, MEDIUM):
+        // the _copyFeedbackTimer must be stopped + nulled on both
+        // Unloaded and OnNavigatedFrom so it can't tick on a detached
+        // visual tree. Without this, a copy followed by quick navigate-
+        // away leaks a Tick handler that touches IsOpen on a torn-down
+        // FrameworkElement. Mirrors the codebase pattern in
+        // ConnectionPage._reconnectMaskTimer and
+        // PermissionsPage._execSavedHintTimer.
+        var cs = Read("src", "OpenClaw.Tray.WinUI", "Pages", "DebugPage.xaml.cs");
+
+        // The shared teardown helper exists.
+        Assert.Contains("private void StopCopyFeedbackTimer()", cs);
+        // Helper stops AND nulls the timer (both halves are required —
+        // Stop() alone leaves the field non-null which prevents the
+        // lazy-init path from re-creating a fresh timer; nulling alone
+        // leaks a running timer).
+        Assert.Matches(
+            new System.Text.RegularExpressions.Regex(
+                @"StopCopyFeedbackTimer\(\)[\s\S]{0,400}_copyFeedbackTimer\.Stop\(\)[\s\S]{0,200}_copyFeedbackTimer = null"),
+            cs);
+
+        // Both teardown sites call the helper.
+        Assert.Matches(
+            new System.Text.RegularExpressions.Regex(
+                @"Unloaded \+=[\s\S]{0,400}StopCopyFeedbackTimer\(\)"),
+            cs);
+        Assert.Matches(
+            new System.Text.RegularExpressions.Regex(
+                @"OnNavigatedFrom[\s\S]{0,400}StopCopyFeedbackTimer\(\)"),
+            cs);
+
+        // The Tick lambda must use ?.Stop() (not !.Stop()) because
+        // teardown can null the field between tick-queue and tick-run.
+        // And it must guard the InfoBar access with IsLoaded because
+        // DispatcherTimer.Stop() does not cancel ticks already queued
+        // on the DispatcherQueue.
+        Assert.Contains("_copyFeedbackTimer?.Stop()", cs);
+        Assert.Contains("CopyFeedbackInfoBar.IsLoaded", cs);
+        // The old null-forgiving Stop() must not creep back; it would
+        // NRE under the teardown race described above.
+        Assert.DoesNotContain("_copyFeedbackTimer!.Stop()", cs);
+    }
+
+    [Fact]
+    public void App_PreservesConnectionStatusDeepLinkAndCommandRoute()
+    {
+        // The Diagnostics redesign commit promises that the deep-link
+        // / command-palette path through "connectionstatus" keeps
+        // working. The page now also depends on this wiring for its
+        // popup behavior. Pin the App-side route here so neither side
+        // can be accidentally renamed without a test failing.
+        var app = Read("src", "OpenClaw.Tray.WinUI", "App.xaml.cs");
+        Assert.Contains("case \"connectionstatus\": ShowConnectionStatusWindow();", app);
+        Assert.Contains("void IAppCommands.ShowConnectionStatus() => ShowConnectionStatusWindow();", app);
+
+        var iface = Read("src", "OpenClaw.Tray.WinUI", "Services", "IAppCommands.cs");
+        Assert.Contains("void ShowConnectionStatus();", iface);
+    }
+
+    [Fact]
+    public void DebugPage_HasInPageDetailView_ForLogOnly()
+    {
+        var xaml = Read("src", "OpenClaw.Tray.WinUI", "Pages", "DebugPage.xaml");
+        // We swap a MainView/DetailView pair via Visibility for the
+        // recent-log reader, mirroring ConnectionPage.AddGatewayPanel.
         Assert.Contains("x:Name=\"MainView\"", xaml);
         Assert.Contains("x:Name=\"DetailView\"", xaml);
         Assert.Contains("Visibility=\"Collapsed\"", xaml);
         // The detail surface uses a RichTextBlock so we can color
-        // individual events / log lines.
+        // individual log lines.
         Assert.Contains("x:Name=\"DetailRichText\"", xaml);
 
-        // The old "open separate ConnectionStatusWindow" entry must no
-        // longer be on the page — the timeline is in-page now.
+        // The old "open separate ConnectionStatusWindow" handler name
+        // must not return. The new wiring goes through
+        // IAppCommands.ShowConnectionStatus inside OnOpenEventTimeline.
         Assert.DoesNotContain("OnOpenConnectionDiagnostics", xaml);
+
+        // The Clear toolbar button was timeline-only — Log mode has
+        // nothing to clear (it's a re-read from disk). The button +
+        // its handler must be gone now that timeline lives in its
+        // own window.
+        Assert.DoesNotContain("DetailClearButton", xaml);
+        var cs = Read("src", "OpenClaw.Tray.WinUI", "Pages", "DebugPage.xaml.cs");
+        Assert.DoesNotContain("OnDetailClear", cs);
     }
 
     [Fact]
@@ -134,10 +332,13 @@ public sealed class DiagnosticsPageContractTests
         // Per docs/design/tokens.md status colors must use
         // SystemFillColor* tokens. Hard-coded ARGB / Color.FromArgb
         // is the drift the handoff calls out for status dots.
+        // (Success/Attention tokens were used by the in-page timeline
+        // coloring; the timeline now lives in ConnectionStatusWindow,
+        // so only the Critical/Caution/Secondary tokens are still
+        // referenced from this page — which is what we assert.)
         var cs = Read("src", "OpenClaw.Tray.WinUI", "Pages", "DebugPage.xaml.cs");
         Assert.Contains("SystemFillColorCriticalBrush", cs);
         Assert.Contains("SystemFillColorCautionBrush", cs);
-        Assert.Contains("SystemFillColorSuccessBrush", cs);
         Assert.Contains("TextFillColorSecondaryBrush", cs);
         Assert.DoesNotContain("ColorHelper.FromArgb", cs);
     }
@@ -158,59 +359,100 @@ public sealed class DiagnosticsPageContractTests
     [Fact]
     public void DebugPage_PageDimensionsMatchPermissions()
     {
-        // Page uses Width=900 + 24 px padding so the title block, MainView,
-        // and DetailView all share a single centered 900-wide column.
-        // Width (not MaxWidth) because we need the title TextBlocks to
-        // align to the SettingsCard left edge even though TextBlocks
-        // naturally measure to text width — see screenshot iteration
-        // in #thread.
+        // Page uses MaxWidth=900 + HorizontalAlignment=Center on the
+        // content container, wrapped in a HorizontalAlignment=Stretch
+        // outer container. The Stretch wrapper is REQUIRED — without it,
+        // a content element placed directly inside a ScrollViewer ignores
+        // MaxWidth on wide windows (Center collapses to natural content
+        // width). This has regressed across several sessions; the contract
+        // pins all three pieces of the pattern.
         var xaml = Read("src", "OpenClaw.Tray.WinUI", "Pages", "DebugPage.xaml");
-        Assert.Contains("Width=\"900\"", xaml);
+        Assert.Contains("MaxWidth=\"900\"", xaml);
+        Assert.Contains("HorizontalAlignment=\"Center\"", xaml);
+        // " Width=" (space-prefixed) distinguishes the fixed-width regression
+        // from the valid MaxWidth="900" attribute we just asserted above.
+        Assert.DoesNotContain(" Width=\"900\"", xaml);
         Assert.DoesNotContain("MaxWidth=\"1064\"", xaml);
     }
 
     [Fact]
-    public void DebugPage_DetailView_HasTimelineAndLogModes()
+    public void DebugPage_WrapsCenteredContentInStretchingContainer()
+    {
+        // WinUI 3 quirk: a MaxWidth + HorizontalAlignment=Center element
+        // placed directly inside a ScrollViewer is given the ScrollViewer's
+        // full width but then collapses to its natural content size
+        // (which on wide settings pages is "however wide the cards
+        // measure to be" — often filling the entire ScrollViewer).
+        // The fix is to wrap the centered element in a Grid with
+        // HorizontalAlignment=Stretch so the centered child has a known
+        // parent rect to center within. Mirrors PermissionsPage.xaml.
+        // This is the SPECIFIC regression the user has hit multiple
+        // times across sessions — guard it explicitly.
+        var xaml = Read("src", "OpenClaw.Tray.WinUI", "Pages", "DebugPage.xaml");
+        // The string "HorizontalAlignment=\"Stretch\"" must appear on
+        // BOTH the MainView wrapper Grid AND the DetailView outer Grid.
+        // Easiest: count occurrences; we expect at least 2 (one per view).
+        var stretchCount = System.Text.RegularExpressions.Regex.Matches(
+            xaml, "HorizontalAlignment=\"Stretch\"").Count;
+        Assert.True(stretchCount >= 2,
+            $"DebugPage.xaml must wrap MainView and DetailView centered " +
+            $"content in a HorizontalAlignment=Stretch container so MaxWidth=900 " +
+            $"is honored on wide windows. Found {stretchCount} Stretch declarations; " +
+            $"expected at least 2 (one per view).");
+    }
+
+    [Fact]
+    public void DebugPage_DetailViewMatchesMainViewPadding()
+    {
+        // The DetailView Padding must match the MainView ScrollViewer
+        // Padding so the centered 900-wide column doesn't visually
+        // shift (jump up or change horizontal position) when the user
+        // enters or leaves the detail view. Both sides must be
+        // "24,24,24,24" — earlier "24,12,24,24" on the DetailView
+        // caused a visible 12px vertical jolt that the user described
+        // as the views having "different widths".
+        var xaml = Read("src", "OpenClaw.Tray.WinUI", "Pages", "DebugPage.xaml");
+        // MainView ScrollViewer.
+        Assert.Contains("x:Name=\"MainView\"", xaml);
+        // DetailView Grid with matching uniform 24,24,24,24 padding.
+        Assert.Matches(
+            new System.Text.RegularExpressions.Regex(
+                @"x:Name=""DetailView""[\s\S]{0,200}Padding=""24,24,24,24"""),
+            xaml);
+        Assert.DoesNotContain("Padding=\"24,12,24,24\"", xaml);
+    }
+
+    [Fact]
+    public void DebugPage_DetailView_HasLogMode()
     {
         var cs = Read("src", "OpenClaw.Tray.WinUI", "Pages", "DebugPage.xaml.cs");
         Assert.Contains("enum DetailMode", cs);
-        Assert.Contains("DetailMode.Timeline", cs);
         Assert.Contains("DetailMode.Log", cs);
-        // Both entry points present.
-        Assert.Contains("OnShowEventTimeline", cs);
+        // Both entry points present. OnOpenEventTimeline opens the
+        // ConnectionStatusWindow popup; OnShowRecentLog enters the
+        // in-page DetailView. OnOpen* vs OnShow* mirrors the rest of
+        // the page (popup vs in-page detail).
+        Assert.Contains("OnOpenEventTimeline", cs);
         Assert.Contains("OnShowRecentLog", cs);
         // Back navigation present.
         Assert.Contains("OnBackToMain", cs);
     }
 
     [Fact]
-    public void DebugPage_SharesColoringWithConnectionStatusWindow()
+    public void DebugPage_SharesLogColoringWithConnectionStatusWindow()
     {
         var cs = Read("src", "OpenClaw.Tray.WinUI", "Pages", "DebugPage.xaml.cs");
-        // The five severity brushes mirror ConnectionStatusWindow:33-40
-        // so both surfaces speak the same visual language.
+        // The severity brushes used for log line coloring mirror
+        // ConnectionStatusWindow:33-40 so both surfaces speak the same
+        // visual language. (AuthTextBrush was timeline-only and is
+        // gone now that the timeline lives in ConnectionStatusWindow.)
         Assert.Contains("ErrorTextBrush", cs);
         Assert.Contains("WarnTextBrush", cs);
-        Assert.Contains("OkTextBrush", cs);
         Assert.Contains("DimTextBrush", cs);
-        Assert.Contains("AuthTextBrush", cs);
 
         // Log lines must be parsed for severity so they get colored too.
         Assert.Contains("LogSeverityPattern", cs);
         Assert.Contains("CreateLogParagraph", cs);
-    }
-
-    [Fact]
-    public void DebugPage_TimelineSubscribesToConnectionDiagnostics()
-    {
-        var cs = Read("src", "OpenClaw.Tray.WinUI", "Pages", "DebugPage.xaml.cs");
-        // Live timeline must subscribe to ConnectionDiagnostics events
-        // and unsubscribe on leave to avoid leaks across navigations.
-        Assert.Contains("EventRecorded += OnTimelineEventRecorded", cs);
-        Assert.Contains("EventRecorded -= OnTimelineEventRecorded", cs);
-        // After Ranjesh's single-app-model rebase, pages get
-        // ConnectionManager from App directly rather than via HubWindow.
-        Assert.Contains("CurrentApp.ConnectionManager?.Diagnostics", cs);
     }
 
     [Fact]
@@ -318,33 +560,17 @@ public sealed class DiagnosticsPageContractTests
     [Fact]
     public void DebugPage_DetailView_UsesGenerationCounterForRaceSafety()
     {
-        // Hanselman v2 review #5/#6: long log reads and queued live
-        // event handlers must check a generation counter after their
-        // async/dispatched continuation so a mode switch or navigation
-        // mid-flight can't clobber the active view.
+        // Hanselman v2 review #5/#6: long log reads must check a
+        // generation counter after their async continuation so a
+        // page navigation mid-flight can't clobber the active view
+        // (or, post-popup, write into a no-longer-current generation).
         var cs = Read("src", "OpenClaw.Tray.WinUI", "Pages", "DebugPage.xaml.cs");
         Assert.Contains("_detailGeneration", cs);
         // LoadLogFileAsync takes the generation as a parameter.
         Assert.Contains("LoadLogFileAsync(int generation)", cs);
-        // Live timeline handler re-checks both mode AND generation
-        // inside the DispatcherQueue lambda.
-        Assert.Contains("_detailMode != DetailMode.Timeline || _detailGeneration != gen", cs);
-    }
-
-    [Fact]
-    public void DebugPage_DropsDedupeSetAfterSnapshot()
-    {
-        // Hanselman v2 review #1 + #2: the _renderedEvents HashSet must
-        // not be kept forever — it grows unbounded and can drop
-        // legitimate events whose record value-equality collides
-        // (DateTime.UtcNow resolution is ~15.6ms). The set is only
-        // needed during the snapshot/subscribe overlap window.
-        var cs = Read("src", "OpenClaw.Tray.WinUI", "Pages", "DebugPage.xaml.cs");
-        Assert.Contains("_renderedEventsActive", cs);
-        // The live handler only consults the set while it's active.
-        Assert.Contains("_renderedEventsActive && !_renderedEvents.Add", cs);
-        // The set is cleared after the snapshot foreach.
-        Assert.Contains("_renderedEvents.Clear()", cs);
+        // Log mode re-checks both mode AND generation after the
+        // background ReadLogTail call returns.
+        Assert.Contains("_detailMode != DetailMode.Log || _detailGeneration != generation", cs);
     }
 
     [Fact]
