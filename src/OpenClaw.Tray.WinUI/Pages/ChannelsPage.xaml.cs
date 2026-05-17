@@ -4,63 +4,76 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
 using OpenClaw.Shared;
-using OpenClawTray.Windows;
+using OpenClawTray.Services;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 
 namespace OpenClawTray.Pages;
 
 public sealed partial class ChannelsPage : Page
 {
-    private HubWindow? _hub;
+    private static App CurrentApp => (App)Microsoft.UI.Xaml.Application.Current;
+    private AppState? _appState;
 
     public ChannelsPage()
     {
         InitializeComponent();
+        Unloaded += (_, _) =>
+        {
+            if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
+        };
     }
 
-    public void Initialize(HubWindow hub)
+    public void Initialize()
     {
-        _hub = hub;
-        ConnectionWarning.Visibility = hub.GatewayClient != null ? Visibility.Collapsed : Visibility.Visible;
-        if (hub.GatewayClient != null)
+        _appState = CurrentApp.AppState;
+        _appState.PropertyChanged += OnAppStateChanged;
+        if (CurrentApp.GatewayClient != null)
         {
             // Apply cached data immediately
-            if (hub.LastChannels != null)
-                UpdateChannels(hub.LastChannels);
+            if (_appState?.Channels != null)
+                UpdateChannels(_appState.Channels);
             else
                 ChannelsList.Children.Clear();
         }
     }
 
+    private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(AppState.Channels):
+                UpdateChannels(_appState!.Channels);
+                break;
+        }
+    }
+
     public void UpdateChannels(ChannelHealth[] channels)
     {
-        DispatcherQueue?.TryEnqueue(() =>
+        if (channels.Length == 0)
         {
-            if (channels.Length == 0)
-            {
-                ChannelsList.Children.Clear();
-                EmptyState.Visibility = Visibility.Visible;
-                return;
-            }
+            ChannelsList.Children.Clear();
+            EmptyState.Visibility = Visibility.Visible;
+            return;
+        }
 
-            EmptyState.Visibility = Visibility.Collapsed;
-            var vms = new List<ChannelViewModel>();
-            foreach (var ch in channels)
+        EmptyState.Visibility = Visibility.Collapsed;
+        var vms = new List<ChannelViewModel>();
+        foreach (var ch in channels)
+        {
+            var isHealthy = ChannelHealth.IsHealthyStatus(ch.Status);
+            var isIntermediate = ChannelHealth.IsIntermediateStatus(ch.Status);
+            vms.Add(new ChannelViewModel
             {
-                var isHealthy = ChannelHealth.IsHealthyStatus(ch.Status);
-                var isIntermediate = ChannelHealth.IsIntermediateStatus(ch.Status);
-                vms.Add(new ChannelViewModel
-                {
-                    Name = ch.Name,
-                    Status = ch.Error != null ? $"Error: {ch.Error}" : ch.Status,
-                    StatusColor = isHealthy ? "Green" : (isIntermediate ? "Yellow" : "Red"),
-                    IsRunning = isHealthy,
-                    ProbeInfo = ch.AuthAge != null ? $"Auth age: {ch.AuthAge}" : null,
-                });
-            }
-            RenderChannels(vms);
-        });
+                Name = ch.Name,
+                Status = ch.Error != null ? $"Error: {ch.Error}" : ch.Status,
+                StatusColor = isHealthy ? "Green" : (isIntermediate ? "Yellow" : "Red"),
+                IsRunning = isHealthy,
+                ProbeInfo = ch.AuthAge != null ? $"Auth age: {ch.AuthAge}" : null,
+            });
+        }
+        RenderChannels(vms);
     }
 
     private void RenderChannels(List<ChannelViewModel> channels)
@@ -148,8 +161,8 @@ public sealed partial class ChannelsPage : Page
     {
         if (sender is Button btn && btn.Tag is string name)
         {
-            var client = _hub?.GatewayClient;
-            if (client == null) { ConnectionWarning.Visibility = Visibility.Visible; return; }
+            var client = CurrentApp.GatewayClient;
+            if (client == null) return;
             btn.IsEnabled = false;
             try
             {
@@ -165,8 +178,8 @@ public sealed partial class ChannelsPage : Page
     {
         if (sender is Button btn && btn.Tag is string name)
         {
-            var client = _hub?.GatewayClient;
-            if (client == null) { ConnectionWarning.Visibility = Visibility.Visible; return; }
+            var client = CurrentApp.GatewayClient;
+            if (client == null) return;
             btn.IsEnabled = false;
             try
             {

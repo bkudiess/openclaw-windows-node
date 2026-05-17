@@ -7,6 +7,7 @@ using OpenClawTray.Pages;
 using OpenClawTray.Services;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using WinUIEx;
 
@@ -16,65 +17,11 @@ public sealed partial class HubWindow : WindowEx
 {
     public bool IsClosed { get; private set; }
 
-    // Shared state accessible by pages
-    private SettingsManager? _settings;
-    public SettingsManager? Settings
-    {
-        get => _settings;
-        set
-        {
-            _settings = value;
-            // Apply persisted nav-pane state. NavView starts with its XAML
-            // default of IsPaneOpen=true; honor the user's last preference
-            // here so they don't re-toggle on every Hub open.
-            if (value != null && NavView != null)
-            {
-                NavView.IsPaneOpen = value.HubNavPaneOpen;
-            }
-        }
-    }
-    public IOperatorGatewayClient? GatewayClient { get; set; }
-    public ConnectionStatus CurrentStatus { get; set; }
+    private static App CurrentApp => (App)Application.Current;
+
+    internal AppState? AppModel { get; set; }
     private string _currentAgentId = "main";
     public string CurrentAgentId => _currentAgentId;
-
-    // Legacy compatibility alias
-    public string SelectedAgentId => _currentAgentId;
-    public Action<string?>? OpenDashboardAction { get; set; }
-    public Action? CheckForUpdatesAction { get; set; }
-    public Action? ConnectAction { get; set; }
-    public Action? DisconnectAction { get; set; }
-    public Action? ReconnectAction { get; set; }
-    public Action? OpenSetupAction { get; set; }
-    public Action? OpenConnectionStatusAction { get; set; }
-    public Action? OpenVoiceAction { get; set; }
-    public OpenClaw.Connection.IGatewayConnectionManager? ConnectionManager { get; set; }
-    public OpenClaw.Connection.GatewayRegistry? GatewayRegistry { get; set; }
-
-    // Node service state (set by App.xaml.cs in ShowHub)
-    public bool NodeIsConnected { get; set; }
-    public bool NodeIsPaired { get; set; }
-    public bool NodeIsPendingApproval { get; set; }
-    public string? LastAuthError { get; set; }
-    public string? NodeShortDeviceId { get; set; }
-    public VoiceService? VoiceServiceInstance { get; set; }
-    public string? NodeFullDeviceId { get; set; }
-
-    // Cached gateway data — pages read these on navigation
-    public SessionInfo[]? LastSessions { get; private set; }
-    public ChannelHealth[]? LastChannels { get; private set; }
-    public GatewayUsageInfo? LastUsage { get; private set; }
-    public GatewayCostUsageInfo? LastUsageCost { get; private set; }
-    public GatewayUsageStatusInfo? LastUsageStatus { get; private set; }
-    public GatewayNodeInfo[]? LastNodes { get; private set; }
-
-    public System.Text.Json.JsonElement? LastConfig { get; private set; }
-    public System.Text.Json.JsonElement? LastConfigSchema { get; private set; }
-    public System.Text.Json.JsonElement? LastSkillsData { get; private set; }
-    public string? LastSkillsAgentId { get; private set; }
-    public System.Text.Json.JsonElement? LastAgentFilesList { get; private set; }
-    public string? LastAgentFilesListAgentId { get; private set; }
-    private string? _pendingAgentFilesListAgentId;
 
     // Event for settings saved (App.xaml.cs subscribes)
     public event EventHandler? SettingsSaved;
@@ -86,16 +33,90 @@ public sealed partial class HubWindow : WindowEx
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
-        Closed += (s, e) => IsClosed = true;
+        Closed += (s, e) =>
+        {
+            IsClosed = true;
+            if (AppModel != null)
+                AppModel.PropertyChanged -= OnAppModelChanged;
+        };
 
         this.SetWindowSize(900, 650);
         this.CenterOnScreen();
         this.SetIcon(IconHelper.GetStatusIconPath(ConnectionStatus.Connected));
 
         RootGrid.SizeChanged += OnRootGridSizeChanged;
+    }
 
-        // Don't select a nav item here — Settings/GatewayClient aren't set yet.
-        // ShowHub() in App.xaml.cs calls NavigateToDefault() after setting properties.
+    /// <summary>
+    /// Subscribe to AppState property changes for title bar and nav updates.
+    /// Called from App.ShowHub() after setting AppModel.
+    /// </summary>
+    internal void BindToAppState()
+    {
+        if (AppModel != null)
+        {
+            AppModel.PropertyChanged += OnAppModelChanged;
+            UpdateGatewayNavVisibility(AppModel.Status == ConnectionStatus.Connected);
+        }
+    }
+
+    private void OnAppModelChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (IsClosed || AppModel == null) return;
+        try
+        {
+            switch (e.PropertyName)
+            {
+                case nameof(AppState.Status):
+                    DispatcherQueue?.TryEnqueue(() =>
+                    {
+                        if (IsClosed) return;
+                        _cachedCommands = null;
+                        var status = AppModel!.Status;
+                        UpdateTitleBarStatus(status);
+                        // Defer nav visibility to avoid stowed exceptions during NavigationView layout
+                        DispatcherQueue?.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+                        {
+                            if (IsClosed) return;
+                            UpdateGatewayNavVisibility(AppModel!.Status == ConnectionStatus.Connected);
+                        });
+                });
+                break;
+            case nameof(AppState.GatewaySelf):
+                DispatcherQueue?.TryEnqueue(() =>
+                {
+                    if (IsClosed) return;
+                    UpdateTitleBarStatus(AppModel!.Status);
+                    if (ContentFrame?.Content is AboutPage about)
+                        about.RefreshGatewayInfo();
+                });
+                break;
+            case nameof(AppState.AgentsList):
+                DispatcherQueue?.TryEnqueue(() =>
+                {
+                    if (IsClosed) return;
+                    if (AppModel!.AgentsList.HasValue)
+                        RebuildAgentNavItems(AppModel.AgentsList.Value);
+                });
+                break;
+        }
+        }
+        catch (Exception ex)
+        {
+            Services.Logger.Warn($"[HubWindow] OnAppModelChanged({e.PropertyName}) failed: {ex.Message}");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Apply persisted nav-pane state. Called from App.ShowHub() after creating the window.
+    /// </summary>
+    internal void ApplyNavPaneState(SettingsManager settings)
+    {
+        if (NavView != null)
+        {
+            NavView.IsPaneOpen = settings.HubNavPaneOpen;
+        }
     }
 
     private void OnRootGridSizeChanged(object sender, SizeChangedEventArgs e)
@@ -114,14 +135,12 @@ public sealed partial class HubWindow : WindowEx
     }
 
     /// <summary>
-    /// Navigate to the default page. Call after setting Settings/GatewayClient.
+    /// Navigate to the default page. Call after setting AppModel.
     /// </summary>
     public void NavigateToDefault()
     {
         if (ContentFrame.Content == null)
         {
-            // Connection is the landing page (Home was removed; legacy
-            // "home"/"general" tags alias to "connection" in NavigateTo).
             NavigateTo("connection");
         }
     }
@@ -204,9 +223,16 @@ public sealed partial class HubWindow : WindowEx
         if (ContentFrame.SourcePageType == pageType && _currentNavTag == tag)
         {
             // Same as above: Frame.Navigate is skipped, so
-            // OnContentFrameNavigated won't run to consume the origin.
-            // Clear it here to avoid stale-origin leakage on the next nav.
+            // OnContentFrameNavigated won't run to consume the origin. If the
+            // caller changed origin context, refresh the active page so inline
+            // back-link state stays accurate.
+            var pendingOrigin = _pendingNavigationOrigin;
             _pendingNavigationOrigin = null;
+            if (!string.Equals(LastNavigationOrigin, pendingOrigin, StringComparison.Ordinal))
+            {
+                LastNavigationOrigin = pendingOrigin;
+                InitializeCurrentPage();
+            }
             return;
         }
 
@@ -248,27 +274,6 @@ public sealed partial class HubWindow : WindowEx
         return null;
     }
 
-    public void UpdateStatus(ConnectionStatus status)
-    {
-        try
-        {
-            DispatcherQueue?.TryEnqueue(() =>
-            {
-                if (IsClosed) return;
-                CurrentStatus = status;
-                _cachedCommands = null;
-                if (status == ConnectionStatus.Disconnected)
-                    _lastGatewaySelf = null;
-                UpdateTitleBarStatus(status);
-                if (ContentFrame?.Content is ConnectionPage connectionPage)
-                {
-                    connectionPage.UpdateStatus(status);
-                }
-            });
-        }
-        catch { }
-    }
-
     private void UpdateTitleBarStatus(ConnectionStatus status)
     {
         var (color, text) = status switch
@@ -282,13 +287,13 @@ public sealed partial class HubWindow : WindowEx
         TitleStatusDot.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
 
         // Build status text with version when connected
-        if (status == ConnectionStatus.Connected && _lastGatewaySelf is { ServerVersion: { Length: > 0 } ver })
+        if (status == ConnectionStatus.Connected && LastGatewaySelf is { ServerVersion: { Length: > 0 } ver })
             TitleStatusText.Text = $"v{ver}";
         else
             TitleStatusText.Text = text;
 
         // Update role indicator dots
-        var snapshot = ConnectionManager?.CurrentSnapshot;
+        var snapshot = CurrentApp.ConnectionManager?.CurrentSnapshot;
         if (snapshot != null)
         {
             TitleOpDot.Fill = RoleDotBrush(snapshot.OperatorState);
@@ -317,200 +322,44 @@ public sealed partial class HubWindow : WindowEx
         _ => new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Gray),
     };
 
-    private GatewaySelfInfo? _lastGatewaySelf;
-    public GatewaySelfInfo? LastGatewaySelf => _lastGatewaySelf;
-
-    public void UpdateGatewaySelf(GatewaySelfInfo self)
-    {
-        _lastGatewaySelf = self;
-        try
-        {
-            DispatcherQueue?.TryEnqueue(() =>
-            {
-                if (IsClosed) return;
-                UpdateTitleBarStatus(CurrentStatus);
-                if (ContentFrame?.Content is AboutPage about)
-                    about.RefreshGatewayInfo();
-            });
-        }
-        catch { }
-    }
-
-    public void UpdateSessions(SessionInfo[] sessions)
-    {
-        LastSessions = sessions;
-        if (IsClosed) return;
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            if (ContentFrame?.Content is SessionsPage sp) sp.UpdateSessions(sessions);
-            else if (ContentFrame?.Content is ConnectionPage cp) cp.OnGlanceDataChanged();
-        });
-    }
-
-    public void UpdateChannelHealth(ChannelHealth[] channels)
-    {
-        LastChannels = channels;
-        if (IsClosed) return;
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            if (ContentFrame?.Content is ChannelsPage cp) cp.UpdateChannels(channels);
-            else if (ContentFrame?.Content is ConnectionPage connection) connection.OnGlanceDataChanged();
-        });
-    }
-
-    public void UpdateUsage(GatewayUsageInfo usage)
-    {
-        LastUsage = usage;
-        if (IsClosed) return;
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            if (ContentFrame?.Content is UsagePage up) up.UpdateUsage(usage);
-        });
-    }
-
-    public void UpdateUsageCost(GatewayCostUsageInfo cost)
-    {
-        LastUsageCost = cost;
-        if (IsClosed) return;
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            if (ContentFrame?.Content is UsagePage up) up.UpdateUsageCost(cost);
-            else if (ContentFrame?.Content is ConnectionPage cp) cp.OnGlanceDataChanged();
-        });
-    }
-
-    public void UpdateUsageStatus(GatewayUsageStatusInfo status)
-    {
-        LastUsageStatus = status;
-        if (IsClosed) return;
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            if (ContentFrame?.Content is UsagePage up) up.UpdateUsageStatus(status);
-        });
-    }
-
-    public void UpdateNodes(GatewayNodeInfo[] nodes)
-    {
-        LastNodes = nodes;
-        if (IsClosed) return;
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            if (ContentFrame?.Content is InstancesPage ip) ip.UpdateNodes(nodes);
-        });
-    }
-
-    // Cached cron data for when CronPage isn't active
-    private System.Text.Json.JsonElement? _lastCronList;
-    private System.Text.Json.JsonElement? _lastCronStatus;
-
-    public void UpdateCronList(System.Text.Json.JsonElement data)
-    {
-        _lastCronList = data.Clone();
-        try
-        {
-            DispatcherQueue?.TryEnqueue(() =>
-            {
-                if (IsClosed) return;
-                if (ContentFrame?.Content is CronPage cp) cp.UpdateFromGateway(data);
-            });
-        }
-        catch { }
-    }
-
-    public void UpdateCronStatus(System.Text.Json.JsonElement data)
-    {
-        _lastCronStatus = data.Clone();
-        try
-        {
-            DispatcherQueue?.TryEnqueue(() =>
-            {
-                if (IsClosed) return;
-                if (ContentFrame?.Content is CronPage cp) cp.UpdateFromGateway(data);
-            });
-        }
-        catch { }
-    }
-
-    public void UpdateCronRuns(System.Text.Json.JsonElement data)
+    private void UpdateGatewayNavVisibility(bool connected)
     {
         try
         {
-            DispatcherQueue?.TryEnqueue(() =>
+            var vis = connected ? Visibility.Visible : Visibility.Collapsed;
+            NavChat.Visibility = vis;
+            NavSessions.Visibility = vis;
+            NavSkills.Visibility = vis;
+            NavChannels.Visibility = vis;
+            NavInstances.Visibility = vis;
+            NavAdvanced.Visibility = vis;
+            NavGatewaySeparator.Visibility = vis;
+
+            if (!connected)
             {
-                if (IsClosed) return;
-                if (ContentFrame?.Content is CronPage cp) cp.UpdateCronRuns(data);
-            });
-        }
-        catch { }
-    }
-
-    public void SeedCronData(CronPage page)
-    {
-        if (_lastCronList.HasValue) page.UpdateFromGateway(_lastCronList.Value);
-        if (_lastCronStatus.HasValue) page.UpdateFromGateway(_lastCronStatus.Value);
-    }
-
-    public void UpdateConfig(System.Text.Json.JsonElement config)
-    {
-        var snapshot = config.Clone();
-        LastConfig = snapshot;
-        if (IsClosed) return;
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            if (ContentFrame?.Content is ConfigPage cp) cp.UpdateConfig(snapshot);
-            else if (ContentFrame?.Content is BindingsPage bp) bp.UpdateConfig(snapshot);
-        });
-    }
-
-    public void UpdateConfigSchema(System.Text.Json.JsonElement schema)
-    {
-        var snapshot = schema.Clone();
-        LastConfigSchema = snapshot;
-        if (IsClosed) return;
-        try
-        {
-            DispatcherQueue?.TryEnqueue(() =>
-            {
-                if (IsClosed) return;
-                if (ContentFrame?.Content is ConfigPage cp) cp.UpdateConfigSchema(snapshot);
-            });
-        }
-        catch { }
-    }
-
-    public void UpdateSkillsStatus(System.Text.Json.JsonElement data)
-    {
-        try
-        {
-            var snapshot = data.Clone();
-            LastSkillsData = snapshot;
-            DispatcherQueue?.TryEnqueue(() =>
-            {
-                if (IsClosed) return;
-                if (ContentFrame?.Content is SkillsPage sp)
+                var currentTag = (NavView?.SelectedItem as NavigationViewItem)?.Tag as string;
+                var gatewayTags = new HashSet<string> { "chat", "sessions", "skills", "channels", "instances", "agentevents", "bindings", "config", "usage", "cron", "workspace" };
+                if (currentTag != null && (gatewayTags.Contains(currentTag) || currentTag.StartsWith("agent:")))
                 {
-                    LastSkillsAgentId = sp.CurrentAgentId;
-                    sp.UpdateFromGateway(snapshot);
+                    foreach (NavigationViewItem item in NavView.MenuItems.OfType<NavigationViewItem>())
+                    {
+                        if (item.Tag as string == "connection")
+                        {
+                            NavView.SelectedItem = item;
+                            break;
+                        }
+                    }
                 }
-            });
+            }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Services.Logger.Warn($"[HubWindow] UpdateGatewayNavVisibility failed: {ex.Message}");
+            throw;
+        }
     }
 
-    public void UpdateAgentsList(System.Text.Json.JsonElement data)
-    {
-        LastAgentsData = data;
-        try
-        {
-            DispatcherQueue?.TryEnqueue(() =>
-            {
-                if (IsClosed) return;
-                // Rebuild nav sidebar agent items
-                RebuildAgentNavItems(data);
-            });
-        }
-        catch { }
-    }
+    public GatewaySelfInfo? LastGatewaySelf => AppModel?.GatewaySelf;
 
     private void RebuildAgentNavItems(System.Text.Json.JsonElement data)
     {
@@ -537,181 +386,9 @@ public sealed partial class HubWindow : WindowEx
     }
 
     /// <summary>Extract agent IDs from cached agents data.</summary>
-    public List<string> GetAgentIds()
-    {
-        var ids = new List<string>();
-        if (LastAgentsData.HasValue &&
-            LastAgentsData.Value.TryGetProperty("agents", out var agentsEl) &&
-            agentsEl.ValueKind == System.Text.Json.JsonValueKind.Array)
-        {
-            foreach (var agent in agentsEl.EnumerateArray())
-            {
-                var id = agent.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
-                if (!string.IsNullOrEmpty(id)) ids.Add(id);
-            }
-        }
-        if (ids.Count == 0) ids.Add("main");
-        return ids;
-    }
+    public List<string> GetAgentIds() => AppModel?.GetAgentIds() ?? new List<string> { "main" };
 
-    public void RecordAgentFilesListRequest(string agentId)
-    {
-        _pendingAgentFilesListAgentId = string.IsNullOrWhiteSpace(agentId) ? "main" : agentId;
-    }
-
-    public void UpdateAgentFilesList(System.Text.Json.JsonElement data)
-    {
-        try
-        {
-            var snapshot = data.Clone();
-            var responseAgentId = _pendingAgentFilesListAgentId ?? _currentAgentId;
-            _pendingAgentFilesListAgentId = null;
-            LastAgentFilesListAgentId = responseAgentId;
-            LastAgentFilesList = snapshot;
-            DispatcherQueue?.TryEnqueue(() =>
-            {
-                if (IsClosed) return;
-                if (ContentFrame?.Content is WorkspacePage wp &&
-                    string.Equals(wp.CurrentAgentId, responseAgentId, StringComparison.OrdinalIgnoreCase))
-                {
-                    wp.UpdateAgentFilesList(snapshot);
-                }
-            });
-        }
-        catch { }
-    }
-
-    public void UpdateAgentFileContent(System.Text.Json.JsonElement data)
-    {
-        try
-        {
-            var snapshot = data.Clone();
-            DispatcherQueue?.TryEnqueue(() =>
-            {
-                if (IsClosed) return;
-                if (ContentFrame?.Content is WorkspacePage wp) wp.UpdateAgentFileContent(snapshot);
-            });
-        }
-        catch { }
-    }
-
-    // Agent events ring buffer (max 400, cached centrally)
-    // All mutations happen on the UI thread via DispatcherQueue
-    private const int MaxAgentEvents = 400;
-    private readonly System.Collections.Generic.List<AgentEventInfo> _agentEvents = new();
-    public System.Collections.Generic.IReadOnlyList<AgentEventInfo> LastAgentEvents => _agentEvents;
-
-    /// <summary>Called by App to also clear its own agent event cache when Clear is invoked.</summary>
-    public Action? ClearAppAgentEventsCache { get; set; }
-
-    public void ClearAgentEvents()
-    {
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            _agentEvents.Clear();
-            ClearAppAgentEventsCache?.Invoke();
-        });
-    }
-
-    /// <summary>Seed the hub's agent event cache from App-level cache (deduplicates by RunId+Seq).</summary>
-    public void SeedAgentEvents(IReadOnlyList<AgentEventInfo> appCache)
-    {
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            var existingKeys = new System.Collections.Generic.HashSet<(string, int)>(
-                _agentEvents.Select(e => (e.RunId, e.Seq)));
-            foreach (var evt in appCache)
-            {
-                if (!existingKeys.Contains((evt.RunId, evt.Seq)))
-                {
-                    _agentEvents.Add(evt);
-                    if (_agentEvents.Count >= MaxAgentEvents) break;
-                }
-            }
-        });
-    }
-
-    public void UpdateAgentEvent(AgentEventInfo evt)
-    {
-        try
-        {
-            DispatcherQueue?.TryEnqueue(() =>
-            {
-                if (IsClosed) return;
-                _agentEvents.Insert(0, evt);
-                if (_agentEvents.Count > MaxAgentEvents)
-                    _agentEvents.RemoveRange(MaxAgentEvents, _agentEvents.Count - MaxAgentEvents);
-                if (ContentFrame?.Content is AgentEventsPage agentEvents) agentEvents.AddEvent(evt);
-            });
-        }
-        catch { }
-    }
-
-    // Pairing data
-    public PairingListInfo? LastNodePairList { get; private set; }
-    public DevicePairingListInfo? LastDevicePairList { get; private set; }
-    public ModelsListInfo? LastModelsList { get; private set; }
-
-    public void UpdateNodePairList(PairingListInfo data)
-    {
-        LastNodePairList = data;
-        try
-        {
-            DispatcherQueue?.TryEnqueue(() =>
-            {
-                if (IsClosed) return;
-                // Operator/node pairing approval moved from NodesPage to ConnectionPage
-                // (single home for all pairing approvals).
-                if (ContentFrame?.Content is ConnectionPage cp) cp.UpdatePairingRequests(data);
-            });
-        }
-        catch { }
-    }
-
-    public void UpdateDevicePairList(DevicePairingListInfo data)
-    {
-        LastDevicePairList = data;
-        try
-        {
-            DispatcherQueue?.TryEnqueue(() =>
-            {
-                if (IsClosed) return;
-                if (ContentFrame?.Content is ConnectionPage cp) cp.UpdateDevicePairingRequests(data);
-            });
-        }
-        catch { }
-    }
-
-    public void UpdateModelsList(ModelsListInfo data)
-    {
-        LastModelsList = data;
-        try
-        {
-            DispatcherQueue?.TryEnqueue(() =>
-            {
-                if (IsClosed) return;
-                if (ContentFrame?.Content is SessionsPage sp) sp.UpdateModelsList(data);
-            });
-        }
-        catch { }
-    }
-
-    public PresenceEntry[]? LastPresence { get; private set; }
-    public System.Text.Json.JsonElement? LastAgentsData { get; private set; }
-
-    public void UpdatePresence(PresenceEntry[] data)
-    {
-        LastPresence = data;
-        try
-        {
-            DispatcherQueue?.TryEnqueue(() =>
-            {
-                if (IsClosed) return;
-                if (ContentFrame?.Content is InstancesPage ip) ip.UpdatePresence(data);
-            });
-        }
-        catch { }
-    }
+    public System.Text.Json.JsonElement? LastAgentsData => AppModel?.AgentsList;
 
     private void NavView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
@@ -762,64 +439,43 @@ public sealed partial class HubWindow : WindowEx
     /// </summary>
     private void OnNavPaneStateChanged(NavigationView sender, object args)
     {
-        if (_settings == null) return;
+        var settings = CurrentApp.Settings;
+        if (settings == null) return;
         // PaneOpening fires BEFORE IsPaneOpen flips, PaneClosing fires
         // BEFORE it flips the other way. Use the event identity to know
         // the new state rather than reading IsPaneOpen.
         var newState = args is NavigationViewPaneClosingEventArgs ? false : true;
-        if (_settings.HubNavPaneOpen == newState) return;
-        _settings.HubNavPaneOpen = newState;
-        try { _settings.Save(); } catch { /* swallow — don't block UI */ }
+        if (settings.HubNavPaneOpen == newState) return;
+        settings.HubNavPaneOpen = newState;
+        try { settings.Save(); } catch { /* swallow — don't block UI */ }
     }
 
     private void InitializeCurrentPage()
     {
         switch (ContentFrame.Content)
         {
-            case ChatPage chat: chat.Initialize(this); break;
-            case SessionsPage sessions:
-                sessions.Initialize(this);
-                if (LastModelsList != null) sessions.UpdateModelsList(LastModelsList);
-                break;
-            case ConnectionPage connection:
-                connection.Initialize(this);
-                if (LastNodePairList != null) connection.UpdatePairingRequests(LastNodePairList);
-                if (LastDevicePairList != null) connection.UpdateDevicePairingRequests(LastDevicePairList);
-                break;
-            case ChannelsPage channels: channels.Initialize(this); break;
-            case UsagePage usage: usage.Initialize(this); break;
-            case CronPage cron: cron.Initialize(this); SeedCronData(cron); break;
-            case SkillsPage skills:
-                skills.Initialize(this);
-                if (LastSkillsData.HasValue && LastSkillsAgentId == skills.CurrentAgentId)
-                    skills.UpdateFromGateway(LastSkillsData.Value);
-                break;
+            case ChatPage chat: chat.Initialize(); break;
+            case SessionsPage sessions: sessions.Initialize(); break;
+            case ConnectionPage connection: connection.Initialize(); break;
+            case ChannelsPage channels: channels.Initialize(); break;
+            case UsagePage usage: usage.Initialize(); break;
+            case CronPage cron: cron.Initialize(); break;
+            case SkillsPage skills: skills.Initialize(); break;
             case ConfigPage config:
-                try
-                {
-                    config.Initialize(this);
-                    if (LastConfigSchema.HasValue) config.UpdateConfigSchema(LastConfigSchema.Value);
-                    if (LastConfig.HasValue) config.UpdateConfig(LastConfig.Value);
-                }
+                try { config.Initialize(); }
                 catch (Exception ex)
                 {
                     OpenClawTray.Services.Logger.Error($"[HubWindow] ConfigPage seed failed: {ex}");
                 }
                 break;
-            case InstancesPage instances:
-                // Initialize already seeds _lastNodes/_lastPresence from
-                // hub.LastNodes/hub.LastPresence and triggers a single
-                // Rerender. Calling UpdateNodes/UpdatePresence here would
-                // cause two additional dispatcher-queued rebuilds on every
-                // page entry — visible flicker on lists with many cards.
-                instances.Initialize(this);
-                break;
-            case PermissionsPage permissions: permissions.Initialize(this); break;
-            case SandboxPage sandbox: sandbox.Initialize(this); break;
-            case VoiceSettingsPage voice: voice.Initialize(this, VoiceServiceInstance); break;
-            case ActivityPage activity: activity.Initialize(this); break;
+            case InstancesPage instances: instances.Initialize(); break;
+            case PermissionsPage permissions: permissions.Initialize(); break;
+            case SandboxPage sandbox: sandbox.Initialize(); break;
+            case VoiceSettingsPage voice: voice.Initialize(CurrentApp.VoiceService); break;
+            case ActivityPage activity: activity.Initialize(); break;
             case AgentEventsPage agentEvents:
-                agentEvents.ClearCentralCache = ClearAgentEvents;
+                agentEvents.Initialize(this);
+                agentEvents.ClearCentralCache = () => AppModel?.ClearAgentEvents();
                 agentEvents.PopulateAgentFilter(this);
                 // When navigated via top-level nav (tag "agentevents") show all
                 // agents; when reached via an agent-scoped tag (e.g.
@@ -829,27 +485,21 @@ public sealed partial class HubWindow : WindowEx
                 // disagree during Back/Forward.
                 var eventsAgentFilter = _currentNavTag?.StartsWith("agent:") == true ? _currentAgentId : null;
                 agentEvents.SetAgentFilter(eventsAgentFilter);
-                if (agentEvents.EventCount == 0 && LastAgentEvents != null)
+                // Seed existing events from AppState
+                if (agentEvents.EventCount == 0 && AppModel?.AgentEvents is { Count: > 0 } events)
                 {
-                    for (int i = LastAgentEvents.Count - 1; i >= 0; i--)
-                        agentEvents.AddEvent(LastAgentEvents[i]);
+                    for (int i = events.Count - 1; i >= 0; i--)
+                        agentEvents.AddEvent(events[i]);
                 }
                 break;
             case WorkspacePage workspace:
-                workspace.Initialize(this);
-                if (LastAgentFilesList.HasValue &&
-                    string.Equals(LastAgentFilesListAgentId, workspace.CurrentAgentId, StringComparison.OrdinalIgnoreCase))
-                {
-                    workspace.UpdateAgentFilesList(LastAgentFilesList.Value);
-                }
+                workspace.AgentId = _currentAgentId;
+                workspace.Initialize();
                 break;
-            case BindingsPage bindings:
-                bindings.Initialize(this);
-                if (LastConfig.HasValue) bindings.UpdateConfig(LastConfig.Value);
-                break;
-            case SettingsPage settings: settings.Initialize(this); break;
-            case DebugPage debug: debug.Initialize(this); break;
-            case AboutPage about: about.Initialize(this); break;
+            case BindingsPage bindings: bindings.Initialize(); break;
+            case SettingsPage settings: settings.Initialize(); break;
+            case DebugPage debug: debug.Initialize(); break;
+            case AboutPage about: about.Initialize(); break;
         }
     }
 
@@ -1009,56 +659,58 @@ public sealed partial class HubWindow : WindowEx
 
             // Actions
             new() { Icon = "💬", Title = "Open Chat Window", Subtitle = "Open standalone chat", Tag = "chat" },
-            new() { Icon = "🌐", Title = "Open Dashboard", Subtitle = "Open web dashboard", Execute = () => OpenDashboardAction?.Invoke(null) },
+            new() { Icon = "🌐", Title = "Open Dashboard", Subtitle = "Open web dashboard", Execute = () => ((IAppCommands)Application.Current).OpenDashboard(null) },
             new() { Icon = "📤", Title = "Quick Send", Subtitle = "Send a quick message", Execute = () => QuickSendAction?.Invoke() },
         };
 
         // Toggle commands
-        if (Settings != null)
+        var settings = CurrentApp.Settings;
+        if (settings != null)
         {
             commands.Add(new CommandItem
             {
                 Icon = "🔌", Title = "Toggle Node Mode",
-                Subtitle = Settings.EnableNodeMode ? "Currently ON" : "Currently OFF",
-                Execute = () => { Settings.EnableNodeMode = !Settings.EnableNodeMode; Settings.Save(); RaiseSettingsSaved(); }
+                Subtitle = settings.EnableNodeMode ? "Currently ON" : "Currently OFF",
+                Execute = () => { settings.EnableNodeMode = !settings.EnableNodeMode; settings.Save(); RaiseSettingsSaved(); }
             });
             commands.Add(new CommandItem
             {
                 Icon = "📷", Title = "Toggle Camera",
-                Subtitle = Settings.NodeCameraEnabled ? "Currently ON" : "Currently OFF",
-                Execute = () => { Settings.NodeCameraEnabled = !Settings.NodeCameraEnabled; Settings.Save(); RaiseSettingsSaved(); }
+                Subtitle = settings.NodeCameraEnabled ? "Currently ON" : "Currently OFF",
+                Execute = () => { settings.NodeCameraEnabled = !settings.NodeCameraEnabled; settings.Save(); RaiseSettingsSaved(); }
             });
             commands.Add(new CommandItem
             {
                 Icon = "🎨", Title = "Toggle Canvas",
-                Subtitle = Settings.NodeCanvasEnabled ? "Currently ON" : "Currently OFF",
-                Execute = () => { Settings.NodeCanvasEnabled = !Settings.NodeCanvasEnabled; Settings.Save(); RaiseSettingsSaved(); }
+                Subtitle = settings.NodeCanvasEnabled ? "Currently ON" : "Currently OFF",
+                Execute = () => { settings.NodeCanvasEnabled = !settings.NodeCanvasEnabled; settings.Save(); RaiseSettingsSaved(); }
             });
             commands.Add(new CommandItem
             {
                 Icon = "🖥️", Title = "Toggle Screen Capture",
-                Subtitle = Settings.NodeScreenEnabled ? "Currently ON" : "Currently OFF",
-                Execute = () => { Settings.NodeScreenEnabled = !Settings.NodeScreenEnabled; Settings.Save(); RaiseSettingsSaved(); }
+                Subtitle = settings.NodeScreenEnabled ? "Currently ON" : "Currently OFF",
+                Execute = () => { settings.NodeScreenEnabled = !settings.NodeScreenEnabled; settings.Save(); RaiseSettingsSaved(); }
             });
             commands.Add(new CommandItem
             {
                 Icon = "🌐", Title = "Toggle Browser Control",
-                Subtitle = Settings.NodeBrowserProxyEnabled ? "Currently ON" : "Currently OFF",
-                Execute = () => { Settings.NodeBrowserProxyEnabled = !Settings.NodeBrowserProxyEnabled; Settings.Save(); RaiseSettingsSaved(); }
+                Subtitle = settings.NodeBrowserProxyEnabled ? "Currently ON" : "Currently OFF",
+                Execute = () => { settings.NodeBrowserProxyEnabled = !settings.NodeBrowserProxyEnabled; settings.Save(); RaiseSettingsSaved(); }
             });
         }
 
         // Dynamic session commands
-        if (LastSessions != null)
+        var sessions = AppModel?.Sessions;
+        if (sessions != null)
         {
-            foreach (var session in LastSessions)
+            foreach (var session in sessions)
             {
                 var key = session.Key;
                 commands.Add(new CommandItem
                 {
                     Icon = "🧠", Title = $"Go to session: {key}",
                     Subtitle = "Open in dashboard",
-                    Execute = () => OpenDashboardAction?.Invoke($"sessions/{key}")
+                    Execute = () => ((IAppCommands)Application.Current).OpenDashboard($"sessions/{key}")
                 });
             }
         }

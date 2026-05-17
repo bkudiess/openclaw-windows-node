@@ -2,7 +2,6 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using OpenClawTray.Services;
-using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -11,7 +10,6 @@ namespace OpenClawTray.Pages;
 
 public sealed partial class ActivityPage : Page
 {
-    private HubWindow? _hub;
     private string _currentFilter = "all";
     private bool _initialized;
 
@@ -27,9 +25,8 @@ public sealed partial class ActivityPage : Page
         _initialized = false;
     }
 
-    public void Initialize(HubWindow hub)
+    public void Initialize()
     {
-        _hub = hub;
         if (!_initialized)
         {
             ActivityStreamService.Updated += OnActivityUpdated;

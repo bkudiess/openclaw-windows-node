@@ -1,33 +1,50 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using OpenClawTray.Helpers;
-using OpenClawTray.Windows;
+using OpenClawTray.Services;
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
 
 namespace OpenClawTray.Pages;
 
 public sealed partial class AboutPage : Page
 {
-    private HubWindow? _hub;
+    private static App CurrentApp => (App)Microsoft.UI.Xaml.Application.Current;
+    private AppState? _appState;
 
     public AboutPage()
     {
         InitializeComponent();
+        Unloaded += (_, _) =>
+        {
+            if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
+        };
     }
 
-    public void Initialize(HubWindow hub)
+    public void Initialize()
     {
-        _hub = hub;
+        _appState = CurrentApp.AppState;
+        _appState.PropertyChanged += OnAppStateChanged;
         TryLoadGatewayInfo();
+    }
+
+    private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(AppState.GatewaySelf):
+                RefreshGatewayInfo();
+                break;
+        }
     }
 
     public void RefreshGatewayInfo() => TryLoadGatewayInfo();
 
     private void TryLoadGatewayInfo()
     {
-        var self = _hub?.LastGatewaySelf;
-        if (_hub?.CurrentStatus == OpenClaw.Shared.ConnectionStatus.Connected && self != null)
+        var self = CurrentApp.AppState?.GatewaySelf;
+        if (CurrentApp.AppState?.Status == OpenClaw.Shared.ConnectionStatus.Connected && self != null)
         {
             GatewayVersionText.Text = self.VersionText;
             GatewayModelText.Text = self.Protocol.HasValue ? $"protocol v{self.Protocol}" : "unknown";
@@ -80,8 +97,8 @@ public sealed partial class AboutPage : Page
             var context = $"OpenClaw Hub v0.1.0\n"
                 + $"OS: {Environment.OSVersion}\n"
                 + $"Runtime: {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}\n"
-                + $"Connection: {_hub?.CurrentStatus}\n"
-                + $"Gateway: {_hub?.Settings?.GetEffectiveGatewayUrl() ?? "n/a"}\n";
+                + $"Connection: {CurrentApp.AppState?.Status}\n"
+                + $"Gateway: {CurrentApp.Settings?.GetEffectiveGatewayUrl() ?? "n/a"}\n";
 
             ClipboardHelper.CopyText(context);
         }
@@ -93,7 +110,7 @@ public sealed partial class AboutPage : Page
 
     private void OnCheckUpdatesClick(object sender, RoutedEventArgs e)
     {
-        _hub?.CheckForUpdatesAction?.Invoke();
+        ((IAppCommands)CurrentApp).CheckForUpdates();
     }
 
     private void OnDocumentationClick(object sender, RoutedEventArgs e)
@@ -122,6 +139,6 @@ public sealed partial class AboutPage : Page
 
     private void OnDashboardClick(object sender, RoutedEventArgs e)
     {
-        _hub?.OpenDashboardAction?.Invoke(null);
+        ((IAppCommands)CurrentApp).OpenDashboard(null);
     }
 }

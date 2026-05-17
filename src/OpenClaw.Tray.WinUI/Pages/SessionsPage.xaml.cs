@@ -3,16 +3,19 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using OpenClaw.Shared;
+using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 
 namespace OpenClawTray.Pages;
 
 public sealed partial class SessionsPage : Page
 {
-    private HubWindow? _hub;
+    private static App CurrentApp => (App)Microsoft.UI.Xaml.Application.Current;
+    private AppState? _appState;
     private SessionInfo[]? _allSessions;
     private string _activeChannel = "all";
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _refreshTimer;
@@ -20,53 +23,50 @@ public sealed partial class SessionsPage : Page
     public SessionsPage()
     {
         InitializeComponent();
-        Unloaded += (_, _) => { _refreshTimer?.Stop(); _refreshTimer = null; };
+        Unloaded += (_, _) =>
+        {
+            _refreshTimer?.Stop(); _refreshTimer = null;
+            if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
+        };
     }
 
-    public void Initialize(HubWindow hub)
+    public void Initialize()
     {
-        _hub = hub;
+        // Guard against duplicate subscriptions (NavigationCacheMode reuses page)
+        if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
+        _appState = CurrentApp.AppState;
+        _appState.PropertyChanged += OnAppStateChanged;
 
         // Show "← Back to Connection" only when the user arrived from
         // Connection's cross-page link; staying hidden when the rail nav
         // is used keeps the page chrome quiet for direct navigation.
-        BackToConnectionLink.Visibility = hub.LastNavigationOrigin == "connection"
+        var hub = CurrentApp.ActiveHubWindow as HubWindow;
+        BackToConnectionLink.Visibility = hub?.LastNavigationOrigin == "connection"
             ? Visibility.Visible
             : Visibility.Collapsed;
 
-        if (hub.GatewayClient == null)
+        if (CurrentApp.GatewayClient == null)
         {
-            ConnectionWarning.IsOpen = true;
             EmptyState.Visibility = Visibility.Collapsed;
             SessionListView.ItemsSource = null;
             return;
         }
 
-        ConnectionWarning.IsOpen = false;
+        if (_appState?.Sessions != null)
+            UpdateSessions(_appState.Sessions);
 
-        if (hub.LastSessions != null)
-            UpdateSessions(hub.LastSessions);
-
-        _ = hub.GatewayClient.RequestSessionsAsync();
-        _ = hub.GatewayClient.RequestModelsListAsync();
+        _ = CurrentApp.GatewayClient.RequestSessionsAsync();
+        _ = CurrentApp.GatewayClient.RequestModelsListAsync();
     }
 
     private void OnBackToConnectionClicked(object sender, RoutedEventArgs e)
-        => _hub?.NavigateTo("connection");
+        => ((IAppCommands)CurrentApp).Navigate("connection");
 
     public void UpdateSessions(SessionInfo[] sessions)
     {
         _allSessions = sessions;
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            RebuildChannelTabs();
-            ApplyFilter();
-        });
-    }
-
-    public void UpdateModelsList(ModelsListInfo data)
-    {
-        // Models data received — re-render in case we want it later
+        RebuildChannelTabs();
+        ApplyFilter();
     }
 
     private void RebuildChannelTabs()
@@ -125,6 +125,16 @@ public sealed partial class SessionsPage : Page
         }
     }
 
+    private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(AppState.Sessions):
+                UpdateSessions(_appState!.Sessions);
+                break;
+        }
+    }
+
     private SessionViewModel ToViewModel(SessionInfo s)
     {
         var isActive = s.Status == "active" || s.Status == "running";
@@ -161,7 +171,6 @@ public sealed partial class SessionsPage : Page
 
     private void ChannelSelector_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {
-        if (_hub == null) return;
         var selected = sender.SelectedItem;
         _activeChannel = selected == AllTab ? "all" : (selected?.Text ?? "all");
         ApplyFilter();
@@ -171,7 +180,7 @@ public sealed partial class SessionsPage : Page
     {
         if (sender is Button btn && btn.Tag is string key)
         {
-            var client = _hub?.GatewayClient;
+            var client = CurrentApp.GatewayClient;
             if (client == null) return;
             try { await client.ResetSessionAsync(key); }
             catch { }
@@ -182,7 +191,7 @@ public sealed partial class SessionsPage : Page
     {
         if (sender is Button btn && btn.Tag is string key)
         {
-            var client = _hub?.GatewayClient;
+            var client = CurrentApp.GatewayClient;
             if (client == null) return;
             try { await client.DeleteSessionAsync(key); }
             catch { }
@@ -193,7 +202,7 @@ public sealed partial class SessionsPage : Page
     {
         if (sender is Button btn && btn.Tag is string key)
         {
-            var client = _hub?.GatewayClient;
+            var client = CurrentApp.GatewayClient;
             if (client == null) return;
             try { await client.CompactSessionAsync(key); }
             catch { }
@@ -202,7 +211,7 @@ public sealed partial class SessionsPage : Page
 
     private void OnRefresh(object sender, RoutedEventArgs e)
     {
-        var client = _hub?.GatewayClient;
+        var client = CurrentApp.GatewayClient;
         if (client != null)
         {
             _ = client.RequestSessionsAsync();

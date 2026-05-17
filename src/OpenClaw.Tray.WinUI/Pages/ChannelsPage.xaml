@@ -9,10 +9,6 @@
 
             <TextBlock x:Uid="ChannelsPage_TextBlock_10" Text="📡 Channels" Style="{StaticResource TitleTextBlockStyle}"/>
 
-            <InfoBar x:Uid="ConnectionWarning" x:Name="ConnectionWarning" Title="Not Connected"
-                     Message="Connect to gateway to see live data"
-                     Severity="Warning" IsOpen="True" IsClosable="False" Visibility="Collapsed"/>
-
             <!-- Channel Cards -->
             <StackPanel x:Name="ChannelsList" Spacing="8"/>
 

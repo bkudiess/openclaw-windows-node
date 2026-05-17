@@ -1,29 +1,46 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using OpenClawTray.Windows;
+using OpenClawTray.Services;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Text.Json;
 
 namespace OpenClawTray.Pages;
 
 public sealed partial class BindingsPage : Page
 {
-    private HubWindow? _hub;
+    private static App CurrentApp => (App)Microsoft.UI.Xaml.Application.Current;
+    private AppState? _appState;
 
     public BindingsPage()
     {
         InitializeComponent();
+        Unloaded += (_, _) =>
+        {
+            if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
+        };
     }
 
-    public void Initialize(HubWindow hub)
+    public void Initialize()
     {
-        _hub = hub;
+        _appState = CurrentApp.AppState;
+        _appState.PropertyChanged += OnAppStateChanged;
         // Use cached config if available
-        if (hub.LastConfig.HasValue)
-            ParseBindings(hub.LastConfig.Value);
+        if (_appState?.Config.HasValue == true)
+            ParseBindings(_appState.Config.Value);
         // Request fresh config
-        if (hub.GatewayClient != null)
-            _ = hub.GatewayClient.RequestConfigAsync();
+        if (CurrentApp.GatewayClient != null)
+            _ = CurrentApp.GatewayClient.RequestConfigAsync();
+    }
+
+    private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(AppState.Config):
+                if (_appState!.Config.HasValue) UpdateConfig(_appState.Config.Value);
+                break;
+        }
     }
 
     public void UpdateConfig(JsonElement config)
@@ -78,9 +95,9 @@ public sealed partial class BindingsPage : Page
 
     private void RefreshButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_hub?.GatewayClient != null)
+        if (CurrentApp.GatewayClient != null)
         {
-            _ = _hub.GatewayClient.RequestConfigAsync();
+            _ = CurrentApp.GatewayClient.RequestConfigAsync();
         }
     }
 
