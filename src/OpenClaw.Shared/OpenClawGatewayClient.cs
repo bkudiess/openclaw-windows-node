@@ -674,7 +674,12 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
         }
         catch (Exception ex)
         {
-            _logger.Warn($"config.patch failed: {ex.Message}");
+            // Sanitize before logging — the gateway sometimes echoes patched
+            // field values in validation errors, so logging ex.Message verbatim
+            // can leak secrets to the on-disk tray log (Hanselman review LOW-7).
+            // The full unsanitized message stays in ConfigPatchResult.Error so
+            // the UI banner can show it.
+            _logger.Warn($"config.patch failed: {SanitizeErrorForLog(ex.Message)}");
             return new ConfigPatchResult
             {
                 Ok = false,
@@ -682,6 +687,27 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
                 RawResponse = ex.ToString(),
             };
         }
+    }
+
+    /// <summary>
+    /// Best-effort scrub of a gateway error message before it lands in the
+    /// tray log: caps length and masks token-shaped values for the channel
+    /// credential keys we know about (botToken / signingSecret / webhookUrl
+    /// / nsec / privateKey / generic token|secret|key|password fields). The
+    /// gateway may put raw field values in validation errors, and the log
+    /// is persistent on disk — see Hanselman review LOW-7.
+    /// </summary>
+    private static string SanitizeErrorForLog(string? raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return raw ?? "";
+        const int MaxLen = 500;
+        var truncated = raw.Length > MaxLen ? raw[..MaxLen] + "…(truncated)" : raw;
+        // Mask JSON-style "field": "value" pairs for sensitive field names.
+        truncated = System.Text.RegularExpressions.Regex.Replace(
+            truncated,
+            @"(""(?i:botToken|signingSecret|webhookUrl|nsec|privateKey|token|secret|apiKey|password)""\s*:\s*"")[^""]+("")",
+            "$1<redacted>$2");
+        return truncated;
     }
 
     // Agent methods

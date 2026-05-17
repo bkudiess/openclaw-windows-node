@@ -312,10 +312,17 @@ public sealed class ConfigPatchResult
     /// True when the gateway rejected the patch because our baseHash was
     /// stale (someone else changed the config out from under us). Pages
     /// should refresh the cached config and prompt the user to retry.
+    ///
+    /// The bare word "conflict" is too generic to match on its own (Hanselman
+    /// review MEDIUM-3) — a JSON schema error like "property 'conflict_mode'
+    /// is invalid" would otherwise trigger a spurious refresh-and-retry loop.
+    /// We require "conflict" to co-occur with "hash" or "baseHash" before
+    /// treating it as a stale-hash signal.
     /// </summary>
     public bool LooksLikeStaleBaseHash =>
         Error != null &&
         (Error.Contains("baseHash", System.StringComparison.OrdinalIgnoreCase) ||
          Error.Contains("stale", System.StringComparison.OrdinalIgnoreCase) ||
-         Error.Contains("conflict", System.StringComparison.OrdinalIgnoreCase));
+         (Error.Contains("conflict", System.StringComparison.OrdinalIgnoreCase) &&
+          Error.Contains("hash", System.StringComparison.OrdinalIgnoreCase)));
 }

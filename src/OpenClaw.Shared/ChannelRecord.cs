@@ -75,6 +75,26 @@ public static class ChannelsAggregator
     public static readonly IReadOnlyList<string> BuiltInChannelOrder =
         new[] { "whatsapp", "telegram", "discord", "googlechat", "slack", "signal", "imessage", "nostr" };
 
+    /// <summary>
+    /// Pretty labels for the built-in channels. Used when the gateway
+    /// hasn't reported a label (typical for "preview" channels — those the
+    /// user hasn't configured yet and the gateway doesn't have a plugin
+    /// for). Without this we'd render raw lowercase ids ("discord",
+    /// "googlechat") which look broken.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> BuiltInChannelLabels =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["whatsapp"]   = "WhatsApp",
+            ["telegram"]   = "Telegram",
+            ["discord"]    = "Discord",
+            ["googlechat"] = "Google Chat",
+            ["slack"]      = "Slack",
+            ["signal"]     = "Signal",
+            ["imessage"]   = "iMessage",
+            ["nostr"]      = "Nostr",
+        };
+
     /// <summary>Channels that require a phone-app QR scan.</summary>
     private static readonly HashSet<string> QrLinkChannels =
         new(StringComparer.OrdinalIgnoreCase) { "whatsapp", "signal" };
@@ -155,11 +175,26 @@ public static class ChannelsAggregator
             if (configured && !running)
                 caps |= ChannelCapabilities.CanStart;
 
+            // Label / DetailLabel fall back to BuiltInChannelLabels when
+            // the gateway didn't supply a nice name (typical for preview
+            // channels — those we surface from BuiltInChannelOrder for
+            // discoverability but that the gateway hasn't reported).
+            var gatewayLabel = snapshot.ResolveLabel(id);
+            var label = string.Equals(gatewayLabel, id, StringComparison.Ordinal)
+                && BuiltInChannelLabels.TryGetValue(id, out var nice)
+                ? nice
+                : gatewayLabel;
+            var gatewayDetailLabel = snapshot.ResolveDetailLabel(id);
+            var detailLabel = string.Equals(gatewayDetailLabel, id, StringComparison.Ordinal)
+                && BuiltInChannelLabels.TryGetValue(id, out var niceDetail)
+                ? niceDetail
+                : gatewayDetailLabel;
+
             records.Add(new ChannelRecord
             {
                 Id = id,
-                Label = snapshot.ResolveLabel(id),
-                DetailLabel = snapshot.ResolveDetailLabel(id),
+                Label = label,
+                DetailLabel = detailLabel,
                 SystemImage = snapshot.ResolveSystemImage(id),
                 RawStatus = raw,
                 Accounts = accounts,
@@ -184,13 +219,18 @@ public static class ChannelsAggregator
     /// Build the ordered channel id list by unioning every source in the snapshot:
     /// <c>channelOrder</c> (canonical, if provided) → channel ids in <c>channels</c>
     /// (covers older gateways missing channelOrder) → ids in <c>channelMeta</c> /
-    /// <c>channelAccounts</c> (covers metadata-only entries).
+    /// <c>channelAccounts</c> → optionally <see cref="BuiltInChannelOrder"/>.
     /// </summary>
     /// <param name="useBuiltInFallback">
-    /// When true, an empty snapshot falls back to <see cref="BuiltInChannelOrder"/>
-    /// (preview mode for disconnected users). When false, an empty snapshot
-    /// returns an empty list (honest mode for connected users — we don't claim
-    /// the gateway supports channels it never reported).
+    /// When true, the built-in catalog is **always** unioned in so the
+    /// AVAILABLE section gives the user discoverable options to add — not
+    /// just whatever the gateway has already configured. Channels reported
+    /// by the gateway dedupe correctly via the OrdinalIgnoreCase HashSet
+    /// and keep their gateway-provided position; pure built-in extras
+    /// append at the end in BuiltInChannelOrder order.
+    /// When false, only what the gateway reported is returned — honest
+    /// mode for callers that don't want to surface "preview" channels the
+    /// gateway can't host.
     /// </param>
     internal static IReadOnlyList<string> BuildOrderedIds(
         ChannelsStatusSnapshot snapshot,
@@ -213,11 +253,14 @@ public static class ChannelsAggregator
         Append(snapshot.Channels.Keys);
         Append(snapshot.ChannelAccounts.Keys);
 
-        // Built-in fallback: only fires when we got literally nothing from the
-        // gateway AND the caller wants a preview list (e.g. user not yet
-        // connected). Connected users see an empty list instead of fake
-        // channels.
-        if (order.Count == 0 && useBuiltInFallback) Append(BuiltInChannelOrder);
+        // Always union the built-in catalog (when requested) so the
+        // AVAILABLE section stays populated even when the gateway is
+        // only reporting the user's currently-configured channels.
+        // Discoverability matters more than the small risk of surfacing
+        // a channel whose plugin isn't installed — the Save flow already
+        // detects "unknown channel" responses and points the user at
+        // openclaw plugins install <pkg>.
+        if (useBuiltInFallback) Append(BuiltInChannelOrder);
         return order;
     }
 

@@ -45,25 +45,30 @@ public sealed partial class ChannelsPage : Page
     private CancellationTokenSource? _refreshCts;
 
     /// <summary>
-    /// Cached gateway config root (unwrapped from the config.get
-    /// <c>{ path, raw, parsed }</c> envelope). Required to build atomic
-    /// channel-config patches: the gateway only accepts whole-config writes
-    /// (<c>config.patch { raw, baseHash }</c>) so we have to splice channel
-    /// updates into the cached config rather than writing per-field.
+    /// Atomic config-cache snapshot (root + baseHash bundled). Replaced
+    /// wholesale by <see cref="CaptureConfigSnapshot"/> so callers can read
+    /// a single field and get a consistent pair — see Hanselman review
+    /// HIGH-2: reading root and baseHash as two separate fields opens a
+    /// TOCTOU window where a fresh config.get can advance baseHash while
+    /// the patch is still being built from the older root, letting the
+    /// gateway accept a stale-raw + fresh-hash combo that silently clobbers
+    /// interim changes.
     /// </summary>
-    private JsonElement? _cachedConfigRoot;
+    private sealed record ConfigSnapshot(JsonElement Root, string? BaseHash)
+    {
+        public static ConfigSnapshot Empty { get; } = new(default, null);
+        public bool HasRoot => Root.ValueKind != JsonValueKind.Undefined && Root.ValueKind != JsonValueKind.Null;
+    }
 
-    /// <summary>baseHash (optimistic-concurrency token) for the cached config. Required by config.patch.</summary>
-    private string? _configBaseHash;
+    private ConfigSnapshot _configSnapshot = ConfigSnapshot.Empty;
 
     /// <summary>
-    /// Signals to anyone awaiting on a fresh config that the cache has been
-    /// updated. Used by <see cref="EnsureConfigLoadedAsync"/> so SaveAsync can
-    /// kick off a config.get and await the response within a bounded window
-    /// instead of failing if the user clicks Save before the page-warm fetch
-    /// completes.
+    /// Single-slot TaskCompletionSource for an in-flight config.get fetch.
+    /// Reused by every concurrent <see cref="EnsureConfigLoadedAsync"/> call
+    /// so two saves clicked back-to-back share one fetch instead of racing
+    /// each other's TCS overwrites (Hanselman review HIGH-1).
     /// </summary>
-    private TaskCompletionSource<bool>? _configLoadedTcs;
+    private TaskCompletionSource<bool>? _configLoadTcs;
 
     /// <summary>Tracks the channel id for each Expander so per-channel pushes can target the right card.</summary>
     private readonly Dictionary<string, Expander> _expanderById = new(StringComparer.OrdinalIgnoreCase);
@@ -106,8 +111,30 @@ public sealed partial class ChannelsPage : Page
         InitializeComponent();
         Unloaded += OnUnloaded;
         // User-dismiss of the save banner clears the pending state so it
-        // doesn't reappear on the next snapshot refresh.
-        SaveBanner.Closed += (_, _) => _pendingSaveBanner = null;
+        // doesn't reappear on the next snapshot refresh. Also collapse
+        // Visibility so the dismissed bar doesn't keep claiming layout
+        // space in the StackPanel (see SetInfoBarOpen comment).
+        SaveBanner.Closed += (_, _) =>
+        {
+            _pendingSaveBanner = null;
+            SaveBanner.Visibility = Visibility.Collapsed;
+        };
+        ErrorBar.Closed += (_, _) => ErrorBar.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// Toggle both <see cref="InfoBar.IsOpen"/> and <see cref="UIElement.Visibility"/>
+    /// in lock-step. WinUI's <c>InfoBar.IsOpen=false</c> only collapses the
+    /// bar's internal content — the control element itself stays Visible,
+    /// so the parent <c>StackPanel</c> keeps applying its 16-px Spacing
+    /// around the (empty) bar. Stacking four conditional bars that way
+    /// leaves a ~60–80 px gap below the header when nothing is open.
+    /// Setting Visibility too reclaims that space.
+    /// </summary>
+    private static void SetInfoBarOpen(InfoBar bar, bool open)
+    {
+        bar.IsOpen = open;
+        bar.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -138,7 +165,7 @@ public sealed partial class ChannelsPage : Page
         if (_appState != null)
             _appState.PropertyChanged += OnAppStateChanged;
 
-        NotConnectedBar.IsOpen = CurrentApp.GatewayClient == null;
+        SetInfoBarOpen(NotConnectedBar, CurrentApp.GatewayClient == null);
 
         // Render whatever AppState already holds (lets the user re-enter the
         // page without a gateway round-trip) and then kick off a fresh fetch
@@ -172,7 +199,8 @@ public sealed partial class ChannelsPage : Page
     /// snapshot to keep metadata current.</item>
     /// <item><see cref="AppState.Config"/> — full gateway config snapshot
     /// (required by SaveAsync to build atomic config.patch payloads).
-    /// Unwrap into <see cref="_cachedConfigRoot"/> + <see cref="_configBaseHash"/>
+    /// Unwrap into <see cref="_configSnapshot"/> (an atomic record bundling
+    /// the unwrapped root + baseHash so they can't desync)
     /// and release any awaiters.</item>
     /// </list>
     /// </summary>
@@ -200,14 +228,15 @@ public sealed partial class ChannelsPage : Page
     /// <c>config.patch</c> for optimistic-concurrency. baseHash extraction
     /// follows the same chain ConfigPage uses: prefer the gateway's
     /// <c>baseHash</c> field, fall back to <c>hash</c>, fall back to
-    /// SHA256(raw).
+    /// SHA256(raw). Publishes the (root, baseHash) pair atomically by
+    /// replacing the single <see cref="_configSnapshot"/> field — readers
+    /// never see a torn write.
     /// </summary>
     private void CaptureConfigSnapshot(JsonElement envelope)
     {
         var snapshot = envelope.Clone();
         var root = snapshot.TryGetProperty("parsed", out var parsed) ? parsed
             : (snapshot.TryGetProperty("config", out var inner) ? inner : snapshot);
-        _cachedConfigRoot = root.Clone();
 
         string? baseHash = null;
         if (snapshot.TryGetProperty("baseHash", out var bh) && bh.ValueKind == JsonValueKind.String)
@@ -224,44 +253,58 @@ public sealed partial class ChannelsPage : Page
                 baseHash = Convert.ToHexStringLower(hash);
             }
         }
-        _configBaseHash = baseHash;
 
-        // Release anyone awaiting a fresh config.
-        var tcs = _configLoadedTcs;
-        if (tcs != null && !tcs.Task.IsCompleted)
+        // Atomic publish: a single field swap so readers always see a
+        // consistent (root, baseHash) pair.
+        _configSnapshot = new ConfigSnapshot(root.Clone(), baseHash);
+
+        // Release ALL waiters on the current in-flight load (if any).
+        var tcs = _configLoadTcs;
+        if (tcs != null)
+        {
+            _configLoadTcs = null;
             tcs.TrySetResult(true);
+        }
     }
 
     /// <summary>
     /// Block until a config snapshot is available, with a generous timeout
     /// so users on slow gateways still get a definitive outcome rather than
-    /// a silent hang. Subscribes BEFORE firing the request so the
-    /// PropertyChanged callback can't race the await.
+    /// a silent hang.
+    ///
+    /// Concurrency model (post-Hanselman HIGH-1 fix):
+    /// <list type="bullet">
+    /// <item>If the cache is already populated → return true immediately.</item>
+    /// <item>If a load is already in flight → await THAT load's TCS
+    /// (never overwrite it). Multiple concurrent saves share one fetch.</item>
+    /// <item>Otherwise start a new fetch, store the TCS, fire the request.</item>
+    /// <item>After the timeout, re-check the cache directly — another path
+    /// (the page-warm fetch in Initialize, a parallel save, an unrelated
+    /// gateway push) may have populated it while our TCS was racing.</item>
+    /// </list>
     /// </summary>
     private async Task<bool> EnsureConfigLoadedAsync(int timeoutMs = 5000)
     {
-        if (_cachedConfigRoot.HasValue) return true;
+        if (_configSnapshot.HasRoot) return true;
         var client = CurrentApp.GatewayClient;
         if (client == null) return false;
 
-        // Subscribe FIRST to avoid the race where the response arrives
-        // between the request and the await.
-        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _configLoadedTcs = tcs;
-
-        try
+        // Reuse any in-flight load TCS so concurrent saves share one fetch.
+        // Only start a new fetch if no load is currently in progress.
+        var tcs = _configLoadTcs;
+        if (tcs == null)
         {
+            tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _configLoadTcs = tcs;
             _ = client.RequestConfigAsync();
-            var winner = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs));
-            return winner == tcs.Task && _cachedConfigRoot.HasValue;
         }
-        finally
-        {
-            // Only clear if it's still ours — a parallel SaveAsync may have
-            // installed its own TCS in the meantime.
-            if (ReferenceEquals(_configLoadedTcs, tcs))
-                _configLoadedTcs = null;
-        }
+
+        await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs));
+        // Re-check the cache rather than gating on our specific TCS winning:
+        // another path (warm-up fetch, parallel save, gateway push) may have
+        // populated the cache while our timer was running. Caring only about
+        // whether the cache is now usable is what callers actually need.
+        return _configSnapshot.HasRoot;
     }
 
     private async void OnRefreshAll(object sender, RoutedEventArgs e)
@@ -274,10 +317,10 @@ public sealed partial class ChannelsPage : Page
         var client = CurrentApp.GatewayClient;
         if (client == null)
         {
-            NotConnectedBar.IsOpen = true;
+            SetInfoBarOpen(NotConnectedBar, true);
             return;
         }
-        NotConnectedBar.IsOpen = false;
+        SetInfoBarOpen(NotConnectedBar, false);
 
         // Replace any superseded CTS, disposing the old one so we don't leak
         // its internal handle.
@@ -304,10 +347,10 @@ public sealed partial class ChannelsPage : Page
             {
                 ErrorBar.Title = "Couldn't refresh channels";
                 ErrorBar.Message = "The gateway didn't return a channels.status response. Try Refresh again.";
-                ErrorBar.IsOpen = true;
+                SetInfoBarOpen(ErrorBar, true);
                 return;
             }
-            ErrorBar.IsOpen = false;
+            SetInfoBarOpen(ErrorBar, false);
             _latestSnapshotAt = DateTime.UtcNow;
             // Publish into AppState — single source of truth. Setting the
             // property fires PropertyChanged which calls Render via
@@ -372,7 +415,7 @@ public sealed partial class ChannelsPage : Page
         var gatewayReportedSomething = snapshot.ChannelOrder.Count > 0
             || snapshot.Channels.Count > 0
             || (snapshot.ChannelMeta?.Count ?? 0) > 0;
-        GuideBar.IsOpen = connected && !gatewayReportedSomething && records.Count > 0;
+        SetInfoBarOpen(GuideBar, connected && !gatewayReportedSomething && records.Count > 0);
 
         // Re-paint any pending save banner. Lives at page level so it survives
         // the per-channel Expander rebuild that just happened. If the save was
@@ -405,11 +448,11 @@ public sealed partial class ChannelsPage : Page
                 SaveBanner.Title = pending.Title;
                 SaveBanner.Message = pending.Message;
             }
-            SaveBanner.IsOpen = true;
+            SetInfoBarOpen(SaveBanner, true);
         }
         else
         {
-            SaveBanner.IsOpen = false;
+            SetInfoBarOpen(SaveBanner, false);
         }
 
         MetaText.Text = records.Count == 0
@@ -418,7 +461,7 @@ public sealed partial class ChannelsPage : Page
                 : "connect to a gateway to see what channels are available")
             : (connected && !gatewayReportedSomething
                 ? $"showing {records.Count} common channels (your gateway didn't list any — some may not work)"
-                : $"{records.Count} channels · {configured.Count} configured · last check just now");
+                : $"{configured.Count} configured · {available.Count} available to add");
     }
 
     // ─── Expander construction ─────────────────────────────────────────────
@@ -488,7 +531,7 @@ public sealed partial class ChannelsPage : Page
             middle.Children.Add(new TextBlock
             {
                 Text = subtitle,
-                FontSize = 12,
+                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
                 Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
                 TextTrimming = TextTrimming.CharacterEllipsis,
             });
@@ -534,15 +577,28 @@ public sealed partial class ChannelsPage : Page
         return new Border
         {
             Background = bg,
-            CornerRadius = new CornerRadius(999),
+            // Pill: CornerRadius must equal at least half the rendered height
+            // for full half-circle ends. Setting MinHeight and matching the
+            // radius keeps the shape consistent regardless of the inner
+            // TextBlock's font metrics on different DPIs — relying on
+            // CornerRadius=999 alone was getting rendered as a soft-rounded
+            // rectangle on Win11 (radius clamped against the bar's actual
+            // measured height which is shorter than expected for small text).
+            CornerRadius = new CornerRadius(10),
+            MinHeight = 20,
             Padding = new Thickness(8, 2, 8, 2),
             VerticalAlignment = VerticalAlignment.Center,
             Child = new TextBlock
             {
                 Text = text,
+                // FontSize=11 is an intentional exception to tokens.md's
+                // 12 px minimum — this is a status chip, not body text, and
+                // FontSize=12 makes the pill visually chunky against the
+                // surrounding 14 px text. Keep the override here only.
                 FontSize = 11,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 Foreground = fg,
+                VerticalAlignment = VerticalAlignment.Center,
             },
         };
     }
@@ -551,14 +607,18 @@ public sealed partial class ChannelsPage : Page
     {
         var btn = new Button
         {
-            Padding = new Thickness(8, 2, 8, 2),
+            Padding = new Thickness(8, 4, 8, 4),
             Tag = tag,
         };
         var stack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
         // Use FluentIconCatalog.Build so the icon honors SymbolThemeFontFamily.
         var icon = FluentIconCatalog.Build(glyph, size: 12);
         stack.Children.Add(icon);
-        stack.Children.Add(new TextBlock { Text = label, FontSize = 12 });
+        stack.Children.Add(new TextBlock
+        {
+            Text = label,
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+        });
         btn.Content = stack;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(btn, label);
         btn.Click += (s, _) =>
@@ -626,7 +686,7 @@ public sealed partial class ChannelsPage : Page
         panel.Children.Add(new TextBlock
         {
             Text = title.ToUpperInvariant(),
-            FontSize = 11,
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             CharacterSpacing = 80,
             Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
@@ -653,7 +713,7 @@ public sealed partial class ChannelsPage : Page
             BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(14, 12, 14, 14),
+            Padding = new Thickness(16, 12, 16, 12),
         };
 
         var stack = new StackPanel { Spacing = 6 };
@@ -680,7 +740,7 @@ public sealed partial class ChannelsPage : Page
             var num = new TextBlock
             {
                 Text = (i + 1).ToString() + ".",
-                FontSize = 13,
+                Style = (Style)Application.Current.Resources["BodyTextBlockStyle"],
                 Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
                 VerticalAlignment = VerticalAlignment.Top,
             };
@@ -690,7 +750,7 @@ public sealed partial class ChannelsPage : Page
             var body = new TextBlock
             {
                 Text = steps[i],
-                FontSize = 13,
+                Style = (Style)Application.Current.Resources["BodyTextBlockStyle"],
                 TextWrapping = TextWrapping.Wrap,
             };
             Grid.SetColumn(body, 1);
@@ -934,8 +994,7 @@ public sealed partial class ChannelsPage : Page
             var label = new TextBlock
             {
                 Text = field.Required ? $"{field.Label} *" : field.Label,
-                FontSize = 13,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"],
             };
             row.Children.Add(label);
 
@@ -966,7 +1025,7 @@ public sealed partial class ChannelsPage : Page
                     PlaceholderText = field.Placeholder,
                     AcceptsReturn = true,
                     TextWrapping = TextWrapping.Wrap,
-                    MinHeight = 70,
+                    MinHeight = 72,
                 };
                 if (!string.IsNullOrEmpty(restored)) tb.Text = restored;
                 tb.TextChanged += (s, _) =>
@@ -994,7 +1053,7 @@ public sealed partial class ChannelsPage : Page
                 row.Children.Add(new TextBlock
                 {
                     Text = field.HelpText,
-                    FontSize = 11,
+                    Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
                     Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
                     TextWrapping = TextWrapping.Wrap,
                 });
@@ -1079,9 +1138,26 @@ public sealed partial class ChannelsPage : Page
                     return;
                 }
 
+                // Snapshot once: read both root and baseHash from the same
+                // atomic publish so a concurrent config.get can't desync
+                // them under us (Hanselman review HIGH-2).
+                var configForThisSave = _configSnapshot;
+                if (!configForThisSave.HasRoot)
+                {
+                    // Shouldn't happen — EnsureConfigLoadedAsync only returns
+                    // true when the snapshot is populated — but defend
+                    // against a race where the snapshot was reset between
+                    // the load returning and this read.
+                    _pendingSaveBanner = (record.Id, $"Couldn't load gateway config",
+                        "The gateway's config was cleared mid-save. Try Refresh and save again.",
+                        InfoBarSeverity.Error);
+                    ApplyPendingSaveBanner();
+                    return;
+                }
+
                 var updates = values.Select(v => (v.Path, (object)v.Value)).ToList();
                 var buildResult = ChannelConfigPatchBuilder.BuildPatch(
-                    _cachedConfigRoot!.Value,
+                    configForThisSave.Root,
                     record.Id,
                     updates,
                     multilinePaths);
@@ -1095,7 +1171,7 @@ public sealed partial class ChannelsPage : Page
                     return;
                 }
 
-                var patchResult = await client.PatchConfigDetailedAsync(buildResult.Patch!.Value, _configBaseHash);
+                var patchResult = await client.PatchConfigDetailedAsync(buildResult.Patch!.Value, configForThisSave.BaseHash);
 
                 if (!patchResult.Ok)
                 {
@@ -1125,9 +1201,11 @@ public sealed partial class ChannelsPage : Page
                     "Waiting for the gateway to confirm the channel is running…",
                     InfoBarSeverity.Success);
                 ApplyPendingSaveBanner();
-                // Re-fetch config (so baseHash advances) + channels.status
-                // (so Render() can upgrade the banner to "running" if the
-                // channel transitioned).
+                // Invalidate the snapshot so a rapid second save MUST wait
+                // for a fresh baseHash — protects against silent clobber in
+                // the baseHash-null case (Hanselman review HIGH-2 follow-on).
+                // The fresh config.get below will repopulate the snapshot.
+                _configSnapshot = ConfigSnapshot.Empty;
                 _ = client.RequestConfigAsync();
                 await RefreshAsync(probe: true);
             }
@@ -1151,13 +1229,13 @@ public sealed partial class ChannelsPage : Page
     {
         if (_pendingSaveBanner is not { } p)
         {
-            SaveBanner.IsOpen = false;
+            SetInfoBarOpen(SaveBanner, false);
             return;
         }
         SaveBanner.Severity = p.Severity;
         SaveBanner.Title = p.Title;
         SaveBanner.Message = p.Message;
-        SaveBanner.IsOpen = true;
+        SetInfoBarOpen(SaveBanner, true);
     }
 
     private static FrameworkElement BuildStatusKv(ChannelRecord record)
@@ -1176,9 +1254,9 @@ public sealed partial class ChannelsPage : Page
             var keyBlock = new TextBlock
             {
                 Text = key,
-                FontSize = 13,
+                Style = (Style)Application.Current.Resources["BodyTextBlockStyle"],
                 Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-                Margin = new Thickness(0, 2, 0, 2),
+                Margin = new Thickness(0, 4, 0, 4),
             };
             Grid.SetRow(keyBlock, i);
             Grid.SetColumn(keyBlock, 0);
@@ -1187,9 +1265,9 @@ public sealed partial class ChannelsPage : Page
             var valBlock = new TextBlock
             {
                 Text = value,
-                FontSize = 13,
+                Style = (Style)Application.Current.Resources["BodyTextBlockStyle"],
                 TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 2, 0, 2),
+                Margin = new Thickness(0, 4, 0, 4),
             };
             Grid.SetRow(valBlock, i);
             Grid.SetColumn(valBlock, 1);
@@ -1298,7 +1376,7 @@ public sealed partial class ChannelsPage : Page
         stack.Children.Add(new TextBlock
         {
             Text = "LINKING",
-            FontSize = 11,
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             CharacterSpacing = 80,
             Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
@@ -1318,8 +1396,8 @@ public sealed partial class ChannelsPage : Page
         var messageBlock = new TextBlock
         {
             Text = "Click \"Show QR\" to start linking your phone to this device.",
+            Style = (Style)Application.Current.Resources["BodyTextBlockStyle"],
             Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-            FontSize = 13,
             TextWrapping = TextWrapping.Wrap,
         };
 
@@ -1338,7 +1416,7 @@ public sealed partial class ChannelsPage : Page
         {
             Text = "",
             FontFamily = new FontFamily("Cascadia Mono, Consolas, monospace"),
-            FontSize = 12,
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
             TextWrapping = TextWrapping.Wrap,
             IsTextSelectionEnabled = true,
             Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
@@ -1579,7 +1657,7 @@ public sealed partial class ChannelsPage : Page
             Text = record.IsConfigured
                 ? $"Edit this channel's settings in the gateway Config page."
                 : $"After following the steps above, save the config to start the channel.",
-            FontSize = 13,
+            Style = (Style)Application.Current.Resources["BodyTextBlockStyle"],
             Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
             TextWrapping = TextWrapping.Wrap,
         });
@@ -1639,7 +1717,7 @@ public sealed partial class ChannelsPage : Page
         {
             Text = $"Channel plugins are loaded by the gateway, not the tray — so installs happen on the machine that hosts your gateway. If {record.Id} isn't coming up after Save, the plugin may not be installed yet.",
             TextWrapping = TextWrapping.Wrap,
-            FontSize = 13,
+            Style = (Style)Application.Current.Resources["BodyTextBlockStyle"],
             Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
         });
 
@@ -1687,7 +1765,7 @@ public sealed partial class ChannelsPage : Page
         body.Children.Add(new TextBlock
         {
             Text = "Run this command on the machine that hosts your gateway. After it finishes, come back and click Refresh.",
-            FontSize = 11,
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
             Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
             TextWrapping = TextWrapping.Wrap,
         });
@@ -1711,7 +1789,7 @@ public sealed partial class ChannelsPage : Page
         {
             ErrorBar.Title = "Not connected";
             ErrorBar.Message = "Connect to a gateway before logging out.";
-            ErrorBar.IsOpen = true;
+            SetInfoBarOpen(ErrorBar, true);
             return;
         }
         var dialog = new ContentDialog
@@ -1731,7 +1809,7 @@ public sealed partial class ChannelsPage : Page
         {
             ErrorBar.Title = "Logout failed";
             ErrorBar.Message = $"Could not log out of {channelId}. The gateway may not support this action.";
-            ErrorBar.IsOpen = true;
+            SetInfoBarOpen(ErrorBar, true);
         }
         await RefreshAsync(probe: false);
     }
@@ -1896,7 +1974,7 @@ public sealed partial class ChannelsPage : Page
         return new TextBlock
         {
             Text = text,
-            FontSize = 13,
+            Style = (Style)Application.Current.Resources["BodyTextBlockStyle"],
             Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
             TextWrapping = TextWrapping.Wrap,
         };

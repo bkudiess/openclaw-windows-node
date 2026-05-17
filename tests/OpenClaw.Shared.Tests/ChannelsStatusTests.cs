@@ -212,6 +212,52 @@ public class ChannelsAggregatorTests
     }
 
     [Fact]
+    public void Aggregate_AlwaysUnionsBuiltInCatalog_SoUserCanDiscoverMoreChannels()
+    {
+        // Gateway reports only the channel the user has configured.
+        // The page should still surface the other built-in channels as
+        // AVAILABLE entries so the user can discover and add more.
+        var snap = new ChannelsStatusSnapshot
+        {
+            ChannelOrder = new[] { "telegram" },
+            Channels = new Dictionary<string, JsonElement>
+            {
+                ["telegram"] = Json("""{ "configured": true, "running": true }"""),
+            },
+        };
+        var records = ChannelsAggregator.Aggregate(snap, DateTime.UtcNow);
+
+        // Configured (telegram) appears first, then every other built-in
+        // catalog channel as unconfigured "preview" entries.
+        Assert.Equal("telegram", records[0].Id);
+        Assert.True(records[0].IsConfigured);
+
+        var allIds = records.Select(r => r.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var builtIn in ChannelsAggregator.BuiltInChannelOrder)
+            Assert.Contains(builtIn, allIds);
+
+        // No duplicate ids (built-in entries dedupe against gateway-reported).
+        Assert.Equal(records.Count, records.Select(r => r.Id.ToLowerInvariant()).Distinct().Count());
+
+        // All non-target built-ins are unconfigured.
+        Assert.All(records.Where(r => !string.Equals(r.Id, "telegram", System.StringComparison.OrdinalIgnoreCase)),
+            r => Assert.False(r.IsConfigured));
+    }
+
+    [Fact]
+    public void Aggregate_BuiltInExtras_GetPrettyLabels()
+    {
+        // Gateway provides no labels for preview channels; the aggregator
+        // should fall back to the built-in pretty-name catalog so the
+        // AVAILABLE list never shows raw lowercase ids like "googlechat".
+        var records = ChannelsAggregator.Aggregate(null, DateTime.UtcNow);
+        var byId = records.ToDictionary(r => r.Id.ToLowerInvariant());
+        Assert.Equal("WhatsApp",    byId["whatsapp"].Label);
+        Assert.Equal("Google Chat", byId["googlechat"].Label);
+        Assert.Equal("iMessage",    byId["imessage"].Label);
+    }
+
+    [Fact]
     public void Aggregate_CapabilitiesAreInferredFromId()
     {
         // All four channels are configured here, so their full capability set
@@ -358,11 +404,14 @@ public class ChannelsAggregatorTests
             },
         };
         var records = ChannelsAggregator.Aggregate(snap, DateTime.UtcNow);
-        var ids = records.Select(r => r.Id).ToList();
-        Assert.Contains("telegram", ids);
-        Assert.Contains("custom-plugin", ids);
-        // The order-list entry sorts before the appended union entry; both are configured.
-        Assert.True(records.All(r => r.IsConfigured));
+        var byId = records.ToDictionary(r => r.Id);
+        Assert.Contains("telegram", byId.Keys);
+        Assert.Contains("custom-plugin", byId.Keys);
+        // Both gateway-reported channels are configured. (Built-in extras —
+        // whatsapp/discord/etc. — appear unconfigured per the discoverability
+        // union; see Aggregate_AlwaysUnionsBuiltInCatalog.)
+        Assert.True(byId["telegram"].IsConfigured);
+        Assert.True(byId["custom-plugin"].IsConfigured);
     }
 
     [Fact]
@@ -379,10 +428,12 @@ public class ChannelsAggregatorTests
         };
         var records = ChannelsAggregator.Aggregate(snap, DateTime.UtcNow);
         var ids = records.Select(r => r.Id).ToHashSet();
-        // Both should surface; built-in fallback should NOT fire because we had data.
+        // Custom plugin-a / plugin-b surface — and the built-in catalog
+        // ALWAYS unions in for discoverability, so whatsapp et al. also
+        // appear (per Aggregate_AlwaysUnionsBuiltInCatalog).
         Assert.Contains("plugin-a", ids);
         Assert.Contains("plugin-b", ids);
-        Assert.DoesNotContain("whatsapp", ids); // built-in fallback didn't kick in
+        Assert.Contains("whatsapp", ids);
     }
 
     [Fact]
@@ -397,8 +448,10 @@ public class ChannelsAggregatorTests
             },
         };
         var records = ChannelsAggregator.Aggregate(snap, DateTime.UtcNow);
-        Assert.Single(records);
-        Assert.Equal("acct-only", records[0].Id);
-        Assert.True(records[0].IsConfigured);
+        // acct-only is surfaced (the assertion this test was originally
+        // protecting); built-in extras append for discoverability.
+        var byId = records.ToDictionary(r => r.Id);
+        Assert.Contains("acct-only", byId.Keys);
+        Assert.True(byId["acct-only"].IsConfigured);
     }
 }

@@ -39,14 +39,21 @@ public class ChannelsPipelineTests
         var snapshot = ChannelsStatusParser.Parse(Json(json));
         var records = ChannelsAggregator.Aggregate(snapshot, DateTime.UtcNow);
 
-        // Order: configured first (whatsapp, telegram, discord), then unconfigured (slack, nostr).
+        // Order: configured first (whatsapp, telegram, discord), then unconfigured (slack, nostr),
+        // then built-in extras the gateway didn't list (googlechat, signal, imessage) — appended
+        // for discoverability so the user can add more channels.
         var ids = records.Select(r => r.Id).ToList();
-        Assert.Equal(new[] { "whatsapp", "telegram", "discord", "slack", "nostr" }, ids);
+        Assert.Equal(
+            new[] { "whatsapp", "telegram", "discord", "slack", "nostr", "googlechat", "signal", "imessage" },
+            ids);
         Assert.True(records[0].IsConfigured);
         Assert.True(records[1].IsConfigured);
         Assert.True(records[2].IsConfigured);
-        Assert.False(records[3].IsConfigured);
-        Assert.False(records[4].IsConfigured);
+        Assert.False(records[3].IsConfigured); // slack
+        Assert.False(records[4].IsConfigured); // nostr
+        Assert.False(records[5].IsConfigured); // googlechat (preview)
+        Assert.False(records[6].IsConfigured); // signal (preview)
+        Assert.False(records[7].IsConfigured); // imessage (preview)
 
         // Capabilities reflect channel id
         Assert.True(records[0].Capabilities.HasFlag(ChannelCapabilities.CanShowQr));
@@ -54,9 +61,14 @@ public class ChannelsPipelineTests
         Assert.True(records[1].Capabilities.HasFlag(ChannelCapabilities.CanLogout));
         Assert.False(records[2].Capabilities.HasFlag(ChannelCapabilities.CanLogout));
 
-        // Labels come from snapshot
+        // Labels: snapshot supplies the ones it knows; preview channels fall
+        // back to the built-in pretty-name catalog (so users don't see
+        // lowercase ids like "googlechat" in the AVAILABLE list).
         Assert.Equal("WhatsApp", records[0].Label);
         Assert.Equal("Nostr", records[4].Label);
+        Assert.Equal("Google Chat", records[5].Label);
+        Assert.Equal("Signal", records[6].Label);
+        Assert.Equal("iMessage", records[7].Label);
     }
 
     [Fact]

@@ -61,12 +61,20 @@
                      state; the body explains how channels work; the action
                      button opens the canonical docs. Hidden once the gateway
                      reports at least one channel — no need to keep teaching
-                     the page to a user who's clearly past that point. -->
+                     the page to a user who's clearly past that point.
+
+                     Visibility starts Collapsed and is toggled alongside
+                     IsOpen via SetInfoBarOpen — InfoBar's IsOpen=false only
+                     hides its inner content, the control element itself
+                     stays Visible to the StackPanel which then applies its
+                     16-px Spacing around the (empty) bar. Explicitly
+                     collapsing reclaims that space. -->
                 <InfoBar x:Uid="ChannelsPage_GuideBar"
                          x:Name="GuideBar"
                          Severity="Informational"
                          IsOpen="False"
                          IsClosable="False"
+                         Visibility="Collapsed"
                          Title="Your gateway didn't list any channels"
                          Message="Channels are configured on your gateway. To add one, expand it below and fill in its credentials — the form saves directly to your gateway's config. The setup guide walks through each channel end-to-end.">
                     <InfoBar.ActionButton>
@@ -82,12 +90,14 @@
                          x:Name="NotConnectedBar"
                          Title="Not connected"
                          Message="Connect to a gateway to manage channels."
-                         Severity="Error" IsOpen="False" IsClosable="False"/>
+                         Severity="Error" IsOpen="False" IsClosable="False"
+                         Visibility="Collapsed"/>
 
                 <!-- Generic error InfoBar (channels.status failed, etc.) -->
                 <InfoBar x:Uid="ChannelsPage_ErrorBar"
                          x:Name="ErrorBar"
-                         Severity="Warning" IsOpen="False" IsClosable="True"/>
+                         Severity="Warning" IsOpen="False" IsClosable="True"
+                         Visibility="Collapsed"/>
 
                 <!-- Persistent save-result banner. Survives the Render() rebuild
                      that fires after every snapshot refresh, so a user who saves
@@ -96,7 +106,8 @@
                 <InfoBar x:Uid="ChannelsPage_SaveBanner"
                          x:Name="SaveBanner"
                          IsOpen="False"
-                         IsClosable="True"/>
+                         IsClosable="True"
+                         Visibility="Collapsed"/>
 
                 <!-- ═════════════════════════════════════════════════════════
                      CONFIGURED GROUP — channels with active state

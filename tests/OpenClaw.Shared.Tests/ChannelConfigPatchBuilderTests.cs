@@ -8,7 +8,18 @@ namespace OpenClaw.Shared.Tests;
 
 public class ChannelConfigPatchBuilderTests
 {
-    private static JsonElement Json(string raw) => JsonDocument.Parse(raw).RootElement;
+    /// <summary>
+    /// Mirror production usage: callers always pass a Clone()'d element so
+    /// the JsonDocument's lifetime doesn't matter. The earlier form
+    /// (JsonDocument.Parse(raw).RootElement) left the document undisposed,
+    /// which worked only because BuildPatch internally clones — fragile if
+    /// internals ever change. Hanselman review LOW-9.
+    /// </summary>
+    private static JsonElement Json(string raw)
+    {
+        using var doc = JsonDocument.Parse(raw);
+        return doc.RootElement.Clone();
+    }
 
     private static List<(string, object)> Updates(params (string, object)[] vs) => vs.ToList();
 
@@ -186,13 +197,13 @@ public class ChannelConfigPatchBuilderTests
     [InlineData("  [REDACTED]  ")] // trimmed before matching
     public void BuildPatch_DetectsCommonRedactionSentinels(string sentinel)
     {
-        var existing = JsonDocument.Parse($$"""
+        var existing = Json($$"""
             {
               "channels": {
                 "slack": { "signingSecret": "{{sentinel.Replace("\\", "\\\\")}}", "enabled": true }
               }
             }
-            """).RootElement;
+            """);
 
         var result = ChannelConfigPatchBuilder.BuildPatch(
             existing, "telegram",
@@ -200,6 +211,34 @@ public class ChannelConfigPatchBuilderTests
 
         Assert.NotNull(result.BlockedReason);
         Assert.Equal("channels.slack.signingSecret", result.BlockedPath);
+    }
+
+    [Theory]
+    [InlineData("REDACTED")]         // bracket-less
+    [InlineData("<hidden>")]         // gateway-of-Theseus alternative
+    [InlineData("●●●●●●")]           // bullet characters
+    [InlineData("....")]             // dots
+    public void BuildPatch_DoesNotCatch_NonListedSentinelVariants(string variant)
+    {
+        // Documents the *current* limitation of the redaction safety rail:
+        // values outside the hardcoded sentinel set silently pass through
+        // (Hanselman review LOW-13). If the sentinel matcher is widened in
+        // the future, the matching InlineData rows here should flip to
+        // BlockedReason != null and be moved into the Detects test above.
+        var existing = Json($$"""
+            {
+              "channels": {
+                "slack": { "signingSecret": "{{variant}}", "enabled": true }
+              }
+            }
+            """);
+
+        var result = ChannelConfigPatchBuilder.BuildPatch(
+            existing, "telegram",
+            Updates(("channels.telegram.botToken", "abc")));
+
+        Assert.Null(result.BlockedReason);
+        Assert.NotNull(result.Patch);
     }
 
     [Fact]
@@ -224,6 +263,52 @@ public class ChannelConfigPatchBuilderTests
     }
 
     // ─── Edge cases ──────────────────────────────────────────────────────
+
+    [Fact]
+    public void BuildPatch_BlocksOnSentinelInsideArrayInOtherChannel()
+    {
+        // FindRedactionSentinel handles arrays — confirm a sentinel buried
+        // inside an array value in a non-target channel is still detected
+        // (Hanselman review LOW-10). Without this test the array-traversal
+        // branch could regress silently.
+        var existing = Json("""
+            {
+              "channels": {
+                "slack": { "webhookUrls": ["https://real.example/", "[REDACTED]"], "enabled": true }
+              }
+            }
+            """);
+
+        var result = ChannelConfigPatchBuilder.BuildPatch(
+            existing, "telegram",
+            Updates(("channels.telegram.botToken", "abc")));
+
+        Assert.NotNull(result.BlockedReason);
+        Assert.Equal("channels.slack.webhookUrls[1]", result.BlockedPath);
+    }
+
+    [Fact]
+    public void BuildPatch_PrefixChannelId_DoesNotSkipSentinelInLongerChannelName()
+    {
+        // The exclude prefix is `channels.{id}.` with a trailing dot — that
+        // dot is what stops `channelId = "tel"` from skipping sentinels in
+        // `channels.telegram.*`. Documenting that boundary so a refactor
+        // can't silently drop the dot (Hanselman review LOW-11).
+        var existing = Json("""
+            {
+              "channels": {
+                "telegram": { "botToken": "[REDACTED]", "enabled": true }
+              }
+            }
+            """);
+
+        var result = ChannelConfigPatchBuilder.BuildPatch(
+            existing, "tel",
+            Updates(("channels.tel.apiKey", "abc")));
+
+        Assert.NotNull(result.BlockedReason);
+        Assert.Equal("channels.telegram.botToken", result.BlockedPath);
+    }
 
     [Fact]
     public void BuildPatch_RejectsEmptyDotPathSegments()
