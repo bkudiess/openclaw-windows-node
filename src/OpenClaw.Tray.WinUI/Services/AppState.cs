@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -32,8 +31,10 @@ internal sealed class AppState : INotifyPropertyChanged
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? name = null)
     {
 #if !OPENCLAW_TRAY_TESTS
-        Debug.Assert(_dispatcher == null || _dispatcher.HasThreadAccess,
-            $"AppState.{name} must be written on UI thread");
+        if (_dispatcher != null && !_dispatcher.HasThreadAccess)
+        {
+            throw new InvalidOperationException($"AppState.{name} must be written on UI thread");
+        }
 #endif
         if (EqualityComparer<T>.Default.Equals(field, value)) return false;
         field = value;
@@ -151,8 +152,10 @@ internal sealed class AppState : INotifyPropertyChanged
     public void AddAgentEvent(AgentEventInfo evt)
     {
 #if !OPENCLAW_TRAY_TESTS
-        Debug.Assert(_dispatcher == null || _dispatcher.HasThreadAccess,
-            "AppState.AddAgentEvent must be called on UI thread");
+        if (_dispatcher != null && !_dispatcher.HasThreadAccess)
+        {
+            throw new InvalidOperationException("AppState.AddAgentEvent must be called on UI thread");
+        }
 #endif
         _agentEvents.Insert(0, evt);
         if (_agentEvents.Count > MaxAgentEvents)

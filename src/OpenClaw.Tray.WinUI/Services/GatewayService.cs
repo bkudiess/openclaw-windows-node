@@ -49,6 +49,15 @@ internal sealed class GatewayService
     /// </summary>
     public void AttachClient(IOperatorGatewayClient? newClient, IOperatorGatewayClient? oldClient)
     {
+        if (!_dispatcher.HasThreadAccess)
+        {
+            if (!_dispatcher.TryEnqueue(() => AttachClient(newClient, oldClient)))
+            {
+                Logger.Warn("[GatewayService] Failed to dispatch operator client swap to UI thread");
+            }
+            return;
+        }
+
         if (oldClient != null)
             UnsubscribeAll(oldClient);
 
@@ -258,6 +267,7 @@ internal sealed class GatewayService
     internal void OnChannelHealthUpdated(object? sender, ChannelHealth[] channels)
     {
         if (sender != _currentClient && sender is IOperatorGatewayClient) return;
+        if (sender is not IOperatorGatewayClient && _state.Status != ConnectionStatus.Connected) return;
 
         var signature = string.Join("|", channels
             .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
@@ -333,6 +343,7 @@ internal sealed class GatewayService
     internal void OnGatewaySelfUpdated(object? sender, GatewaySelfInfo gatewaySelf)
     {
         if (sender != _currentClient && sender is IOperatorGatewayClient) return;
+        if (sender is not IOperatorGatewayClient && _state.Status != ConnectionStatus.Connected) return;
 
         EnqueueModelUpdate(() =>
         {

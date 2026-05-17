@@ -122,10 +122,10 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
     public LocalGatewaySetupEngine CreateLocalGatewaySetupEngine(
         bool replaceExistingConfigurationConfirmed = false)
     {
-        if (_connectionManager == null || _gatewayRegistry == null)
+        if (_connectionManager == null || _gatewayRegistry == null || _gatewayService == null)
         {
             throw new InvalidOperationException(
-                "GatewayConnectionManager / GatewayRegistry must be initialized before " +
+                "GatewayConnectionManager / GatewayRegistry / GatewayService must be initialized before " +
                 "CreateLocalGatewaySetupEngine. App.OnLaunched initializes them before " +
                 "ShowOnboardingAsync — if you reach here, the init order has regressed.");
         }
@@ -1263,7 +1263,6 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
     private void LocalDisconnectCleanup()
     {
         _appState?.ClearCachedData();
-        if (_appState != null) _appState.Status = ConnectionStatus.Disconnected;
         UpdateTrayIcon();
         // Dismiss the tray menu on disconnect — it will capture fresh data on next open
         _trayMenuWindow?.HideCascade();
@@ -1643,6 +1642,15 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
     /// </summary>
     private void OnOperatorClientChanged(object? sender, OperatorClientChangedEventArgs e)
     {
+        if (_dispatcherQueue is { HasThreadAccess: false } dispatcher)
+        {
+            if (!dispatcher.TryEnqueue(() => OnOperatorClientChanged(sender, e)))
+            {
+                Logger.Warn("[ConnMgr] Failed to dispatch operator client swap to UI thread");
+            }
+            return;
+        }
+
         // Delegate all 27 event subscriptions to GatewayService
         _gatewayService?.AttachClient(e.NewClient, e.OldClient);
 
@@ -1665,11 +1673,8 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         RaiseChatProviderChanged();
 
         // Update UI references
-        OnUiThread(() =>
-        {
-            if (_appState != null)
-                _appState.GatewaySelf = null;
-        });
+        if (_appState != null)
+            _appState.GatewaySelf = null;
     }
 
     private void RaiseChatProviderChanged()
@@ -1680,7 +1685,8 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
     /// <summary>
     /// Handles the connection manager's StateChanged event.
     /// Maps the snapshot to the existing tray icon / UI status system.
-    /// Only authoritative writer of <see cref="AppState.Status"/>.
+    /// Authoritative writer of gateway lifecycle status. Local prerequisite
+    /// failures can still mark the app Error before the manager can connect.
     /// </summary>
     private void OnManagerStateChanged(object? sender, GatewayConnectionSnapshot snap)
     {
@@ -1719,6 +1725,12 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         if (_dispatcherQueue == null)
             return null;
 
+        if (_gatewayService == null)
+        {
+            Logger.Error("GatewayService must be initialized before NodeService event wiring");
+            return null;
+        }
+
         try
         {
             _nodeService = new NodeService(
@@ -1733,9 +1745,9 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             _nodeService.NotificationRequested += OnNodeNotificationRequested;
             _nodeService.ToastRequested += OnNodeToastRequested;
             _nodeService.PairingStatusChanged += OnPairingStatusChanged;
-            _nodeService.ChannelHealthUpdated += _gatewayService!.OnChannelHealthUpdated;
+            _nodeService.ChannelHealthUpdated += _gatewayService.OnChannelHealthUpdated;
             _nodeService.InvokeCompleted += OnNodeInvokeCompleted;
-            _nodeService.GatewaySelfUpdated += _gatewayService!.OnGatewaySelfUpdated;
+            _nodeService.GatewaySelfUpdated += _gatewayService.OnGatewaySelfUpdated;
             return _nodeService;
         }
         catch (Exception ex)
@@ -2528,7 +2540,6 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
                     _sshTunnelService?.Stop();
                 }
                 // Status is updated by OnManagerStateChanged when reconnect starts.
-                if (_appState != null) _appState.Status = ConnectionStatus.Disconnected;
                 UpdateTrayIcon();
 
                 // Reset chat window — it has a stale URL/token

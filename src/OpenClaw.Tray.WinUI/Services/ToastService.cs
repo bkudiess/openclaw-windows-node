@@ -14,6 +14,7 @@ internal sealed class ToastService
     private readonly Func<SettingsManager?> _getSettings;
     private readonly Dictionary<string, DateTime> _recentToastKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _shownPairedToasts = new(StringComparer.Ordinal);
+    private readonly object _gate = new();
     private static readonly TimeSpan ToastDedupeWindow = TimeSpan.FromSeconds(30);
 
     public ToastService(Func<SettingsManager?> getSettings)
@@ -43,19 +44,32 @@ internal sealed class ToastService
     public bool HasRecentToast(string toastTag, string? deviceId)
     {
         var normalizedDeviceId = NormalizeToastDeviceId(deviceId);
-        return _recentToastKeys.TryGetValue(BuildToastKey(toastTag, normalizedDeviceId), out var lastShown) &&
-            DateTime.UtcNow - lastShown < ToastDedupeWindow;
+        lock (_gate)
+        {
+            return _recentToastKeys.TryGetValue(BuildToastKey(toastTag, normalizedDeviceId), out var lastShown) &&
+                DateTime.UtcNow - lastShown < ToastDedupeWindow;
+        }
     }
 
     /// <summary>
     /// Per-device idempotency for "Node paired" toast. Prevents duplicate
     /// toasts when PairingStatusChanged(Paired) re-fires on WS reconnect.
     /// </summary>
-    public bool HasShownPairedToast(string deviceId) =>
-        _shownPairedToasts.Contains(deviceId);
+    public bool HasShownPairedToast(string deviceId)
+    {
+        lock (_gate)
+        {
+            return _shownPairedToasts.Contains(deviceId);
+        }
+    }
 
-    public void MarkPairedToastShown(string deviceId) =>
-        _shownPairedToasts.Add(deviceId);
+    public void MarkPairedToastShown(string deviceId)
+    {
+        lock (_gate)
+        {
+            _shownPairedToasts.Add(deviceId);
+        }
+    }
 
     private bool ShouldShowToast(string? toastTag, string? deviceId)
     {
@@ -66,22 +80,26 @@ internal sealed class ToastService
         var dedupeKey = BuildToastKey(toastTag, normalizedDeviceId);
         var now = DateTime.UtcNow;
 
-        foreach (var staleKey in _recentToastKeys
-            .Where(pair => now - pair.Value >= ToastDedupeWindow)
-            .Select(pair => pair.Key)
-            .ToArray())
+        lock (_gate)
         {
-            _recentToastKeys.Remove(staleKey);
+            foreach (var staleKey in _recentToastKeys
+                .Where(pair => now - pair.Value >= ToastDedupeWindow)
+                .Select(pair => pair.Key)
+                .ToArray())
+            {
+                _recentToastKeys.Remove(staleKey);
+            }
+
+            if (_recentToastKeys.TryGetValue(dedupeKey, out var lastShown) &&
+                now - lastShown < ToastDedupeWindow)
+            {
+                Logger.Info($"[ToastDeduper] Suppressed duplicate toast tag={toastTag} deviceId={normalizedDeviceId}");
+                return false;
+            }
+
+            _recentToastKeys[dedupeKey] = now;
         }
 
-        if (_recentToastKeys.TryGetValue(dedupeKey, out var lastShown) &&
-            now - lastShown < ToastDedupeWindow)
-        {
-            Logger.Info($"[ToastDeduper] Suppressed duplicate toast tag={toastTag} deviceId={normalizedDeviceId}");
-            return false;
-        }
-
-        _recentToastKeys[dedupeKey] = now;
         Logger.Info($"[ToastDeduper] Showing toast tag={toastTag} deviceId={normalizedDeviceId}");
         return true;
     }
