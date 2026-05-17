@@ -571,6 +571,13 @@ public sealed class DiagnosticsPageContractTests
         // Log mode re-checks both mode AND generation after the
         // background ReadLogTail call returns.
         Assert.Contains("_detailMode != DetailMode.Log || _detailGeneration != generation", cs);
+        // Manual refresh must also invalidate any in-flight read, otherwise
+        // rapid refresh clicks can let multiple reads append duplicate rows
+        // into the same detail view generation.
+        Assert.Matches(
+            new System.Text.RegularExpressions.Regex(
+                @"OnDetailRefresh[\s\S]{0,200}_detailGeneration\+\+[\s\S]{0,120}LoadLogFileAsync\(_detailGeneration\)"),
+            cs);
     }
 
     [Fact]

@@ -229,7 +229,11 @@ public sealed partial class DebugPage : Page
 
     private void OnDetailRefresh(object sender, RoutedEventArgs e)
     {
-        if (_detailMode == DetailMode.Log) _ = LoadLogFileAsync(_detailGeneration);
+        if (_detailMode == DetailMode.Log)
+        {
+            _detailGeneration++;
+            _ = LoadLogFileAsync(_detailGeneration);
+        }
     }
 
     private void OnDetailCopy(object sender, RoutedEventArgs e)
