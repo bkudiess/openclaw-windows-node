@@ -5,6 +5,7 @@ using OpenClaw.Shared;
 using OpenClaw.Shared.Capabilities;
 using OpenClawTray.Helpers;
 using OpenClawTray.Services;
+using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -37,6 +38,14 @@ public sealed partial class PermissionsPage : Page
     {
         HostnameText.Text = Environment.MachineName;
 
+        // Show "← Back to Connection" only when the user arrived from
+        // Connection's cross-page link; staying hidden when the rail nav
+        // is used keeps the page chrome quiet for direct navigation.
+        var hub = CurrentApp.ActiveHubWindow as HubWindow;
+        BackToConnectionLink.Visibility = hub?.LastNavigationOrigin == "connection"
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
         BindNodeModeMaster();
         BuildCapabilityToggles();
         UpdateMcpStatus();
@@ -48,6 +57,9 @@ public sealed partial class PermissionsPage : Page
         LoadExecPolicy();
         LoadAllowlist(CurrentApp.AppState?.Config);
     }
+
+    private void OnBackToConnectionClicked(object sender, RoutedEventArgs e)
+        => ((IAppCommands)CurrentApp).Navigate("connection");
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
@@ -85,7 +97,6 @@ public sealed partial class PermissionsPage : Page
 
     private void OnSettingsSaved(object? sender, EventArgs e)
     {
-        
         DispatcherQueue?.TryEnqueue(() =>
         {
             if (!IsLoaded) return;

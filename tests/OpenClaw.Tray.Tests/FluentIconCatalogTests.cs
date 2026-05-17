@@ -256,14 +256,18 @@ public sealed class TrayMenuPopupCompositionTests
     {
         var src = ReadHubWindowXaml();
 
-        var aliasIndex = src.IndexOf("if (tag == \"nodes\") tag = \"instances\";", StringComparison.Ordinal);
-        var selectIndex = src.IndexOf("FindAndSelectNavItem(NavView.MenuItems, tag)", StringComparison.Ordinal);
+        // Legacy "nodes" deep links must still land on the Instances rail
+        // item. The normalization rule lives in NormalizeNavTag, which
+        // NavigateTo applies before handing the tag to NavigateInternal
+        // (which is what actually highlights the rail item via
+        // FindNavItemForTag and calls Frame.Navigate).
+        var aliasIndex = src.IndexOf("if (tag == \"nodes\") return \"instances\";", StringComparison.Ordinal);
+        var funnelIndex = src.IndexOf("NavigateInternal(NormalizeNavTag(tag))", StringComparison.Ordinal);
+        var selectIndex = src.IndexOf("FindNavItemForTag(NavView.MenuItems, tag)", StringComparison.Ordinal);
 
-        Assert.True(aliasIndex >= 0, "NavigateTo must keep legacy nodes deep links working.");
-        Assert.True(selectIndex >= 0, "NavigateTo must select a nav item before falling back to direct navigation.");
-        Assert.True(
-            aliasIndex < selectIndex,
-            "Legacy nodes tag must be normalized before nav item selection so the Instances item is highlighted.");
+        Assert.True(aliasIndex >= 0, "NormalizeNavTag must keep legacy 'nodes' deep links pointing at 'instances'.");
+        Assert.True(funnelIndex >= 0, "NavigateTo must normalize the tag before routing through NavigateInternal.");
+        Assert.True(selectIndex >= 0, "NavigateInternal must select a nav item by tag before falling back to direct navigation.");
     }
 
     private static string GetRepositoryRoot()
