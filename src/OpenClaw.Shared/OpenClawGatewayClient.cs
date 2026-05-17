@@ -650,6 +650,40 @@ public class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatewayClient
             return TrySendTrackedRequestAsync("config.patch", new { raw });
     }
 
+    /// <summary>
+    /// Response-aware variant of <see cref="PatchConfigAsync"/>. Uses the
+    /// wizard request mechanism (<see cref="SendWizardRequestAsync"/>) so we
+    /// actually await the gateway's response and return a <see cref="ConfigPatchResult"/>
+    /// with the real error message on failure. The fire-and-forget
+    /// <see cref="PatchConfigAsync"/> stays for legacy callers that don't
+    /// care about the gateway's reply.
+    /// </summary>
+    public async Task<ConfigPatchResult> PatchConfigDetailedAsync(JsonElement fullConfig, string? baseHash, int timeoutMs = 15000)
+    {
+        var raw = fullConfig.GetRawText();
+        object payload = baseHash != null ? new { raw, baseHash } : (object)new { raw };
+        try
+        {
+            var response = await SendWizardRequestAsync("config.patch", payload, timeoutMs);
+            _logger.Info("config.patch succeeded");
+            return new ConfigPatchResult
+            {
+                Ok = true,
+                RawResponse = response.ValueKind == JsonValueKind.Undefined ? null : response.GetRawText(),
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"config.patch failed: {ex.Message}");
+            return new ConfigPatchResult
+            {
+                Ok = false,
+                Error = ex.Message,
+                RawResponse = ex.ToString(),
+            };
+        }
+    }
+
     // Agent methods
 
     public async Task RequestAgentsListAsync()

@@ -175,6 +175,8 @@ public sealed class OnboardingChatBootstrapperTests : IDisposable
         public Task RequestConfigSchemaAsync() => Task.CompletedTask;
         public Task<bool> SetConfigAsync(string path, object value) => Task.FromResult(false);
         public Task<bool> PatchConfigAsync(JsonElement fullConfig, string? baseHash) => Task.FromResult(false);
+        public Task<ConfigPatchResult> PatchConfigDetailedAsync(JsonElement fullConfig, string? baseHash, int timeoutMs = 15000) =>
+            Task.FromResult(new ConfigPatchResult { Ok = false, Error = "stub" });
         public Task RequestAgentsListAsync() => Task.CompletedTask;
         public Task RequestAgentFilesListAsync(string agentId = "main") => Task.CompletedTask;
         public Task RequestAgentFileGetAsync(string agentId, string name) => Task.CompletedTask;

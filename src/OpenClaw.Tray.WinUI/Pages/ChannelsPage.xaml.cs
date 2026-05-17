@@ -44,6 +44,27 @@ public sealed partial class ChannelsPage : Page
     private DateTime _latestSnapshotAt;
     private CancellationTokenSource? _refreshCts;
 
+    /// <summary>
+    /// Cached gateway config root (unwrapped from the config.get
+    /// <c>{ path, raw, parsed }</c> envelope). Required to build atomic
+    /// channel-config patches: the gateway only accepts whole-config writes
+    /// (<c>config.patch { raw, baseHash }</c>) so we have to splice channel
+    /// updates into the cached config rather than writing per-field.
+    /// </summary>
+    private JsonElement? _cachedConfigRoot;
+
+    /// <summary>baseHash (optimistic-concurrency token) for the cached config. Required by config.patch.</summary>
+    private string? _configBaseHash;
+
+    /// <summary>
+    /// Signals to anyone awaiting on a fresh config that the cache has been
+    /// updated. Used by <see cref="EnsureConfigLoadedAsync"/> so SaveAsync can
+    /// kick off a config.get and await the response within a bounded window
+    /// instead of failing if the user clicks Save before the page-warm fetch
+    /// completes.
+    /// </summary>
+    private TaskCompletionSource<bool>? _configLoadedTcs;
+
     /// <summary>Tracks the channel id for each Expander so per-channel pushes can target the right card.</summary>
     private readonly Dictionary<string, Expander> _expanderById = new(StringComparer.OrdinalIgnoreCase);
 
@@ -126,11 +147,22 @@ public sealed partial class ChannelsPage : Page
         if (cached != null)
             Render(cached);
 
+        // Adopt any config already in AppState so SaveAsync doesn't have to
+        // wait on a fresh fetch if the user goes straight to saving.
+        if (_appState?.Config is { } existingConfig)
+            CaptureConfigSnapshot(existingConfig);
+
         _ = RefreshAsync();
+
+        // Warm the config cache. Required by SaveAsync — the gateway only
+        // accepts full-config patches, so we need the current config + baseHash
+        // before we can write channel credentials.
+        if (CurrentApp.GatewayClient != null)
+            _ = CurrentApp.GatewayClient.RequestConfigAsync();
     }
 
     /// <summary>
-    /// React to <see cref="AppState"/> updates. Two properties matter:
+    /// React to <see cref="AppState"/> updates. Three properties matter:
     /// <list type="bullet">
     /// <item><see cref="AppState.ChannelsSnapshot"/> — the rich snapshot
     /// (Updated by us after a <c>channels.status</c> fetch; other surfaces
@@ -138,6 +170,10 @@ public sealed partial class ChannelsPage : Page
     /// <item><see cref="AppState.Channels"/> — slim per-event health array
     /// pushed by the gateway. Signals something changed; refresh the rich
     /// snapshot to keep metadata current.</item>
+    /// <item><see cref="AppState.Config"/> — full gateway config snapshot
+    /// (required by SaveAsync to build atomic config.patch payloads).
+    /// Unwrap into <see cref="_cachedConfigRoot"/> + <see cref="_configBaseHash"/>
+    /// and release any awaiters.</item>
     /// </list>
     /// </summary>
     private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
@@ -151,6 +187,80 @@ public sealed partial class ChannelsPage : Page
             case nameof(AppState.Channels):
                 _ = RefreshAsync(probe: false);
                 break;
+            case nameof(AppState.Config):
+                if (_appState?.Config is { } cfg)
+                    CaptureConfigSnapshot(cfg);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Unwrap the <c>config.get</c> envelope (<c>{ path, exists, raw, parsed }</c>)
+    /// into the actual config root plus the baseHash used by
+    /// <c>config.patch</c> for optimistic-concurrency. baseHash extraction
+    /// follows the same chain ConfigPage uses: prefer the gateway's
+    /// <c>baseHash</c> field, fall back to <c>hash</c>, fall back to
+    /// SHA256(raw).
+    /// </summary>
+    private void CaptureConfigSnapshot(JsonElement envelope)
+    {
+        var snapshot = envelope.Clone();
+        var root = snapshot.TryGetProperty("parsed", out var parsed) ? parsed
+            : (snapshot.TryGetProperty("config", out var inner) ? inner : snapshot);
+        _cachedConfigRoot = root.Clone();
+
+        string? baseHash = null;
+        if (snapshot.TryGetProperty("baseHash", out var bh) && bh.ValueKind == JsonValueKind.String)
+            baseHash = bh.GetString();
+        else if (snapshot.TryGetProperty("hash", out var hashEl) && hashEl.ValueKind == JsonValueKind.String)
+            baseHash = hashEl.GetString();
+        else if (snapshot.TryGetProperty("raw", out var rawEl) && rawEl.ValueKind == JsonValueKind.String)
+        {
+            var rawContent = rawEl.GetString();
+            if (rawContent != null)
+            {
+                var bytes = System.Text.Encoding.UTF8.GetBytes(rawContent);
+                var hash = System.Security.Cryptography.SHA256.HashData(bytes);
+                baseHash = Convert.ToHexStringLower(hash);
+            }
+        }
+        _configBaseHash = baseHash;
+
+        // Release anyone awaiting a fresh config.
+        var tcs = _configLoadedTcs;
+        if (tcs != null && !tcs.Task.IsCompleted)
+            tcs.TrySetResult(true);
+    }
+
+    /// <summary>
+    /// Block until a config snapshot is available, with a generous timeout
+    /// so users on slow gateways still get a definitive outcome rather than
+    /// a silent hang. Subscribes BEFORE firing the request so the
+    /// PropertyChanged callback can't race the await.
+    /// </summary>
+    private async Task<bool> EnsureConfigLoadedAsync(int timeoutMs = 5000)
+    {
+        if (_cachedConfigRoot.HasValue) return true;
+        var client = CurrentApp.GatewayClient;
+        if (client == null) return false;
+
+        // Subscribe FIRST to avoid the race where the response arrives
+        // between the request and the await.
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _configLoadedTcs = tcs;
+
+        try
+        {
+            _ = client.RequestConfigAsync();
+            var winner = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs));
+            return winner == tcs.Task && _cachedConfigRoot.HasValue;
+        }
+        finally
+        {
+            // Only clear if it's still ours — a parallel SaveAsync may have
+            // installed its own TCS in the meantime.
+            if (ReferenceEquals(_configLoadedTcs, tcs))
+                _configLoadedTcs = null;
         }
     }
 
@@ -230,9 +340,10 @@ public sealed partial class ChannelsPage : Page
         // failure with a real diagnostic. Empty-page-when-connected is the
         // worst of both worlds: no path forward AND no error to act on.
         //
-        // A small banner below (GatewayMissingChannelsBar) tells the user
-        // when their gateway returned an empty list so they know the
-        // preview channels may not all work.
+        // GuideBar (top InfoBar) doubles as the "your gateway didn't list any
+        // channels" hint AND the page intro: shown only when the snapshot is
+        // empty, hidden once the gateway reports at least one channel so the
+        // page stays clean for users past the initial-setup phase.
         var records = ChannelsAggregator.Aggregate(
             snapshot,
             _latestSnapshotAt == default ? DateTime.UtcNow : _latestSnapshotAt,
@@ -253,21 +364,15 @@ public sealed partial class ChannelsPage : Page
         AvailableSection.Visibility = available.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         EmptyState.Visibility = records.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        // Surface the "connected-but-empty-response" case so the user knows
-        // the channels below are a generic preview rather than a definitive
-        // list of what their gateway supports.
+        // Surface the "connected-but-empty-response" case on the merged
+        // GuideBar so the user knows the channels below are a generic preview
+        // rather than a definitive list of what their gateway supports. Also
+        // doubles as the page's "how channels work" intro for that state.
         var connected = CurrentApp.GatewayClient != null;
         var gatewayReportedSomething = snapshot.ChannelOrder.Count > 0
             || snapshot.Channels.Count > 0
             || (snapshot.ChannelMeta?.Count ?? 0) > 0;
-        if (connected && !gatewayReportedSomething && records.Count > 0)
-        {
-            GatewayMissingChannelsBar.IsOpen = true;
-        }
-        else
-        {
-            GatewayMissingChannelsBar.IsOpen = false;
-        }
+        GuideBar.IsOpen = connected && !gatewayReportedSomething && records.Count > 0;
 
         // Re-paint any pending save banner. Lives at page level so it survives
         // the per-channel Expander rebuild that just happened. If the save was
@@ -349,18 +454,13 @@ public sealed partial class ChannelsPage : Page
         string subtitle)
     {
         var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        // Channel icon — built via FluentIconCatalog.Build so the icon honors
-        // SymbolThemeFontFamily (Segoe Fluent Icons on Win11, MDL2 fallback on Win10).
-        // Size 22 px matches the Permissions row icon size in tokens.md.
-        var icon = FluentIconCatalog.Build(ChannelIconCatalog.ResolveGlyph(record.Id), size: 22);
-        icon.VerticalAlignment = VerticalAlignment.Center;
-        icon.Margin = new Thickness(0, 0, 12, 0);
-        Grid.SetColumn(icon, 0);
-        grid.Children.Add(icon);
+        // Per-channel brand icons removed: until we ship real channel logos
+        // (WhatsApp, Telegram, etc.) the generic Segoe Fluent glyphs are more
+        // noise than signal. The status dot below already communicates
+        // configured/running state without needing a per-channel mark.
 
         // Middle stack: top row (dot + name + badge) + subtitle
         var middle = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
@@ -393,7 +493,7 @@ public sealed partial class ChannelsPage : Page
                 TextTrimming = TextTrimming.CharacterEllipsis,
             });
         }
-        Grid.SetColumn(middle, 1);
+        Grid.SetColumn(middle, 0);
         grid.Children.Add(middle);
 
         // Header actions: Start (configured-but-stopped channels), Logout
@@ -409,7 +509,7 @@ public sealed partial class ChannelsPage : Page
             actions.Children.Add(BuildHeaderActionButton(FluentIconCatalog.ChannelStart, "Start", record.Id, channelId => { var _ignored = StartChannelAsync(channelId!); }));
         if (record.Capabilities.HasFlag(ChannelCapabilities.CanLogout))
             actions.Children.Add(BuildHeaderActionButton(FluentIconCatalog.ChannelLogout, "Logout", record.Id, channelId => { var _ignored = LogoutAsync(channelId!); }));
-        Grid.SetColumn(actions, 2);
+        Grid.SetColumn(actions, 1);
         grid.Children.Add(actions);
 
         return grid;
@@ -933,6 +1033,7 @@ public sealed partial class ChannelsPage : Page
 
             // Validate required + collect values from the inputs.
             var values = new List<(string Path, string Value)>();
+            var multilinePaths = new HashSet<string>(StringComparer.Ordinal);
             foreach (var field in fields)
             {
                 var raw = inputs[field.Path] switch
@@ -951,6 +1052,7 @@ public sealed partial class ChannelsPage : Page
                 }
                 if (string.IsNullOrWhiteSpace(raw)) continue;
                 values.Add((field.Path, raw.Trim()));
+                if (field.Multiline) multilinePaths.Add(field.Path);
             }
 
             if (values.Count == 0) return;
@@ -963,53 +1065,71 @@ public sealed partial class ChannelsPage : Page
                     InfoBarSeverity.Informational);
                 ApplyPendingSaveBanner();
 
-                var failures = new List<string>();
-                foreach (var (path, value) in values)
+                // Gateway v2026.5+ rejects per-field config.set { path, value }
+                // with "must have required property 'raw'". Build an atomic
+                // config.patch payload from the cached config + the user's
+                // new values, send it as a single round-trip, and surface
+                // the gateway's actual response.
+                if (!await EnsureConfigLoadedAsync())
                 {
-                    object payload = value;
-                    if (fields.FirstOrDefault(f => f.Path == path) is { Multiline: true })
-                    {
-                        var lines = value.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                            .Select(s => s.Trim())
-                            .Where(s => s.Length > 0)
-                            .ToArray();
-                        payload = lines;
-                    }
-                    var ok = await client.SetConfigAsync(path, payload);
-                    if (!ok) failures.Add(path);
-                }
-
-                // Gateway tests in the openclaw repo show channel configs
-                // commonly need `enabled: true` alongside credentials before
-                // the gateway will actually start the channel
-                // (e.g. src/commands/channels.adds-non-default-telegram-account.test.ts
-                // sets `telegram: { botToken, enabled: true }`). Write it
-                // after the credentials so the gateway sees a complete config.
-                if (failures.Count == 0)
-                {
-                    var enabledPath = $"channels.{record.Id}.enabled";
-                    var enabledOk = await client.SetConfigAsync(enabledPath, true);
-                    if (!enabledOk) failures.Add(enabledPath);
-                }
-
-                if (failures.Count > 0)
-                {
-                    _pendingSaveBanner = (record.Id, $"Save failed for {record.Id}",
-                        $"The gateway rejected: {string.Join(", ", failures)}. Try the Config page for direct JSON editing.",
+                    _pendingSaveBanner = (record.Id, $"Couldn't load gateway config",
+                        "The gateway didn't return its current config — can't safely save without it. Try Refresh and save again.",
                         InfoBarSeverity.Error);
                     ApplyPendingSaveBanner();
+                    return;
                 }
-                else
+
+                var updates = values.Select(v => (v.Path, (object)v.Value)).ToList();
+                var buildResult = ChannelConfigPatchBuilder.BuildPatch(
+                    _cachedConfigRoot!.Value,
+                    record.Id,
+                    updates,
+                    multilinePaths);
+
+                if (buildResult.BlockedReason != null)
                 {
-                    _pendingSaveBanner = (record.Id, $"{record.Id} config saved",
-                        "Waiting for the gateway to confirm the channel is running…",
-                        InfoBarSeverity.Success);
+                    _pendingSaveBanner = (record.Id, $"Save blocked for {record.Id}",
+                        buildResult.BlockedReason,
+                        InfoBarSeverity.Warning);
                     ApplyPendingSaveBanner();
-                    // Re-fetch the snapshot; Render() will upgrade the banner
-                    // to "running" if the channel transitioned, or downgrade
-                    // to "config saved but not running yet" if it didn't.
-                    await RefreshAsync(probe: true);
+                    return;
                 }
+
+                var patchResult = await client.PatchConfigDetailedAsync(buildResult.Patch!.Value, _configBaseHash);
+
+                if (!patchResult.Ok)
+                {
+                    var detail = patchResult.Error ?? "The gateway didn't respond.";
+                    var title = $"Save failed for {record.Id}";
+                    if (patchResult.LooksLikeStaleBaseHash)
+                    {
+                        // Config changed elsewhere. Refresh the cache so the
+                        // next retry uses a fresh baseHash.
+                        _ = client.RequestConfigAsync();
+                        _pendingSaveBanner = (record.Id, title,
+                            $"Your gateway config changed elsewhere (e.g., from the Config page). " +
+                            $"We refreshed the cache — try Save again. Details: {detail}",
+                            InfoBarSeverity.Warning);
+                    }
+                    else
+                    {
+                        _pendingSaveBanner = (record.Id, title,
+                            $"{detail} If this looks like a wire-format mismatch, open the Config page for direct JSON editing.",
+                            InfoBarSeverity.Error);
+                    }
+                    ApplyPendingSaveBanner();
+                    return;
+                }
+
+                _pendingSaveBanner = (record.Id, $"{record.Id} config saved",
+                    "Waiting for the gateway to confirm the channel is running…",
+                    InfoBarSeverity.Success);
+                ApplyPendingSaveBanner();
+                // Re-fetch config (so baseHash advances) + channels.status
+                // (so Render() can upgrade the banner to "running" if the
+                // channel transitioned).
+                _ = client.RequestConfigAsync();
+                await RefreshAsync(probe: true);
             }
             finally
             {

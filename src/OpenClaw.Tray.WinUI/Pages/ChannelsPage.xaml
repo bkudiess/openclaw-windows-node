@@ -54,16 +54,20 @@
                     </Button>
                 </Grid>
 
-                <!-- "How channels work" intro: always-open InfoBar that
-                     answers "what is this page" and exposes the canonical
-                     docs link via its ActionButton slot. Replaces the
-                     previous Border+HyperlinkButton card. -->
+                <!-- Merged guide / "gateway didn't list any channels" InfoBar.
+                     Shown only when the gateway returned an empty channels
+                     list (so the rows below are built-in previews, not a
+                     definitive supported-channels list). The title flags the
+                     state; the body explains how channels work; the action
+                     button opens the canonical docs. Hidden once the gateway
+                     reports at least one channel — no need to keep teaching
+                     the page to a user who's clearly past that point. -->
                 <InfoBar x:Uid="ChannelsPage_GuideBar"
                          x:Name="GuideBar"
                          Severity="Informational"
-                         IsOpen="True"
+                         IsOpen="False"
                          IsClosable="False"
-                         Title="How channels work"
+                         Title="Your gateway didn't list any channels"
                          Message="Channels are configured on your gateway. To add one, expand it below and fill in its credentials — the form saves directly to your gateway's config. The setup guide walks through each channel end-to-end.">
                     <InfoBar.ActionButton>
                         <HyperlinkButton x:Uid="ChannelsPage_DocsLink"
@@ -94,17 +98,6 @@
                          IsOpen="False"
                          IsClosable="True"/>
 
-                <!-- Shown when the gateway is connected but its channels.status
-                     response was empty. The list below is then a preview of
-                     common channels the user can attempt to configure. -->
-                <InfoBar x:Uid="ChannelsPage_GatewayMissingChannelsBar"
-                         x:Name="GatewayMissingChannelsBar"
-                         Severity="Informational"
-                         IsOpen="False"
-                         IsClosable="False"
-                         Title="Your gateway didn't list any channels"
-                         Message="Showing common channel types as a preview. Some may not be supported by your gateway — try one, and the error message will tell you if so."/>
-
                 <!-- ═════════════════════════════════════════════════════════
                      CONFIGURED GROUP — channels with active state
                      ═════════════════════════════════════════════════════════ -->
@@ -113,7 +106,7 @@
                                FontSize="11" FontWeight="SemiBold"
                                CharacterSpacing="80"
                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                               Margin="4,8,4,4"/>
+                               Margin="4,0,4,4"/>
                     <StackPanel x:Name="ConfiguredList" Spacing="8"/>
                 </StackPanel>
 
@@ -125,7 +118,7 @@
                                FontSize="11" FontWeight="SemiBold"
                                CharacterSpacing="80"
                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                               Margin="4,8,4,4"/>
+                               Margin="4,0,4,4"/>
                     <StackPanel x:Name="AvailableList" Spacing="8"/>
                 </StackPanel>
 

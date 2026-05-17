@@ -287,3 +287,35 @@ public sealed class ChannelStartResult
         Error != null &&
         Error.Contains("unknown channel", System.StringComparison.OrdinalIgnoreCase);
 }
+
+/// <summary>
+/// Result of <see cref="OpenClawGatewayClient.PatchConfigDetailedAsync"/>.
+///
+/// Distinguishes "patch dispatched" (the older fire-and-forget bool) from
+/// "patch was accepted by the gateway". Lets the inline channel save flow
+/// surface the gateway's actual error message — including the wire-format
+/// validation errors that fail silently with the legacy
+/// <c>config.set { path, value }</c> path on newer gateways.
+/// </summary>
+public sealed class ConfigPatchResult
+{
+    /// <summary>True when the gateway accepted the patch (responded ok:true).</summary>
+    public bool Ok { get; init; }
+
+    /// <summary>Gateway-side error message when <see cref="Ok"/> is false. Null on success.</summary>
+    public string? Error { get; init; }
+
+    /// <summary>Raw JSON of the gateway response (or stringified exception). For diagnostic disclosure.</summary>
+    public string? RawResponse { get; init; }
+
+    /// <summary>
+    /// True when the gateway rejected the patch because our baseHash was
+    /// stale (someone else changed the config out from under us). Pages
+    /// should refresh the cached config and prompt the user to retry.
+    /// </summary>
+    public bool LooksLikeStaleBaseHash =>
+        Error != null &&
+        (Error.Contains("baseHash", System.StringComparison.OrdinalIgnoreCase) ||
+         Error.Contains("stale", System.StringComparison.OrdinalIgnoreCase) ||
+         Error.Contains("conflict", System.StringComparison.OrdinalIgnoreCase));
+}
