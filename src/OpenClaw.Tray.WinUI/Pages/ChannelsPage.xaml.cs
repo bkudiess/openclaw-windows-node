@@ -93,6 +93,14 @@ public sealed partial class ChannelsPage : Page
     private (string ChannelId, string Title, string Message, InfoBarSeverity Severity)? _pendingSaveBanner;
 
     /// <summary>
+    /// True when the pending banner is from a control action (Start/Stop/Logout)
+    /// rather than a config Save. Render() must NOT rewrite the banner title to
+    /// "is running" or clear cached form values for action banners — that's
+    /// only correct for Save flows where the form was just submitted.
+    /// </summary>
+    private bool _pendingBannerIsAction;
+
+    /// <summary>
     /// Gates concurrent refreshes so a burst of channel-health pushes plus a user
     /// click don't trigger overlapping <c>channels.status</c> requests. The CTS
     /// only suppresses stale UI updates — the semaphore prevents duplicate calls.
@@ -117,6 +125,7 @@ public sealed partial class ChannelsPage : Page
         SaveBanner.Closed += (_, _) =>
         {
             _pendingSaveBanner = null;
+            _pendingBannerIsAction = false;
             SaveBanner.Visibility = Visibility.Collapsed;
         };
         ErrorBar.Closed += (_, _) => ErrorBar.Visibility = Visibility.Collapsed;
@@ -423,10 +432,16 @@ public sealed partial class ChannelsPage : Page
         // banner to "running" so the user gets confirmation; if it didn't,
         // change to a warning so the user knows the gateway accepted config
         // but didn't actually start the channel.
+        //
+        // The "upgrade to 'is running'" path is ONLY safe for Save-flow banners.
+        // For control-action banners (Stop/Start/Logout) the title is already
+        // truthful ("X stopped", "X starting…") and rewriting it would lie about
+        // state — especially after Stop, where the override would say "is running"
+        // and additionally wipe the user's cached form drafts.
         if (_pendingSaveBanner is { } pending)
         {
             var record = records.FirstOrDefault(r => string.Equals(r.Id, pending.ChannelId, StringComparison.OrdinalIgnoreCase));
-            if (pending.Severity == InfoBarSeverity.Success && record != null && !record.IsConfigured)
+            if (!_pendingBannerIsAction && pending.Severity == InfoBarSeverity.Success && record != null && !record.IsConfigured)
             {
                 // Gateway accepted config.set but the channel still isn't
                 // configured/running. Don't lie about it.
@@ -434,7 +449,7 @@ public sealed partial class ChannelsPage : Page
                 SaveBanner.Title = $"{pending.ChannelId}: config saved, but not running yet";
                 SaveBanner.Message = "The gateway accepted the settings but didn't start the channel. Expand the channel below — the Status section and the diagnostic disclosure will show why.";
             }
-            else if (pending.Severity == InfoBarSeverity.Success && record != null && record.IsConfigured)
+            else if (!_pendingBannerIsAction && pending.Severity == InfoBarSeverity.Success && record != null && record.IsConfigured)
             {
                 SaveBanner.Severity = InfoBarSeverity.Success;
                 SaveBanner.Title = $"{pending.ChannelId} is running";
@@ -468,21 +483,99 @@ public sealed partial class ChannelsPage : Page
 
     private Expander BuildExpander(ChannelRecord record)
     {
-        var (dotBrushKey, badgeText, badgeSeverity, subtitle) = ResolveHeaderState(record);
+        var (dotBrushKey, badgeText, badgeSeverity, subtitles) = ResolveHeaderState(record);
 
-        var header = BuildHeader(record, dotBrushKey, badgeText, badgeSeverity, subtitle);
+        var header = BuildHeader(record, dotBrushKey, badgeText, badgeSeverity, subtitles);
         var body = BuildBody(record);
 
+        // Symmetric 24 px horizontal padding — matches the Fluent 2 page
+        // gutter and the design-skill tokens.md "card padding" norm.
+        //
+        // Vertical padding scales with how "rich" the card is:
+        //   * Configured channels (isRichRow=true)   → 32 px top/bottom
+        //     gives the title + multi-line activity strip real breathing
+        //     room from the card chrome. 24 was reading as "title too
+        //     close to top border, last subtitle too close to bottom" in
+        //     manual review.
+        //   * Unconfigured previews (compact)        → 24 px top/bottom
+        //     a single-tagline card doesn't need the same vertical room;
+        //     keeping previews compact preserves the visual asymmetry
+        //     that signals "this is just a discoverability suggestion,
+        //     not a real-state card".
+        //
+        // Using IsConfigured rather than subtitle count handles the
+        // malformed-status edge case where a configured channel happens
+        // to return an empty subtitle list (still deserves the
+        // configured-card padding).
+        var isRichRow = record.IsConfigured || subtitles.Count >= 2;
         var expander = new Expander
         {
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             IsExpanded = _expandedIds.Contains(record.Id),
+            Padding = isRichRow
+                ? new Thickness(24, 32, 24, 32)
+                : new Thickness(24, 24, 24, 24),
             Header = header,
             Content = body,
         };
         expander.Expanding += (_, _) => _expandedIds.Add(record.Id);
         expander.Collapsed += (_, _) => _expandedIds.Remove(record.Id);
+
+        // ──────────────────────────────────────────────────────────────────
+        // WinUI Expander template gotcha
+        // ──────────────────────────────────────────────────────────────────
+        // Setting `Expander.Padding` ONLY pads the expanded body content —
+        // it does NOT touch the always-visible header. The template's
+        // ExpanderHeader uses two theme resources baked into its setters:
+        //
+        //   ExpanderHeaderPadding        default: (16, 0, 8, 0)  ← 0 V !
+        //   ExpanderHeaderMinHeight      default: 64 px
+        //
+        // The 0 top/bottom padding plus MinHeight=64 leaves the title
+        // visually pinned ~8 px from the card border regardless of what
+        // we set on Padding. A pixel-measured baseline confirmed the
+        // Telegram card had ~7 px above the title and ~2 px below the
+        // last subtitle, even with `Padding = (24, 32, 24, 32)`.
+        //
+        // Local Resources["ExpanderHeaderPadding"] = ... DOES NOT work
+        // here: the template setter resolves the ThemeResource lookup
+        // when the style/template is applied (control loaded), which
+        // happens before / outside the visual subtree where our local
+        // Resources are visible. Verified empirically in this codebase —
+        // overriding via Resources left the card pixel-identical.
+        //
+        // The robust fix is to apply Margin to the header element
+        // itself. Margin lives INSIDE the template's ContentPresenter
+        // and stacks ON TOP OF whatever ExpanderHeaderPadding the
+        // template applies, so the header content always gets at least
+        // `headerVPadding` px of breathing room above and below.
+        //
+        // Calibration (verified empirically by screenshot pixel-counting
+        // at 100% DPI on the OpenClaw hub window):
+        //
+        //   Margin     Telegram-card visible (top / bottom)
+        //   ──────    ──────────────────────────────────────
+        //   32         48 px / 45 px   (much too generous)
+        //   16         28 px / 25 px   (top hits floor of range)
+        //   20         32 px / 29 px   (lands cleanly in 28-32 ✓)
+        //
+        // The Expander template adds an effectively-fixed ~12 px on top
+        // and ~9 px on bottom on top of our Margin (chevron column
+        // intrinsic centering + ContentRoot Grid measurement). That
+        // means setting Margin=20 delivers the 32/29 px of visible
+        // breathing room the design called for, with ~3 px of natural
+        // asymmetry due to text-descender pixels being included in the
+        // bottom measurement (cap-height-to-border reads visually
+        // symmetric).
+        //
+        // For compact (unconfigured) cards we scale down to keep the
+        // intentional "this is just a discoverability suggestion"
+        // asymmetry from the original design: Margin=14 lands ~24/21
+        // visible — close to the originally-intended 24/24 once the
+        // template overhead is accounted for.
+        var headerVPadding = isRichRow ? 20.0 : 14.0;
+        header.Margin = new Thickness(0, headerVPadding, 0, headerVPadding);
 
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(expander, record.Label);
         _expanderById[record.Id] = expander;
@@ -494,66 +587,81 @@ public sealed partial class ChannelsPage : Page
         string dotBrushKey,
         string badgeText,
         BadgeSeverity badgeSeverity,
-        string subtitle)
+        IReadOnlyList<string> subtitles)
     {
-        var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        // Win 11 Settings-style header layout: 2 columns. With all action
+        // buttons moved into a CONTROLS section at the top of the body,
+        // the header is now pure status:
+        //
+        //   Col 0: status dot      (Auto)
+        //   Col 1: title + subtitle stack (1*)
+        //
+        // The expand chevron is rendered by the Expander template at the
+        // right edge — outside our Grid.
+        var grid = new Grid { ColumnSpacing = 12 };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        // Per-channel brand icons removed: until we ship real channel logos
-        // (WhatsApp, Telegram, etc.) the generic Segoe Fluent glyphs are more
-        // noise than signal. The status dot below already communicates
-        // configured/running state without needing a per-channel mark.
-
-        // Middle stack: top row (dot + name + badge) + subtitle
-        var middle = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-
-        var topRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        // Column 0: status dot. Top-aligned so it sits with the title row,
+        // not vertically centered with the whole content stack (which
+        // would float it down between subtitle lines on rich cards).
+        // 6 px top offset aligns the dot's vertical center with the
+        // BodyStrongTextBlockStyle title's cap-height baseline.
         var dot = new Ellipse
         {
-            // 12 px diameter on cards per tokens.md.
             Width = 12, Height = 12,
-            VerticalAlignment = VerticalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 6, 0, 0),
         };
         if (Application.Current.Resources[dotBrushKey] is Brush brush) dot.Fill = brush;
-        topRow.Children.Add(dot);
+        Grid.SetColumn(dot, 0);
+        grid.Children.Add(dot);
+
+        // Column 1: title + subtitle stack. Top-aligned so the title row
+        // is at a predictable top distance from the card chrome on both
+        // short (1-subtitle) and tall (3-subtitle) cards.
+        //
+        // Two-tier rhythm:
+        //   * Spacing=8 between top row and subtitle group (groups feel
+        //     related but distinct from the title row)
+        //   * Subtitle lines themselves cluster at Spacing=4 inside a
+        //     nested stack (related metadata reads as a paragraph, not
+        //     three independent rows)
+        var textColumn = new StackPanel
+        {
+            Spacing = 8,
+            VerticalAlignment = VerticalAlignment.Top,
+        };
+
+        var topRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
         topRow.Children.Add(new TextBlock
         {
             Text = record.Label,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"],
             VerticalAlignment = VerticalAlignment.Center,
         });
         topRow.Children.Add(BuildBadge(badgeText, badgeSeverity));
-        middle.Children.Add(topRow);
+        textColumn.Children.Add(topRow);
 
-        if (!string.IsNullOrEmpty(subtitle))
+        if (subtitles.Count > 0)
         {
-            middle.Children.Add(new TextBlock
+            var subtitleStack = new StackPanel { Spacing = 4 };
+            foreach (var line in subtitles)
             {
-                Text = subtitle,
-                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
-                Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-                TextTrimming = TextTrimming.CharacterEllipsis,
-            });
+                if (string.IsNullOrEmpty(line)) continue;
+                subtitleStack.Children.Add(new TextBlock
+                {
+                    Text = line,
+                    Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+                    Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                });
+            }
+            if (subtitleStack.Children.Count > 0)
+                textColumn.Children.Add(subtitleStack);
         }
-        Grid.SetColumn(middle, 0);
-        grid.Children.Add(middle);
-
-        // Header actions: Start (configured-but-stopped channels), Logout
-        // (configured channels with a session to end). Per-channel Refresh
-        // was dropped in favor of the page-level Refresh-all in the toolbar.
-        var actions = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 6,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        if (record.Capabilities.HasFlag(ChannelCapabilities.CanStart))
-            actions.Children.Add(BuildHeaderActionButton(FluentIconCatalog.ChannelStart, "Start", record.Id, channelId => { var _ignored = StartChannelAsync(channelId!); }));
-        if (record.Capabilities.HasFlag(ChannelCapabilities.CanLogout))
-            actions.Children.Add(BuildHeaderActionButton(FluentIconCatalog.ChannelLogout, "Logout", record.Id, channelId => { var _ignored = LogoutAsync(channelId!); }));
-        Grid.SetColumn(actions, 1);
-        grid.Children.Add(actions);
+        Grid.SetColumn(textColumn, 1);
+        grid.Children.Add(textColumn);
 
         return grid;
     }
@@ -603,27 +711,55 @@ public sealed partial class ChannelsPage : Page
         };
     }
 
-    private Button BuildHeaderActionButton(string glyph, string label, string? tag, Action<string?> handler)
+    private Button BuildHeaderActionButton(string glyph, string label, string? tag, Func<string?, Task> handler)
     {
+        // Real WinUI command button — not a caption-sized chip. Specs from
+        // the Fluent critique: MinHeight=32 (standard control height),
+        // 16 px icon (legible — was 12), BodyTextBlockStyle for the label
+        // (looks tappable — caption made it read as inline metadata),
+        // 12 px horizontal padding (matches default Button rhythm).
         var btn = new Button
         {
-            Padding = new Thickness(8, 4, 8, 4),
+            MinHeight = 32,
+            Padding = new Thickness(12, 5, 12, 5),
             Tag = tag,
+            VerticalAlignment = VerticalAlignment.Center,
         };
-        var stack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
-        // Use FluentIconCatalog.Build so the icon honors SymbolThemeFontFamily.
-        var icon = FluentIconCatalog.Build(glyph, size: 12);
+        var stack = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var icon = FluentIconCatalog.Build(glyph, size: 16);
         stack.Children.Add(icon);
         stack.Children.Add(new TextBlock
         {
             Text = label,
-            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            Style = (Style)Application.Current.Resources["BodyTextBlockStyle"],
+            VerticalAlignment = VerticalAlignment.Center,
         });
         btn.Content = stack;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(btn, label);
-        btn.Click += (s, _) =>
+        // Reentrancy guard — disable the button while the async handler runs
+        // so a rapid double-click can't send duplicate gateway commands (or,
+        // for handlers that show a ContentDialog, crash with COMException
+        // because WinUI doesn't allow two simultaneous ShowAsync calls).
+        // The button is rebuilt on every Render(), so even if a re-enable
+        // race orphans this instance, the next render gets a fresh button.
+        btn.Click += async (s, _) =>
         {
-            handler(((Button)s).Tag as string);
+            var clicked = (Button)s;
+            if (!clicked.IsEnabled) return;
+            clicked.IsEnabled = false;
+            try
+            {
+                await handler(clicked.Tag as string);
+            }
+            finally
+            {
+                clicked.IsEnabled = true;
+            }
         };
         return btn;
     }
@@ -646,6 +782,15 @@ public sealed partial class ChannelsPage : Page
             return stack;
         }
 
+        // CONTROLS section — every state-changing action for configured
+        // channels lives here, at the TOP of the body. Header has no
+        // action buttons; the chevron is the only header-level
+        // affordance. This gives every card the same mental model:
+        // expand to act, header to read state.
+        var controls = BuildControlsSection(record);
+        if (controls != null)
+            stack.Children.Add(controls);
+
         // Getting started — only for unconfigured channels. The user doesn't
         // need to read setup instructions for something that's already running.
         if (!record.IsConfigured)
@@ -654,8 +799,11 @@ public sealed partial class ChannelsPage : Page
             if (guide != null) stack.Children.Add(guide);
         }
 
-        // Status section
-        stack.Children.Add(BuildSection("Status", BuildStatusKv(record)));
+        // Status K-V section removed entirely. With the multi-line activity
+        // strip on the card surface (Polling mode · Last event 23 s ago · …)
+        // there's no remaining value in repeating the same data as a key/
+        // value grid inside the expander body, regardless of configured
+        // state.
 
         // Linking section (WhatsApp/Signal) — body is built lazily when the user opens the section.
         if (record.Capabilities.HasFlag(ChannelCapabilities.CanShowQr))
@@ -663,21 +811,145 @@ public sealed partial class ChannelsPage : Page
 
         // Configuration section — inline credential form for channels we have
         // explicit field definitions for (Telegram bot token, Discord webhook,
-        // Slack tokens, Google Chat webhook, Nostr key/relays). For unknown
-        // plugin channels we fall back to the "Open Config page" stub.
+        // Slack tokens, Google Chat webhook, Nostr key/relays).
+        //
+        // For configured channels the section header reads "Replace
+        // credentials" so the form's purpose is clear; for unconfigured
+        // channels it reads "Configuration" because that's where the
+        // channel becomes configured in the first place.
         var inlineForm = BuildInlineConfigForm(record);
-        stack.Children.Add(BuildSection("Configuration", inlineForm));
+        var configSectionTitle = record.IsConfigured ? "Replace credentials" : "Configuration";
+        stack.Children.Add(BuildSection(configSectionTitle, inlineForm));
 
-        // "Install plugin on your gateway" panel. Gateway doesn't expose
-        // plugin install over the operator wire (verified: src/gateway/
-        // server-methods-list.ts only exposes channels.{status,start,stop,
-        // logout}), so this panel surfaces the exact CLI command the user
-        // needs to run on the gateway host — with a one-click Copy button.
-        // Collapsed by default for healthy/running channels; auto-expanded
-        // when the channel isn't running yet so the user spots it.
-        stack.Children.Add(BuildInstallPluginPanel(record));
+        // "Install plugin on your gateway" panel. Hidden entirely when the
+        // channel is already running — if it's up, the plugin is provably
+        // loaded and showing install instructions is misleading. Shown for
+        // unconfigured channels (plugin state unknown) AND for configured-
+        // but-not-running channels (missing plugin is one likely cause).
+        if (!record.IsRunning)
+            stack.Children.Add(BuildInstallPluginPanel(record));
 
         return stack;
+    }
+
+    /// <summary>
+    /// CONTROLS section — every state-changing action for the channel,
+    /// grouped at the top of the expanded body. Returns null for
+    /// unconfigured channels (nothing meaningful to "control" yet) and
+    /// for channels with no applicable actions.
+    ///
+    /// Contents per channel state:
+    ///   * Configured + running, non-QR  → [Stop] + [Disconnect and forget credentials]
+    ///   * Configured + not running, non-QR → [Start] + [Disconnect and forget credentials]
+    ///   * Configured + running, QR (WhatsApp/Signal) → [Logout] (the QR-flow analog of Stop; unlinks the device, scan a fresh QR to relink)
+    ///   * Configured + linked-but-not-connected, QR → [Logout]
+    /// </summary>
+    private FrameworkElement? BuildControlsSection(ChannelRecord record)
+    {
+        if (!record.IsConfigured) return null;
+
+        var caps = record.Capabilities;
+        var hasStart = caps.HasFlag(ChannelCapabilities.CanStart);
+        var hasStop = caps.HasFlag(ChannelCapabilities.CanStop);
+        var hasLogout = caps.HasFlag(ChannelCapabilities.CanLogout);
+        var isQr = caps.HasFlag(ChannelCapabilities.CanShowQr);
+
+        if (!hasStart && !hasStop && !hasLogout) return null;
+
+        var stack = new StackPanel { Spacing = 8 };
+
+        // Caption explains the action set at a glance — what's the
+        // lightweight option vs the destructive one. Keeps users from
+        // accidentally clicking Disconnect when they meant Stop.
+        string caption;
+        if (isQr && hasLogout)
+        {
+            caption = "Unlink this device from the channel. Scan a fresh QR to reconnect — your account stays paired on your phone.";
+        }
+        else if (hasStop && hasLogout)
+        {
+            caption = "Pause the channel temporarily — credentials are kept so you can start it again. Or disconnect entirely to clear them.";
+        }
+        else if (hasStart && hasLogout)
+        {
+            caption = "Start the channel — it'll begin handling messages with the stored credentials. Or disconnect entirely to clear them.";
+        }
+        else if (hasStop)
+        {
+            caption = "Pause the channel — credentials are kept so you can start it again.";
+        }
+        else if (hasStart)
+        {
+            caption = "Start the channel — it'll begin handling messages with the stored credentials.";
+        }
+        else
+        {
+            caption = "";
+        }
+
+        if (!string.IsNullOrEmpty(caption))
+        {
+            stack.Children.Add(new TextBlock
+            {
+                Text = caption,
+                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+                Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
+
+        var buttonRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+
+        if (hasStart)
+            buttonRow.Children.Add(BuildHeaderActionButton(FluentIconCatalog.ChannelStart, "Start", record.Id, channelId => StartChannelAsync(channelId!)));
+        if (hasStop)
+        {
+            var stopBtn = new Button
+            {
+                Content = "Stop",
+                MinHeight = 32,
+                Padding = new Thickness(12, 5, 12, 5),
+            };
+            // Reentrancy guard — see BuildHeaderActionButton for rationale.
+            stopBtn.Click += async (_, _) =>
+            {
+                if (!stopBtn.IsEnabled) return;
+                stopBtn.IsEnabled = false;
+                try { await StopChannelAsync(record.Id); }
+                finally { stopBtn.IsEnabled = true; }
+            };
+            buttonRow.Children.Add(stopBtn);
+        }
+
+        // QR channels: Logout = unlink the device (lightweight, can re-scan QR).
+        // Non-QR channels: Logout = clear credentials (destructive — label says so).
+        if (hasLogout && isQr)
+        {
+            buttonRow.Children.Add(BuildHeaderActionButton(FluentIconCatalog.ChannelLogout, "Logout", record.Id, channelId => LogoutAsync(channelId!, isQr: true)));
+        }
+        else if (hasLogout && !isQr)
+        {
+            var disconnectBtn = new Button
+            {
+                Content = "Disconnect and forget credentials",
+                MinHeight = 32,
+                Padding = new Thickness(12, 5, 12, 5),
+            };
+            // Reentrancy guard is especially important here — LogoutAsync shows
+            // a ContentDialog, and WinUI throws COMException if a second
+            // ShowAsync starts before the first closes.
+            disconnectBtn.Click += async (_, _) =>
+            {
+                if (!disconnectBtn.IsEnabled) return;
+                disconnectBtn.IsEnabled = false;
+                try { await LogoutAsync(record.Id, isQr: false); }
+                finally { disconnectBtn.IsEnabled = true; }
+            };
+            buttonRow.Children.Add(disconnectBtn);
+        }
+
+        stack.Children.Add(buttonRow);
+        return BuildSection("Controls", stack);
     }
 
     private static FrameworkElement BuildSection(string title, FrameworkElement content)
@@ -1080,6 +1352,11 @@ public sealed partial class ChannelsPage : Page
 
         async Task SaveAsync()
         {
+            // This is a Save flow — let Render upgrade the success banner to
+            // "is running" / "config saved, but not running yet" and clear
+            // cached form drafts on success.
+            _pendingBannerIsAction = false;
+
             var client = CurrentApp.GatewayClient;
             if (client == null)
             {
@@ -1675,41 +1952,24 @@ public sealed partial class ChannelsPage : Page
     }
 
     /// <summary>
-    /// Collapsible "Install plugin on your gateway" panel. The gateway doesn't
-    /// expose plugin install over the operator wire (verified against
+    /// "Install plugin on your gateway" section. The gateway doesn't expose
+    /// plugin install over the operator wire (verified against
     /// <c>openclaw/src/gateway/server-methods-list.ts</c> — only
     /// <c>channels.{status,start,stop,logout}</c> and <c>config.*</c> are
-    /// available), so this panel shows the exact CLI command the user needs
-    /// to run on the gateway host, plus a one-click Copy button and a docs
-    /// link. Auto-expands on channels that aren't running yet — that's
-    /// usually the trigger for "did I forget to install the plugin?".
+    /// available), so this section shows the exact CLI command the user
+    /// needs to run on the gateway host, plus a one-click Copy button and
+    /// a docs link.
+    ///
+    /// Renders as a flat section (no nested Expander) — the channel card
+    /// is itself the Expander, and stacking an Expander inside an Expander
+    /// is the "open a card to open another card" anti-pattern. Callers
+    /// already gate the call: <see cref="BuildBody"/> only invokes this
+    /// when <c>!record.IsRunning</c>.
     /// </summary>
     private FrameworkElement BuildInstallPluginPanel(ChannelRecord record)
     {
         var pkg = $"@openclaw/{record.Id}";
         var cmd = $"openclaw plugins install {pkg}";
-
-        var expander = new Expander
-        {
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            // Auto-expand for channels that aren't running — that's the case
-            // where "did I install the plugin?" is the most likely question.
-            IsExpanded = !record.IsRunning,
-        };
-
-        var headerRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var icon = FluentIconCatalog.Build(FluentIconCatalog.ChannelInstall, 16);
-        icon.VerticalAlignment = VerticalAlignment.Center;
-        icon.Foreground = (Brush)Application.Current.Resources["AccentTextFillColorPrimaryBrush"];
-        headerRow.Children.Add(icon);
-        headerRow.Children.Add(new TextBlock
-        {
-            Text = "Install plugin on your gateway",
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            VerticalAlignment = VerticalAlignment.Center,
-        });
-        expander.Header = headerRow;
 
         var body = new StackPanel { Spacing = 10 };
 
@@ -1778,39 +2038,122 @@ public sealed partial class ChannelsPage : Page
         };
         body.Children.Add(docsLink);
 
-        expander.Content = body;
-        return expander;
+        return BuildSection("Install plugin on your gateway", body);
     }
 
-    private async Task LogoutAsync(string channelId)
+    private async Task LogoutAsync(string channelId, bool isQr)
     {
         var client = CurrentApp.GatewayClient;
         if (client == null)
         {
             ErrorBar.Title = "Not connected";
-            ErrorBar.Message = "Connect to a gateway before logging out.";
+            ErrorBar.Message = isQr
+                ? "Connect to a gateway before unlinking this device."
+                : "Connect to a gateway before disconnecting this channel.";
             SetInfoBarOpen(ErrorBar, true);
             return;
         }
+        // QR channels: Logout = unlink the device (lightweight — re-scan a
+        // new QR to reconnect, your account stays paired on your phone).
+        // Non-QR channels: Logout = forget stored credentials (destructive —
+        // you'll need to re-enter the bot token / webhook URL to reconnect).
         var dialog = new ContentDialog
         {
-            Title = $"Log out of {channelId}?",
-            Content = "This will sign out the channel. You can relink afterwards.",
-            PrimaryButtonText = "Log out",
+            Title = isQr
+                ? $"Unlink {channelId} from this device?"
+                : $"Disconnect {channelId} and forget credentials?",
+            Content = isQr
+                ? "This unlinks the channel from this device. Your account stays paired on your phone — scan a fresh QR to reconnect."
+                : "This signs out the channel and clears the stored credentials. You'll need to re-enter them to reconnect.",
+            PrimaryButtonText = isQr ? "Unlink" : "Disconnect",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = XamlRoot,
         };
-        var result = await dialog.ShowAsync();
+        ContentDialogResult result;
+        try
+        {
+            result = await dialog.ShowAsync();
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            // A ContentDialog is already on screen (double-click race). Drop
+            // this invocation silently — the first dialog will drive the action.
+            return;
+        }
         if (result != ContentDialogResult.Primary) return;
 
         var ok = await client.LogoutChannelAsync(channelId);
         if (!ok)
         {
-            ErrorBar.Title = "Logout failed";
-            ErrorBar.Message = $"Could not log out of {channelId}. The gateway may not support this action.";
+            ErrorBar.Title = isQr ? "Unlink failed" : "Disconnect failed";
+            ErrorBar.Message = isQr
+                ? $"Could not unlink {channelId}. The gateway may not support this action."
+                : $"Could not disconnect {channelId}. The gateway may not support this action.";
             SetInfoBarOpen(ErrorBar, true);
         }
+        await RefreshAsync(probe: false);
+    }
+
+    /// <summary>
+    /// Pause a running channel via <c>channels.stop</c>. Lightweight
+    /// counterpart to <see cref="LogoutAsync"/> — keeps credentials in
+    /// the gateway config so the channel can be started again later
+    /// without re-entering the bot token / webhook URL / etc. Wired to
+    /// the "Stop" button in the body CONTROLS section on non-QR running
+    /// channels (Telegram, Discord, Slack, GoogleChat, Nostr); for
+    /// WhatsApp/Signal the analogous action is Logout (unlinks the device).
+    /// </summary>
+    private async Task StopChannelAsync(string channelId)
+    {
+        // Action-flow banner — Render must not rewrite the title to "is running"
+        // or clear form drafts (see _pendingBannerIsAction docs).
+        _pendingBannerIsAction = true;
+
+        var client = CurrentApp.GatewayClient;
+        if (client == null)
+        {
+            _pendingSaveBanner = (channelId, "Not connected",
+                "Connect to a gateway before stopping channels.",
+                InfoBarSeverity.Error);
+            ApplyPendingSaveBanner();
+            return;
+        }
+
+        _pendingSaveBanner = (channelId, $"Stopping {channelId}…",
+            "Asking the gateway to pause this channel. Credentials are kept so you can start it again.",
+            InfoBarSeverity.Informational);
+        ApplyPendingSaveBanner();
+
+        bool ok;
+        try
+        {
+            ok = await client.StopChannelAsync(channelId);
+        }
+        catch (Exception ex)
+        {
+            // Don't let the network exception become an unobserved task fault —
+            // the user clicked Stop, they deserve to see why it didn't work.
+            _pendingSaveBanner = (channelId, $"Couldn't stop {channelId}",
+                $"Lost connection to the gateway while stopping ({ex.GetType().Name}). Try Refresh.",
+                InfoBarSeverity.Error);
+            ApplyPendingSaveBanner();
+            return;
+        }
+
+        if (!ok)
+        {
+            _pendingSaveBanner = (channelId, $"Couldn't stop {channelId}",
+                "The gateway didn't accept channels.stop. Try Refresh or check the gateway log.",
+                InfoBarSeverity.Error);
+            ApplyPendingSaveBanner();
+            return;
+        }
+
+        _pendingSaveBanner = (channelId, $"{channelId} stopped",
+            "Channel paused. Press Start to resume — credentials are kept.",
+            InfoBarSeverity.Success);
+        ApplyPendingSaveBanner();
         await RefreshAsync(probe: false);
     }
 
@@ -1825,6 +2168,9 @@ public sealed partial class ChannelsPage : Page
     /// </summary>
     private async Task StartChannelAsync(string channelId)
     {
+        // Action-flow banner (see _pendingBannerIsAction docs).
+        _pendingBannerIsAction = true;
+
         var client = CurrentApp.GatewayClient;
         if (client == null)
         {
@@ -1873,7 +2219,7 @@ public sealed partial class ChannelsPage : Page
 
     // ─── Header state resolution (dot color, badge, subtitle) ─────────────
 
-    private static (string DotBrushKey, string BadgeText, BadgeSeverity Severity, string Subtitle) ResolveHeaderState(ChannelRecord record)
+    private static (string DotBrushKey, string BadgeText, BadgeSeverity Severity, IReadOnlyList<string> Subtitles) ResolveHeaderState(ChannelRecord record)
     {
         var raw = record.RawStatus;
 
@@ -1881,15 +2227,17 @@ public sealed partial class ChannelsPage : Page
         // forms (connected / connecting / disconnected / reconnecting, etc.).
         // Stays consistent with the tray/Mission-Control status lines.
 
+        IReadOnlyList<string> Single(string s) => new[] { s };
+
         // Unavailable on this OS short-circuit
         if (record.IsUnavailableOnWindows)
-            return ("SystemFillColorNeutralBrush", "unavailable on Windows", BadgeSeverity.Neutral, "Requires a macOS host");
+            return ("SystemFillColorNeutralBrush", "unavailable on Windows", BadgeSeverity.Neutral, Single(ResolveTagline(record.Id)));
 
         if (raw.ValueKind != JsonValueKind.Object)
         {
             return record.IsConfigured
-                ? ("SystemFillColorSuccessBrush", "configured", BadgeSeverity.Success, "")
-                : ("SystemFillColorNeutralBrush", "not configured", BadgeSeverity.Neutral, "Click to expand and configure");
+                ? ("SystemFillColorSuccessBrush", "configured", BadgeSeverity.Success, Array.Empty<string>())
+                : ("SystemFillColorNeutralBrush", "not configured", BadgeSeverity.Neutral, Single(ResolveTagline(record.Id)));
         }
 
         var running = GetBool(raw, "running");
@@ -1900,72 +2248,122 @@ public sealed partial class ChannelsPage : Page
 
         // Error path
         if (!string.IsNullOrEmpty(lastError) && running != true)
-            return ("SystemFillColorCriticalBrush", "error", BadgeSeverity.Critical, BuildErrorSubtitle(raw, lastError!));
+            return ("SystemFillColorCriticalBrush", "error", BadgeSeverity.Critical, BuildErrorSubtitleLines(raw, lastError!));
 
         // WhatsApp-style flow: linked/connected
         if (record.Capabilities.HasFlag(ChannelCapabilities.CanShowQr))
         {
-            if (configured == false) return ("SystemFillColorNeutralBrush", "not configured", BadgeSeverity.Neutral, "Click to expand and configure");
-            if (linked == false) return ("SystemFillColorCriticalBrush", "not linked", BadgeSeverity.Critical, "Scan a QR to link this device");
-            if (connected == true) return ("SystemFillColorSuccessBrush", "connected", BadgeSeverity.Success, BuildWhatsAppSubtitle(raw));
-            if (running == true) return ("SystemFillColorCautionBrush", "running", BadgeSeverity.Caution, BuildWhatsAppSubtitle(raw));
-            return ("SystemFillColorCautionBrush", "linked", BadgeSeverity.Caution, BuildWhatsAppSubtitle(raw));
+            if (configured == false) return ("SystemFillColorNeutralBrush", "not configured", BadgeSeverity.Neutral, Single(ResolveTagline(record.Id)));
+            if (linked == false) return ("SystemFillColorCriticalBrush", "not linked", BadgeSeverity.Critical, Single("Scan a QR to link this device"));
+            if (connected == true) return ("SystemFillColorSuccessBrush", "connected", BadgeSeverity.Success, BuildWhatsAppSubtitleLines(raw));
+            if (running == true) return ("SystemFillColorCautionBrush", "running", BadgeSeverity.Caution, BuildWhatsAppSubtitleLines(raw));
+            return ("SystemFillColorCautionBrush", "linked", BadgeSeverity.Caution, BuildWhatsAppSubtitleLines(raw));
         }
 
         // Generic flow
         if (running == true)
         {
-            return ("SystemFillColorSuccessBrush", "running", BadgeSeverity.Success, BuildGenericSubtitle(record, raw));
+            return ("SystemFillColorSuccessBrush", "running", BadgeSeverity.Success, BuildGenericSubtitleLines(record, raw));
         }
         if (configured == true)
-            return ("SystemFillColorCautionBrush", "configured", BadgeSeverity.Caution, BuildGenericSubtitle(record, raw));
+            return ("SystemFillColorCautionBrush", "configured", BadgeSeverity.Caution, BuildGenericSubtitleLines(record, raw));
 
-        return ("SystemFillColorNeutralBrush", "not configured", BadgeSeverity.Neutral, "Click to expand and configure");
+        return ("SystemFillColorNeutralBrush", "not configured", BadgeSeverity.Neutral, Single(ResolveTagline(record.Id)));
     }
 
-    private static string BuildErrorSubtitle(JsonElement raw, string lastError)
+    private static IReadOnlyList<string> BuildErrorSubtitleLines(JsonElement raw, string lastError)
     {
-        var parts = new List<string> { Truncate(lastError, 80) };
+        // Two-line layout for error cards: error message on top, last-probe
+        // recency below. Splitting these visually highlights the failure
+        // without burying it in a comma-separated list.
+        var lines = new List<string> { Truncate(lastError, 80) };
         if (raw.TryGetProperty("lastProbeAt", out var ts) && ts.ValueKind == JsonValueKind.Number && ts.TryGetDouble(out var d))
-            parts.Add("Last probe " + FormatRelative(d));
-        return string.Join(" · ", parts);
+            lines.Add("Last probe " + FormatRelative(d));
+        return lines;
     }
 
-    private static string BuildWhatsAppSubtitle(JsonElement raw)
+    private static IReadOnlyList<string> BuildWhatsAppSubtitleLines(JsonElement raw)
     {
-        var parts = new List<string>();
+        // Line 1: identity (phone / JID). Line 2: activity (auth age,
+        // last message). Single-account WhatsApp connection is the common
+        // case so we don't bother surfacing account count.
+        var lines = new List<string>();
+
         if (raw.TryGetProperty("self", out var self) && self.ValueKind == JsonValueKind.Object)
         {
             var e164 = GetString(self, "e164") ?? GetString(self, "jid");
-            if (!string.IsNullOrEmpty(e164)) parts.Add("Linked as " + e164);
+            if (!string.IsNullOrEmpty(e164)) lines.Add("Linked as " + e164);
         }
+
+        var activityParts = new List<string>();
         if (raw.TryGetProperty("authAgeMs", out var age) && age.ValueKind == JsonValueKind.Number && age.TryGetDouble(out var ageD))
-            parts.Add("Auth age " + FormatAge(ageD));
+            activityParts.Add("Auth age " + FormatAge(ageD));
         if (raw.TryGetProperty("lastMessageAt", out var lm) && lm.ValueKind == JsonValueKind.Number && lm.TryGetDouble(out var lmd))
-            parts.Add("Last message " + FormatRelative(lmd));
-        return string.Join(" · ", parts);
+            activityParts.Add("Last message " + FormatRelative(lmd));
+        if (activityParts.Count > 0) lines.Add(string.Join(" · ", activityParts));
+
+        return lines;
     }
 
-    private static string BuildGenericSubtitle(ChannelRecord record, JsonElement raw)
+    private static IReadOnlyList<string> BuildGenericSubtitleLines(ChannelRecord record, JsonElement raw)
     {
-        var parts = new List<string>();
+        // Multi-line activity card for configured channels:
+        //   Line 1: identity / mode / account count
+        //   Line 2: activity timestamps + probe time
+        //   Line 3: caution (reconnect attempts > 0)
+        // Splitting across lines makes the card visibly bigger than an
+        // unconfigured preview row, which keeps a single-line tagline.
+        var lines = new List<string>();
+        var generic = ChannelsStatusParser.ExtractGeneric(raw);
 
-        if (GetString(raw, "botUsername") is { Length: > 0 } bot) parts.Add("@" + bot);
-        if (GetString(raw, "webhookUrl") is { Length: > 0 } hook) parts.Add(Truncate(hook, 48));
+        // Line 1: identity / mode summary.
+        var line1Parts = new List<string>();
+        if (GetString(raw, "botUsername") is { Length: > 0 } bot) line1Parts.Add("@" + bot);
+        else if (GetString(raw, "webhookUrl") is { Length: > 0 } hook) line1Parts.Add(Truncate(hook, 48));
+        if (generic?.Mode is { Length: > 0 } mode)
+            line1Parts.Add(char.ToUpperInvariant(mode[0]) + mode[1..] + " mode");
+        if (record.Accounts.Count > 1)
+            line1Parts.Add($"{record.Accounts.Count} accounts");
+        if (line1Parts.Count > 0) lines.Add(string.Join(" · ", line1Parts));
 
-        if (raw.TryGetProperty("probe", out var probe) && probe.ValueKind == JsonValueKind.Object)
-        {
-            var ok = GetBool(probe, "ok");
-            if (ok == true && probe.TryGetProperty("elapsedMs", out var el) && el.ValueKind == JsonValueKind.Number && el.TryGetDouble(out var elD))
-                parts.Add($"Probe {(int)elD} ms");
-        }
-        if (raw.TryGetProperty("lastProbeAt", out var lp) && lp.ValueKind == JsonValueKind.Number && lp.TryGetDouble(out var lpd))
-            parts.Add("Last probe " + FormatRelative(lpd));
+        // Line 2: activity / probe.
+        var line2Parts = new List<string>();
+        if (generic?.LastEventAt is double lastEvent && lastEvent > 0)
+            line2Parts.Add("Last event " + FormatRelative(lastEvent));
+        else if (generic?.LastProbeAt is double lastProbe && lastProbe > 0)
+            line2Parts.Add("Last probe " + FormatRelative(lastProbe));
+        if (generic?.Probe is { Ok: true, ElapsedMs: double el })
+            line2Parts.Add($"{(int)el} ms probe");
+        if (line2Parts.Count > 0) lines.Add(string.Join(" · ", line2Parts));
 
-        if (parts.Count == 0 && record.IsConfigured)
-            parts.Add("Configured");
-        return string.Join(" · ", parts);
+        // Line 3: caution (reconnect attempts).
+        if (generic?.ReconnectAttempts is int n && n > 0)
+            lines.Add($"{n} reconnect attempt{(n == 1 ? "" : "s")}");
+
+        if (lines.Count == 0 && record.IsConfigured)
+            lines.Add("Configured");
+        return lines;
     }
+
+    /// <summary>
+    /// Per-channel one-liner shown as the card subtitle when the channel
+    /// isn't configured yet. Replaces the generic "Click to expand and
+    /// configure" hint — each tagline tells the user up-front what the
+    /// integration shape is (QR-linked phone, OAuth bot, webhook URL, …)
+    /// so they can pick the right channel without expanding each one.
+    /// </summary>
+    private static string ResolveTagline(string channelId) => channelId.ToLowerInvariant() switch
+    {
+        "whatsapp"   => "Link your phone — scan a QR to connect",
+        "telegram"   => "Bot integration — paste your bot token to set up",
+        "discord"    => "Webhook integration — paste a Discord webhook URL",
+        "googlechat" => "Webhook integration — paste a Google Chat webhook",
+        "slack"      => "OAuth app — install a Slack app to connect",
+        "signal"     => "Link your phone — scan a QR to connect",
+        "imessage"   => "macOS-only — requires running the gateway on a Mac",
+        "nostr"      => "Decentralized — paste your nsec and relays",
+        _            => "Plugin channel — expand to configure",
+    };
 
     // ─── Tiny utility helpers ─────────────────────────────────────────────
 

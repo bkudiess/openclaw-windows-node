@@ -63,6 +63,14 @@ public enum ChannelCapabilities
     CanRelink = 1 << 3,
     /// <summary>Configured-but-not-running channel: offer a <c>channels.start</c> action.</summary>
     CanStart = 1 << 4,
+    /// <summary>
+    /// Configured-and-running non-QR channel: offer a <c>channels.stop</c>
+    /// action (pause without clearing credentials). QR-link channels
+    /// (WhatsApp/Signal) instead expose <see cref="CanLogout"/> in the
+    /// header — for them "logout" already means "unlink this device",
+    /// which is the analogous lightweight pause action.
+    /// </summary>
+    CanStop = 1 << 5,
 }
 
 /// <summary>
@@ -99,9 +107,12 @@ public static class ChannelsAggregator
     private static readonly HashSet<string> QrLinkChannels =
         new(StringComparer.OrdinalIgnoreCase) { "whatsapp", "signal" };
 
-    /// <summary>Channels that support a per-channel logout/unlink action.</summary>
+    /// <summary>Channels that support a per-channel logout/unlink action.
+    /// For QR channels (WhatsApp/Signal) Logout = unlink the device (re-scan
+    /// to reconnect). For non-QR channels (Telegram) Logout = clear stored
+    /// credentials (re-enter them to reconnect).</summary>
     private static readonly HashSet<string> LogoutChannels =
-        new(StringComparer.OrdinalIgnoreCase) { "whatsapp", "telegram" };
+        new(StringComparer.OrdinalIgnoreCase) { "whatsapp", "telegram", "signal" };
 
     /// <summary>Channels that cannot be hosted on Windows.</summary>
     private static readonly HashSet<string> WindowsUnsupportedChannels =
@@ -174,6 +185,12 @@ public static class ChannelsAggregator
                 caps |= ChannelCapabilities.CanLogout;
             if (configured && !running)
                 caps |= ChannelCapabilities.CanStart;
+            // CanStop: lightweight pause for non-QR running channels.
+            // For QR channels (WhatsApp/Signal) we don't set CanStop —
+            // "Logout" is the analogous lightweight action there (unlink
+            // the device; can scan a fresh QR to reconnect).
+            if (configured && running && !QrLinkChannels.Contains(id))
+                caps |= ChannelCapabilities.CanStop;
 
             // Label / DetailLabel fall back to BuiltInChannelLabels when
             // the gateway didn't supply a nice name (typical for preview

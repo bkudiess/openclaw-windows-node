@@ -124,6 +124,18 @@ public sealed class GenericChannelStatus
     public ChannelProbe? Probe { get; init; }
     /// <summary>Last probe completion timestamp (epoch ms).</summary>
     public double? LastProbeAt { get; init; }
+    /// <summary>Transport mode, e.g. "polling" / "webhook" — channel plugins set this to declare how they receive events.</summary>
+    public string? Mode { get; init; }
+    /// <summary>Epoch ms when the channel last booted (entered the running state).</summary>
+    public double? LastStartAt { get; init; }
+    /// <summary>Epoch ms of the channel's last upstream event (message, presence push, …) — useful as a "freshness" indicator.</summary>
+    public double? LastEventAt { get; init; }
+    /// <summary>Epoch ms of the last transport-layer activity (HTTP poll round-trip, WS heartbeat). Often equals <see cref="LastEventAt"/> when traffic is flowing.</summary>
+    public double? LastTransportActivityAt { get; init; }
+    /// <summary>Number of times the plugin has reconnected since it last booted. Non-zero is a soft caution signal.</summary>
+    public int ReconnectAttempts { get; init; }
+    /// <summary>True when the plugin is in the middle of a graceful restart (channels.start has been queued but hasn't completed).</summary>
+    public bool RestartPending { get; init; }
 }
 
 /// <summary>Probe sub-record common to most channel statuses.</summary>

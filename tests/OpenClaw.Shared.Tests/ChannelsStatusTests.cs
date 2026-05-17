@@ -151,6 +151,45 @@ public class ChannelsStatusParserTests
         var generic = ChannelsStatusParser.ExtractGeneric(Json(json));
         Assert.Equal("boom", generic!.LastError);
     }
+
+    [Fact]
+    public void ExtractGeneric_PopulatesActivityAndModeFields()
+    {
+        // Mirrors what the live gateway returns for a running Telegram channel.
+        var json = """
+            {
+              "configured": true, "running": true, "connected": true,
+              "mode": "polling",
+              "lastStartAt": 1778990651099,
+              "lastEventAt": 1778997012450,
+              "lastTransportActivityAt": 1778997012450,
+              "reconnectAttempts": 3,
+              "restartPending": false
+            }
+            """;
+        var generic = ChannelsStatusParser.ExtractGeneric(Json(json));
+        Assert.NotNull(generic);
+        Assert.Equal("polling", generic!.Mode);
+        Assert.Equal(1778990651099d, generic.LastStartAt);
+        Assert.Equal(1778997012450d, generic.LastEventAt);
+        Assert.Equal(1778997012450d, generic.LastTransportActivityAt);
+        Assert.Equal(3, generic.ReconnectAttempts);
+        Assert.False(generic.RestartPending);
+    }
+
+    [Fact]
+    public void ExtractGeneric_DefaultsActivityFields_WhenMissing()
+    {
+        var json = """{ "configured": true, "running": true }""";
+        var generic = ChannelsStatusParser.ExtractGeneric(Json(json));
+        Assert.NotNull(generic);
+        Assert.Null(generic!.Mode);
+        Assert.Null(generic.LastStartAt);
+        Assert.Null(generic.LastEventAt);
+        Assert.Null(generic.LastTransportActivityAt);
+        Assert.Equal(0, generic.ReconnectAttempts);
+        Assert.False(generic.RestartPending);
+    }
 }
 
 public class ChannelsAggregatorTests
@@ -261,7 +300,7 @@ public class ChannelsAggregatorTests
     public void Aggregate_CapabilitiesAreInferredFromId()
     {
         // All four channels are configured here, so their full capability set
-        // (Logout for whatsapp/telegram, ShowQr+Relink for whatsapp/signal)
+        // (Logout for whatsapp/telegram/signal, ShowQr+Relink for whatsapp/signal)
         // should be reported. CanLogout/CanRelink are gated on "configured" —
         // see Aggregate_NotConfigured_HidesLogoutAndRelink for the negative case.
         var snap = SnapshotWith(
@@ -279,6 +318,12 @@ public class ChannelsAggregatorTests
         Assert.False(records["telegram"].Capabilities.HasFlag(ChannelCapabilities.CanShowQr));
         Assert.False(records["discord"].Capabilities.HasFlag(ChannelCapabilities.CanLogout));
         Assert.True(records["signal"].Capabilities.HasFlag(ChannelCapabilities.CanShowQr));
+        // Configured Signal exposes CanLogout — it's a QR channel and Logout
+        // is the unlink-the-device action (lightweight, re-scan to reconnect).
+        // Without this, the Channels page would render zero control buttons
+        // for a configured Signal card (isQr=true + hasLogout=false fell
+        // through both branches in BuildControlsSection).
+        Assert.True(records["signal"].Capabilities.HasFlag(ChannelCapabilities.CanLogout));
     }
 
     [Fact]

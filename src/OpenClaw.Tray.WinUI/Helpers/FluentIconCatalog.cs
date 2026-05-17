@@ -58,10 +58,8 @@ public static class FluentIconCatalog
     public const string MoreOverflow = "\uE712";   // More — saved-row overflow ⋯ button
 
     // ── Channel actions ────────────────────────────────────────────
-    public const string ChannelRefresh = "\uE72C";  // Refresh (alias of Sync; per-channel + global Refresh)
-    public const string ChannelLogout = "\uF3B1";   // SignOut — per-channel logout (WhatsApp/Telegram)
+    public const string ChannelLogout = "\uF3B1";   // SignOut — per-channel logout (WhatsApp/Signal in the header; non-QR channels' destructive "disconnect" body action)
     public const string ChannelStart = "\uE768";    // Play — start-channel header action
-    public const string ChannelInstall = "\uE896";  // Download — copy/install plugin command panel
 
     // ── Glance chips (Connection page) ─────────────────────────────
     public const string People = "\uE716";         // People — N clients chip

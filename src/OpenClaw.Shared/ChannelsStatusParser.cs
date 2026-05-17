@@ -71,6 +71,12 @@ public static class ChannelsStatusParser
                 LastError = GetString(channel, "lastError") ?? GetString(channel, "error"),
                 Probe = ExtractProbe(channel),
                 LastProbeAt = GetDouble(channel, "lastProbeAt"),
+                Mode = GetString(channel, "mode"),
+                LastStartAt = GetDouble(channel, "lastStartAt"),
+                LastEventAt = GetDouble(channel, "lastEventAt"),
+                LastTransportActivityAt = GetDouble(channel, "lastTransportActivityAt"),
+                ReconnectAttempts = (int)(GetDouble(channel, "reconnectAttempts") ?? 0),
+                RestartPending = GetBool(channel, "restartPending") ?? false,
             }
             : null;
 

@@ -727,39 +727,3 @@ Requires .NET 10.0 SDK, Windows 10/11. For testing node protocol, you'll need a 
 *This issue is a living document. As we make progress, sub-issues will be filed for individual work items and linked back here.*
 
 /cc @shanselman
-
-
-## Channels page (May 2026 rewrite)
-
-The tray Channels page (`src/OpenClaw.Tray.WinUI/Pages/ChannelsPage.xaml`)
-is a single-column `Expander` list mirroring the existing `ConnectionPage`
-pattern. Each channel is rendered as one expandable card; multiple cards can
-be open simultaneously.
-
-**Data source.** The page fetches the canonical channel snapshot from the
-gateway via `channels.status` — the same wire method macOS and the web UI
-use. The Shared layer exposes:
-
-- `OpenClawGatewayClient.GetChannelsStatusAsync(probe, timeoutMs)` returns
-  a strongly-typed `ChannelsStatusSnapshot`.
-- `ChannelsAggregator.Aggregate(snapshot, now)` merges the snapshot with
-  built-in channel capabilities (CanLogout / CanShowQr / CanRelink /
-  CanRefresh) into a stable list of `ChannelRecord`s ordered Configured-
-  first, then by the gateway-provided `channelOrder`.
-
-**Per-channel actions.** Configured channels show Refresh and (for WhatsApp /
-Telegram) Logout in the Expander header. WhatsApp/Signal additionally expose
-a Linking section with QR rendering — handled via `web.login.start` and
-`web.login.wait` returning the `qrDataUrl` payload.
-
-**Connection model.** The Windows tray does not connect to channels directly.
-The gateway runs the channel plugins; the tray only edits config (via the
-existing Config page for now), observes status, and triggers QR linking.
-This mirrors the macOS app and the web UI.
-
-**ActivityPage removal.** The standalone Activity page was removed in this
-rewrite. `ActivityStreamService` is preserved (it still feeds the support
-bundle, command-center diagnostics, and tray tooltip), but the dedicated
-viewer page is gone. Legacy `openclaw://activity` and `openclaw://history`
-deep links redirect to the Channels page (or, for filter=session/usage/node,
-to the appropriate sibling page).
