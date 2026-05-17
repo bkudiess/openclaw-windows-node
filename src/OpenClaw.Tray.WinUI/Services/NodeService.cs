@@ -1096,7 +1096,7 @@ public sealed class NodeService : IDisposable
         if (!enqueued)
             tcs.TrySetException(new InvalidOperationException("CANVAS_DISPATCHER_UNAVAILABLE: dispatcher queue rejected"));
 
-        return await tcs.Task;
+        return await WaitWithTimeout(tcs.Task, "canvas.eval");
     }
 
     private async Task<string> OnCanvasSnapshot(CanvasSnapshotArgs args)
@@ -1133,7 +1133,7 @@ public sealed class NodeService : IDisposable
         if (!enqueued)
             tcs.TrySetException(new InvalidOperationException("CANVAS_DISPATCHER_UNAVAILABLE: dispatcher queue rejected"));
 
-        return await tcs.Task;
+        return await WaitWithTimeout(tcs.Task, "canvas.snapshot");
     }
 
     private Task<string> OnCanvasA2UIDumpAsync()
@@ -1203,6 +1203,21 @@ public sealed class NodeService : IDisposable
         if (!enqueued)
             tcs.TrySetException(new InvalidOperationException("CANVAS_DISPATCHER_UNAVAILABLE: dispatcher queue rejected"));
         return tcs.Task;
+    }
+
+    /// <summary>
+    /// Awaits a dispatcher-bridged TCS with a timeout so that canvas commands
+    /// return a tool error instead of hanging indefinitely when the UI thread
+    /// dispatcher is not pumping (e.g. headless CI).
+    /// </summary>
+    private static async Task<string> WaitWithTimeout(Task<string> task, string command, int timeoutSeconds = 15)
+    {
+        if (await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(timeoutSeconds))) != task)
+        {
+            throw new TimeoutException(
+                $"CANVAS_TIMEOUT: {command} did not complete within {timeoutSeconds}s — the UI dispatcher may not be pumping");
+        }
+        return await task; // propagate the result or exception
     }
 
     private void EnsureCanvasWindow()
