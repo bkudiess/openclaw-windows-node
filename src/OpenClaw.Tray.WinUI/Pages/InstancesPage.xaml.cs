@@ -5,9 +5,10 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using OpenClaw.Shared;
 using OpenClawTray.Helpers;
-using OpenClawTray.Windows;
+using OpenClawTray.Services;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
 
@@ -24,54 +25,56 @@ namespace OpenClawTray.Pages;
 /// </summary>
 public sealed partial class InstancesPage : Page
 {
-    private HubWindow? _hub;
-    private GatewayNodeInfo[]? _lastNodes;
-    private PresenceEntry[]? _lastPresence;
+    private static App CurrentApp => (App)Microsoft.UI.Xaml.Application.Current;
+    private AppState? _appState;
 
     public InstancesPage()
     {
         InitializeComponent();
+        Unloaded += (_, _) =>
+        {
+            if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
+        };
     }
 
     /// <summary>Called by HubWindow when this page becomes the navigation target.</summary>
-    public void Initialize(HubWindow hub)
+    public void Initialize()
     {
-        _hub = hub;
-        var connected = hub.GatewayClient != null;
-        ConnectionWarning.Visibility = connected ? Visibility.Collapsed : Visibility.Visible;
+        _appState = CurrentApp.AppState;
+        _appState.PropertyChanged += OnAppStateChanged;
 
-        _lastNodes = hub.LastNodes;
-        _lastPresence = hub.LastPresence;
         Rerender();
 
-        if (connected)
+        if (CurrentApp.GatewayClient != null)
         {
             _ = RequestNodesWithSpinnerAsync();
         }
     }
 
+    private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(AppState.Nodes):
+                UpdateNodes(_appState!.Nodes);
+                break;
+            case nameof(AppState.Presence):
+                UpdatePresence(_appState!.Presence ?? Array.Empty<PresenceEntry>());
+                break;
+        }
+    }
+
     public void UpdateNodes(GatewayNodeInfo[] nodes)
     {
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            _lastNodes = nodes;
-            // A node push satisfies an in-flight refresh request.
-            SetRefreshing(false);
-            Rerender();
-        });
+        // A node push satisfies an in-flight refresh request.
+        SetRefreshing(false);
+        Rerender();
     }
 
     public void UpdatePresence(PresenceEntry[] entries)
     {
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            _lastPresence = entries;
-            Rerender();
-        });
+        Rerender();
     }
-
-    // Legacy alias kept for HubWindow's older fan-out signature.
-    public void UpdatePresenceData(PresenceEntry[] entries) => UpdatePresence(entries);
 
     private void OnRefreshClicked(object sender, RoutedEventArgs e)
     {
@@ -80,9 +83,9 @@ public sealed partial class InstancesPage : Page
 
     private async System.Threading.Tasks.Task RequestNodesWithSpinnerAsync()
     {
-        if (_hub?.GatewayClient is not { } client)
+        if (CurrentApp.GatewayClient is not { } client)
         {
-            // Still re-render in case _hub.GatewayClient state changed.
+            // Still re-render in case gateway client state changed.
             Rerender();
             return;
         }
@@ -115,8 +118,7 @@ public sealed partial class InstancesPage : Page
 
     private void Rerender()
     {
-        var connected = _hub?.GatewayClient != null;
-        ConnectionWarning.Visibility = connected ? Visibility.Collapsed : Visibility.Visible;
+        InstancesList.Children.Clear();
 
         // Single timestamp shared by merge classification AND age formatting so
         // a row's status word (e.g. "Active") never disagrees with the relative
@@ -124,11 +126,11 @@ public sealed partial class InstancesPage : Page
         var nowUtc = DateTime.UtcNow;
 
         var merged = InstanceMerger.Merge(
-            _lastNodes,
-            _lastPresence,
+            _appState?.Nodes,
+            _appState?.Presence,
             new InstanceMergeOptions
             {
-                LocalNodeId = _hub?.NodeFullDeviceId,
+                LocalNodeId = CurrentApp.NodeFullDeviceId,
                 LocalHost = Environment.MachineName,
                 OnUnmatchedNode = msg => Debug.WriteLine($"[InstancesPage] {msg}"),
                 NowUtc = () => nowUtc,
@@ -218,9 +220,9 @@ public sealed partial class InstancesPage : Page
         var updateLine = BuildUpdateLine(row, nowUtc);
         if (updateLine is not null) body.Children.Add(updateLine);
 
-        if (row.IsManaged && row.Node is not null && _hub is not null)
+        if (row.IsManaged && row.Node is not null)
         {
-            var managementBody = InstanceManagementControls.BuildManagementBody(row.Node, _hub, this);
+            var managementBody = InstanceManagementControls.BuildManagementBody(row.Node, CurrentApp.GatewayClient, this);
             if (managementBody is FrameworkElement fe)
             {
                 fe.Margin = new Thickness(0, 10, 0, 0);

@@ -3,9 +3,10 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using OpenClaw.Shared;
-using OpenClawTray.Windows;
+using OpenClawTray.Services;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -16,7 +17,8 @@ namespace OpenClawTray.Pages;
 
 public sealed partial class CronPage : Page
 {
-    private HubWindow? _hub;
+    private static App CurrentApp => (App)Microsoft.UI.Xaml.Application.Current;
+    private AppState? _appState;
     private List<CronJobViewModel> _jobs = new();
     private Border? _editingCard = null; // card hidden during inline edit
     private string? _historyJobId = null; // job whose history is currently displayed
@@ -28,15 +30,36 @@ public sealed partial class CronPage : Page
     public CronPage()
     {
         InitializeComponent();
+        Unloaded += (_, _) =>
+        {
+            if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
+        };
     }
 
-    public void Initialize(HubWindow hub)
+    public void Initialize()
     {
-        _hub = hub;
-        if (hub.GatewayClient != null)
+        _appState = CurrentApp.AppState;
+        _appState.PropertyChanged += OnAppStateChanged;
+        if (CurrentApp.GatewayClient != null)
         {
-            _ = hub.GatewayClient.RequestCronListAsync();
-            _ = hub.GatewayClient.RequestCronStatusAsync();
+            _ = CurrentApp.GatewayClient.RequestCronListAsync();
+            _ = CurrentApp.GatewayClient.RequestCronStatusAsync();
+        }
+    }
+
+    private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(AppState.CronList):
+                if (_appState!.CronList.HasValue) UpdateFromGateway(_appState.CronList.Value);
+                break;
+            case nameof(AppState.CronStatus):
+                if (_appState!.CronStatus.HasValue) UpdateFromGateway(_appState.CronStatus.Value);
+                break;
+            case nameof(AppState.CronRuns):
+                if (_appState!.CronRuns.HasValue) UpdateCronRuns(_appState.CronRuns.Value);
+                break;
         }
     }
 
@@ -44,14 +67,14 @@ public sealed partial class CronPage : Page
     {
         var btn = sender as Button;
         var jobId = btn?.Tag as string;
-        if (string.IsNullOrEmpty(jobId) || _hub?.GatewayClient == null) return;
+        if (string.IsNullOrEmpty(jobId) || CurrentApp.GatewayClient == null) return;
         var vm = _jobs.Find(j => j.Id == jobId);
         if (vm != null && !vm.IsEnabled) return;
         _runningJobIds.Add(jobId);
         btn!.Content = "Running...";
         btn.IsEnabled = false;
 
-        _hub.GatewayClient.RunCronJobAsync(jobId).ContinueWith(t =>
+        CurrentApp.GatewayClient.RunCronJobAsync(jobId).ContinueWith(t =>
         {
             if (t.IsFaulted || (t.IsCompletedSuccessfully && !t.Result))
             {
@@ -59,13 +82,13 @@ public sealed partial class CronPage : Page
                 DispatcherQueue?.TryEnqueue(() =>
                 {
                     _runningJobIds.Remove(jobId);
-                    _ = _hub?.GatewayClient?.RequestCronListAsync();
+                    _ = CurrentApp.GatewayClient?.RequestCronListAsync();
                 });
             }
         });
 
         // Safety timeout: clear running state after 90s if gateway never reports completion
-        var capturedHub = _hub;
+        // Safety timeout uses CurrentApp directly
         Task.Delay(TimeSpan.FromSeconds(90)).ContinueWith(_ =>
         {
             if (_runningJobIds.Contains(jobId))
@@ -73,7 +96,7 @@ public sealed partial class CronPage : Page
                 DispatcherQueue?.TryEnqueue(() =>
                 {
                     _runningJobIds.Remove(jobId);
-                    _ = capturedHub?.GatewayClient?.RequestCronListAsync();
+                    _ = CurrentApp.GatewayClient?.RequestCronListAsync();
                 });
             }
         });
@@ -82,21 +105,21 @@ public sealed partial class CronPage : Page
     private void OnRemoveClick(object sender, RoutedEventArgs e)
     {
         var jobId = (sender as Button)?.Tag as string;
-        if (string.IsNullOrEmpty(jobId) || _hub?.GatewayClient == null) return;
+        if (string.IsNullOrEmpty(jobId) || CurrentApp.GatewayClient == null) return;
         _removedJobIds.Add(jobId);
         // Gateway client's HandleKnownResponse refreshes the list automatically on cron.remove
-        _ = _hub.GatewayClient.RemoveCronJobAsync(jobId);
+        _ = CurrentApp.GatewayClient.RemoveCronJobAsync(jobId);
     }
 
     private void OnToggleEnabledClick(object sender, RoutedEventArgs e)
     {
         var jobId = (sender as Button)?.Tag as string;
-        if (string.IsNullOrEmpty(jobId) || _hub?.GatewayClient == null) return;
+        if (string.IsNullOrEmpty(jobId) || CurrentApp.GatewayClient == null) return;
 
         var vm = _jobs.Find(j => j.Id == jobId);
         if (vm != null)
         {
-            _ = _hub.GatewayClient.UpdateCronJobAsync(jobId, new { enabled = !vm.IsEnabled });
+            _ = CurrentApp.GatewayClient.UpdateCronJobAsync(jobId, new { enabled = !vm.IsEnabled });
         }
     }
 
@@ -198,7 +221,7 @@ public sealed partial class CronPage : Page
             return;
         }
 
-        if (_hub?.GatewayClient == null)
+        if (CurrentApp.GatewayClient == null)
         {
             ShowFormError("Not connected to gateway.");
             return;
@@ -282,7 +305,7 @@ public sealed partial class CronPage : Page
             if (kind == "at")
                 patch["deleteAfterRun"] = FormDeleteAfterRun.IsChecked == true;
 
-            _ = _hub.GatewayClient.UpdateCronJobAsync(_editingJobId, patch);
+            _ = CurrentApp.GatewayClient.UpdateCronJobAsync(_editingJobId, patch);
         }
         else
         {
@@ -304,7 +327,7 @@ public sealed partial class CronPage : Page
             if (kind == "at")
                 job["deleteAfterRun"] = FormDeleteAfterRun.IsChecked == true;
 
-            _ = _hub.GatewayClient.AddCronJobAsync(job);
+            _ = CurrentApp.GatewayClient.AddCronJobAsync(job);
         }
 
         RestoreFormFromInline();
@@ -1220,7 +1243,7 @@ public sealed partial class CronPage : Page
     private void OnHistoryClick(object sender, RoutedEventArgs e)
     {
         var jobId = (sender as Button)?.Tag as string;
-        if (string.IsNullOrEmpty(jobId) || _hub?.GatewayClient == null) return;
+        if (string.IsNullOrEmpty(jobId) || CurrentApp.GatewayClient == null) return;
         var vm = _jobs.Find(j => j.Id == jobId);
         if (vm != null && !vm.IsEnabled) return;
         if (_historyJobId == jobId)
@@ -1250,7 +1273,7 @@ public sealed partial class CronPage : Page
             histPanel.Visibility = Visibility.Visible;
         }
 
-        _ = _hub.GatewayClient.RequestCronRunsAsync(jobId, limit: 20, offset: 0);
+        _ = CurrentApp.GatewayClient.RequestCronRunsAsync(jobId, limit: 20, offset: 0);
     }
 
     private void HideHistoryPanel(string jobId)
@@ -1370,12 +1393,12 @@ public sealed partial class CronPage : Page
             loadMoreBtn.Click += (s, args) =>
             {
                 var jid = (s as Button)?.Tag as string;
-                if (!string.IsNullOrEmpty(jid) && _hub?.GatewayClient != null)
+                if (!string.IsNullOrEmpty(jid) && CurrentApp.GatewayClient != null)
                 {
                     loadMoreBtn.IsEnabled = false;
                     loadMoreBtn.Content = "Loading...";
                     // For simplicity, reload with higher limit
-                    _ = _hub.GatewayClient.RequestCronRunsAsync(jid, limit: nextOffset + 20, offset: 0);
+                    _ = CurrentApp.GatewayClient.RequestCronRunsAsync(jid, limit: nextOffset + 20, offset: 0);
                 }
             };
             histPanel.Children.Add(loadMoreBtn);

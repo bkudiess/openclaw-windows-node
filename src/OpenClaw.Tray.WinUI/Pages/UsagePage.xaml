@@ -9,10 +9,6 @@
 
             <TextBlock x:Uid="UsagePage_TextBlock_10" Text="📊 Usage &amp; Cost" Style="{StaticResource TitleTextBlockStyle}"/>
 
-            <InfoBar x:Uid="ConnectionWarning" x:Name="ConnectionWarning" Title="Not Connected"
-                     Message="Connect to gateway to see live data"
-                     Severity="Warning" IsOpen="True" IsClosable="False" Visibility="Collapsed"/>
-
             <!-- Big number: Total Cost -->
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"

@@ -371,7 +371,7 @@ internal sealed record ConnectionPagePlan
                 StripGlyph = OpenClawTray.Helpers.FluentIconCatalog.Lock,
                 StripAccent = ConnectionAccent.Caution,
                 StripHeadline = "Awaiting approval",
-                StripSub = "Approve this client on the gateway host. Connection will resume automatically.",
+                StripSub = "Approve this client on the gateway host. Click Connect once approved.",
                 StripPrimaryLabel = cmd != null ? "Copy command" : null,
                 StripPrimaryAction = cmd != null ? ConnectionPrimaryAction.CopyApproveCommand : ConnectionPrimaryAction.None,
                 RecoveryApproveCommand = cmd,
@@ -507,8 +507,8 @@ internal sealed record ConnectionPagePlan
             ? ConnectionCardPlanSanitizer.Sanitize(snap.NodePairingRequestId!, maxLen: 64)
             : null;
         return reqId != null
-            ? $"openclaw approve node {reqId}"
-            : "openclaw approve node";
+            ? $"openclaw nodes approve {reqId}"
+            : "openclaw nodes approve";
     }
 
     private static string? BuildDevicePairingApproveCommand(GatewayConnectionSnapshot snap)
@@ -519,8 +519,8 @@ internal sealed record ConnectionPagePlan
             ? ConnectionCardPlanSanitizer.Sanitize(snap.OperatorPairingRequestId!, maxLen: 64)
             : null;
         return reqId != null
-            ? $"openclaw approve device {reqId}"
-            : "openclaw approve device";
+            ? $"openclaw devices approve {reqId}"
+            : "openclaw devices approve";
     }
 
     private static string? ExtractNodeErrorDetail(GatewayConnectionSnapshot snap)

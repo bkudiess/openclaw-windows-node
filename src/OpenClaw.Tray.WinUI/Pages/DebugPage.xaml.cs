@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using OpenClaw.Shared;
 using OpenClawTray.Helpers;
+using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System;
 using System.Diagnostics;
@@ -13,7 +14,7 @@ namespace OpenClawTray.Pages;
 
 public sealed partial class DebugPage : Page
 {
-    private HubWindow? _hub;
+    private static App CurrentApp => (App)Microsoft.UI.Xaml.Application.Current;
 
     private static readonly string LocalAppData = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenClawTray");
@@ -24,9 +25,8 @@ public sealed partial class DebugPage : Page
 
     public DebugPage() { InitializeComponent(); }
 
-    public void Initialize(HubWindow hub)
+    public void Initialize()
     {
-        _hub = hub;
         LoadLog();
         LoadConnectionStatus();
         LoadDeviceIdentity();
@@ -122,9 +122,9 @@ public sealed partial class DebugPage : Page
 
     private void LoadConnectionStatus()
     {
-        if (_hub == null) return;
+        var status = CurrentApp.AppState?.Status ?? ConnectionStatus.Disconnected;
 
-        var statusText = _hub.CurrentStatus switch
+        var statusText = status switch
         {
             ConnectionStatus.Connected => "🟢 Connected",
             ConnectionStatus.Connecting => "🟡 Connecting",
@@ -134,8 +134,8 @@ public sealed partial class DebugPage : Page
         };
         OperatorStatusText.Text = statusText;
 
-        GatewayUrlText.Text = _hub.Settings?.GetEffectiveGatewayUrl() ?? "—";
-        NodeModeText.Text = _hub.Settings?.EnableNodeMode == true ? "Enabled" : "Disabled";
+        GatewayUrlText.Text = CurrentApp.Settings?.GetEffectiveGatewayUrl() ?? "—";
+        NodeModeText.Text = CurrentApp.Settings?.EnableNodeMode == true ? "Enabled" : "Disabled";
     }
 
     // ── Device Identity ──────────────────────────────────────────────
@@ -218,7 +218,7 @@ public sealed partial class DebugPage : Page
 
     private void OnOpenConnectionStatus(object sender, RoutedEventArgs e)
     {
-        _hub?.OpenConnectionStatusAction?.Invoke();
+        ((IAppCommands)CurrentApp).ShowConnectionStatus();
     }
 
     private void OnCopySupportContext(object sender, RoutedEventArgs e)
@@ -248,7 +248,7 @@ public sealed partial class DebugPage : Page
 
     private void OnRelaunchOnboarding(object sender, RoutedEventArgs e)
     {
-        _hub?.OpenSetupAction?.Invoke();
+        ((IAppCommands)CurrentApp).ShowOnboarding();
     }
 
     private ChatExplorationsWindow? _explorationsWindow;

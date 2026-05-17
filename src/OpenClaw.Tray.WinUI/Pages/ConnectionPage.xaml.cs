@@ -6,9 +6,9 @@ using OpenClaw.Shared;
 using OpenClawTray.Helpers;
 using OpenClawTray.Onboarding.Services;
 using OpenClawTray.Services;
-using OpenClawTray.Windows;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -31,7 +31,8 @@ namespace OpenClawTray.Pages;
 public sealed partial class ConnectionPage : Page
 {
     // ─── DI / services ───
-    private HubWindow? _hub;
+    private static App CurrentApp => (App)Microsoft.UI.Xaml.Application.Current;
+    private AppState? _appState;
     private IGatewayConnectionManager? _connectionManager;
     private GatewayRegistry? _gatewayRegistry;
     private GatewayDiscoveryService? _discoveryService;
@@ -86,12 +87,13 @@ public sealed partial class ConnectionPage : Page
 
     // ─── Initialization ───────────────────────────────────────────────
 
-    public void Initialize(HubWindow hub)
+    public void Initialize()
     {
-        _hub = hub;
-        _connectionManager = hub.ConnectionManager;
-        _gatewayRegistry = hub.GatewayRegistry;
-        var settings = hub.Settings;
+        _appState = ((App)Application.Current).AppState;
+        _appState.PropertyChanged += OnAppStateChanged;
+        _connectionManager = CurrentApp.ConnectionManager;
+        _gatewayRegistry = CurrentApp.Registry;
+        var settings = CurrentApp.Settings;
         if (settings == null) return;
 
         // Local-WSL install entry points. The hub only exposes
@@ -102,7 +104,7 @@ public sealed partial class ConnectionPage : Page
         //     Welcome screen for first-run users.
         //   • AddLocalWslItem — third method tab inside the Add Gateway
         //     form, alongside Direct and Setup code.
-        var localSetupAvailable = hub.OpenSetupAction is not null;
+        var localSetupAvailable = true;
         var localSetupVisibility = localSetupAvailable
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -142,6 +144,7 @@ public sealed partial class ConnectionPage : Page
             _reconnectMaskTimer.Tick -= OnReconnectMaskTimeout;
             _reconnectMaskTimer = null;
         }
+        if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
     }
 
     private void OnManagerStateChanged(object? sender, GatewayConnectionSnapshot snapshot)
@@ -162,19 +165,11 @@ public sealed partial class ConnectionPage : Page
         });
     }
 
-    /// <summary>Legacy bridge from HubWindow's ConnectionStatus-based pumps.</summary>
-    public void UpdateStatus(ConnectionStatus status)
-    {
-        var snapshot = _connectionManager?.CurrentSnapshot ?? GatewayConnectionSnapshot.Idle;
-        _lastSnapshot = snapshot;
-        RefreshFromSnapshot(snapshot);
-    }
-
     // ─── Plan apply ───────────────────────────────────────────────────
 
     private void RefreshFromSnapshot(GatewayConnectionSnapshot snapshot)
     {
-        if (_hub == null) return;
+        
 
         // Reconnect-mask: see field comment. While the mask window is open,
         // pretend the gateway/operator state is still at its last-stable
@@ -227,8 +222,8 @@ public sealed partial class ConnectionPage : Page
 
         var savedCount = _gatewayRegistry?.GetAll().Count ?? 0;
         var activeRecord = _gatewayRegistry?.GetActive();
-        var self = _hub.LastGatewaySelf;
-        var settings = _hub.Settings;
+        var self = CurrentApp.AppState?.GatewaySelf;
+        var settings = CurrentApp.Settings;
 
         var plan = ConnectionPagePlan.Build(
             effective, activeRecord, self, settings, savedCount, _userIntent);
@@ -242,7 +237,7 @@ public sealed partial class ConnectionPage : Page
         LoadSavedGateways();
 
         // Bridge auth error (lives outside the plan as a transient modifier)
-        var authError = _hub.LastAuthError;
+        var authError = CurrentApp.AppState?.AuthFailureMessage;
         if (!string.IsNullOrEmpty(authError))
         {
             AuthErrorBar.Message = GetAuthErrorGuidance(authError!);
@@ -419,9 +414,9 @@ public sealed partial class ConnectionPage : Page
             return;
         }
 
-        var self = _hub?.LastGatewaySelf;
-        var channels = _hub?.LastChannels;
-        var cost = _hub?.LastUsageCost;
+        var self = _appState?.GatewaySelf;
+        var channels = _appState?.Channels;
+        var cost = _appState?.UsageCost;
         var activeRec = _gatewayRegistry?.GetActive();
 
         // Compute the fingerprint from the same inputs the chips render so
@@ -584,7 +579,7 @@ public sealed partial class ConnectionPage : Page
 
         // Status sub-row (mirrors PermissionsPage NodeStatusDot pattern):
         // colored dot + descriptive label that reflects the live state.
-        var sessions = _hub?.LastSessions;
+        var sessions = _appState?.Sessions;
         int activeSessions = sessions?.Count(s =>
             string.Equals(s.Status, "active", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(s.Status, "running", StringComparison.OrdinalIgnoreCase)) ?? 0;
@@ -631,7 +626,7 @@ public sealed partial class ConnectionPage : Page
         }
         NodeCardBorder.Visibility = Visibility.Visible;
 
-        var settings = _hub?.Settings;
+        var settings = CurrentApp.Settings;
         var enabledCaps = settings != null ? CountEnabledCapabilities(settings) : 0;
 
         // Body text + chips (defined below) cover every Node state. The
@@ -725,15 +720,17 @@ public sealed partial class ConnectionPage : Page
         if (settings != null) NodeModeToggle.IsOn = settings.EnableNodeMode;
         _suppressNodeModeToggle = false;
 
-        // Approve command box (only when pairing required)
+        // Approve command box + connect button (only when pairing required)
         if (plan.NodeCard == NodeCardState.OnNodePairingRequired && plan.NodeApproveCommand != null)
         {
             NodeApproveCmdBox.Visibility = Visibility.Visible;
             NodeApproveCmdText.Text = plan.NodeApproveCommand;
+            NodeReconnectButton.Visibility = Visibility.Visible;
         }
         else
         {
             NodeApproveCmdBox.Visibility = Visibility.Collapsed;
+            NodeReconnectButton.Visibility = Visibility.Collapsed;
         }
 
         // Capability chips — skip the rebuild if the rendered output would
@@ -778,7 +775,7 @@ public sealed partial class ConnectionPage : Page
             RecoveryCategory.Pairing => new[]
             {
                 "Approve this client on the gateway host using the command below.",
-                "Once approved, this client will connect automatically.",
+                "Once approved, click Connect to resume.",
             },
             RecoveryCategory.Tunnel => new[]
             {
@@ -974,7 +971,7 @@ public sealed partial class ConnectionPage : Page
         // response (server-reported, the source of truth for what we're
         // actually using). For inactive saved gateways we fall back to whatever
         // credential is stored on the record.
-        var activeAuthMode = _hub?.LastGatewaySelf?.AuthMode;
+        var activeAuthMode = CurrentApp.AppState?.GatewaySelf?.AuthMode;
 
         if (_gatewayRegistry != null)
         {
@@ -1331,7 +1328,7 @@ public sealed partial class ConnectionPage : Page
             case ConnectionPrimaryAction.Connect:
             case ConnectionPrimaryAction.Reconnect:
             case ConnectionPrimaryAction.Retry:
-                _hub?.ReconnectAction?.Invoke();
+                ((IAppCommands)CurrentApp).Reconnect();
                 break;
             case ConnectionPrimaryAction.Cancel:
                 _ = _connectionManager?.DisconnectAsync();
@@ -1381,17 +1378,17 @@ public sealed partial class ConnectionPage : Page
     /// </summary>
     private void OnInstallLocalWslGateway(object sender, RoutedEventArgs e)
     {
-        _hub?.OpenSetupAction?.Invoke();
+        ((IAppCommands)CurrentApp).ShowOnboarding();
     }
 
     // ─── Operator card navigation ────────────────────────────────────
 
-    private void OnOpenSessions(object sender, RoutedEventArgs e) => _hub?.NavigateTo("sessions");
-    private void OnOpenInstances(object sender, RoutedEventArgs e) => _hub?.NavigateTo("instances");
+    private void OnOpenSessions(object sender, RoutedEventArgs e) => ((IAppCommands)CurrentApp).Navigate("sessions");
+    private void OnOpenInstances(object sender, RoutedEventArgs e) => ((IAppCommands)CurrentApp).Navigate("instances");
 
     // ─── Node card navigation ────────────────────────────────────────
 
-    private void OnOpenPermissions(object sender, RoutedEventArgs e) => _hub?.NavigateTo("permissions");
+    private void OnOpenPermissions(object sender, RoutedEventArgs e) => ((IAppCommands)CurrentApp).Navigate("permissions");
 
     private void OnCopyNodeApproveCommand(object sender, RoutedEventArgs e)
     {
@@ -1577,6 +1574,90 @@ public sealed partial class ConnectionPage : Page
 
     // ─── Add gateway: Save ────────────────────────────────────────────
 
+    // ─── Auto-test connectivity (debounced) ────────────────────────────
+
+    private System.Threading.CancellationTokenSource? _connectivityTestCts;
+
+    private void OnDirectInputChanged(object sender, RoutedEventArgs e)
+    {
+        ScheduleConnectivityTest(DirectUrlBox.Text?.Trim());
+    }
+
+    private void ScheduleConnectivityTest(string? rawUrl)
+    {
+        _connectivityTestCts?.Cancel();
+        if (string.IsNullOrWhiteSpace(rawUrl))
+        {
+            AddTestResultText.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+            return;
+        }
+        _connectivityTestCts = new System.Threading.CancellationTokenSource();
+        var token = _connectivityTestCts.Token;
+        // Debounce 600ms so we don't hit the network on every keystroke
+        _ = RunConnectivityTestAsync(rawUrl, token, delay: 600);
+    }
+
+    private async Task RunConnectivityTestAsync(string rawUrl, System.Threading.CancellationToken ct, int delay = 0)
+    {
+        if (delay > 0)
+        {
+            await Task.Delay(delay, ct);
+            if (ct.IsCancellationRequested) return;
+        }
+
+        AddTestResultText.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+        AddTestResultText.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
+        AddTestResultText.Text = "Testing connection…";
+
+        try
+        {
+            var url = GatewayUrlHelper.NormalizeForWebSocket(rawUrl);
+            var httpUrl = url.Replace("ws://", "http://").Replace("wss://", "https://").TrimEnd('/');
+
+            using var httpClient = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            System.Net.Http.HttpResponseMessage? response = null;
+            try { response = await httpClient.GetAsync(httpUrl, ct); }
+            catch (OperationCanceledException) { throw; }
+            catch { }
+
+            if (ct.IsCancellationRequested) return;
+
+            if (response == null || !response.IsSuccessStatusCode)
+            {
+                try { response = await httpClient.GetAsync($"{httpUrl}/health", ct); }
+                catch (OperationCanceledException) { throw; }
+                catch { }
+            }
+
+            if (ct.IsCancellationRequested) return;
+
+            if (response != null && response.IsSuccessStatusCode)
+            {
+                AddTestResultText.Text = $"✓ Gateway reachable";
+                AddTestResultText.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorSuccessBrush"];
+            }
+            else if (response != null)
+            {
+                AddTestResultText.Text = $"⚠ Gateway responded with {(int)response.StatusCode}";
+                AddTestResultText.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCautionBrush"];
+            }
+            else
+            {
+                AddTestResultText.Text = $"✗ Cannot reach gateway";
+                AddTestResultText.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCriticalBrush"];
+            }
+        }
+        catch (OperationCanceledException) { /* debounce or page nav */ }
+        catch (Exception ex)
+        {
+            if (!ct.IsCancellationRequested)
+            {
+                AddTestResultText.Text = $"✗ {ex.Message}";
+                AddTestResultText.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCriticalBrush"];
+            }
+        }
+    }
+
     private async void OnAddSave(object sender, RoutedEventArgs e)
     {
         var tag = ActiveAddPaneTag();
@@ -1645,7 +1726,7 @@ public sealed partial class ConnectionPage : Page
 
         // Snapshot previous state for rollback (mirrors legacy logic exactly)
         var previousActiveId = _gatewayRegistry.ActiveGatewayId;
-        var previousSettings = _hub?.Settings;
+        var previousSettings = CurrentApp.Settings;
         var prevGatewayUrl = previousSettings?.GatewayUrl;
         var prevUseSsh = previousSettings?.UseSshTunnel ?? false;
         var prevSshUser = previousSettings?.SshTunnelUser;
@@ -1938,13 +2019,13 @@ public sealed partial class ConnectionPage : Page
                     AddResultText.Text = $"✗ {decoded.Error}";
                     return;
                 }
-                var settings = _hub?.Settings;
+                var settings = CurrentApp.Settings;
                 if (settings == null) return;
                 if (!string.IsNullOrEmpty(decoded.Url))
                     settings.GatewayUrl = decoded.Url;
                 settings.Save();
                 AddResultText.Text = $"✓ Applied — gateway: {SanitizeUrl(decoded.Url ?? settings.GatewayUrl ?? "")}";
-                _hub?.RaiseSettingsSaved();
+                ((IAppCommands)CurrentApp).NotifySettingsSaved();
             }
         }
         finally
@@ -1975,6 +2056,9 @@ public sealed partial class ConnectionPage : Page
                 : decoded.Token!.Substring(0, Math.Min(8, decoded.Token.Length)) + "…";
             AddSetupCodePreviewToken.Text = $"Token: {tokenHint}";
             AddSetupCodePreviewPanel.Visibility = Visibility.Visible;
+            // Auto-test connectivity with the decoded URL
+            if (!string.IsNullOrEmpty(decoded.Url))
+                ScheduleConnectivityTest(decoded.Url);
         }
         else
         {
@@ -2142,7 +2226,12 @@ public sealed partial class ConnectionPage : Page
 
     private void OnDisconnect(object sender, RoutedEventArgs e)
     {
-        _hub?.DisconnectAction?.Invoke();
+        ((IAppCommands)CurrentApp).Disconnect();
+    }
+
+    private void OnReconnectFromRecovery(object sender, RoutedEventArgs e)
+    {
+        ((IAppCommands)CurrentApp).Reconnect();
     }
 
     /// <summary>
@@ -2156,19 +2245,19 @@ public sealed partial class ConnectionPage : Page
         if (ConnectionToggle.IsOn)
         {
             // User asked to reconnect.
-            _hub?.ReconnectAction?.Invoke();
+            ((IAppCommands)CurrentApp).Reconnect();
         }
         else
         {
             // User asked to disconnect.
-            _hub?.DisconnectAction?.Invoke();
+            ((IAppCommands)CurrentApp).Disconnect();
         }
     }
 
     private void OnNodeModeToggled(object sender, RoutedEventArgs e)
     {
         if (_suppressNodeModeToggle) return;
-        var settings = _hub?.Settings;
+        var settings = CurrentApp.Settings;
         if (settings == null) return;
         settings.EnableNodeMode = NodeModeToggle.IsOn;
         settings.Save();
@@ -2176,7 +2265,7 @@ public sealed partial class ConnectionPage : Page
         // the role change registers; mask the brief transient window so the
         // gateway/operator visuals don't flicker through "Disconnected".
         BeginReconnectMask();
-        _hub?.RaiseSettingsSaved();
+        ((IAppCommands)CurrentApp).NotifySettingsSaved();
         RefreshFromSnapshot(_lastSnapshot);
     }
 
@@ -2221,6 +2310,38 @@ public sealed partial class ConnectionPage : Page
             RefreshFromSnapshot(_connectionManager.CurrentSnapshot);
     }
 
+    private void OnAppStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        try
+        {
+            switch (e.PropertyName)
+            {
+                case nameof(AppState.Status):
+                    var snapshot = _connectionManager?.CurrentSnapshot ?? GatewayConnectionSnapshot.Idle;
+                    _lastSnapshot = snapshot;
+                    RefreshFromSnapshot(snapshot);
+                    break;
+                case nameof(AppState.NodePairList):
+                    if (_appState?.NodePairList != null) UpdatePairingRequests(_appState.NodePairList);
+                    break;
+                case nameof(AppState.DevicePairList):
+                    if (_appState?.DevicePairList != null) UpdateDevicePairingRequests(_appState.DevicePairList);
+                    break;
+                case nameof(AppState.Channels):
+                case nameof(AppState.UsageCost):
+                case nameof(AppState.Sessions):
+                case nameof(AppState.GatewaySelf):
+                    OnGlanceDataChanged();
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Services.Logger.Warn($"[ConnectionPage] OnAppStateChanged({e.PropertyName}) failed: {ex.Message}");
+            throw;
+        }
+    }
+
     // ─── Pending pairing — populate the banner with existing semantics ─
 
     public void UpdateDevicePairingRequests(DevicePairingListInfo data)
@@ -2230,7 +2351,7 @@ public sealed partial class ConnectionPage : Page
 
         if (hasDevicePending)
         {
-            var scopes = _hub?.GatewayClient?.GrantedOperatorScopes ?? (IReadOnlyList<string>)Array.Empty<string>();
+            var scopes = CurrentApp.GatewayClient?.GrantedOperatorScopes ?? (IReadOnlyList<string>)Array.Empty<string>();
             var canPair = OperatorScopeHelper.CanApproveDevices(scopes);
             // Build the set of fallback ids that collide across multiple
             // pending requests. When a legacy gateway omits RequestId we
@@ -2258,7 +2379,7 @@ public sealed partial class ConnectionPage : Page
 
         if (hasNodePending)
         {
-            var scopes = _hub?.GatewayClient?.GrantedOperatorScopes ?? (IReadOnlyList<string>)Array.Empty<string>();
+            var scopes = CurrentApp.GatewayClient?.GrantedOperatorScopes ?? (IReadOnlyList<string>)Array.Empty<string>();
             var canPair = OperatorScopeHelper.CanApproveDevices(scopes);
             // Same ambiguity guard as UpdateDevicePairingRequests above:
             // if a legacy gateway sends multiple node-pair requests with
@@ -2363,7 +2484,7 @@ public sealed partial class ConnectionPage : Page
                 approveBtn.IsEnabled = false; rejectBtn.IsEnabled = false;
                 try
                 {
-                    var client = _hub?.GatewayClient;
+                    var client = CurrentApp.GatewayClient;
                     if (client != null)
                     {
                         var ok = await client.DevicePairApproveAsync(capturedId);
@@ -2380,7 +2501,7 @@ public sealed partial class ConnectionPage : Page
                 approveBtn.IsEnabled = false; rejectBtn.IsEnabled = false;
                 try
                 {
-                    var client = _hub?.GatewayClient;
+                    var client = CurrentApp.GatewayClient;
                     if (client != null)
                     {
                         var ok = await client.DevicePairRejectAsync(capturedId);
@@ -2458,7 +2579,7 @@ public sealed partial class ConnectionPage : Page
                 approveBtn.IsEnabled = false; rejectBtn.IsEnabled = false;
                 try
                 {
-                    var client = _hub?.GatewayClient;
+                    var client = CurrentApp.GatewayClient;
                     if (client != null)
                     {
                         var ok = await client.NodePairApproveAsync(capturedId);
@@ -2474,7 +2595,7 @@ public sealed partial class ConnectionPage : Page
                 approveBtn.IsEnabled = false; rejectBtn.IsEnabled = false;
                 try
                 {
-                    var client = _hub?.GatewayClient;
+                    var client = CurrentApp.GatewayClient;
                     if (client != null)
                     {
                         var ok = await client.NodePairRejectAsync(capturedId);

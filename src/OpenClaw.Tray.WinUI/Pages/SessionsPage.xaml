@@ -34,12 +34,6 @@
             <SelectorBarItem x:Name="AllTab" Text="All" IsSelected="True"/>
         </SelectorBar>
 
-        <!-- Not-connected warning -->
-        <InfoBar x:Name="ConnectionWarning" Grid.Row="2"
-                 Title="Not connected"
-                 Message="Connect to a gateway to view sessions."
-                 Severity="Warning" IsOpen="False" IsClosable="False"/>
-
         <!-- Empty state -->
         <StackPanel x:Name="EmptyState" Grid.Row="3" Spacing="8"
                     HorizontalAlignment="Center" VerticalAlignment="Center"
