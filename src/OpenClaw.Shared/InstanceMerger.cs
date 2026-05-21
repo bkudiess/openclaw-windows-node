@@ -88,7 +88,126 @@ public static class InstanceMerger
             rows.Add(BuildFromOrphanNode(orphan, nowUtc, options));
         }
 
+        rows = ApplyLocalNodeOverride(rows, options);
+
         return SortStable(rows, nowUtc);
+    }
+
+    /// <summary>
+    /// Replaces gateway-supplied caps/commands on local-identity rows with the
+    /// node's live in-process registration when <see cref="InstanceMergeOptions.LocalNodeCapabilities"/>
+    /// (and friends) are set. Also forces <see cref="PresenceStatus.Active"/>
+    /// when the live websocket is up, and deduplicates multiple
+    /// <c>IsThisInstance</c> rows down to one (the gateway can return several
+    /// paired registrations for the same physical machine across re-pairs).
+    /// No-op when no live data is provided — preserves legacy merge behavior
+    /// for callers that don't have access to the node client (CLI, tests, etc.).
+    /// </summary>
+    private static List<MergedInstance> ApplyLocalNodeOverride(
+        List<MergedInstance> rows,
+        InstanceMergeOptions options)
+    {
+        var hasLiveCaps = options.LocalNodeCapabilities is not null;
+        var hasLiveCommands = options.LocalNodeCommands is not null;
+        if (!hasLiveCaps && !hasLiveCommands && !options.LocalNodeConnected) return rows;
+
+        var result = new List<MergedInstance>(rows.Count);
+        var localSeen = false;
+        foreach (var row in rows)
+        {
+            if (!row.IsThisInstance)
+            {
+                result.Add(row);
+                continue;
+            }
+
+            if (localSeen)
+            {
+                // Duplicate self-row from a stale gateway re-pair record. Drop
+                // it so the user sees ONE "this PC" entry, not two.
+                continue;
+            }
+            localSeen = true;
+
+            var existingNode = row.Node;
+            var caps = options.LocalNodeCapabilities ?? existingNode?.Capabilities ?? new List<string>();
+            var commands = options.LocalNodeCommands ?? existingNode?.Commands ?? new List<string>();
+
+            var nodeOverride = existingNode is null
+                ? new GatewayNodeInfo
+                {
+                    NodeId = options.LocalNodeId ?? "",
+                    DisplayName = row.DisplayName,
+                    Mode = row.Mode ?? "node",
+                    Platform = row.Platform,
+                    Capabilities = caps.ToList(),
+                    Commands = commands.ToList(),
+                    CapabilityCount = caps.Count,
+                    CommandCount = commands.Count,
+                }
+                : new GatewayNodeInfo
+                {
+                    NodeId = existingNode.NodeId,
+                    DisplayName = existingNode.DisplayName,
+                    Mode = existingNode.Mode,
+                    Status = existingNode.Status,
+                    Platform = existingNode.Platform,
+                    LastSeen = existingNode.LastSeen,
+                    IsOnline = options.LocalNodeConnected || existingNode.IsOnline,
+                    Capabilities = caps.ToList(),
+                    Commands = commands.ToList(),
+                    DisabledCommands = existingNode.DisabledCommands,
+                    Permissions = existingNode.Permissions,
+                    CapabilityCount = caps.Count,
+                    CommandCount = commands.Count,
+                    Version = existingNode.Version,
+                    CoreVersion = existingNode.CoreVersion,
+                    UiVersion = existingNode.UiVersion,
+                    ClientId = existingNode.ClientId,
+                    ClientMode = existingNode.ClientMode,
+                    DeviceFamily = existingNode.DeviceFamily,
+                    ModelIdentifier = existingNode.ModelIdentifier,
+                    RemoteIp = existingNode.RemoteIp,
+                    PathEnv = existingNode.PathEnv,
+                    ConnectedAt = existingNode.ConnectedAt,
+                    ApprovedAt = existingNode.ApprovedAt,
+                    LastSeenReason = existingNode.LastSeenReason,
+                    IsPaired = existingNode.IsPaired,
+                    HasExplicitDisplayName = existingNode.HasExplicitDisplayName,
+                };
+
+            var status = options.LocalNodeConnected && !row.IsGateway
+                ? PresenceStatus.Active
+                : row.Status;
+
+            result.Add(new MergedInstance
+            {
+                Key = row.Key,
+                Presence = row.Presence,
+                Node = nodeOverride,
+                CanManageNode = row.CanManageNode || existingNode is null,
+                Status = status,
+                IsGateway = row.IsGateway,
+                IsThisInstance = true,
+                DisplayName = row.DisplayName,
+                Ip = row.Ip,
+                Version = row.Version,
+                Platform = row.Platform,
+                DeviceFamily = row.DeviceFamily,
+                ModelIdentifier = row.ModelIdentifier,
+                Mode = row.Mode,
+                LastInputSeconds = row.LastInputSeconds,
+                Reason = row.Reason,
+                Timestamp = row.Timestamp,
+                CapabilityCount = caps.Count,
+                CommandCount = commands.Count,
+                Roles = row.Roles,
+                IdentityCaption = row.IdentityCaption,
+                NodeStatusRaw = row.NodeStatusRaw,
+                DebugText = row.DebugText,
+            });
+        }
+        return result;
     }
 
     /// <summary>

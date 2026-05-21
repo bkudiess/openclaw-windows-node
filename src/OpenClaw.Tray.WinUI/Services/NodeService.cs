@@ -170,6 +170,20 @@ public sealed class NodeService : IDisposable
     public string? FullDeviceId => _nodeClient?.FullDeviceId;
     public string? GatewayUrl => _nodeClient?.GatewayUrl;
 
+    /// <summary>
+    /// Live capability list this node is advertising in its current handshake.
+    /// Null when no node client is attached. Used by InstancesPage to override
+    /// the gateway's stale paired-registry snapshot for the local row.
+    /// </summary>
+    public IReadOnlyList<string>? RegisteredCapabilities => _nodeClient?.RegisteredCapabilities;
+
+    /// <summary>
+    /// Live command list this node is advertising in its current handshake.
+    /// Null when no node client is attached. Used by InstancesPage to override
+    /// the gateway's stale paired-registry snapshot for the local row.
+    /// </summary>
+    public IReadOnlyList<string>? RegisteredCommands => _nodeClient?.RegisteredCommands;
+
     /// <summary>Show the canvas window (creates it if needed).</summary>
     public void ShowCanvasWindow()
     {
@@ -230,6 +244,8 @@ public sealed class NodeService : IDisposable
     /// </summary>
     public Task DisconnectAsync()
     {
+        _logger.Info($"[SHUTDOWN] NodeService.DisconnectAsync called. " +
+            $"capabilities.Count={_capabilities.Count}, _nodeClient set={_nodeClient != null}");
         StopMcpServer();
 
         WindowsNodeClient? previous;
@@ -242,23 +258,28 @@ public sealed class NodeService : IDisposable
         {
             // Unsubscribe but don't dispose — the connector owns the client.
             DetachClientHandlers(previous);
+            _logger.Info("[SHUTDOWN] NodeService: detached handlers from previous client (connector owns it, not disposing)");
         }
 
         lock (_capabilitiesLock) { _capabilities.Clear(); }
+        _logger.Info("[SHUTDOWN] NodeService: cleared capabilities list");
 
         // Close canvas window
         if (_canvasWindow != null && !_canvasWindow.IsClosed)
         {
+            _logger.Info("[SHUTDOWN] NodeService: closing canvas window");
             _dispatcherQueue.TryEnqueue(() => _canvasWindow.Close());
             _canvasWindow = null;
         }
 
         if (_a2uiCanvasWindow != null && !_a2uiCanvasWindow.IsClosed)
         {
+            _logger.Info("[SHUTDOWN] NodeService: closing a2ui canvas window");
             _dispatcherQueue.TryEnqueue(() => _a2uiCanvasWindow.Close());
             _a2uiCanvasWindow = null;
         }
 
+        _logger.Info("[SHUTDOWN] NodeService.DisconnectAsync done");
         return Task.CompletedTask;
     }
     
@@ -270,14 +291,30 @@ public sealed class NodeService : IDisposable
         // populated list.
         lock (_capabilitiesLock)
         {
+        _logger.Info(
+            $"[CAP-REG] NodeService.RegisterCapabilities START. Toggles: " +
+            $"SystemRun={NodeCapabilityGating.ShouldRegisterSystemRun(_settings)} " +
+            $"Canvas={NodeCapabilityGating.ShouldRegisterCanvas(_settings)} " +
+            $"Screen={NodeCapabilityGating.ShouldRegisterScreen(_settings)} " +
+            $"Camera={NodeCapabilityGating.ShouldRegisterCamera(_settings)} " +
+            $"Location={NodeCapabilityGating.ShouldRegisterLocation(_settings)} " +
+            $"Tts={NodeCapabilityGating.ShouldRegisterTts(_settings)} " +
+            $"Stt={NodeCapabilityGating.ShouldRegisterStt(_settings)} " +
+            $"BrowserProxy={NodeCapabilityGating.ShouldRegisterBrowserProxy(_settings)} " +
+            $"NodeClient={(_nodeClient != null ? "attached" : "null")}");
         _capabilities.Clear();
 
         // App operations capability (always registered, not gated by a toggle)
         _appCapability = new AppCapability(_logger);
         Register(_appCapability);
 
-        // System capability (notifications + command execution)
-        _systemCapability = new SystemCapability(_logger);
+        // System capability (notifications + command execution). The
+        // "Run system tools" toggle gates the run/run.prepare commands
+        // inside the capability — the rest (notify/which/execApprovals)
+        // stay registered regardless.
+        _systemCapability = new SystemCapability(
+            _logger,
+            includeRunCommands: NodeCapabilityGating.ShouldRegisterSystemRun(_settings));
         _systemCapability.NotifyRequested += OnSystemNotify;
         _systemCapability.SetCommandRunner(BuildSystemRunRunner());
         _systemCapability.SetApprovalPolicy(new ExecApprovalPolicy(_dataPath, _logger));
@@ -376,7 +413,9 @@ public sealed class NodeService : IDisposable
                 _nodeClient.SetPermission("screen.record", true);
         }
 
-        _logger.Info($"Capabilities registered: {string.Join(", ", _capabilities.Select(c => c.Category).Distinct(StringComparer.OrdinalIgnoreCase))} ({_capabilities.Count} caps)");
+        _logger.Info($"[CAP-REG] NodeService.RegisterCapabilities END: " +
+            $"categories=[{string.Join(", ", _capabilities.Select(c => c.Category).Distinct(StringComparer.OrdinalIgnoreCase))}] " +
+            $"({_capabilities.Count} capability instances)");
         } // end lock
 
         StartMcpServer();
@@ -457,32 +496,17 @@ public sealed class NodeService : IDisposable
 
         _logger.Info($"[NodeService] AttachClient: capabilitiesBuilt={capabilitiesBuilt}, _capabilities.Count={_capabilities.Count}");
 
-        // First connect after app startup may not have built capability objects yet.
-        // RegisterCapabilities() populates _capabilities and registers them on _nodeClient.
-        if (!capabilitiesBuilt)
-        {
-            _logger.Info("[NodeService] AttachClient: capabilities not yet built, calling RegisterCapabilities()");
-            RegisterCapabilities();
-        }
-        else
-        {
-            // Reconnect path: capabilities already exist, just re-bind to the new client.
-            lock (_capabilitiesLock)
-            {
-                foreach (var capability in _capabilities)
-                {
-                    try
-                    {
-                        client.RegisterCapability(capability);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.Warn($"[NodeService] AttachClient: failed to register {capability.Category}: {ex.Message}");
-                    }
-                }
-            }
-            _logger.Info($"[NodeService] AttachClient: re-registered {_capabilities.Count} capabilities on new client");
-        }
+        // Always rebuild from current settings. The previous reconnect path
+        // re-registered the cached _capabilities instances, but _capabilities
+        // is only cleared in DisconnectAsync — which is never invoked on the
+        // reconnect path used by App.OnSettingsSaved (CapabilityReload calls
+        // ReconnectAsync, not DisconnectAsync). That left toggles like
+        // NodeCanvasEnabled / NodeSystemRunEnabled silently requiring a full
+        // app restart to take effect. RegisterCapabilities() clears the list,
+        // rebuilds with current settings, and registers on the new _nodeClient
+        // — correct for first-attach AND reconnect.
+        _logger.Info("[NodeService] AttachClient: rebuilding capabilities from current settings");
+        RegisterCapabilities();
 
         // Log final registration state for diagnostics
         _logger.Info($"[NodeService] AttachClient DONE: client.Registration.Capabilities={client.RegisteredCapabilityCount}, client.Registration.Commands={client.RegisteredCommandCount}");
@@ -705,6 +729,8 @@ public sealed class NodeService : IDisposable
             disabled.AddRange(CommandCenterCommandGroups.SafeCompanionCommands.Where(command => command.StartsWith("location.", StringComparison.OrdinalIgnoreCase)));
         if (_settings?.NodeBrowserProxyEnabled == false)
             disabled.Add("browser.proxy");
+        if (_settings?.NodeSystemRunEnabled == false)
+            disabled.AddRange(new[] { "system.run", "system.run.prepare" });
         if (_settings?.NodeSttEnabled != true)
             disabled.Add(SttCapability.TranscribeCommand);
         if (_settings?.NodeTtsEnabled != true)
@@ -1857,6 +1883,7 @@ public sealed class NodeService : IDisposable
     
     public void Dispose()
     {
+        _logger.Info("[SHUTDOWN] NodeService.Dispose called");
         StopMcpServer();
 
         WindowsNodeClient? client;
@@ -1868,6 +1895,7 @@ public sealed class NodeService : IDisposable
         if (client != null)
         {
             DetachClientHandlers(client);
+            _logger.Info("[SHUTDOWN] NodeService.Dispose: detached handlers from node client");
         }
 
         try { _cameraCaptureService?.Dispose(); } catch { /* ignore */ }

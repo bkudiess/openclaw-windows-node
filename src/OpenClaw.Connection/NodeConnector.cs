@@ -103,14 +103,18 @@ public sealed class NodeConnector : INodeConnector
 
     private void DisconnectInternal()
     {
+        var hadClient = _client != null;
         var old = _client;
         _client = null;
         if (old != null)
         {
+            _logger.Info("[SHUTDOWN] NodeConnector.DisconnectInternal: disposing WindowsNodeClient");
             try { old.Dispose(); }
             catch (Exception ex) { _logger.Warn($"[NodeConnector] Dispose error: {ex.Message}"); }
         }
         Mode = NodeConnectionMode.Disabled;
+        if (hadClient)
+            _logger.Info("[SHUTDOWN] NodeConnector.DisconnectInternal done; Mode=Disabled");
     }
 
     public void Dispose()

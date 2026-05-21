@@ -69,6 +69,33 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
     /// <summary>The full device ID of the local node service (if running).</summary>
     internal string? NodeFullDeviceId => _nodeService?.FullDeviceId;
 
+    /// <summary>
+    /// Live snapshot of capability categories this node is advertising right now
+    /// (e.g. matches what the gateway sees in the most recent handshake). Used
+    /// by InstancesPage to override the gateway's stale paired-registry data
+    /// for the local "this PC" row. Null when no node client is attached.
+    /// </summary>
+    internal IReadOnlyList<string>? NodeRegisteredCapabilities => _nodeService?.RegisteredCapabilities;
+
+    /// <summary>
+    /// Live snapshot of commands this node is advertising right now (includes
+    /// <c>system.run</c> when the Run-system-tools toggle is on, omits it when
+    /// off). Same rationale as <see cref="NodeRegisteredCapabilities"/>.
+    /// </summary>
+    internal IReadOnlyList<string>? NodeRegisteredCommands => _nodeService?.RegisteredCommands;
+
+    /// <summary>True when the local node client currently has a live websocket to the gateway.</summary>
+    internal bool NodeIsConnected => _nodeService?.IsConnected ?? false;
+
+    /// <summary>
+    /// Current gateway view of all paired nodes (most recent <c>node.list</c>).
+    /// Surfaces (ConnectionPage, TrayMenu) that want to mirror what the
+    /// gateway shows should source from this instead of the live local
+    /// registration. Empty array when AppState isn't initialised yet.
+    /// </summary>
+    internal IReadOnlyList<OpenClaw.Shared.GatewayNodeInfo> AppStateNodes
+        => _appState?.Nodes ?? Array.Empty<OpenClaw.Shared.GatewayNodeInfo>();
+
     public OpenClawTray.Chat.OpenClawChatDataProvider? ChatProvider => _chatCoordinator?.Provider;
 
     /// <summary>
@@ -2474,10 +2501,44 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             case nameof(AppState.UsageCost):
             case nameof(AppState.Nodes):
                 UpdateStatusDetailWindow();
+                if (e.PropertyName == nameof(AppState.Nodes))
+                    LogGatewayDivergenceIfAny();
                 break;
             case nameof(AppState.CurrentActivity):
                 UpdateTrayIcon();
                 break;
+        }
+    }
+
+    /// <summary>
+    /// On every <c>node.list</c> push from the gateway, compare the gateway's
+    /// record for THIS PC against our live registration. Logs a tagged
+    /// <c>[GATEWAY-STALE]</c> line when they disagree so the gateway-side
+    /// bugs (stale capability snapshots, duplicate paired records, wrong
+    /// connected flag) are visible without affecting display. The gateway
+    /// remains the source of truth for what UI surfaces show.
+    /// </summary>
+    private void LogGatewayDivergenceIfAny()
+    {
+        try
+        {
+            if (_nodeService == null || _appState == null) return;
+            var liveLocal = _nodeService.GetLocalNodeInfo();
+            var localId = _nodeService.FullDeviceId;
+            var liveConnected = _nodeService.IsConnected;
+            var report = GatewayDivergenceChecker.Compare(
+                _appState.Nodes, localId, liveLocal, liveConnected);
+            if (report == null) return;
+            if (!report.HasAnyDrift)
+            {
+                Logger.Info($"[GATEWAY-OK] self-entry in sync: caps={report.LiveCommandCount > 0} cmds={report.LiveCommandCount}");
+                return;
+            }
+            Logger.Warn($"[GATEWAY-STALE] node.list disagrees with live registration → {GatewayDivergenceChecker.FormatLogLine(report)}");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[GATEWAY-STALE] divergence check failed: {ex.Message}");
         }
     }
 

@@ -277,10 +277,12 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
     private void DisconnectCore()
     {
         var prev = _stateMachine.Current.OverallState;
+        _logger.Info($"[SHUTDOWN] GatewayConnectionManager.DisconnectCore from state={prev}");
         DisposeActiveClient();
         _stateMachine.TryTransition(ConnectionTrigger.DisconnectRequested);
         _diagnostics.RecordStateChange(prev, _stateMachine.Current.OverallState);
         EmitStateChanged(prev);
+        _logger.Info($"[SHUTDOWN] GatewayConnectionManager.DisconnectCore done; new state={_stateMachine.Current.OverallState}");
     }
 
     public async Task ReconnectAsync()

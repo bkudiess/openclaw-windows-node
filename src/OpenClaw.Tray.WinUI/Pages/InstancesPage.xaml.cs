@@ -196,6 +196,14 @@ public sealed partial class InstancesPage : Page
             {
                 LocalNodeId = CurrentApp.NodeFullDeviceId,
                 LocalHost = Environment.MachineName,
+                // Pass the local node's LIVE registration (from the current
+                // in-process handshake) so the "this PC" row mirrors what we're
+                // actually exposing right now — overrides the gateway's stale
+                // paired-registry snapshot which is captured at first-pair-time
+                // and not refreshed across reconnects. See gateway-node-integration.md.
+                LocalNodeCapabilities = CurrentApp.NodeRegisteredCapabilities,
+                LocalNodeCommands = CurrentApp.NodeRegisteredCommands,
+                LocalNodeConnected = CurrentApp.NodeIsConnected,
                 OnUnmatchedNode = msg => Debug.WriteLine($"[InstancesPage] {msg}"),
                 NowUtc = () => nowUtc,
             });

@@ -103,6 +103,23 @@ public class WindowsNodeClient : WebSocketClientBase
     /// <summary>First few registered command names for diagnostic logging.</summary>
     public IEnumerable<string> RegisteredCommandsSample => _registration.Commands.Take(5);
 
+    /// <summary>
+    /// Snapshot of the capability categories this node is currently advertising in
+    /// its handshake. Surfaced to UI so the local "this PC" row can show what we
+    /// are actually exposing right now (rather than the gateway's stale paired-
+    /// registry snapshot, which is captured at first-pair-time and not refreshed
+    /// when the node reconnects with a different toggle set).
+    /// </summary>
+    public IReadOnlyList<string> RegisteredCapabilities => _registration.Capabilities.ToArray();
+
+    /// <summary>
+    /// Snapshot of the full command list this node is currently advertising in
+    /// its handshake (e.g. includes <c>system.run</c> when the "Run system tools"
+    /// toggle is on, omits it when off). Same rationale as
+    /// <see cref="RegisteredCapabilities"/>.
+    /// </summary>
+    public IReadOnlyList<string> RegisteredCommands => _registration.Commands.ToArray();
+
     protected override int ReceiveBufferSize => 65536;
     protected override string ClientRole => "node";
     
@@ -178,29 +195,39 @@ public class WindowsNodeClient : WebSocketClientBase
     /// </summary>
     public void RegisterCapability(INodeCapability capability)
     {
-        if (!_capabilities.Contains(capability))
+        var wasAlreadyKnown = _capabilities.Contains(capability);
+        if (!wasAlreadyKnown)
         {
             _capabilities.Add(capability);
         }
-        
-        // Update registration
-        if (!_registration.Capabilities.Contains(capability.Category))
+
+        var categoryAdded = !_registration.Capabilities.Contains(capability.Category);
+        if (categoryAdded)
         {
             _registration.Capabilities.Add(capability.Category);
         }
+        var newCommands = new List<string>();
         foreach (var cmd in capability.Commands)
         {
             if (!_registration.Commands.Contains(cmd))
             {
                 _registration.Commands.Add(cmd);
+                newCommands.Add(cmd);
             }
         }
-        
+
         // Rebuild the O(1) command dispatch map so node.invoke lookups stay fast
         // regardless of how many capabilities or commands are registered.
         _commandMap = BuildCommandMap();
-        
-        _logger.Info($"Registered capability: {capability.Category} ({capability.Commands.Count} commands)");
+
+        var allCommands = string.Join(", ", capability.Commands);
+        var newCmdList = newCommands.Count == 0 ? "none (all dedup'd)" : string.Join(", ", newCommands);
+        _logger.Info(
+            $"[CAP-REG] '{capability.Category}' registered: " +
+            $"capabilityNew={!wasAlreadyKnown}, categoryNew={categoryAdded}, " +
+            $"commands={capability.Commands.Count} (newly added: {newCmdList}). " +
+            $"Full command set on this capability: [{allCommands}]. " +
+            $"Registration totals: caps={_registration.Capabilities.Count}, commands={_registration.Commands.Count}.");
     }
     
     /// <summary>
@@ -229,10 +256,14 @@ public class WindowsNodeClient : WebSocketClientBase
     /// </summary>
     public Task DisconnectAsync()
     {
+        _logger.Info(
+            $"[SHUTDOWN] WindowsNodeClient.DisconnectAsync called (was connected={_isConnected}, " +
+            $"caps={_registration.Capabilities.Count}, commands={_registration.Commands.Count}). " +
+            $"Caller: {new System.Diagnostics.StackTrace(1, false).GetFrame(0)?.GetMethod()?.DeclaringType?.Name ?? "?"}.");
         _isConnected = false;
         Dispose();
         RaiseStatusChanged(ConnectionStatus.Disconnected);
-        _logger.Info("Node disconnected");
+        _logger.Info("[SHUTDOWN] WindowsNodeClient: disposed + status=Disconnected raised");
         return Task.CompletedTask;
     }
 

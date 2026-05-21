@@ -17,11 +17,19 @@ public class SystemCapability : NodeCapabilityBase
     private const int DefaultRunTimeoutMs = 30_000;
     private const int MaxRunTimeoutMs = 600_000; // 10 minutes
 
-    private static readonly string[] _commands = new[]
+    private static readonly string[] _commandsWithRun = new[]
     {
         "system.notify",
         "system.run",
         "system.run.prepare",
+        "system.which",
+        "system.execApprovals.get",
+        "system.execApprovals.set"
+    };
+
+    private static readonly string[] _commandsWithoutRun = new[]
+    {
+        "system.notify",
         "system.which",
         "system.execApprovals.get",
         "system.execApprovals.set"
@@ -46,9 +54,12 @@ public class SystemCapability : NodeCapabilityBase
         "reg ",
         "net "
     ];
-    
-    public override IReadOnlyList<string> Commands => _commands;
-    
+
+    private readonly bool _includeRunCommands;
+
+    public override IReadOnlyList<string> Commands =>
+        _includeRunCommands ? _commandsWithRun : _commandsWithoutRun;
+
     // Event to let UI handle the actual notification display
     public event EventHandler<SystemNotifyArgs>? NotifyRequested;
     
@@ -61,9 +72,19 @@ public class SystemCapability : NodeCapabilityBase
 
     // V2 exec approval handler (null = legacy path; inert until explicitly set)
     private IExecApprovalV2Handler? _v2Handler;
-    
-    public SystemCapability(IOpenClawLogger logger) : base(logger)
+
+    /// <param name="logger">Capability logger.</param>
+    /// <param name="includeRunCommands">
+    /// When false, <c>system.run</c> and <c>system.run.prepare</c> are dropped
+    /// from <see cref="Commands"/> and <see cref="ExecuteAsync"/> rejects them
+    /// with a clear error before any V2/legacy dispatch. The rest of the
+    /// <c>system</c> category (notify/which/execApprovals.get/set) is
+    /// unaffected. Wired from the tray "Run system tools" permission toggle
+    /// via <c>NodeCapabilityGating.ShouldRegisterSystemRun</c>.
+    /// </param>
+    public SystemCapability(IOpenClawLogger logger, bool includeRunCommands = true) : base(logger)
     {
+        _includeRunCommands = includeRunCommands;
     }
     
     /// <summary>
@@ -98,6 +119,28 @@ public class SystemCapability : NodeCapabilityBase
     
     public override async Task<NodeInvokeResponse> ExecuteAsync(NodeInvokeRequest request)
     {
+        // [system.run] entry trace for diagnostics: log every system.* dispatch
+        // (the request id helps correlate with gateway-side logs).
+        if (request.Command is "system.run" or "system.run.prepare"
+            or "system.execApprovals.get" or "system.execApprovals.set")
+        {
+            Logger.Info(
+                $"[system.dispatch] command={request.Command} reqId={(string.IsNullOrEmpty(request.Id) ? "(none)" : request.Id)} " +
+                $"toggle.includeRun={_includeRunCommands} " +
+                $"hasV2Handler={_v2Handler != null} hasCommandRunner={_commandRunner != null} " +
+                $"hasApprovalPolicy={_approvalPolicy != null} hasPromptHandler={_promptHandler != null}");
+        }
+
+        // "Run system tools" kill switch — applied before V2/legacy dispatch
+        // so stale gateway allowlists and cached MCP clients still see the
+        // capability as disabled when the user turned it off.
+        if (!_includeRunCommands &&
+            (request.Command == "system.run" || request.Command == "system.run.prepare"))
+        {
+            Logger.Info($"[system.run] rejected: 'Run system tools' is disabled (command={request.Command})");
+            return Error("system.run is disabled by user setting (Permissions → Run system tools).");
+        }
+
         return request.Command switch
         {
             "system.notify" => await HandleNotifyAsync(request),
@@ -229,18 +272,22 @@ public class SystemCapability : NodeCapabilityBase
         var argv = TryParseArgv(request.Args);
         if (argv == null || argv.Length == 0 || string.IsNullOrWhiteSpace(argv[0]))
         {
+            Logger.Warn("[system.run.prepare] missing command parameter");
             return Error("Missing command parameter");
         }
-        
+
         var command = argv[0];
         var rawCommand = GetStringArg(request.Args, "rawCommand");
         var cwd = GetStringArg(request.Args, "cwd");
         var agentId = GetStringArg(request.Args, "agentId");
         var sessionKey = GetStringArg(request.Args, "sessionKey");
-        
-        Logger.Info($"system.run.prepare: {rawCommand} (cwd={cwd ?? "default"})");
-        
-        return Success(new
+
+        Logger.Info(
+            $"[system.run.prepare] argv0={command} argc={argv.Length} " +
+            $"rawCommand=\"{rawCommand ?? "(null)"}\" cwd={cwd ?? "(default)"} " +
+            $"agentId={agentId ?? "(none)"} sessionKey={sessionKey ?? "(none)"}");
+
+        var response = Success(new
         {
             cmdText = rawCommand ?? FormatExecCommand(argv),
             plan = new
@@ -252,16 +299,19 @@ public class SystemCapability : NodeCapabilityBase
                 sessionKey
             }
         });
+        Logger.Info($"[system.run.prepare] returning plan to gateway (cmdText={(rawCommand ?? FormatExecCommand(argv))})");
+        return response;
     }
     
     private async Task<NodeInvokeResponse> HandleRunAsync(NodeInvokeRequest request)
     {
         var correlationId = Guid.NewGuid().ToString("N")[..8];
+        Logger.Info($"[system.run] corr={correlationId} ENTRY: reqId={(string.IsNullOrEmpty(request.Id) ? "(none)" : request.Id)}");
 
         // Routing seam (rail 2): select path, delegate — no approval logic here.
         if (_v2Handler != null)
         {
-            Logger.Info($"[system.run] corr={correlationId} path=v2");
+            Logger.Info($"[system.run] corr={correlationId} path=v2 handler={_v2Handler.GetType().Name} dispatching...");
             ExecApprovalV2Result v2Result;
             try
             {
@@ -286,6 +336,7 @@ public class SystemCapability : NodeCapabilityBase
 
         if (_commandRunner == null)
         {
+            Logger.Warn($"[system.run] corr={correlationId} REJECTED: no _commandRunner wired");
             return Error("Command execution not available");
         }
         
@@ -360,11 +411,15 @@ public class SystemCapability : NodeCapabilityBase
             : command;
         
         Logger.Info($"system.run: {fullCommand} (shell={shell ?? "auto"}, timeout={timeoutMs}ms)");
-        
+
         // Check exec approval policy
         if (_approvalPolicy != null)
         {
             var approval = _approvalPolicy.Evaluate(fullCommand, shell);
+            Logger.Info(
+                $"[system.run] corr={correlationId} approval.evaluate: " +
+                $"allowed={approval.Allowed} action={approval.Action} " +
+                $"matchedPattern=\"{approval.MatchedPattern ?? "(none)"}\" reason=\"{approval.Reason ?? "(none)"}\"");
             if (!await EnsureApprovedAsync(fullCommand, shell, approval))
             {
                 Logger.Warn($"system.run DENIED: {fullCommand} ({approval.Reason})");
@@ -378,9 +433,18 @@ public class SystemCapability : NodeCapabilityBase
                 return Error($"Command denied by exec policy: {parseResult.Error}");
             }
 
+            if (parseResult.Targets.Count > 0)
+            {
+                Logger.Info(
+                    $"[system.run] corr={correlationId} shell wrapper expanded: {parseResult.Targets.Count} inner target(s)");
+            }
+
             foreach (var target in parseResult.Targets)
             {
                 var innerApproval = _approvalPolicy.Evaluate(target.Command, target.Shell);
+                Logger.Info(
+                    $"[system.run] corr={correlationId} inner-approval ({target.Command}): " +
+                    $"allowed={innerApproval.Allowed} action={innerApproval.Action} reason=\"{innerApproval.Reason ?? "(none)"}\"");
                 if (!await EnsureApprovedAsync(target.Command, target.Shell, innerApproval))
                 {
                     Logger.Warn($"system.run DENIED: {target.Command} ({innerApproval.Reason})");
@@ -388,9 +452,14 @@ public class SystemCapability : NodeCapabilityBase
                 }
             }
         }
-        
+        else
+        {
+            Logger.Info($"[system.run] corr={correlationId} no _approvalPolicy: skipping approval checks");
+        }
+
         try
         {
+            Logger.Info($"[system.run] corr={correlationId} EXEC: dispatching to {_commandRunner.GetType().Name}");
             var result = await _commandRunner.RunAsync(new CommandRequest
             {
                 Command = command,
@@ -400,7 +469,12 @@ public class SystemCapability : NodeCapabilityBase
                 TimeoutMs = timeoutMs,
                 Env = env
             });
-            
+
+            Logger.Info(
+                $"[system.run] corr={correlationId} DONE: exitCode={result.ExitCode} " +
+                $"timedOut={result.TimedOut} durationMs={result.DurationMs} " +
+                $"stdoutBytes={result.Stdout?.Length ?? 0} stderrBytes={result.Stderr?.Length ?? 0}");
+
             return Success(new
             {
                 stdout = result.Stdout,
@@ -412,7 +486,7 @@ public class SystemCapability : NodeCapabilityBase
         }
         catch (Exception ex)
         {
-            Logger.Error("system.run failed", ex);
+            Logger.Error($"[system.run] corr={correlationId} FAILED: {ex.GetType().Name}: {ex.Message}", ex);
             return Error("Execution failed");
         }
     }
@@ -424,11 +498,20 @@ public class SystemCapability : NodeCapabilityBase
         CancellationToken cancellationToken = default)
     {
         if (approval.Allowed)
+        {
+            Logger.Info($"[exec-approval] command=\"{command}\" allowed by policy (matched=\"{approval.MatchedPattern ?? "(default)"}\")");
             return true;
+        }
 
         if (approval.Action != ExecApprovalAction.Prompt || _promptHandler == null || _approvalPolicy == null)
+        {
+            Logger.Info(
+                $"[exec-approval] command=\"{command}\" cannot prompt: action={approval.Action} " +
+                $"hasPromptHandler={_promptHandler != null} hasPolicy={_approvalPolicy != null} → denied");
             return false;
+        }
 
+        Logger.Info($"[exec-approval] command=\"{command}\" prompting user (matched=\"{approval.MatchedPattern ?? "(none)"}\" reason=\"{approval.Reason ?? "(none)"}\")");
         var decision = await _promptHandler.RequestAsync(new ExecApprovalPromptRequest
         {
             Command = command,
@@ -436,6 +519,7 @@ public class SystemCapability : NodeCapabilityBase
             MatchedPattern = approval.MatchedPattern,
             Reason = approval.Reason ?? "Command requires approval"
         }, cancellationToken);
+        Logger.Info($"[exec-approval] command=\"{command}\" prompt decision={decision.Kind} reason=\"{decision.Reason ?? "(none)"}\"");
 
         if (decision.Kind == ExecApprovalPromptDecisionKind.Deny)
         {
@@ -474,12 +558,14 @@ public class SystemCapability : NodeCapabilityBase
     {
         if (_approvalPolicy == null)
         {
+            Logger.Info("[exec-approvals.get] no _approvalPolicy → returning disabled");
             return Success(new { enabled = false, message = "No exec policy configured" });
         }
-        
+
         var data = _approvalPolicy.GetPolicyData();
         var policyHash = _approvalPolicy.GetPolicyHash();
         var rules = data.Rules;
+        Logger.Info($"[exec-approvals.get] returning policy: defaultAction={data.DefaultAction} rules={rules.Count} hash={policyHash}");
         var rulesSummary = new object[rules.Count];
         for (var i = 0; i < rules.Count; i++)
         {
@@ -515,9 +601,12 @@ public class SystemCapability : NodeCapabilityBase
     {
         if (_approvalPolicy == null)
         {
+            Logger.Warn("[exec-approvals.set] no _approvalPolicy → error");
             return Error("No exec policy configured");
         }
-        
+
+        Logger.Info("[exec-approvals.set] received policy update from gateway");
+
         try
         {
             var currentHash = _approvalPolicy.GetPolicyHash();

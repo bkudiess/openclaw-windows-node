@@ -121,6 +121,30 @@ You can also explicitly deny commands:
 ```
 `denyCommands` wins over `allowCommands`.
 
+### 1.6 Permissions Page Toggles vs. the Handshake
+
+The Windows tray's **Permissions** page (`PermissionsPage.xaml.cs`) exposes per-capability toggles that gate which commands the node advertises in the connect handshake:
+
+- **Run system tools** (`SettingsData.NodeSystemRunEnabled`, default ON) — drops `system.run` and `system.run.prepare` from the declared commands when OFF. The rest of the `system` category (`system.notify`, `system.which`, `system.execApprovals.get`/`.set`) stays registered. This is a kill switch in addition to per-command exec-approval policy.
+- Other toggles (browser, camera, canvas, screen, location, TTS, STT) gate their respective capabilities the same way.
+
+**Ground truth is the connect-handshake log line** (`WindowsNodeClient`):
+```
+[HANDSHAKE]   commands=N: [system.notify, system.run, …]
+```
+If a command appears here but doesn't show up in the gateway operator's commands dropdown, the gateway is still using a pre-toggle pairing snapshot — re-pair the node (1.4 above).
+
+### 1.7 ConnectionPage vs. InstancesPage Capability Counts
+
+The tray shows two intentionally different capability counts:
+
+| Page | Source | What it counts |
+|------|--------|----------------|
+| **ConnectionPage** (`Connection` tab) | `SettingsManager` toggle booleans | The user-toggleable capabilities currently turned on (browser, camera, canvas, screen, location, TTS, STT, system tools) — 8 user-intent toggles. |
+| **InstancesPage** (`Instances` tab) | `WindowsNodeClient.Capabilities.Select(c => c.Category).Distinct()` | All distinct categories the live node is advertising — includes always-on `app`, `system`, and `device` plus `browser.proxy` when the gateway is connected. |
+
+A default install with the gateway connected reports "**5/8**" on ConnectionPage but "**9 capabilities**" on InstancesPage — same node, two different numbers. ConnectionPage answers "what has the user opted into sharing?"; InstancesPage answers "what is the node actually advertising right now?". Both are useful: ConnectionPage surfaces consent state, InstancesPage surfaces handshake truth.
+
 ---
 
 ## 2. Command Name Mismatches (Bugs We Found)

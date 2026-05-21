@@ -120,6 +120,34 @@ public sealed class InstanceMergeOptions
     /// <summary>Local machine hostname; fallback when <see cref="LocalNodeId"/> is null.</summary>
     public string? LocalHost { get; init; }
 
+    /// <summary>
+    /// Live capability list the local node is currently advertising in its
+    /// handshake. When set, rows matching the local identity have their
+    /// <see cref="MergedInstance.Node"/>.Capabilities replaced with this list
+    /// (and <see cref="MergedInstance.CapabilityCount"/> updated to match).
+    /// Used to override the gateway's stale paired-registry snapshot, which is
+    /// captured at first-pair-time and not refreshed when the node reconnects
+    /// with a different toggle set. Null = no override (legacy behavior).
+    /// </summary>
+    public IReadOnlyList<string>? LocalNodeCapabilities { get; init; }
+
+    /// <summary>
+    /// Live command list the local node is currently advertising. Same rationale
+    /// as <see cref="LocalNodeCapabilities"/>. When set together with that
+    /// option, rows matching the local identity show exactly what this tray is
+    /// exposing right now (e.g. <c>system.run</c> appears here when the
+    /// "Run system tools" toggle is on).
+    /// </summary>
+    public IReadOnlyList<string>? LocalNodeCommands { get; init; }
+
+    /// <summary>
+    /// True when the local node has a live websocket to the gateway. Used to
+    /// force the local row's status to <see cref="PresenceStatus.Active"/> so it
+    /// never says "Inactive" while the websocket is up — the gateway's relayed
+    /// presence beacons can lag the live connection by minutes.
+    /// </summary>
+    public bool LocalNodeConnected { get; init; }
+
     /// <summary>Presence ≤ this age is Active. Default 120s (matches macOS).</summary>
     public TimeSpan ActiveThreshold { get; init; } = TimeSpan.FromSeconds(120);
 

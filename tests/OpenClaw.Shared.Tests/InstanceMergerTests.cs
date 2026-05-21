@@ -549,4 +549,200 @@ public class InstanceMergerTests
         // not the one that only matched by host (p1).
         Assert.Equal("alpha", managedRow.Presence?.DeviceId);
     }
+
+    // ── Local node live-registration override ───────────────────────────────
+    //
+    // Background: the gateway returns a stale paired-registry snapshot in
+    // node.list — captured at first-pair-time and not refreshed across
+    // reconnects. This drops commands the node added later (e.g. system.run
+    // when the "Run system tools" toggle is on). These tests cover the
+    // LocalNodeCapabilities / LocalNodeCommands / LocalNodeConnected override
+    // pass that swaps in the live in-process registration for the self-row.
+
+    [Fact]
+    public void LocalRow_LiveCommands_OverrideStaleGatewaySnapshot()
+    {
+        var p = Presence(deviceId: "self-device", host: "MY-PC", ageSeconds: 5);
+        // Gateway stale snapshot: only 2 commands, missing system.run.
+        var node = Node("self-device", displayName: "My PC");
+        node.Capabilities = new() { "system", "canvas" };
+        node.Commands = new() { "system.notify", "canvas.snapshot" };
+        node.CapabilityCount = 2;
+        node.CommandCount = 2;
+
+        var options = new InstanceMergeOptions
+        {
+            LocalNodeId = "self-device",
+            LocalNodeCapabilities = new[] { "system", "canvas", "browser" },
+            LocalNodeCommands = new[] { "system.notify", "system.run", "system.run.prepare", "canvas.snapshot", "browser.proxy" },
+            NowUtc = () => FixedNowUtc,
+        };
+
+        var result = InstanceMerger.Merge(new[] { node }, new[] { p }, options);
+        var self = Assert.Single(result);
+
+        Assert.True(self.IsThisInstance);
+        Assert.NotNull(self.Node);
+        Assert.Contains("system.run", self.Node!.Commands);
+        Assert.Contains("system.run.prepare", self.Node.Commands);
+        Assert.Contains("browser", self.Node.Capabilities);
+        Assert.Equal(5, self.CommandCount);
+        Assert.Equal(3, self.CapabilityCount);
+    }
+
+    [Fact]
+    public void LocalRow_LiveCommandsExcludingSystemRun_HidesSystemRun()
+    {
+        // Toggle OFF case: live registration omits system.run, gateway snapshot
+        // still has it (e.g. cached from earlier session). Override should hide it.
+        var p = Presence(deviceId: "self-device", host: "MY-PC", ageSeconds: 5);
+        var node = Node("self-device", displayName: "My PC");
+        node.Commands = new() { "system.notify", "system.run", "system.run.prepare" };
+        node.CommandCount = 3;
+
+        var options = new InstanceMergeOptions
+        {
+            LocalNodeId = "self-device",
+            LocalNodeCommands = new[] { "system.notify" },
+            LocalNodeCapabilities = Array.Empty<string>(),
+            NowUtc = () => FixedNowUtc,
+        };
+
+        var result = InstanceMerger.Merge(new[] { node }, new[] { p }, options);
+        var self = Assert.Single(result);
+
+        Assert.DoesNotContain("system.run", self.Node!.Commands);
+        Assert.DoesNotContain("system.run.prepare", self.Node.Commands);
+        Assert.Contains("system.notify", self.Node.Commands);
+        Assert.Equal(1, self.CommandCount);
+    }
+
+    [Fact]
+    public void LocalRow_ConnectedTrue_ForcesActiveStatus_EvenWhenBeaconStale()
+    {
+        // Beacon ts is older than IdleThreshold → would normally classify Stale.
+        var p = Presence(deviceId: "self-device", host: "MY-PC", ageSeconds: 600);
+        var node = Node("self-device", displayName: "My PC");
+
+        var options = new InstanceMergeOptions
+        {
+            LocalNodeId = "self-device",
+            LocalNodeConnected = true,
+            LocalNodeCapabilities = Array.Empty<string>(),
+            LocalNodeCommands = Array.Empty<string>(),
+            NowUtc = () => FixedNowUtc,
+        };
+
+        var result = InstanceMerger.Merge(new[] { node }, new[] { p }, options);
+        var self = Assert.Single(result);
+
+        Assert.Equal(PresenceStatus.Active, self.Status);
+    }
+
+    [Fact]
+    public void LocalRow_ConnectedFalse_LeavesStatusUntouched()
+    {
+        var p = Presence(deviceId: "self-device", host: "MY-PC", ageSeconds: 600);
+        var node = Node("self-device", displayName: "My PC");
+
+        var options = new InstanceMergeOptions
+        {
+            LocalNodeId = "self-device",
+            LocalNodeConnected = false,
+            LocalNodeCapabilities = Array.Empty<string>(),
+            LocalNodeCommands = Array.Empty<string>(),
+            NowUtc = () => FixedNowUtc,
+        };
+
+        var result = InstanceMerger.Merge(new[] { node }, new[] { p }, options);
+        var self = Assert.Single(result);
+
+        Assert.Equal(PresenceStatus.Stale, self.Status);
+    }
+
+    [Fact]
+    public void RemoteRow_NotAffectedByLocalOverride()
+    {
+        // Two presence entries — one local, one remote with different identity.
+        // The remote row's gateway data must NOT be replaced by the local
+        // registration: we only know what we're advertising on THIS machine.
+        var pLocal = Presence(deviceId: "self-device", host: "MY-PC", ageSeconds: 5);
+        var pRemote = Presence(deviceId: "their-device", host: "OTHER-PC", ageSeconds: 5);
+        var nLocal = Node("self-device", displayName: "My PC");
+        var nRemote = Node("their-device", displayName: "Their PC");
+        nRemote.Commands = new() { "screen.snapshot" };
+        nRemote.CommandCount = 1;
+
+        var options = new InstanceMergeOptions
+        {
+            LocalNodeId = "self-device",
+            LocalNodeCapabilities = new[] { "system" },
+            LocalNodeCommands = new[] { "system.run" },
+            LocalNodeConnected = true,
+            NowUtc = () => FixedNowUtc,
+        };
+
+        var result = InstanceMerger.Merge(new[] { nLocal, nRemote }, new[] { pLocal, pRemote }, options);
+
+        var remote = Assert.Single(result, r => !r.IsThisInstance);
+        Assert.Equal("their-device", remote.Presence?.DeviceId);
+        // Remote row preserves the gateway-supplied data verbatim.
+        Assert.Single(remote.Node!.Commands);
+        Assert.Equal("screen.snapshot", remote.Node.Commands[0]);
+        Assert.DoesNotContain("system.run", remote.Node.Commands);
+    }
+
+    [Fact]
+    public void LocalRow_DuplicateGatewayEntries_CollapseToOneSelfRow()
+    {
+        // Mirrors observed gateway behavior: two paired-registry entries for
+        // the same physical machine (different NodeIds, same clientId). The
+        // override pass must reduce these to a single self-row.
+        var p = Presence(deviceId: "self-device", host: "MY-PC", ageSeconds: 5);
+        var dup1 = Node("self-device", displayName: "My PC", clientId: "node-host");
+        var dup2 = Node("self-device-2", displayName: "My PC", clientId: "node-host");
+
+        var options = new InstanceMergeOptions
+        {
+            LocalNodeId = "self-device",
+            LocalHost = "MY-PC",
+            LocalNodeCapabilities = new[] { "system" },
+            LocalNodeCommands = new[] { "system.run" },
+            LocalNodeConnected = true,
+            NowUtc = () => FixedNowUtc,
+        };
+
+        var result = InstanceMerger.Merge(new[] { dup1, dup2 }, new[] { p }, options);
+
+        // Only one row marked IsThisInstance — duplicates collapsed.
+        Assert.Single(result, r => r.IsThisInstance);
+    }
+
+    [Fact]
+    public void LocalOverride_WithoutLiveData_BehavesLikeLegacyMerge()
+    {
+        // Safety: when no live caps/commands and not connected, the merger
+        // must produce the same result as before the override pass existed.
+        var p = Presence(deviceId: "self-device", host: "MY-PC", ageSeconds: 5);
+        var node = Node("self-device", displayName: "My PC");
+        node.Capabilities = new() { "system" };
+        node.Commands = new() { "system.notify" };
+        node.CapabilityCount = 1;
+        node.CommandCount = 1;
+
+        var options = new InstanceMergeOptions
+        {
+            LocalNodeId = "self-device",
+            // No LocalNodeCapabilities, no LocalNodeCommands, no LocalNodeConnected.
+            NowUtc = () => FixedNowUtc,
+        };
+
+        var result = InstanceMerger.Merge(new[] { node }, new[] { p }, options);
+        var self = Assert.Single(result);
+
+        // Caps/commands come from the gateway snapshot — unchanged.
+        Assert.Same(node, self.Node);
+        Assert.Equal(1, self.CommandCount);
+        Assert.Equal(1, self.CapabilityCount);
+    }
 }

@@ -646,7 +646,16 @@ public sealed partial class ConnectionPage : Page
         NodeCardBorder.Visibility = Visibility.Visible;
 
         var settings = CurrentApp.Settings;
-        var enabledCaps = settings != null ? CountEnabledCapabilities(settings) : 0;
+        // Source the chip list from the gateway's `node.list` self-entry so
+        // ConnectionPage matches what the tray menu's Devices flyout shows.
+        // The gateway is the source of truth for what operators can see;
+        // if it's stale we want THAT visible here too (the
+        // [GATEWAY-STALE] log surfaces the divergence). Fallback to
+        // settings only when the gateway list hasn't arrived yet.
+        var gatewayNodes = CurrentApp.AppStateNodes;
+        var exposedCategories = NodeCapabilityDisplay.BuildGatewayViewCategories(
+            gatewayNodes, CurrentApp.NodeFullDeviceId, settings);
+        var caps = exposedCategories.Count;
 
         // Body text + chips (defined below) cover every Node state. The
         // legacy "var (_, body) = …" block was dropped — its prose is no
@@ -679,7 +688,6 @@ public sealed partial class ConnectionPage : Page
         NodeBodyText.Visibility = showBody ? Visibility.Visible : Visibility.Collapsed;
 
         // Status sub-row: dot color + status label, mirrors PermissionsPage.
-        var caps = settings != null ? CountEnabledCapabilities(settings) : 0;
         var (nodeGlyph, nodeBrushKey, nodeStatusText) = plan.NodeCard switch
         {
             NodeCardState.OnHealthy => (
@@ -728,10 +736,12 @@ public sealed partial class ConnectionPage : Page
         // Hidden when Node mode is off (no concept of a "list" then).
         bool showCaps = settings != null && plan.NodeCard != NodeCardState.Off
                                          && plan.NodeCard != NodeCardState.Hidden;
+        // `exposedCategories` (declared above) is the single source of truth
+        // shared by the status text, this providing-line, and the chip strip.
         NodeCapabilityText.Visibility = showCaps ? Visibility.Visible : Visibility.Collapsed;
         if (showCaps)
         {
-            NodeCapabilityText.Text = BuildCapabilityListString(settings!);
+            NodeCapabilityText.Text = BuildCapabilityListString(exposedCategories);
         }
 
         // Sync toggle from current settings (suppress event)
@@ -754,14 +764,14 @@ public sealed partial class ConnectionPage : Page
 
         // Capability chips — skip the rebuild if the rendered output would
         // be identical (e.g. mid-reconnect snapshot ticks where settings and
-        // node state haven't actually changed). Includes ALL 7 capabilities
-        // because BuildCapabilityChips renders all of them — missing any
-        // here would silently swallow that capability's toggle.
-        var capFp = $"{plan.NodeCard}|{settings?.NodeBrowserProxyEnabled}|{settings?.NodeCameraEnabled}|{settings?.NodeCanvasEnabled}|{settings?.NodeScreenEnabled}|{settings?.NodeLocationEnabled}|{settings?.NodeTtsEnabled}|{settings?.NodeSttEnabled}";
+        // node state haven't actually changed). Fingerprint includes the
+        // LIVE registered category list so the chips refresh as soon as the
+        // node re-registers after a toggle change.
+        var capFp = $"{plan.NodeCard}|{string.Join(",", exposedCategories)}";
         if (_capabilityChipsFingerprint != capFp)
         {
             _capabilityChipsFingerprint = capFp;
-            NodeCapabilityChipsHost.ItemsSource = BuildCapabilityChips(settings, plan.NodeCard);
+            NodeCapabilityChipsHost.ItemsSource = BuildCapabilityChips(exposedCategories, plan.NodeCard);
         }
 
         // Permissions link is always visible (entry point even when sharing is off);
@@ -861,10 +871,9 @@ public sealed partial class ConnectionPage : Page
         return new Border { Child = grid };
     }
 
-    private List<Border> BuildCapabilityChips(SettingsManager? s, NodeCardState state)
+    private List<Border> BuildCapabilityChips(IReadOnlyList<string> exposedCategories, NodeCardState state)
     {
         var chips = new List<Border>();
-        if (s == null) return chips;
         if (state == NodeCardState.Off || state == NodeCardState.Hidden) return chips;
 
         void Add(string label, bool enabled, bool warn = false, bool error = false)
@@ -922,54 +931,33 @@ public sealed partial class ConnectionPage : Page
         }
 
         bool permsWarn = state == NodeCardState.OnPermissionsIncomplete;
-        // Order matches the canonical capability list (naming.md):
-        //   browser, camera, canvas, screen, location, tts, stt
-        Add("Browser",  s.NodeBrowserProxyEnabled);
-        Add("Camera",   s.NodeCameraEnabled);
-        Add("Canvas",   s.NodeCanvasEnabled);
-        Add("Screen",   s.NodeScreenEnabled);
-        Add("Location", s.NodeLocationEnabled);
-        Add("TTS",      s.NodeTtsEnabled);
-        Add("STT",      s.NodeSttEnabled);
+        // Show ONE chip per category currently being forwarded by the node.
+        // Toggles that are off don't appear at all (per user request: "if it's
+        // off, don't show anywhere"). The list is sourced from the live
+        // registration so it matches InstancesPage and updates immediately
+        // when a toggle change triggers a re-register.
+        foreach (var category in exposedCategories)
+        {
+            Add(NodeCapabilityDisplay.GetChipLabel(category), enabled: true);
+        }
         // Trailing summary chip — surfaces when permissions are incomplete.
         if (permsWarn)
         {
-            int caps = CountEnabledCapabilities(s);
-            Add($"{caps}/7 enabled", false, warn: true);
+            Add($"{exposedCategories.Count} enabled", false, warn: true);
         }
         return chips;
     }
 
     /// <summary>
     /// Canonical "Providing N capabilities: …" line per design naming.md.
-    /// Order matches the canonical capability list (browser, camera, canvas,
-    /// screen, location, tts, stt). Empty → "Providing no capabilities".
+    /// Sourced from the live registered category list so it matches
+    /// InstancesPage. Empty → "Providing no capabilities".
     /// </summary>
-    private static string BuildCapabilityListString(SettingsManager s)
+    private static string BuildCapabilityListString(IReadOnlyList<string> exposedCategories)
     {
-        var caps = new List<string>(7);
-        if (s.NodeBrowserProxyEnabled) caps.Add("browser");
-        if (s.NodeCameraEnabled)       caps.Add("camera");
-        if (s.NodeCanvasEnabled)       caps.Add("canvas");
-        if (s.NodeScreenEnabled)       caps.Add("screen");
-        if (s.NodeLocationEnabled)     caps.Add("location");
-        if (s.NodeTtsEnabled)          caps.Add("tts");
-        if (s.NodeSttEnabled)          caps.Add("stt");
-        if (caps.Count == 0) return "Providing no capabilities";
-        return $"Providing {caps.Count} capabilit{(caps.Count == 1 ? "y" : "ies")}: {string.Join(", ", caps)}";
-    }
-
-    private static int CountEnabledCapabilities(SettingsManager s)
-    {
-        int n = 0;
-        if (s.NodeBrowserProxyEnabled) n++;
-        if (s.NodeCameraEnabled) n++;
-        if (s.NodeCanvasEnabled) n++;
-        if (s.NodeScreenEnabled) n++;
-        if (s.NodeLocationEnabled) n++;
-        if (s.NodeTtsEnabled) n++;
-        if (s.NodeSttEnabled) n++;
-        return n;
+        if (exposedCategories.Count == 0) return "Providing no capabilities";
+        var slugs = exposedCategories.Select(NodeCapabilityDisplay.GetSlug);
+        return $"Providing {exposedCategories.Count} capabilit{(exposedCategories.Count == 1 ? "y" : "ies")}: {string.Join(", ", slugs)}";
     }
 
     private Brush ResolveBrush(string themeKey)
@@ -2404,6 +2392,9 @@ public sealed partial class ConnectionPage : Page
                 case nameof(AppState.UsageCost):
                 case nameof(AppState.Sessions):
                 case nameof(AppState.GatewaySelf):
+                case nameof(AppState.Nodes):
+                    // Nodes drives the gateway-view chip strip on the node
+                    // card — refresh when a new node.list arrives.
                     OnGlanceDataChanged();
                     break;
             }
