@@ -1595,18 +1595,18 @@ Voer op uw gateway-host (Mac/Linux) uit:
     <value>De gateway is verbonden; het chatoppervlak wordt nog geladen.</value>
   </data>
   <data name="ConfigPage_TextBlock_17.Text" xml:space="preserve">
-    <value>⚙️ Configuratie</value>
+    <value>Configuratie</value>
   </data>
   <data name="ConfigPage_TextBlock_21.Text" xml:space="preserve">
     <value>Vernieuwen</value>
   </data>
-  <data name="ConfigPage_TabViewItem_34.Header" xml:space="preserve">
+  <data name="ConfigPage_TabViewItem_34.Text" xml:space="preserve">
     <value>Bewerker</value>
   </data>
   <data name="DetailPath.Text" xml:space="preserve">
     <value>Selecteer een configuratiesectie</value>
   </data>
-  <data name="ConfigPage_TabViewItem_82.Header" xml:space="preserve">
+  <data name="ConfigPage_TabViewItem_82.Text" xml:space="preserve">
     <value>Ruwe JSON</value>
   </data>
   <data name="ConfigPage_TextBlock_95.Text" xml:space="preserve">

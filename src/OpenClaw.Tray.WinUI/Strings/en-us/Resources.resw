@@ -1642,18 +1642,18 @@ On your gateway host (Mac/Linux), run:
     <value>The gateway is connected; the chat surface is still coming online.</value>
   </data>
   <data name="ConfigPage_TextBlock_17.Text" xml:space="preserve">
-    <value>⚙️ Config</value>
+    <value>Config</value>
   </data>
   <data name="ConfigPage_TextBlock_21.Text" xml:space="preserve">
     <value>Refresh</value>
   </data>
-  <data name="ConfigPage_TabViewItem_34.Header" xml:space="preserve">
+  <data name="ConfigPage_TabViewItem_34.Text" xml:space="preserve">
     <value>Editor</value>
   </data>
   <data name="DetailPath.Text" xml:space="preserve">
     <value>Select a config section</value>
   </data>
-  <data name="ConfigPage_TabViewItem_82.Header" xml:space="preserve">
+  <data name="ConfigPage_TabViewItem_82.Text" xml:space="preserve">
     <value>Raw JSON</value>
   </data>
   <data name="ConfigPage_TextBlock_95.Text" xml:space="preserve">

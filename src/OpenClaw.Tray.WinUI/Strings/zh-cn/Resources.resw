@@ -1594,18 +1594,18 @@
     <value>网关已连接；聊天界面仍在上线中。</value>
   </data>
   <data name="ConfigPage_TextBlock_17.Text" xml:space="preserve">
-    <value>⚙️ 配置</value>
+    <value>配置</value>
   </data>
   <data name="ConfigPage_TextBlock_21.Text" xml:space="preserve">
     <value>刷新</value>
   </data>
-  <data name="ConfigPage_TabViewItem_34.Header" xml:space="preserve">
+  <data name="ConfigPage_TabViewItem_34.Text" xml:space="preserve">
     <value>编辑器</value>
   </data>
   <data name="DetailPath.Text" xml:space="preserve">
     <value>选择配置部分</value>
   </data>
-  <data name="ConfigPage_TabViewItem_82.Header" xml:space="preserve">
+  <data name="ConfigPage_TabViewItem_82.Text" xml:space="preserve">
     <value>原始 JSON</value>
   </data>
   <data name="ConfigPage_TextBlock_95.Text" xml:space="preserve">

@@ -1594,18 +1594,18 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
     <value>La passerelle est connectée ; l'interface de chat est encore en cours de démarrage.</value>
   </data>
   <data name="ConfigPage_TextBlock_17.Text" xml:space="preserve">
-    <value>⚙️ Configuration</value>
+    <value>Configuration</value>
   </data>
   <data name="ConfigPage_TextBlock_21.Text" xml:space="preserve">
     <value>Actualiser</value>
   </data>
-  <data name="ConfigPage_TabViewItem_34.Header" xml:space="preserve">
+  <data name="ConfigPage_TabViewItem_34.Text" xml:space="preserve">
     <value>Éditeur</value>
   </data>
   <data name="DetailPath.Text" xml:space="preserve">
     <value>Sélectionnez une section de configuration</value>
   </data>
-  <data name="ConfigPage_TabViewItem_82.Header" xml:space="preserve">
+  <data name="ConfigPage_TabViewItem_82.Text" xml:space="preserve">
     <value>JSON brut</value>
   </data>
   <data name="ConfigPage_TextBlock_95.Text" xml:space="preserve">

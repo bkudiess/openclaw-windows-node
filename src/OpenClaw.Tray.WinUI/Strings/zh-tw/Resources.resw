@@ -1594,18 +1594,18 @@
     <value>閘道已連接；聊天介面仍在上線中。</value>
   </data>
   <data name="ConfigPage_TextBlock_17.Text" xml:space="preserve">
-    <value>⚙️ 設定</value>
+    <value>設定</value>
   </data>
   <data name="ConfigPage_TextBlock_21.Text" xml:space="preserve">
     <value>重新整理</value>
   </data>
-  <data name="ConfigPage_TabViewItem_34.Header" xml:space="preserve">
+  <data name="ConfigPage_TabViewItem_34.Text" xml:space="preserve">
     <value>編輯器</value>
   </data>
   <data name="DetailPath.Text" xml:space="preserve">
     <value>選取設定區段</value>
   </data>
-  <data name="ConfigPage_TabViewItem_82.Header" xml:space="preserve">
+  <data name="ConfigPage_TabViewItem_82.Text" xml:space="preserve">
     <value>原始 JSON</value>
   </data>
   <data name="ConfigPage_TextBlock_95.Text" xml:space="preserve">
