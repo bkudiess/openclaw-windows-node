@@ -2434,7 +2434,7 @@
     <value>Windows 內建語音</value>
   </data>
   <data name="VoiceSettingsPage_PageTitle.Text" xml:space="preserve">
-    <value>🎙️ 語音與音訊</value>
+    <value>語音與音訊</value>
   </data>
   <data name="VoiceSettingsPage_PageDescription.Text" xml:space="preserve">
     <value>設定語音轉文字和語音互動設定。所有語音處理均在本機本地執行。</value>
@@ -2512,7 +2512,7 @@
     <value>音訊回饋音效</value>
   </data>
   <data name="VoiceSettingsPage_VoiceHeader.Text" xml:space="preserve">
-    <value>🔊 Companion 語音</value>
+    <value>Companion 語音</value>
   </data>
   <data name="VoiceSettingsPage_VoiceDescription.Text" xml:space="preserve">
     <value>選擇朗讀回應時使用的語音。</value>
@@ -2539,7 +2539,10 @@
     <value>刪除</value>
   </data>
   <data name="VoiceSettingsPage_PiperPreviewButton.Content" xml:space="preserve">
-    <value>▶ 預覽</value>
+    <value>預覽</value>
+  </data>
+  <data name="VoiceSettingsPage_PiperPreviewButtonContent" xml:space="preserve">
+    <value>預覽</value>
   </data>
   <data name="VoiceSettingsPage_PiperInfoText.Text" xml:space="preserve">
     <value>語音從 sherpa-onnx 專案的 GitHub 發行版下載(低品質約 25 MB,高品質最高約 150 MB)。它們完全在本機執行;無音訊離開您的裝置。</value>
@@ -2548,7 +2551,7 @@
     <value>語音</value>
   </data>
   <data name="VoiceSettingsPage_PreviewVoiceButton.Content" xml:space="preserve">
-    <value>▶ 預覽語音</value>
+    <value>預覽語音</value>
   </data>
   <data name="VoiceSettingsPage_ElevenLabsApiKeyBox.Header" xml:space="preserve">
     <value>API 金鑰</value>
@@ -2581,7 +2584,7 @@
     <value>下載已取消</value>
   </data>
   <data name="VoiceSettingsPage_StatusError" xml:space="preserve">
-    <value>❌ 操作失敗(參見 Debug 日誌)</value>
+    <value>操作失敗(參見 Debug 日誌)</value>
   </data>
   <data name="VoiceSettingsPage_PiperButtonDownloaded" xml:space="preserve">
     <value>已下載</value>
@@ -2632,7 +2635,7 @@
     <value>載入語音時發生錯誤(參見 Debug 日誌)。</value>
   </data>
   <data name="VoiceSettingsPage_PreviewButtonPlaying" xml:space="preserve">
-    <value>▶ 正在播放...</value>
+    <value>正在播放...</value>
   </data>
   <data name="VoiceOverlayWindow_HeaderText.Text" xml:space="preserve">
     <value>Companion 語音</value>
@@ -2737,7 +2740,7 @@
     <value>下載語音</value>
   </data>
   <data name="VoiceSettingsPage_PreviewVoiceButtonContent" xml:space="preserve">
-    <value>▶ 預覽語音</value>
+    <value>預覽語音</value>
   </data>
   <data name="DebugPage_TextBlock_OverridesHeader.Text" xml:space="preserve">
     <value>偵錯覆寫</value>

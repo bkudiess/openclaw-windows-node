@@ -2482,7 +2482,7 @@ On your gateway host (Mac/Linux), run:
     <value>Windows built-in speech</value>
   </data>
   <data name="VoiceSettingsPage_PageTitle.Text" xml:space="preserve">
-    <value>🎙️ Voice &amp; Audio</value>
+    <value>Voice &amp; Audio</value>
   </data>
   <data name="VoiceSettingsPage_PageDescription.Text" xml:space="preserve">
     <value>Configure speech-to-text and voice interaction settings. All speech processing runs locally on your device.</value>
@@ -2560,7 +2560,7 @@ On your gateway host (Mac/Linux), run:
     <value>Audio feedback sounds</value>
   </data>
   <data name="VoiceSettingsPage_VoiceHeader.Text" xml:space="preserve">
-    <value>🔊 Companion Voice</value>
+    <value>Companion Voice</value>
   </data>
   <data name="VoiceSettingsPage_VoiceDescription.Text" xml:space="preserve">
     <value>Choose the voice used when reading responses aloud.</value>
@@ -2587,7 +2587,10 @@ On your gateway host (Mac/Linux), run:
     <value>Delete</value>
   </data>
   <data name="VoiceSettingsPage_PiperPreviewButton.Content" xml:space="preserve">
-    <value>▶ Preview</value>
+    <value>Preview</value>
+  </data>
+  <data name="VoiceSettingsPage_PiperPreviewButtonContent" xml:space="preserve">
+    <value>Preview</value>
   </data>
   <data name="VoiceSettingsPage_PiperInfoText.Text" xml:space="preserve">
     <value>Voices download from the sherpa-onnx project's GitHub releases (~25 MB low quality, up to ~150 MB high quality). They run fully on this PC; no audio leaves your device.</value>
@@ -2596,7 +2599,7 @@ On your gateway host (Mac/Linux), run:
     <value>Voice</value>
   </data>
   <data name="VoiceSettingsPage_PreviewVoiceButton.Content" xml:space="preserve">
-    <value>▶ Preview Voice</value>
+    <value>Preview Voice</value>
   </data>
   <data name="VoiceSettingsPage_ElevenLabsApiKeyBox.Header" xml:space="preserve">
     <value>API Key</value>
@@ -2629,7 +2632,7 @@ On your gateway host (Mac/Linux), run:
     <value>Download canceled</value>
   </data>
   <data name="VoiceSettingsPage_StatusError" xml:space="preserve">
-    <value>❌ Operation failed (see Debug log)</value>
+    <value>Operation failed (see Debug log)</value>
   </data>
   <data name="VoiceSettingsPage_PiperButtonDownloaded" xml:space="preserve">
     <value>Downloaded</value>
@@ -2680,7 +2683,7 @@ On your gateway host (Mac/Linux), run:
     <value>Error loading voices (see Debug log).</value>
   </data>
   <data name="VoiceSettingsPage_PreviewButtonPlaying" xml:space="preserve">
-    <value>▶ Playing...</value>
+    <value>Playing...</value>
   </data>
   <data name="VoiceOverlayWindow_HeaderText.Text" xml:space="preserve">
     <value>Companion Voice</value>
@@ -2785,7 +2788,7 @@ On your gateway host (Mac/Linux), run:
     <value>Download Voice</value>
   </data>
   <data name="VoiceSettingsPage_PreviewVoiceButtonContent" xml:space="preserve">
-    <value>▶ Preview Voice</value>
+    <value>Preview Voice</value>
   </data>
   <data name="DebugPage_TextBlock_OverridesHeader.Text" xml:space="preserve">
     <value>Debug Overrides</value>

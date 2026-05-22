@@ -2434,7 +2434,7 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
     <value>Voix intégrée à Windows</value>
   </data>
   <data name="VoiceSettingsPage_PageTitle.Text" xml:space="preserve">
-    <value>🎙️ Voix et audio</value>
+    <value>Voix et audio</value>
   </data>
   <data name="VoiceSettingsPage_PageDescription.Text" xml:space="preserve">
     <value>Configurez la reconnaissance vocale et les paramètres d'interaction vocale. Tout le traitement vocal s'exécute localement sur votre appareil.</value>
@@ -2512,7 +2512,7 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
     <value>Sons de retour audio</value>
   </data>
   <data name="VoiceSettingsPage_VoiceHeader.Text" xml:space="preserve">
-    <value>🔊 Voix de Companion</value>
+    <value>Voix de Companion</value>
   </data>
   <data name="VoiceSettingsPage_VoiceDescription.Text" xml:space="preserve">
     <value>Choisissez la voix utilisée pour lire les réponses à voix haute.</value>
@@ -2539,7 +2539,10 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
     <value>Supprimer</value>
   </data>
   <data name="VoiceSettingsPage_PiperPreviewButton.Content" xml:space="preserve">
-    <value>▶ Aperçu</value>
+    <value>Aperçu</value>
+  </data>
+  <data name="VoiceSettingsPage_PiperPreviewButtonContent" xml:space="preserve">
+    <value>Aperçu</value>
   </data>
   <data name="VoiceSettingsPage_PiperInfoText.Text" xml:space="preserve">
     <value>Les voix sont téléchargées depuis les versions GitHub du projet sherpa-onnx (~25 Mo basse qualité, jusqu'à ~150 Mo haute qualité). Elles s'exécutent entièrement sur ce PC ; aucun son ne quitte votre appareil.</value>
@@ -2548,7 +2551,7 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
     <value>Voix</value>
   </data>
   <data name="VoiceSettingsPage_PreviewVoiceButton.Content" xml:space="preserve">
-    <value>▶ Aperçu de la voix</value>
+    <value>Aperçu de la voix</value>
   </data>
   <data name="VoiceSettingsPage_ElevenLabsApiKeyBox.Header" xml:space="preserve">
     <value>Clé API</value>
@@ -2581,7 +2584,7 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
     <value>Téléchargement annulé</value>
   </data>
   <data name="VoiceSettingsPage_StatusError" xml:space="preserve">
-    <value>❌ Échec de l'opération (voir le journal Debug)</value>
+    <value>Échec de l'opération (voir le journal Debug)</value>
   </data>
   <data name="VoiceSettingsPage_PiperButtonDownloaded" xml:space="preserve">
     <value>Téléchargé</value>
@@ -2632,7 +2635,7 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
     <value>Erreur de chargement des voix (voir le journal Debug).</value>
   </data>
   <data name="VoiceSettingsPage_PreviewButtonPlaying" xml:space="preserve">
-    <value>▶ Lecture...</value>
+    <value>Lecture...</value>
   </data>
   <data name="VoiceOverlayWindow_HeaderText.Text" xml:space="preserve">
     <value>Voix de Companion</value>
@@ -2737,7 +2740,7 @@ Sur votre hôte passerelle (Mac/Linux), exécutez :
     <value>Télécharger la voix</value>
   </data>
   <data name="VoiceSettingsPage_PreviewVoiceButtonContent" xml:space="preserve">
-    <value>▶ Aperçu de la voix</value>
+    <value>Aperçu de la voix</value>
   </data>
   <data name="DebugPage_TextBlock_OverridesHeader.Text" xml:space="preserve">
     <value>Substitutions de débogage</value>

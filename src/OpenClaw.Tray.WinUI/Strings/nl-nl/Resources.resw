@@ -2435,7 +2435,7 @@ Voer op uw gateway-host (Mac/Linux) uit:
     <value>Ingebouwde Windows-spraak</value>
   </data>
   <data name="VoiceSettingsPage_PageTitle.Text" xml:space="preserve">
-    <value>🎙️ Spraak en audio</value>
+    <value>Spraak en audio</value>
   </data>
   <data name="VoiceSettingsPage_PageDescription.Text" xml:space="preserve">
     <value>Configureer spraak-naar-tekst en spraakinteractie-instellingen. Alle spraakverwerking draait lokaal op uw apparaat.</value>
@@ -2513,7 +2513,7 @@ Voer op uw gateway-host (Mac/Linux) uit:
     <value>Audio-feedbackgeluiden</value>
   </data>
   <data name="VoiceSettingsPage_VoiceHeader.Text" xml:space="preserve">
-    <value>🔊 Companion-stem</value>
+    <value>Companion-stem</value>
   </data>
   <data name="VoiceSettingsPage_VoiceDescription.Text" xml:space="preserve">
     <value>Kies de stem die wordt gebruikt bij het hardop voorlezen van antwoorden.</value>
@@ -2540,7 +2540,10 @@ Voer op uw gateway-host (Mac/Linux) uit:
     <value>Verwijderen</value>
   </data>
   <data name="VoiceSettingsPage_PiperPreviewButton.Content" xml:space="preserve">
-    <value>▶ Voorbeeld</value>
+    <value>Voorbeeld</value>
+  </data>
+  <data name="VoiceSettingsPage_PiperPreviewButtonContent" xml:space="preserve">
+    <value>Voorbeeld</value>
   </data>
   <data name="VoiceSettingsPage_PiperInfoText.Text" xml:space="preserve">
     <value>Stemmen worden gedownload van de GitHub-releases van het sherpa-onnx-project (~25 MB lage kwaliteit, tot ~150 MB hoge kwaliteit). Ze draaien volledig op deze pc; er verlaat geen audio uw apparaat.</value>
@@ -2549,7 +2552,7 @@ Voer op uw gateway-host (Mac/Linux) uit:
     <value>Stem</value>
   </data>
   <data name="VoiceSettingsPage_PreviewVoiceButton.Content" xml:space="preserve">
-    <value>▶ Voorbeeld van stem</value>
+    <value>Voorbeeld van stem</value>
   </data>
   <data name="VoiceSettingsPage_ElevenLabsApiKeyBox.Header" xml:space="preserve">
     <value>API-sleutel</value>
@@ -2582,7 +2585,7 @@ Voer op uw gateway-host (Mac/Linux) uit:
     <value>Download geannuleerd</value>
   </data>
   <data name="VoiceSettingsPage_StatusError" xml:space="preserve">
-    <value>❌ Bewerking mislukt (zie Debug-log)</value>
+    <value>Bewerking mislukt (zie Debug-log)</value>
   </data>
   <data name="VoiceSettingsPage_PiperButtonDownloaded" xml:space="preserve">
     <value>Gedownload</value>
@@ -2633,7 +2636,7 @@ Voer op uw gateway-host (Mac/Linux) uit:
     <value>Fout bij laden van stemmen (zie Debug-log).</value>
   </data>
   <data name="VoiceSettingsPage_PreviewButtonPlaying" xml:space="preserve">
-    <value>▶ Afspelen...</value>
+    <value>Afspelen...</value>
   </data>
   <data name="VoiceOverlayWindow_HeaderText.Text" xml:space="preserve">
     <value>Companion-stem</value>
@@ -2738,7 +2741,7 @@ Voer op uw gateway-host (Mac/Linux) uit:
     <value>Stem downloaden</value>
   </data>
   <data name="VoiceSettingsPage_PreviewVoiceButtonContent" xml:space="preserve">
-    <value>▶ Voorbeeld van stem</value>
+    <value>Voorbeeld van stem</value>
   </data>
   <data name="DebugPage_TextBlock_OverridesHeader.Text" xml:space="preserve">
     <value>Foutopsporingsopties</value>

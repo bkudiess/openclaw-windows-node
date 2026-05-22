@@ -2434,7 +2434,7 @@
     <value>Windows 内置语音</value>
   </data>
   <data name="VoiceSettingsPage_PageTitle.Text" xml:space="preserve">
-    <value>🎙️ 语音和音频</value>
+    <value>语音和音频</value>
   </data>
   <data name="VoiceSettingsPage_PageDescription.Text" xml:space="preserve">
     <value>配置语音转文字和语音交互设置。所有语音处理均在本机本地运行。</value>
@@ -2512,7 +2512,7 @@
     <value>音频反馈声音</value>
   </data>
   <data name="VoiceSettingsPage_VoiceHeader.Text" xml:space="preserve">
-    <value>🔊 Companion 语音</value>
+    <value>Companion 语音</value>
   </data>
   <data name="VoiceSettingsPage_VoiceDescription.Text" xml:space="preserve">
     <value>选择朗读响应时使用的语音。</value>
@@ -2539,7 +2539,10 @@
     <value>删除</value>
   </data>
   <data name="VoiceSettingsPage_PiperPreviewButton.Content" xml:space="preserve">
-    <value>▶ 预览</value>
+    <value>预览</value>
+  </data>
+  <data name="VoiceSettingsPage_PiperPreviewButtonContent" xml:space="preserve">
+    <value>预览</value>
   </data>
   <data name="VoiceSettingsPage_PiperInfoText.Text" xml:space="preserve">
     <value>语音从 sherpa-onnx 项目的 GitHub 发布版下载(低质量约 25 MB,高质量最高约 150 MB)。它们完全在本机运行;无音频离开您的设备。</value>
@@ -2548,7 +2551,7 @@
     <value>语音</value>
   </data>
   <data name="VoiceSettingsPage_PreviewVoiceButton.Content" xml:space="preserve">
-    <value>▶ 预览语音</value>
+    <value>预览语音</value>
   </data>
   <data name="VoiceSettingsPage_ElevenLabsApiKeyBox.Header" xml:space="preserve">
     <value>API 密钥</value>
@@ -2581,7 +2584,7 @@
     <value>下载已取消</value>
   </data>
   <data name="VoiceSettingsPage_StatusError" xml:space="preserve">
-    <value>❌ 操作失败(参见 Debug 日志)</value>
+    <value>操作失败(参见 Debug 日志)</value>
   </data>
   <data name="VoiceSettingsPage_PiperButtonDownloaded" xml:space="preserve">
     <value>已下载</value>
@@ -2632,7 +2635,7 @@
     <value>加载语音时出错(参见 Debug 日志)。</value>
   </data>
   <data name="VoiceSettingsPage_PreviewButtonPlaying" xml:space="preserve">
-    <value>▶ 正在播放...</value>
+    <value>正在播放...</value>
   </data>
   <data name="VoiceOverlayWindow_HeaderText.Text" xml:space="preserve">
     <value>Companion 语音</value>
@@ -2737,7 +2740,7 @@
     <value>下载语音</value>
   </data>
   <data name="VoiceSettingsPage_PreviewVoiceButtonContent" xml:space="preserve">
-    <value>▶ 预览语音</value>
+    <value>预览语音</value>
   </data>
   <data name="DebugPage_TextBlock_OverridesHeader.Text" xml:space="preserve">
     <value>调试覆盖</value>
