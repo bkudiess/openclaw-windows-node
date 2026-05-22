@@ -93,6 +93,7 @@ public static class FluentIconCatalog
     public const string Clear = "\uE74D";          // Delete — clear/reset a buffer
     public const string Develop = "\uE943";        // Code — engineering / explorations action
     public const string AgentEvents = "\uE81C";    // History — agent events feed
+    public const string Cron = "\uE787";           // Calendar — Cron / scheduled jobs (matches HubWindow search mapping)
 
     // ── Agents / Workspace surface ─────────────────────────────────
     // Workspace concept (per-agent file viewer). Reuses the Folder

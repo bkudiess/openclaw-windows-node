@@ -149,6 +149,9 @@
             <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_112" x:Name="NavInstances" Tag="instances" Content="Instances">
                 <NavigationViewItem.Icon><ImageIcon Source="{StaticResource Instances_Icon}"/></NavigationViewItem.Icon>
             </NavigationViewItem>
+            <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_124" x:Name="NavCron" Tag="cron" Content="Cron">
+                <NavigationViewItem.Icon><ImageIcon Source="{StaticResource Cron_Icon}"/></NavigationViewItem.Icon>
+            </NavigationViewItem>
             <!-- Advanced — consolidates gateway-oriented pages -->
             <NavigationViewItem x:Name="NavAdvanced" Content="Advanced" SelectsOnInvoked="False">
                 <NavigationViewItem.Icon><ImageIcon Source="{StaticResource Advanced_Icon}"/></NavigationViewItem.Icon>
@@ -172,9 +175,6 @@
                     </NavigationViewItem>
                     <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_121" Tag="usage" Content="Usage">
                         <NavigationViewItem.Icon><ImageIcon Source="{StaticResource Usage_Icon}"/></NavigationViewItem.Icon>
-                    </NavigationViewItem>
-                    <NavigationViewItem x:Uid="HubWindow_NavigationViewItem_124" Tag="cron" Content="Cron">
-                        <NavigationViewItem.Icon><ImageIcon Source="{StaticResource Cron_Icon}"/></NavigationViewItem.Icon>
                     </NavigationViewItem>
                 </NavigationViewItem.MenuItems>
             </NavigationViewItem>
