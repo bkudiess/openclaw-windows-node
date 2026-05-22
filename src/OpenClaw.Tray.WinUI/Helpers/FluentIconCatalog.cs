@@ -92,6 +92,7 @@ public static class FluentIconCatalog
     public const string Reset = "\uE72C";          // Refresh (alias) — Reconfigure / start over
     public const string Clear = "\uE74D";          // Delete — clear/reset a buffer
     public const string Develop = "\uE943";        // Code — engineering / explorations action
+    public const string AgentEvents = "\uE81C";    // History — agent events feed
 
     // ── Agents / Workspace surface ─────────────────────────────────
     // Workspace concept (per-agent file viewer). Reuses the Folder
