@@ -45,6 +45,8 @@ public sealed partial class HubWindow : WindowEx
     public VoiceService? VoiceServiceInstance { get; set; }
     /// <summary>When true, ChatPage should auto-start voice recording on next navigation. Consumed (reset to false) by ChatPage.</summary>
     public bool PendingAutoStartVoice { get; set; }
+    /// <summary>Session key the chat surface should select on its next mount. Consumed (cleared) by ChatPage.</summary>
+    public string? PendingChatSessionKey { get; set; }
     public string? NodeFullDeviceId { get; set; }
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _gatewayNavHideTimer;
 
