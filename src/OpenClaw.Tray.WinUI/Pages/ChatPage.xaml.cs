@@ -26,6 +26,7 @@ public sealed partial class ChatPage : Page
     private HubWindow? _hub;
     private MountedFunctionalChat? _functionalHost;
     private IChatDataProvider? _mountedProvider;
+    private string? _mountedThreadId;
     private string? _chatUrl;
     private bool _webViewInitialized;
     private bool _webViewMode;
@@ -212,7 +213,21 @@ public sealed partial class ChatPage : Page
         var provider = app?.ChatProvider;
         Func<string, Task>? readAloud = app is null ? null : app.SpeakChatTextAsync;
 
-        if (_functionalHost is not null && ReferenceEquals(_mountedProvider, provider))
+        // Consume a pending session-key hand-off from SessionsPage so the
+        // chat root mounts with that thread selected. Remount is the only
+        // path — OpenClawChatRoot has no live "switch thread" API.
+        var pendingSessionKey = _hub?.PendingChatSessionKey;
+        if (pendingSessionKey is not null && _hub is not null)
+        {
+            _hub.PendingChatSessionKey = null;
+        }
+        var threadIdToMount = pendingSessionKey ?? _mountedThreadId;
+        var threadChanged = pendingSessionKey is not null
+                            && !string.Equals(_mountedThreadId, pendingSessionKey, StringComparison.Ordinal);
+
+        if (_functionalHost is not null
+            && ReferenceEquals(_mountedProvider, provider)
+            && !threadChanged)
         {
             PlaceholderPanel.Visibility = Visibility.Collapsed;
             ChatHost.Visibility = Visibility.Visible;
@@ -245,6 +260,7 @@ public sealed partial class ChatPage : Page
         _functionalHost = CurrentApp.ActiveHubWindow!.MountFunctionalChat(
             ChatHost,
             provider,
+            initialThreadId: threadIdToMount,
             onReadAloud: readAloud,
             onStopSpeaking: () => app?.StopChatSpeaking(),
             onVoiceRequest: VoiceTranscribeAsync,
@@ -254,6 +270,7 @@ public sealed partial class ChatPage : Page
             initialMuted: CurrentApp.Settings?.VoiceTtsEnabled == false,
             suppressAutoDispose: true);
         _mountedProvider = provider;
+        _mountedThreadId = threadIdToMount;
 
         // If the V hotkey (or another caller) requested auto-start voice,
         // trigger it after the UI thread processes the mount (composer needs
@@ -342,6 +359,7 @@ public sealed partial class ChatPage : Page
         var host = _functionalHost;
         _functionalHost = null;
         _mountedProvider = null;
+        _mountedThreadId = null;
         try { host?.Dispose(); } catch { /* tear-down race — non-fatal */ }
     }
 
