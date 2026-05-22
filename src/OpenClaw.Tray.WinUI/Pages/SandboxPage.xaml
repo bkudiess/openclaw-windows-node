@@ -2,8 +2,8 @@
 <Page x:Class="OpenClawTray.Pages.SandboxPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <ScrollViewer Padding="24">
-        <StackPanel Spacing="16" HorizontalAlignment="Stretch" MaxWidth="900">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Padding="24" Spacing="16" HorizontalAlignment="Stretch" MaxWidth="900">
 
             <!-- Prominent status header: big shield icon + Title-styled name +
                  secondary subtitle + master toggle. Restored from the pre-L2
@@ -109,7 +109,7 @@
                                   VerticalAlignment="Top"
                                   Margin="0,2,0,0" />
                         <TextBlock Grid.Column="1"
-                                   Text="Commands the agent runs directly on the gateway aren't. If the gateway is on WSL on this PC they can reach your Windows files, clipboard, and network — use the gateway's exec approvals."
+                                   Text="Commands the agent runs directly on the gateway aren't. If the gateway is on this PC they may still be able to reach your Windows files, clipboard, and network — check your gateway's configuration."
                                    TextWrapping="Wrap" />
                     </Grid>
                 </StackPanel>
