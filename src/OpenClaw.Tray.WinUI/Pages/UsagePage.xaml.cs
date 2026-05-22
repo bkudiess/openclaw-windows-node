@@ -14,11 +14,16 @@ public sealed partial class UsagePage : Page
 {
     private static App CurrentApp => (App)Microsoft.UI.Xaml.Application.Current;
     private AppState? _appState;
+    private IOperatorGatewayClient? _trackedClient;
     // Default matches the XAML-selected Period7DaysItem (IsSelected="True").
     private int _currentPeriodDays = 7;
     private readonly AsyncListLoadingState _providerLoading = new();
     private readonly AsyncListLoadingState _dailyCostLoading = new();
     private DateTime _lastAppliedUsageCostUpdatedAtUtc = DateTime.MinValue;
+
+    private const string DailyEmptyMessage = "No daily usage for this period";
+    private const string ProviderEmptyMessage = "No providers configured";
+    private const string DisconnectedListMessage = "Couldn't load. Check your gateway connection.";
 
     public UsagePage()
     {
@@ -26,6 +31,7 @@ public sealed partial class UsagePage : Page
         Unloaded += (_, _) =>
         {
             if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
+            DetachClient();
         };
     }
 
@@ -34,40 +40,95 @@ public sealed partial class UsagePage : Page
         if (_appState != null) _appState.PropertyChanged -= OnAppStateChanged;
         _appState = CurrentApp.AppState;
         _appState.PropertyChanged += OnAppStateChanged;
+
         var client = CurrentApp.GatewayClient;
-        if (client != null)
-        {
-            ConnectionInfoBar.IsOpen = false;
-            // Apply cached data immediately, then request fresh.
-            if (_appState?.Usage != null) UpdateUsage(_appState.Usage);
-            // Only apply cached cost data when its period matches the current
-            // selection — otherwise the daily list briefly shows e.g. 30-day
-            // data while the selector reads "7 Days".
-            if (_appState?.UsageCost != null && _appState.UsageCost.Days == _currentPeriodDays)
-            {
-                UpdateUsageCost(_appState.UsageCost);
-                _dailyCostLoading.BeginRefresh();
-            }
-            else
-            {
-                _dailyCostLoading.BeginInitialRefresh();
-            }
-            if (_appState?.UsageStatus != null) UpdateUsageStatus(_appState.UsageStatus);
-            else _providerLoading.BeginInitialRefresh();
-            UpdateDailyCostLoadingVisuals();
-            UpdateProviderLoadingVisuals();
-            _ = client.RequestUsageAsync();
-            _ = client.RequestUsageCostAsync(_currentPeriodDays);
-            _ = client.RequestUsageStatusAsync();
-        }
-        else
+        AttachClient(client);
+
+        // A non-null client may still be disconnected (e.g. WebSocket reconnecting).
+        // The underlying RequestUsage*/RequestUsageCost*/RequestUsageStatus calls
+        // silently no-op when !IsConnectedToGateway, so without this check the
+        // page would spin its progress rings forever — see user reports of
+        // "page not loading, no values".
+        if (client == null || !client.IsConnectedToGateway)
         {
             _providerLoading.Fail();
             _dailyCostLoading.Fail();
             ShowDisconnected();
             UpdateProviderLoadingVisuals();
             UpdateDailyCostLoadingVisuals();
+            return;
         }
+
+        ConnectionInfoBar.IsOpen = false;
+        // Apply cached data immediately, then request fresh.
+        if (_appState?.Usage != null) UpdateUsage(_appState.Usage);
+        // Only apply cached cost data when its period matches the current
+        // selection — otherwise the daily list briefly shows e.g. 30-day
+        // data while the selector reads "7 Days".
+        if (_appState?.UsageCost != null && _appState.UsageCost.Days == _currentPeriodDays)
+        {
+            UpdateUsageCost(_appState.UsageCost);
+            _dailyCostLoading.BeginRefresh();
+        }
+        else
+        {
+            _dailyCostLoading.BeginInitialRefresh();
+        }
+        if (_appState?.UsageStatus != null) UpdateUsageStatus(_appState.UsageStatus);
+        else _providerLoading.BeginInitialRefresh();
+        UpdateDailyCostLoadingVisuals();
+        UpdateProviderLoadingVisuals();
+        RequestRefresh(client);
+    }
+
+    private void AttachClient(IOperatorGatewayClient? client)
+    {
+        if (ReferenceEquals(_trackedClient, client)) return;
+        DetachClient();
+        _trackedClient = client;
+        if (_trackedClient != null)
+        {
+            _trackedClient.StatusChanged += OnClientStatusChanged;
+        }
+    }
+
+    private void DetachClient()
+    {
+        if (_trackedClient != null)
+        {
+            _trackedClient.StatusChanged -= OnClientStatusChanged;
+            _trackedClient = null;
+        }
+    }
+
+    private void OnClientStatusChanged(object? sender, ConnectionStatus status)
+    {
+        // Recover automatically when the gateway comes online while the page
+        // is open (otherwise the user is stuck on the disconnected info bar
+        // with stale cards until they navigate away and back).
+        if (sender is not IOperatorGatewayClient client) return;
+        if (!client.IsConnectedToGateway) return;
+
+        var dispatcher = DispatcherQueue;
+        if (dispatcher == null) return;
+        dispatcher.TryEnqueue(() =>
+        {
+            if (_trackedClient != client) return;
+            ConnectionInfoBar.IsOpen = false;
+            if (!_dailyCostLoading.HasLoaded) _dailyCostLoading.BeginInitialRefresh();
+            else _dailyCostLoading.BeginRefresh();
+            if (!_providerLoading.HasLoaded) _providerLoading.BeginInitialRefresh();
+            UpdateDailyCostLoadingVisuals();
+            UpdateProviderLoadingVisuals();
+            RequestRefresh(client);
+        });
+    }
+
+    private void RequestRefresh(IOperatorGatewayClient client)
+    {
+        _ = client.RequestUsageAsync();
+        _ = client.RequestUsageCostAsync(_currentPeriodDays);
+        _ = client.RequestUsageStatusAsync();
     }
 
     private void OnOpenConnectionClick(object sender, RoutedEventArgs e)
@@ -130,7 +191,6 @@ public sealed partial class UsagePage : Page
             Status = p.Error ?? "",
         }).ToList();
 
-        bool hasProviders = status.Providers.Count > 0;
         _providerLoading.Complete(status.Providers.Count);
         UpdateProviderLoadingVisuals();
     }
@@ -152,9 +212,10 @@ public sealed partial class UsagePage : Page
         _dailyCostLoading.BeginInitialRefresh();
         UpdateDailyCostLoadingVisuals();
 
-        if (CurrentApp.GatewayClient != null)
+        var client = CurrentApp.GatewayClient;
+        if (client != null && client.IsConnectedToGateway)
         {
-            _ = CurrentApp.GatewayClient.RequestUsageCostAsync(days);
+            _ = client.RequestUsageCostAsync(days);
         }
         else
         {
@@ -168,7 +229,12 @@ public sealed partial class UsagePage : Page
     {
         DailyLoadingPanel.Visibility = _dailyCostLoading.ShouldShowLoading ? Visibility.Visible : Visibility.Collapsed;
         DailyListView.Visibility = _dailyCostLoading.ShouldShowContent ? Visibility.Visible : Visibility.Collapsed;
-        DailyEmptyText.Visibility = _dailyCostLoading.ShouldShowEmpty ? Visibility.Visible : Visibility.Collapsed;
+        // After Fail() the state is !IsRefreshing && !HasLoaded, which leaves the
+        // card visually empty (no spinner, no rows, no message). Surface a
+        // disconnected message in that case so the page never looks frozen.
+        bool failed = !_dailyCostLoading.IsRefreshing && !_dailyCostLoading.HasLoaded;
+        DailyEmptyText.Text = failed ? DisconnectedListMessage : DailyEmptyMessage;
+        DailyEmptyText.Visibility = (_dailyCostLoading.ShouldShowEmpty || failed) ? Visibility.Visible : Visibility.Collapsed;
         PeriodSelector.IsEnabled = _dailyCostLoading.CanEdit;
     }
 
@@ -176,7 +242,9 @@ public sealed partial class UsagePage : Page
     {
         ProviderLoadingPanel.Visibility = _providerLoading.ShouldShowLoading ? Visibility.Visible : Visibility.Collapsed;
         ProviderListView.Visibility = _providerLoading.ShouldShowContent ? Visibility.Visible : Visibility.Collapsed;
-        ProviderEmptyText.Visibility = _providerLoading.ShouldShowEmpty ? Visibility.Visible : Visibility.Collapsed;
+        bool failed = !_providerLoading.IsRefreshing && !_providerLoading.HasLoaded;
+        ProviderEmptyText.Text = failed ? DisconnectedListMessage : ProviderEmptyMessage;
+        ProviderEmptyText.Visibility = (_providerLoading.ShouldShowEmpty || failed) ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void ShowDisconnected()

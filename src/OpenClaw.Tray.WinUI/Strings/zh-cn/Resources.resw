@@ -2383,7 +2383,7 @@
     <value>OpenClaw Menu</value>
   </data>
   <data name="UsagePage_TextBlock_10.Text" xml:space="preserve">
-    <value>📊 使用量和成本</value>
+    <value>使用量和成本</value>
   </data>
   <data name="ChatWindowOpenInBrowserToolTip.Content" xml:space="preserve">
     <value>在浏览器中打开</value>

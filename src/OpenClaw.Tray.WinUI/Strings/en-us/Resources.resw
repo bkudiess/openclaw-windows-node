@@ -2431,7 +2431,7 @@ On your gateway host (Mac/Linux), run:
     <value>OpenClaw Menu</value>
   </data>
   <data name="UsagePage_TextBlock_10.Text" xml:space="preserve">
-    <value>📊 Usage &amp; Cost</value>
+    <value>Usage &amp; Cost</value>
   </data>
   <data name="ChatWindowOpenInBrowserToolTip.Content" xml:space="preserve">
     <value>Open in Companion app</value>
