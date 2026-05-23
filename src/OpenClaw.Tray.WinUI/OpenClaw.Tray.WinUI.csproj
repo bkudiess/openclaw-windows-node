@@ -49,6 +49,14 @@
     <ProjectReference Include="..\OpenClawTray.FunctionalUI\OpenClawTray.FunctionalUI.csproj" />
     <ProjectReference Include="..\OpenClawTray.OnboardingV2\OpenClawTray.OnboardingV2.csproj" />
     <ProjectReference Include="..\OpenClaw.Chat\OpenClaw.Chat.csproj" />
+    <!-- Build the BrowserProxy worker as a dependency so its output is ready
+         to copy. ReferenceOutputAssembly=false: worker is launched as a child
+         process from MXC, not linked in. Private=false: worker outputs are
+         copied explicitly by CopyBrowserProxyWorkerToOutput below; we don't
+         want the default ProjectReference copy semantics. -->
+    <ProjectReference Include="..\OpenClaw.BrowserProxy.Worker\OpenClaw.BrowserProxy.Worker.csproj"
+                      ReferenceOutputAssembly="false"
+                      Private="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -250,6 +258,40 @@
           Condition="'$(PublishDir)' != '' And '$(VerifyWxcExecShipped)' != 'false' And '$(SkipMxcNodeBridgeRestore)' != 'true'">
     <Error Condition="!Exists('$(PublishDir)tools\mxc\$(MxcArch)\wxc-exec.exe')"
            Text="wxc-exec.exe missing at $(PublishDir)tools\mxc\$(MxcArch)\. Publish-time copy did not run; check MxcArch=$(MxcArch), MxcSdkBinDir=$(MxcSdkBinDir)." />
+  </Target>
+
+  <!-- Copy OpenClaw.BrowserProxy.Worker.exe (and its small set of dotnet
+       framework-dependent companions) into $(TargetDir) so MXC can launch it
+       next to the tray exe. ProjectReference above ensures the worker is
+       built before this target runs. -->
+  <PropertyGroup>
+    <_BrowserProxyWorkerOutDir>$(OpenClawRepoRoot)src\OpenClaw.BrowserProxy.Worker\bin\$(Configuration)\net10.0\</_BrowserProxyWorkerOutDir>
+  </PropertyGroup>
+  <Target Name="CopyBrowserProxyWorkerToOutput" AfterTargets="Build">
+    <ItemGroup>
+      <_BrowserProxyWorkerFiles Include="$(_BrowserProxyWorkerOutDir)OpenClaw.BrowserProxy.Worker.exe" />
+      <_BrowserProxyWorkerFiles Include="$(_BrowserProxyWorkerOutDir)OpenClaw.BrowserProxy.Worker.dll" />
+      <_BrowserProxyWorkerFiles Include="$(_BrowserProxyWorkerOutDir)OpenClaw.BrowserProxy.Worker.runtimeconfig.json" />
+      <_BrowserProxyWorkerFiles Include="$(_BrowserProxyWorkerOutDir)OpenClaw.BrowserProxy.Worker.deps.json" />
+      <_BrowserProxyWorkerFiles Include="$(_BrowserProxyWorkerOutDir)OpenClaw.BrowserProxy.Worker.pdb" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_BrowserProxyWorkerFiles)"
+          DestinationFolder="$(TargetDir)"
+          SkipUnchangedFiles="true"
+          Condition="'@(_BrowserProxyWorkerFiles)' != '' And Exists('$(_BrowserProxyWorkerOutDir)OpenClaw.BrowserProxy.Worker.exe')" />
+  </Target>
+
+  <Target Name="CopyBrowserProxyWorkerToPublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
+    <ItemGroup>
+      <_BrowserProxyWorkerPublishFiles Include="$(_BrowserProxyWorkerOutDir)OpenClaw.BrowserProxy.Worker.exe" />
+      <_BrowserProxyWorkerPublishFiles Include="$(_BrowserProxyWorkerOutDir)OpenClaw.BrowserProxy.Worker.dll" />
+      <_BrowserProxyWorkerPublishFiles Include="$(_BrowserProxyWorkerOutDir)OpenClaw.BrowserProxy.Worker.runtimeconfig.json" />
+      <_BrowserProxyWorkerPublishFiles Include="$(_BrowserProxyWorkerOutDir)OpenClaw.BrowserProxy.Worker.deps.json" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_BrowserProxyWorkerPublishFiles)"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true"
+          Condition="'@(_BrowserProxyWorkerPublishFiles)' != '' And Exists('$(_BrowserProxyWorkerOutDir)OpenClaw.BrowserProxy.Worker.exe')" />
   </Target>
 
   <!-- Copy WebView2Loader.dll to output root for unpackaged app (not needed for MSIX) -->

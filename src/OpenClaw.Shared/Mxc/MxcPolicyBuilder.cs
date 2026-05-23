@@ -117,6 +117,74 @@ public static class MxcPolicyBuilder
     }
 
     /// <summary>
+    /// Build the policy for a browser.proxy invocation.
+    /// </summary>
+    /// <param name="settings">Live settings snapshot (used only for the denied-path baseline today).</param>
+    /// <param name="settingsDirectoryPath">Path to <see cref="SettingsManager.SettingsDirectoryPath"/>; always blocked from sandbox view to keep tokens / gateway credentials unreachable.</param>
+    /// <param name="controlPort">Local browser-control host port (gateway port + 2). Exposed through <c>network.proxy.localhost</c> so the worker can reach <c>127.0.0.1:&lt;controlPort&gt;</c> from inside the AppContainer.</param>
+    /// <param name="allowedFileRoots">Directories the worker may read to base64-encode files referenced in browser-control responses. Anything outside these roots is denied by AC and rejected by the worker's own guard.</param>
+    /// <remarks>
+    /// browser.proxy needs strictly less than system.run:
+    /// <list type="bullet">
+    /// <item>FS: read-only access to <paramref name="allowedFileRoots"/>; no general user-folder grants.</item>
+    /// <item>Network: loopback to <paramref name="controlPort"/> only; <see cref="NetworkPolicy.AllowOutbound"/> stays <c>false</c>.</item>
+    /// <item>UI: no windows, no clipboard, no input injection.</item>
+    /// </list>
+    /// Denies mirror <see cref="ForSystemRun"/> so a malicious browser-control
+    /// response naming <c>~\.ssh</c> or a browser profile can't coerce a read.
+    /// </remarks>
+    public static SandboxPolicy ForBrowserProxy(
+        SettingsData settings,
+        string settingsDirectoryPath,
+        int controlPort,
+        IReadOnlyList<string> allowedFileRoots)
+    {
+        var deniedPaths = new List<string>();
+        if (!string.IsNullOrWhiteSpace(settingsDirectoryPath))
+            deniedPaths.Add(settingsDirectoryPath);
+
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var sshPath = Path.Combine(userProfile, ".ssh");
+        if (!string.IsNullOrWhiteSpace(sshPath))
+            deniedPaths.Add(sshPath);
+
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        if (!string.IsNullOrWhiteSpace(localAppData))
+        {
+            deniedPaths.Add(Path.Combine(localAppData, "Google", "Chrome", "User Data"));
+            deniedPaths.Add(Path.Combine(localAppData, "Microsoft", "Edge", "User Data"));
+            deniedPaths.Add(Path.Combine(localAppData, "BraveSoftware", "Brave-Browser", "User Data"));
+        }
+        if (!string.IsNullOrWhiteSpace(appData))
+        {
+            deniedPaths.Add(Path.Combine(appData, "Mozilla", "Firefox", "Profiles"));
+        }
+
+        var readonlyPaths = (allowedFileRoots ?? Array.Empty<string>())
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .ToList();
+        readonlyPaths = FilterOutDenied(readonlyPaths, deniedPaths);
+
+        return new SandboxPolicy(
+            Version: SupportedPolicyVersion,
+            Filesystem: new FilesystemPolicy(
+                ReadwritePaths: Array.Empty<string>(),
+                ReadonlyPaths: readonlyPaths,
+                DeniedPaths: deniedPaths,
+                ClearPolicyOnExit: true),
+            Network: new NetworkPolicy(
+                AllowOutbound: false,
+                AllowLocalNetwork: false,
+                LoopbackProxyPort: controlPort > 0 ? controlPort : null),
+            Ui: new UiPolicy(
+                AllowWindows: false,
+                Clipboard: ClipboardPolicy.None,
+                AllowInputInjection: false),
+            TimeoutMs: settings.SandboxTimeoutMs > 0 ? settings.SandboxTimeoutMs : null);
+    }
+
+    /// <summary>
     /// Remove any allow-list entry that overlaps a denied path.
     /// Case-insensitive (NTFS semantics) and tolerant of trailing slashes.
     /// </summary>

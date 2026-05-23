@@ -362,13 +362,31 @@ public sealed class NodeService : IDisposable
         // BrowserProxy needs a live gateway connection — only register when gateway is up.
         if (_nodeClient != null && NodeCapabilityGating.ShouldRegisterBrowserProxy(_settings))
         {
+            // Sandbox plumbing — mirrors BuildSystemRunRunner. browser.proxy gets
+            // the same executor, availability probe, and settings snapshot used
+            // by system.run; the capability decides per-call whether to route
+            // through MXC or fall back to in-process based on the
+            // BrowserProxySandboxEnabled flag and live availability.
+            var availability = _mxcAvailability ??= MxcAvailability.Probe(_logger);
+            var browserProxyExecutor = new DirectAppContainerExecutor(availability, _logger);
+            var workerExe = ResolveBrowserProxyWorkerExePath();
+            var allowedFileRoots = new[] { Path.GetTempPath() };
+            var settingsDirectory = SettingsManager.SettingsDirectoryPath;
+
             _browserProxyCapability = new BrowserProxyCapability(
                 _logger,
                 _nodeClient.GatewayUrl,
                 _token,
                 sshRemoteGatewayPort: _settings?.UseSshTunnel == true
                     ? _settings.SshTunnelRemotePort
-                    : null);
+                    : null,
+                sandboxExecutor: browserProxyExecutor,
+                settingsProvider: SnapshotSettings,
+                isSandboxAvailable: () => (_mxcAvailability ??= MxcAvailability.Probe(_logger)).HasAnyBackend,
+                invalidateAvailability: () => _mxcAvailability = null,
+                settingsDirectoryPathProvider: () => settingsDirectory,
+                workerExePath: workerExe,
+                allowedFileRoots: allowedFileRoots);
             Register(_browserProxyCapability);
         }
 
@@ -552,12 +570,14 @@ public sealed class NodeService : IDisposable
             {
                 SystemRunSandboxEnabled = true,
                 SystemRunAllowOutbound = false,
+                BrowserProxySandboxEnabled = true,
             };
 
         return new SettingsData
         {
             SystemRunSandboxEnabled = _settings.SystemRunSandboxEnabled,
             SystemRunAllowOutbound = _settings.SystemRunAllowOutbound,
+            BrowserProxySandboxEnabled = _settings.BrowserProxySandboxEnabled,
             // Sandbox page fields — read by MxcPolicyBuilder.ForSystemRun.
             SandboxClipboard = _settings.SandboxClipboard,
             SandboxDocumentsAccess = _settings.SandboxDocumentsAccess,
@@ -575,6 +595,32 @@ public sealed class NodeService : IDisposable
     }
 
     private MxcAvailability? _mxcAvailability;
+
+    /// <summary>
+    /// Resolve the path to <c>OpenClaw.BrowserProxy.Worker.exe</c>. The worker
+    /// ships next to the tray exe in the install layout; in dev builds the
+    /// MSBuild copy target lands it in <c>$(TargetDir)</c>.
+    /// </summary>
+    /// <remarks>
+    /// Returns the candidate path even when the file is missing. The capability
+    /// treats a missing worker as "MXC unavailable" via the existing fallback,
+    /// so a stale dev build still works through the in-process path.
+    /// </remarks>
+    private static string ResolveBrowserProxyWorkerExePath()
+    {
+        var baseDir = AppContext.BaseDirectory;
+        // Co-located with the tray exe under the normal install layout.
+        var colocated = System.IO.Path.Combine(baseDir, "OpenClaw.BrowserProxy.Worker.exe");
+        if (System.IO.File.Exists(colocated))
+            return colocated;
+
+        // Allow an explicit override for tests / unpackaged debug runs.
+        var overridePath = Environment.GetEnvironmentVariable("OPENCLAW_BROWSER_PROXY_WORKER");
+        if (!string.IsNullOrWhiteSpace(overridePath) && System.IO.File.Exists(overridePath))
+            return overridePath;
+
+        return colocated;
+    }
 
     private void StartMcpServer()
     {

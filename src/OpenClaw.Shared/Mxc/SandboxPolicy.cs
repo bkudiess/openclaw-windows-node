@@ -23,7 +23,8 @@ public sealed record NetworkPolicy(
     bool AllowOutbound = false,
     bool AllowLocalNetwork = false,
     IReadOnlyList<string>? AllowedHosts = null,
-    IReadOnlyList<string>? BlockedHosts = null);
+    IReadOnlyList<string>? BlockedHosts = null,
+    int? LoopbackProxyPort = null);
 
 public sealed record UiPolicy(
     bool AllowWindows = false,

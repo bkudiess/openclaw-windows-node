@@ -50,6 +50,11 @@ public static class MxcConfigBuilder
         if (request is null) throw new ArgumentNullException(nameof(request));
         if (string.IsNullOrWhiteSpace(scratchDir)) throw new ArgumentException("scratchDir required", nameof(scratchDir));
 
+        // Capability-shaped invocations (no shell wrapping, structured args).
+        // Today: browser.proxy. Each shape parses its own args envelope.
+        if (string.Equals(request.CapabilityCommand, "browser.proxy", StringComparison.OrdinalIgnoreCase))
+            return BuildForBrowserProxy(request, scratchDir, containerId);
+
         var policy = request.Policy;
         var args = ParseSystemRunArgs(request.Args);
 
@@ -353,6 +358,146 @@ public static class MxcConfigBuilder
         ClipboardPolicy.All => "all",
         _ => "none",
     };
+
+    /// <summary>
+    /// Build the wxc-exec config for a browser.proxy invocation. Browser-proxy
+    /// is capability-shaped (not shell-shaped) — the command line is a fixed
+    /// invocation of <see cref="BrowserProxyWorkerExeArg"/> with explicit
+    /// <c>--request</c>/<c>--response</c> file arguments, no shell wrapping,
+    /// no PATH grants, and a narrow loopback network policy.
+    /// </summary>
+    /// <remarks>
+    /// Required <see cref="SandboxExecutionRequest.Args"/> object fields:
+    /// <list type="bullet">
+    /// <item><c>workerExePath</c> — absolute path to <c>OpenClaw.BrowserProxy.Worker.exe</c>.</item>
+    /// <item><c>requestFilePath</c> — absolute path to the <c>req.json</c> the tray wrote.</item>
+    /// <item><c>responseFilePath</c> — absolute path where the worker should write <c>resp.json</c>.</item>
+    /// </list>
+    /// Both file paths must already live inside <paramref name="scratchDir"/>
+    /// (or another readwrite-granted location) so the worker can read/write
+    /// them from inside the AppContainer.
+    /// </remarks>
+    public const string BrowserProxyWorkerExeArg = "workerExePath";
+
+    private static MxcConfig BuildForBrowserProxy(
+        SandboxExecutionRequest request,
+        string scratchDir,
+        string? containerId)
+    {
+        var args = request.Args;
+        string workerExe = TryGetStringArg(args, "workerExePath")
+            ?? throw new ArgumentException("browser.proxy MXC request missing 'workerExePath'", nameof(request));
+        string requestFile = TryGetStringArg(args, "requestFilePath")
+            ?? throw new ArgumentException("browser.proxy MXC request missing 'requestFilePath'", nameof(request));
+        string responseFile = TryGetStringArg(args, "responseFilePath")
+            ?? throw new ArgumentException("browser.proxy MXC request missing 'responseFilePath'", nameof(request));
+
+        // Command line — wxc-exec hands this verbatim to CreateProcessW. Quote
+        // each path so spaces in the install directory (Program Files etc.)
+        // don't fragment into multiple argv entries.
+        var commandLine = $"\"{workerExe}\" --request \"{requestFile}\" --response \"{responseFile}\"";
+
+        var policy = request.Policy;
+
+        // Readonly = caller's allowed file roots (from policy) + the worker's
+        // own install directory so AC can execute it. We do NOT add PATH dirs
+        // here — the worker is self-contained .NET; it doesn't need git/node.
+        var roFromPolicy = (policy?.Filesystem?.ReadonlyPaths ?? Array.Empty<string>()).ToList();
+        var workerDir = Path.GetDirectoryName(workerExe);
+        if (!string.IsNullOrWhiteSpace(workerDir)
+            && !roFromPolicy.Contains(workerDir, StringComparer.OrdinalIgnoreCase))
+        {
+            roFromPolicy.Add(workerDir);
+        }
+
+        // Readwrite = scratch dir for req.json/resp.json. AppContainer needs
+        // the file's directory granted, not just the file itself.
+        var rwFromPolicy = (policy?.Filesystem?.ReadwritePaths ?? Array.Empty<string>()).ToList();
+        if (!rwFromPolicy.Contains(scratchDir, StringComparer.OrdinalIgnoreCase))
+            rwFromPolicy.Add(scratchDir);
+
+        // Compatibility roots (drive roots etc.) mirror the system.run path so
+        // the worker can resolve dependencies under its install dir even if
+        // it spans a junction or volume mount.
+        AddCompatibilityReadonlyPaths(roFromPolicy, roFromPolicy.Concat(rwFromPolicy).ToArray());
+
+        var denied = (policy?.Filesystem?.DeniedPaths ?? Array.Empty<string>()).ToList();
+
+        // Deny wins: strip any allow that overlaps a deny.
+        roFromPolicy = FilterOutDenied(roFromPolicy, denied);
+        rwFromPolicy = FilterOutDenied(rwFromPolicy, denied);
+
+        var timeoutMs = request.TimeoutMs > 0 ? request.TimeoutMs : DefaultProcessTimeoutMs;
+
+        // Loopback to 127.0.0.1:<controlPort>: declared via network.proxy.localhost
+        // per MXC example 11_localhost_proxy_processcontainer.json. The
+        // privateNetworkClientServer capability is the AC primitive backing
+        // loopback; default network policy stays block so no other host is
+        // reachable.
+        var capabilities = new List<string> { "privateNetworkClientServer" };
+        MxcNetworkProxy? proxy = policy?.Network?.LoopbackProxyPort is int port and > 0
+            ? new MxcNetworkProxy { Localhost = port }
+            : null;
+        var network = new MxcNetwork
+        {
+            DefaultPolicy = "block",
+            EnforcementMode = "capabilities",
+            Proxy = proxy,
+        };
+
+        return new MxcConfig
+        {
+            Version = MxcPolicyBuilder.SupportedPolicyVersion,
+            ContainerId = containerId ?? Guid.NewGuid().ToString("N"),
+            Process = new MxcProcess
+            {
+                CommandLine = commandLine,
+                Cwd = scratchDir,
+                Env = null,
+                TimeoutMs = timeoutMs,
+            },
+            AppContainer = new MxcAppContainer
+            {
+                LeastPrivilege = false,
+                Capabilities = capabilities.ToArray(),
+                Ui = new MxcBaseProcessUi
+                {
+                    Isolation = "container",
+                    DesktopSystemControl = false,
+                    SystemSettings = "none",
+                    Ime = false,
+                },
+            },
+            Filesystem = new MxcFilesystem
+            {
+                ReadonlyPaths = roFromPolicy.ToArray(),
+                ReadwritePaths = rwFromPolicy.ToArray(),
+                DeniedPaths = denied.ToArray(),
+                ClearPolicyOnExit = null,
+            },
+            Network = network,
+            Ui = new MxcUi
+            {
+                Disable = true,
+                Clipboard = "none",
+                Injection = false,
+            },
+            Lifecycle = new MxcLifecycle
+            {
+                DestroyOnExit = true,
+                PreservePolicy = false,
+            },
+        };
+    }
+
+    private static string? TryGetStringArg(System.Text.Json.JsonElement args, string name)
+    {
+        if (args.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
+        if (!args.TryGetProperty(name, out var prop)) return null;
+        if (prop.ValueKind != System.Text.Json.JsonValueKind.String) return null;
+        var value = prop.GetString();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
 
     /// <summary>
     /// Capability args envelope for system.run. Other capability shapes can add

@@ -132,6 +132,8 @@ public class SettingsManager
     public bool SystemRunSandboxEnabled { get; set; } = true;
     /// <summary>When sandboxed, allow system.run commands to reach the public internet. Default false.</summary>
     public bool SystemRunAllowOutbound { get; set; } = false;
+    /// <summary>Master switch for browser.proxy containment. When true (default), browser.proxy runs inside an MXC AppContainer via a dedicated worker; falls back to in-process when MXC is unavailable. When false, browser.proxy runs in-process like before.</summary>
+    public bool BrowserProxySandboxEnabled { get; set; } = true;
 
     // ── MXC sandbox: additional knobs (Sandbox page) ─────────────────
     public SandboxClipboardMode SandboxClipboard { get; set; } = SandboxClipboardMode.None;
@@ -247,6 +249,7 @@ public class SettingsManager
                     // MXC sandbox settings
                     SystemRunSandboxEnabled = loaded.SystemRunSandboxEnabled;
                     SystemRunAllowOutbound = loaded.SystemRunAllowOutbound;
+                    BrowserProxySandboxEnabled = loaded.BrowserProxySandboxEnabled;
 
                     // MXC sandbox settings (Sandbox page)
                     SandboxClipboard = loaded.SandboxClipboard;
@@ -355,6 +358,7 @@ public class SettingsManager
         // MXC sandbox settings
         SystemRunSandboxEnabled = SystemRunSandboxEnabled,
         SystemRunAllowOutbound = SystemRunAllowOutbound,
+        BrowserProxySandboxEnabled = BrowserProxySandboxEnabled,
         // MXC sandbox settings (Sandbox page)
         SandboxClipboard = SandboxClipboard,
         SandboxDocumentsAccess = SandboxDocumentsAccess,

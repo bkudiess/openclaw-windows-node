@@ -15,6 +15,7 @@
       <Platform Solution="*|ARM64" Project="ARM64" />
     </Project>
     <Project Path="src/OpenClaw.Shared/OpenClaw.Shared.csproj" />
+    <Project Path="src/OpenClaw.BrowserProxy.Worker/OpenClaw.BrowserProxy.Worker.csproj" />
     <Project Path="src/OpenClaw.Connection/OpenClaw.Connection.csproj" />
     <Project Path="src/OpenClaw.Chat/OpenClaw.Chat.csproj">
       <Platform Solution="*|Any CPU" Project="x64" />

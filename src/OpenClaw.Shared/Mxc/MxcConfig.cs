@@ -131,6 +131,24 @@ public sealed record MxcNetwork
     [JsonPropertyName("blockedHosts")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string[]? BlockedHosts { get; init; }
+
+    /// <summary>
+    /// Optional loopback-proxy declaration. Setting <c>localhost</c> to a port
+    /// number tells MXC to grant the contained process the AppContainer
+    /// loopback exemption for that port — required to reach <c>127.0.0.1:N</c>
+    /// from inside processcontainer. Mirrors the MXC example
+    /// <c>11_localhost_proxy_processcontainer.json</c>.
+    /// </summary>
+    [JsonPropertyName("proxy")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MxcNetworkProxy? Proxy { get; init; }
+}
+
+public sealed record MxcNetworkProxy
+{
+    [JsonPropertyName("localhost")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Localhost { get; init; }
 }
 
 public sealed record MxcUi

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>OpenClaw.BrowserProxy.Worker</AssemblyName>
+    <RootNamespace>OpenClaw.BrowserProxy.Worker</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Cross-plat TFM keeps the worker tiny; wxc-exec is Windows-only so the
+         worker only ever runs on Windows in practice, but net10.0 avoids the
+         WindowsAppSDK transitive weight that net10.0-windows pulls in. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="OpenClaw.Shared.Tests" />
+  </ItemGroup>
+</Project>

@@ -122,6 +122,17 @@ public class SettingsData
     public bool SystemRunAllowOutbound { get; set; } = false;
 
     /// <summary>
+    /// Master switch for browser.proxy containment. When <c>true</c> (default),
+    /// browser.proxy invocations run inside an MXC AppContainer via a dedicated
+    /// worker process. When MXC is unavailable on this host the invocation
+    /// falls back to in-process execution with a warning (mirrors the
+    /// <see cref="SystemRunSandboxEnabled"/> fall-open behavior). When
+    /// <c>false</c>, browser.proxy runs in-process as it did before MXC
+    /// containment was added.
+    /// </summary>
+    public bool BrowserProxySandboxEnabled { get; set; } = true;
+
+    /// <summary>
     /// Clipboard access policy inside the sandbox. Default <c>None</c> — the
     /// sandboxed payload cannot see or change the user's clipboard.
     /// </summary>
