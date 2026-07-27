@@ -49,7 +49,8 @@ public static class ExecApprovalV2InputValidator
                     return Deny("malformed-env");
                 dict[prop.Name] = prop.Value.GetString() ?? "";
             }
-            env = dict;
+            if (dict.Count > 0)
+                return Deny("custom-env-not-supported");
         }
 
         // timeoutMs / timeout — positive integer; defaults to 30 000.
@@ -73,7 +74,6 @@ public static class ExecApprovalV2InputValidator
 
         return ExecApprovalV2ValidationOutcome.Ok(new ValidatedRunRequest(
             argv,
-            TryGetString(request.Args, "shell"),
             cwd,
             timeoutMs,
             env,
@@ -91,39 +91,19 @@ public static class ExecApprovalV2InputValidator
             !args.TryGetProperty("command", out var cmdEl))
             return null;
 
-        if (cmdEl.ValueKind == JsonValueKind.Array)
+        if (cmdEl.ValueKind != JsonValueKind.Array)
         {
-            var list = new List<string>();
-            foreach (var item in cmdEl.EnumerateArray())
-            {
-                if (item.ValueKind != JsonValueKind.String) { malformed = true; return null; }
-                list.Add(item.GetString() ?? "");
-            }
-            return list.Count > 0 ? [.. list] : null;
+            malformed = true;
+            return null;
         }
 
-        if (cmdEl.ValueKind == JsonValueKind.String)
+        var list = new List<string>();
+        foreach (var item in cmdEl.EnumerateArray())
         {
-            var cmd = cmdEl.GetString();
-            if (string.IsNullOrWhiteSpace(cmd)) return null;
-
-            // Also merge a separate "args" array when command is a bare string.
-            // A non-array "args" value is a protocol violation.
-            if (args.TryGetProperty("args", out var argsEl))
-            {
-                if (argsEl.ValueKind != JsonValueKind.Array) { malformed = true; return null; }
-                var list = new List<string> { cmd };
-                foreach (var item in argsEl.EnumerateArray())
-                {
-                    if (item.ValueKind != JsonValueKind.String) { malformed = true; return null; }
-                    list.Add(item.GetString() ?? "");
-                }
-                return [.. list];
-            }
-            return [cmd];
+            if (item.ValueKind != JsonValueKind.String) { malformed = true; return null; }
+            list.Add(item.GetString() ?? "");
         }
-
-        return null;
+        return list.Count > 0 ? [.. list] : null;
     }
 
     private static string? TryGetString(JsonElement args, string key)

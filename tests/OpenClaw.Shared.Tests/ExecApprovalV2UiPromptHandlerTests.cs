@@ -14,7 +14,7 @@ public class ExecApprovalV2UiPromptHandlerTests
 
     private static ExecApprovalV2PromptRequest Request(
         string command = "echo hello", string? cwd = null, string? resolvedPath = null,
-        string agentId = "agent-1") =>
+        string agentId = "agent-1", bool allowAlwaysAvailable = false) =>
         new()
         {
             DisplayCommand = command,
@@ -23,6 +23,7 @@ public class ExecApprovalV2UiPromptHandlerTests
             Security = ExecSecurity.Full,
             Ask = ExecAsk.Always,
             AgentId = agentId,
+            AllowAlwaysAvailable = allowAlwaysAvailable,
             CorrelationId = "corr-1",
         };
 
@@ -224,6 +225,71 @@ public class ExecApprovalV2UiPromptHandlerTests
 
         Assert.NotNull(seen);
         Assert.True(seen!.HasConfusableWarning);
+    }
+
+    [Fact]
+    public async Task MixedScriptOnlyInAgentLabel_SetsConfusableWarningOnView()
+    {
+        ExecApprovalPromptView? seen = null;
+        var handler = Handler((view, _) => { seen = view; return Task.FromResult(ExecApprovalPromptOutcome.Deny); });
+
+        // The agent label is agent-controlled and rendered like the other rows, so a
+        // homoglyph-spoofed label (Cyrillic 'е' U+0435 inside a Latin word) must raise
+        // the warning even when the command, cwd, and path are clean.
+        await handler.PromptAsync(Request(command: "git status", agentId: "ag" + U(0x0435) + "nt"));
+
+        Assert.NotNull(seen);
+        Assert.True(seen!.HasConfusableWarning);
+    }
+
+    [Fact]
+    public async Task ViewCarriesAllowAlwaysAvailable_WhenRequestAllowsIt()
+    {
+        ExecApprovalPromptView? seen = null;
+        var handler = Handler((view, _) => { seen = view; return Task.FromResult(ExecApprovalPromptOutcome.Deny); });
+
+        await handler.PromptAsync(Request(allowAlwaysAvailable: true));
+
+        Assert.NotNull(seen);
+        Assert.True(seen!.AllowAlwaysAvailable);
+    }
+
+    [Fact]
+    public async Task ViewAllowAlwaysUnavailable_ByDefault()
+    {
+        ExecApprovalPromptView? seen = null;
+        var handler = Handler((view, _) => { seen = view; return Task.FromResult(ExecApprovalPromptOutcome.Deny); });
+
+        await handler.PromptAsync(Request());
+
+        Assert.NotNull(seen);
+        Assert.False(seen!.AllowAlwaysAvailable);
+    }
+
+    [Fact]
+    public async Task OversizedCommand_IsDenied_WithoutShowingDialog()
+    {
+        var shown = false;
+        var handler = Handler((_, _) => { shown = true; return Task.FromResult(ExecApprovalPromptOutcome.AllowOnce); });
+
+        // Exceeds the 256KB hard display cap: cannot be reviewed in full, so it must not be approvable.
+        var outcome = await handler.PromptAsync(Request(command: new string('a', 300_000)));
+
+        Assert.Equal(ExecApprovalPromptOutcome.Deny, outcome);
+        Assert.False(shown);
+    }
+
+    [Fact]
+    public async Task TruncatedCommand_IsDenied_WithoutShowingDialog()
+    {
+        var shown = false;
+        var handler = Handler((_, _) => { shown = true; return Task.FromResult(ExecApprovalPromptOutcome.AllowOnce); });
+
+        // Exceeds the 16KB soft cap: the tail would be hidden behind truncation, so deny.
+        var outcome = await handler.PromptAsync(Request(command: new string('a', 20_000)));
+
+        Assert.Equal(ExecApprovalPromptOutcome.Deny, outcome);
+        Assert.False(shown);
     }
 
     [Fact]
