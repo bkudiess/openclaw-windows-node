@@ -329,6 +329,8 @@ Packaged installs declare camera, microphone, and location capabilities. Windows
     > 🔒 **Exec approvals**: `system.run` is gated by the V2 approval coordinator and `%APPDATA%\OpenClawTray\exec-approvals.json`. The file uses the same `defaults`/`agents`/`allowlist` model as the macOS node host. `system.execApprovals.set` requires the current `baseHash` and rejects stale or unsafe remote updates.
     >
     > Allowlist rules match resolved executable paths, using path-aware wildcards such as `**/git.exe`. Script interpreters and command hosts cannot receive reusable grants. Non-empty custom environments are rejected until they can be identity-bound and displayed safely.
+    >
+    > **V2 caller migration**: raw MCP, direct `node.invoke`, plugin, and `winnode` callers must replace string-form `{"command":"echo hello","shell":"cmd"}` with canonical `{"command":["cmd.exe","/d","/s","/c","echo hello"],"rawCommand":"echo hello"}`. The normal gateway `exec host=node` path already performs this wrapping. Remove custom `env`; non-empty environments are rejected.
 
 #### Command Center diagnostics
 

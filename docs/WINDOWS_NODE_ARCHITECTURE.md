@@ -477,6 +477,28 @@ would preserve parallel authorization paths and bypass drift.
 migration UI. Revisit this decision only if measured support impact justifies a separate
 compatibility feature.
 
+#### Decision: version the low-level `system.run` boundary as canonical argv
+
+The V2 low-level node contract accepts `command` only as `string[]` canonical argv.
+String-form `command`, implicit `shell`, separate `args`, and non-empty custom `env`
+are intentional breaking changes. The normal gateway `exec host=node` flow already
+constructs canonical Windows argv, so this affects raw MCP, direct `node.invoke`,
+plugins, and other callers that bypass gateway exec orchestration.
+
+Migration example:
+
+```json
+// Before
+{"command":"echo hello","shell":"cmd"}
+
+// V2
+{"command":["cmd.exe","/d","/s","/c","echo hello"],"rawCommand":"echo hello"}
+```
+
+The node returns `command-array-required` for a string command and
+`custom-env-not-supported` for a non-empty environment. This explicit boundary
+keeps approval identity and process execution on one argv representation.
+
 ### Location → Windows.Devices.Geolocation
 
 ```csharp

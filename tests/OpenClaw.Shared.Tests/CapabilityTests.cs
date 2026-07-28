@@ -230,7 +230,7 @@ public class SystemCapabilityTests
 
         var res = await cap.ExecuteAsync(req);
         Assert.False(res.Ok);
-        Assert.Contains("malformed-command", res.Error);
+        Assert.Contains("command-array-required", res.Error);
     }
 
     [Fact]
@@ -580,7 +580,7 @@ public class SystemCapabilityTests
             });
 
             Assert.False(response.Ok);
-            Assert.Contains("full access", response.Error);
+            Assert.Contains("less restrictive", response.Error);
         }
         finally
         {
@@ -654,6 +654,159 @@ public class SystemCapabilityTests
         }
     }
 
+        [Theory]
+        [InlineData(ExecSecurity.Deny, ExecAsk.OnMiss, ExecSecurity.Deny, false,
+            ExecSecurity.Allowlist, ExecAsk.OnMiss, ExecSecurity.Deny, false, "security")]
+        [InlineData(ExecSecurity.Allowlist, ExecAsk.Always, ExecSecurity.Deny, false,
+            ExecSecurity.Allowlist, ExecAsk.OnMiss, ExecSecurity.Deny, false, "ask")]
+        [InlineData(ExecSecurity.Allowlist, ExecAsk.OnMiss, ExecSecurity.Deny, false,
+            ExecSecurity.Allowlist, ExecAsk.OnMiss, ExecSecurity.Allowlist, false, "askFallback")]
+        [InlineData(ExecSecurity.Allowlist, ExecAsk.OnMiss, ExecSecurity.Deny, false,
+            ExecSecurity.Allowlist, ExecAsk.OnMiss, ExecSecurity.Deny, true, "autoAllowSkills")]
+        public async Task ExecApprovalsSet_RejectsLessRestrictivePolicy(
+            ExecSecurity currentSecurity,
+            ExecAsk currentAsk,
+            ExecSecurity currentFallback,
+            bool currentAutoAllowSkills,
+            ExecSecurity desiredSecurity,
+            ExecAsk desiredAsk,
+            ExecSecurity desiredFallback,
+            bool desiredAutoAllowSkills,
+            string expectedField)
+        {
+            var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                var store = new ExecApprovalsStore(tempDir, NullLogger.Instance);
+                var initial = await store.GetSnapshotAsync();
+                var current = V2File("**/where.exe");
+                SetPolicy(
+                    current,
+                    currentSecurity,
+                    currentAsk,
+                    currentFallback,
+                    currentAutoAllowSkills);
+                Assert.NotNull(await store.ReplaceAsync(initial.Hash, current));
+                var before = await store.GetSnapshotAsync();
+                var desired = before.File;
+                SetPolicy(
+                    desired,
+                    desiredSecurity,
+                    desiredAsk,
+                    desiredFallback,
+                    desiredAutoAllowSkills);
+
+                var cap = new SystemCapability(NullLogger.Instance);
+                cap.SetApprovalsStore(store);
+                var response = await cap.ExecuteAsync(new NodeInvokeRequest
+                {
+                    Id = "set-weaker",
+                    Command = "system.execApprovals.set",
+                    Args = JsonSerializer.SerializeToElement(
+                        new { baseHash = before.Hash, file = desired },
+                        ExecApprovalsStore.JsonOptions)
+                });
+
+                Assert.False(response.Ok);
+                Assert.Contains(expectedField, response.Error, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("less restrictive", response.Error, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+
+        [Fact]
+        public async Task ExecApprovalsSet_AllowsMoreRestrictivePolicy()
+        {
+            var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                var store = new ExecApprovalsStore(tempDir, NullLogger.Instance);
+                var initial = await store.GetSnapshotAsync();
+                var current = V2File("**/where.exe");
+                SetPolicy(
+                    current,
+                    ExecSecurity.Allowlist,
+                    ExecAsk.OnMiss,
+                    ExecSecurity.Allowlist,
+                    currentAutoAllowSkills: true);
+                Assert.NotNull(await store.ReplaceAsync(initial.Hash, current));
+                var before = await store.GetSnapshotAsync();
+                var desired = before.File;
+                SetPolicy(
+                    desired,
+                    ExecSecurity.Deny,
+                    ExecAsk.Always,
+                    ExecSecurity.Deny,
+                    currentAutoAllowSkills: false);
+
+                var cap = new SystemCapability(NullLogger.Instance);
+                cap.SetApprovalsStore(store);
+                var response = await cap.ExecuteAsync(new NodeInvokeRequest
+                {
+                    Id = "set-tighter",
+                    Command = "system.execApprovals.set",
+                    Args = JsonSerializer.SerializeToElement(
+                        new { baseHash = before.Hash, file = desired },
+                        ExecApprovalsStore.JsonOptions)
+                });
+
+                Assert.True(response.Ok);
+            }
+            finally
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+
+            [Fact]
+            public async Task ExecApprovalsSet_PreservesExistingFullWhileTighteningAsk()
+            {
+                var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(tempDir);
+                try
+                {
+                    var store = new ExecApprovalsStore(tempDir, NullLogger.Instance);
+                    var initial = await store.GetSnapshotAsync();
+                    var current = V2File("**/where.exe");
+                    SetPolicy(
+                        current,
+                        ExecSecurity.Full,
+                        ExecAsk.OnMiss,
+                        ExecSecurity.Full,
+                        currentAutoAllowSkills: true);
+                    Assert.NotNull(await store.ReplaceAsync(initial.Hash, current));
+                    var before = await store.GetSnapshotAsync();
+                    var desired = before.File;
+                    SetPolicy(
+                        desired,
+                        ExecSecurity.Full,
+                        ExecAsk.Always,
+                        ExecSecurity.Full,
+                        currentAutoAllowSkills: false);
+
+                    var cap = new SystemCapability(NullLogger.Instance);
+                    cap.SetApprovalsStore(store);
+                    var response = await cap.ExecuteAsync(new NodeInvokeRequest
+                    {
+                        Id = "set-preserve-full",
+                        Command = "system.execApprovals.set",
+                        Args = JsonSerializer.SerializeToElement(
+                            new { baseHash = before.Hash, file = desired },
+                            ExecApprovalsStore.JsonOptions)
+                    });
+
+                    Assert.True(response.Ok);
+                }
+                finally
+                {
+                    Directory.Delete(tempDir, true);
+                }
+            }
     private static ExecApprovalsFile V2File(string? pattern = null) => new()
     {
         Version = 1,
@@ -685,6 +838,30 @@ public class SystemCapabilityTests
             },
         },
     };
+
+    private static void SetPolicy(
+        ExecApprovalsFile file,
+        ExecSecurity security,
+        ExecAsk ask,
+        ExecSecurity askFallback,
+        bool currentAutoAllowSkills)
+    {
+        file.Defaults ??= new ExecApprovalsDefaults();
+        file.Defaults.Security = security;
+        file.Defaults.Ask = ask;
+        file.Defaults.AskFallback = askFallback;
+        file.Defaults.AutoAllowSkills = currentAutoAllowSkills;
+        file.Agents ??= new Dictionary<string, ExecApprovalsAgent>();
+        if (!file.Agents.TryGetValue("main", out var main))
+        {
+            main = new ExecApprovalsAgent();
+            file.Agents["main"] = main;
+        }
+        main.Security = security;
+        main.Ask = ask;
+        main.AskFallback = askFallback;
+        main.AutoAllowSkills = currentAutoAllowSkills;
+    }
 }
 
 public class BrowserProxyCapabilityTests

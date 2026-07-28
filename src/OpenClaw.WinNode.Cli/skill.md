@@ -103,6 +103,25 @@ Shell behavior must be explicit in the argv, for example
 The gateway's `exec host=node` path performs this wrapping automatically.
 Non-empty custom `env` is rejected until environment values can be identity-bound
 and shown safely during approval.
+
+#### Migration from the pre-V2 low-level contract
+
+The V2 node boundary intentionally rejects string-form `command` with
+`command-array-required`. Update raw MCP, `node.invoke`, plugin, and direct
+`winnode` callers to send the shell transport explicitly:
+
+```json
+// Before
+{"command":"echo hello","shell":"cmd"}
+
+// V2
+{"command":["cmd.exe","/d","/s","/c","echo hello"],"rawCommand":"echo hello"}
+```
+
+PowerShell callers must likewise name `powershell.exe` or `pwsh.exe` and its
+`-Command` arguments explicitly. Remove custom `env` from the request; V2 rejects
+non-empty environments rather than approving an executable under hidden process
+configuration.
 Returns `{ stdout, stderr, exitCode, timedOut, durationMs }`.
 
 ### system.run.prepare

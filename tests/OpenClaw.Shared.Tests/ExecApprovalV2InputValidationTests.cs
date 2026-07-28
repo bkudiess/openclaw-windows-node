@@ -40,7 +40,7 @@ public class ExecApprovalV2InputValidationTests
         var outcome = ExecApprovalV2InputValidator.Validate(Req("""{"command":"echo"}"""));
 
         Assert.False(outcome.IsValid);
-        Assert.Equal("malformed-command", outcome.Error!.Reason);
+        Assert.Equal("command-array-required", outcome.Error!.Reason);
     }
 
     [Fact]
@@ -50,7 +50,7 @@ public class ExecApprovalV2InputValidationTests
             Req("""{"command":"echo","args":["hello","world"]}"""));
 
         Assert.False(outcome.IsValid);
-        Assert.Equal("malformed-command", outcome.Error!.Reason);
+        Assert.Equal("command-array-required", outcome.Error!.Reason);
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public class ExecApprovalV2InputValidationTests
 
         Assert.False(outcome.IsValid);
         Assert.Equal(ExecApprovalV2Code.ValidationFailed, outcome.Error!.Code);
-        Assert.Equal("malformed-command", outcome.Error.Reason);
+        Assert.Equal("command-array-required", outcome.Error.Reason);
     }
 
     [Fact]
@@ -331,7 +331,7 @@ public class ExecApprovalV2InputValidationTests
             Req("""{"command":"  "}"""));
 
         Assert.False(outcome.IsValid);
-        Assert.Equal("malformed-command", outcome.Error!.Reason);
+        Assert.Equal("command-array-required", outcome.Error!.Reason);
     }
 
     // -------------------------------------------------------------------------
@@ -535,7 +535,7 @@ public class ExecApprovalV2InputValidationTests
         {
             Req("""{}"""),                                          // missing-command
             Req("""{"command":[]}"""),                              // missing-command (empty array)
-            Req("""{"command":"echo"}"""),                          // malformed-command (array required)
+            Req("""{"command":"echo"}"""),                          // command-array-required
             Req("""{"command":["echo",42]}"""),                     // malformed-command
             Req("""{"command":["echo"],"cwd":""}"""),               // empty-cwd
             Req("""{"command":["echo"],"cwd":123}"""),              // malformed-cwd

@@ -14,6 +14,13 @@ public static class ExecApprovalV2InputValidator
 
     public static ExecApprovalV2ValidationOutcome Validate(NodeInvokeRequest request)
     {
+        if (request.Args.ValueKind == JsonValueKind.Object
+            && request.Args.TryGetProperty("command", out var commandElement)
+            && commandElement.ValueKind == JsonValueKind.String)
+        {
+            return Deny("command-array-required");
+        }
+
         var argv = TryParseArgv(request.Args, out bool malformedCommand);
         if (malformedCommand)
             return Deny("malformed-command");

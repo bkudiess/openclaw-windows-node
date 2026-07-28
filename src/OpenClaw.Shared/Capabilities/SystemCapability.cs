@@ -531,23 +531,20 @@ public class SystemCapability : NodeCapabilityBase
         ExecApprovalsFile current,
         ExecApprovalsFile desired)
     {
-        if (desired.Defaults?.Security == ExecSecurity.Full
-            || desired.Defaults?.AskFallback == ExecSecurity.Full)
-        {
-            return "Remote exec approval updates cannot set defaults to full access.";
-        }
-
-        if (desired.Agents is null)
-            return null;
-
-        foreach (var (agentId, agent) in desired.Agents)
+        foreach (var (agentId, agent) in desired.Agents ?? [])
         {
             if (string.IsNullOrWhiteSpace(agentId))
                 return "Exec approval agent ids cannot be empty.";
             if (agent is null)
                 return $"Exec approval agent '{agentId}' is invalid.";
-            if (agent.Security == ExecSecurity.Full || agent.AskFallback == ExecSecurity.Full)
-                return $"Remote exec approval updates cannot set agent '{agentId}' to full access.";
+        }
+
+        var policyError = ValidateRemotePolicyMonotonicity(current, desired);
+        if (policyError is not null)
+            return policyError;
+
+        foreach (var (agentId, agent) in desired.Agents ?? [])
+        {
 
             ExecApprovalsAgent? currentAgent = null;
             current.Agents?.TryGetValue(agentId, out currentAgent);
@@ -572,6 +569,103 @@ public class SystemCapability : NodeCapabilityBase
 
         return null;
     }
+
+    private static string? ValidateRemotePolicyMonotonicity(
+        ExecApprovalsFile current,
+        ExecApprovalsFile desired)
+    {
+        var error = ComparePolicies(
+            ResolvePolicy(current, agentId: null, includeWildcard: false),
+            ResolvePolicy(desired, agentId: null, includeWildcard: false),
+            "defaults");
+        if (error is not null)
+            return error;
+
+        error = ComparePolicies(
+            ResolvePolicy(current, agentId: null, includeWildcard: true),
+            ResolvePolicy(desired, agentId: null, includeWildcard: true),
+            "agent '*'");
+        if (error is not null)
+            return error;
+
+        var agentIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var id in current.Agents?.Keys ?? (IEnumerable<string>)Array.Empty<string>())
+        {
+            if (id != "*")
+                agentIds.Add(id);
+        }
+        foreach (var id in desired.Agents?.Keys ?? (IEnumerable<string>)Array.Empty<string>())
+        {
+            if (id != "*")
+                agentIds.Add(id);
+        }
+        agentIds.Add("main");
+
+        foreach (var agentId in agentIds)
+        {
+            error = ComparePolicies(
+                ResolvePolicy(current, agentId, includeWildcard: true),
+                ResolvePolicy(desired, agentId, includeWildcard: true),
+                $"agent '{agentId}'");
+            if (error is not null)
+                return error;
+        }
+
+        return null;
+    }
+
+    private static string? ComparePolicies(
+        RemoteEffectivePolicy current,
+        RemoteEffectivePolicy desired,
+        string scope)
+    {
+        if (desired.Security > current.Security)
+            return $"Remote exec approval updates cannot make security less restrictive for {scope}.";
+        if (desired.Ask < current.Ask)
+            return $"Remote exec approval updates cannot make ask less restrictive for {scope}.";
+        if (desired.AskFallback > current.AskFallback)
+            return $"Remote exec approval updates cannot make askFallback less restrictive for {scope}.";
+        if (!current.AutoAllowSkills && desired.AutoAllowSkills)
+            return $"Remote exec approval updates cannot make policy less restrictive by enabling autoAllowSkills for {scope}.";
+        return null;
+    }
+
+    private static RemoteEffectivePolicy ResolvePolicy(
+        ExecApprovalsFile file,
+        string? agentId,
+        bool includeWildcard)
+    {
+        ExecApprovalsAgent? wildcard = null;
+        ExecApprovalsAgent? agent = null;
+        if (includeWildcard)
+            file.Agents?.TryGetValue("*", out wildcard);
+        if (agentId is not null)
+            file.Agents?.TryGetValue(agentId, out agent);
+
+        return new RemoteEffectivePolicy(
+            agent?.Security
+                ?? wildcard?.Security
+                ?? file.Defaults?.Security
+                ?? ExecSecurity.Allowlist,
+            agent?.Ask
+                ?? wildcard?.Ask
+                ?? file.Defaults?.Ask
+                ?? ExecAsk.OnMiss,
+            agent?.AskFallback
+                ?? wildcard?.AskFallback
+                ?? file.Defaults?.AskFallback
+                ?? ExecSecurity.Deny,
+            agent?.AutoAllowSkills
+                ?? wildcard?.AutoAllowSkills
+                ?? file.Defaults?.AutoAllowSkills
+                ?? false);
+    }
+
+    private readonly record struct RemoteEffectivePolicy(
+        ExecSecurity Security,
+        ExecAsk Ask,
+        ExecSecurity AskFallback,
+        bool AutoAllowSkills);
 
     private static bool TryGetBaseHash(System.Text.Json.JsonElement args, out string baseHash)
     {
