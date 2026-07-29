@@ -1,5 +1,6 @@
 using System.Text.Json;
 using OpenClaw.Connection;
+using OpenClaw.Shared;
 
 namespace OpenClaw.Connection.Tests;
 
@@ -158,5 +159,20 @@ public class DeviceIdentityStoreTests : IDisposable
         Assert.False(doc.TryGetProperty("DeviceToken", out _));
         Assert.Equal("dev-idem", doc.GetProperty("DeviceId").GetString());
         Assert.Equal("pk", doc.GetProperty("PublicKey").GetString());
+    }
+
+    [Fact]
+    public void StoreToken_WhenExistingIdentityIsCorrupt_PropagatesTypedFailureWithoutMutation()
+    {
+        var path = Path.Combine(_tempDir, "device-key-ed25519.json");
+        File.WriteAllText(path, "{");
+        var originalBytes = File.ReadAllBytes(path);
+        var store = new DeviceIdentityStore();
+
+        Assert.Throws<DeviceIdentityLoadException>(
+            () => store.StoreToken(_tempDir, "device-token", null, "operator"));
+
+        Assert.Equal(originalBytes, File.ReadAllBytes(path));
+        Assert.Empty(Directory.GetFiles(_tempDir, ".device-key-ed25519.json.*.tmp"));
     }
 }

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using OpenClaw.Shared;
 using OpenClaw.Shared.Telemetry;
 using OpenClaw.Connection;
@@ -121,6 +122,144 @@ public class GatewayConnectionManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task PassiveGatewayRestart_ReusesLiveClientsAndPreservesDurableIdentity()
+    {
+        _registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "gw-restart",
+            Url = "wss://test"
+        });
+        _registry.SetActive("gw-restart");
+        var identityDir = _registry.GetIdentityDirectory("gw-restart");
+        var identity = new DeviceIdentity(identityDir, NullLogger.Instance);
+        identity.Initialize();
+        identity.StoreDeviceTokenForRole("operator", "operator-device-token");
+        identity.StoreDeviceTokenForRole("node", "node-device-token");
+        var originalBytes = File.ReadAllBytes(Path.Combine(identityDir, "device-key-ed25519.json"));
+
+        var factory = new MockClientFactory();
+        var node = new ScriptedNodeConnector
+        {
+            ConnectAction = (connector, _) =>
+            {
+                connector.SimulateStatus(ConnectionStatus.Connecting);
+                connector.SimulateTransportConnected();
+                connector.SimulatePairing(PairingStatus.Paired);
+                connector.SimulateStatus(ConnectionStatus.Connected);
+            }
+        };
+        var pairingEvents = 0;
+        node.PairingStatusChanged += (_, _) => pairingEvents++;
+        using var manager = new GatewayConnectionManager(
+            new CredentialResolver(DeviceIdentityFileReader.Instance),
+            factory,
+            _registry,
+            NullLogger.Instance,
+            nodeConnector: node,
+            isNodeEnabled: () => true,
+            shouldStartNodeConnection: (_, _) => true);
+
+        await manager.ConnectAsync("gw-restart");
+        var operatorLifecycle = Assert.Single(factory.CreatedClients);
+        operatorLifecycle.SimulateTransportConnected();
+        operatorLifecycle.SimulateHandshake();
+        await WaitUntilAsync(() => node.ConnectCount == 1);
+        Assert.Equal(1, pairingEvents);
+
+        operatorLifecycle.SimulateStatusChanged(ConnectionStatus.Disconnected);
+        node.SimulateStatus(ConnectionStatus.Error);
+        await WaitUntilAsync(() =>
+            manager.CurrentSnapshot.OperatorState == RoleConnectionState.Connecting &&
+            manager.CurrentSnapshot.NodeState == RoleConnectionState.Error);
+
+        operatorLifecycle.SimulateTransportConnected();
+        operatorLifecycle.SimulateHandshake();
+        node.SimulateStatus(ConnectionStatus.Connecting);
+        await WaitUntilAsync(() =>
+            manager.CurrentSnapshot.NodeState == RoleConnectionState.Connecting);
+        node.SimulateStatus(ConnectionStatus.Connected);
+        await WaitUntilAsync(() =>
+            manager.CurrentSnapshot.OperatorState == RoleConnectionState.Connected &&
+            manager.CurrentSnapshot.NodeState == RoleConnectionState.Connected);
+
+        Assert.Single(factory.CreatedClients);
+        Assert.False(operatorLifecycle.IsDisposed);
+        Assert.Equal(1, node.ConnectCount);
+        Assert.Equal(1, pairingEvents);
+        Assert.Equal(PairingStatus.Paired, node.PairingStatus);
+        Assert.Equal(
+            "operator-device-token",
+            DeviceIdentity.TryReadStoredDeviceTokenForRole(identityDir, "operator"));
+        Assert.Equal(
+            "node-device-token",
+            DeviceIdentity.TryReadStoredDeviceTokenForRole(identityDir, "node"));
+        Assert.Equal(
+            originalBytes,
+            File.ReadAllBytes(Path.Combine(identityDir, "device-key-ed25519.json")));
+        Assert.Empty(Directory.GetFiles(identityDir, ".device-key-ed25519.json.*.tmp"));
+    }
+
+    [Fact]
+    public async Task ExplicitNodeStart_SupersedesAutomaticStartWithoutClearingLifecycleGuard()
+    {
+        _registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "gw-node-race",
+            Url = "wss://test"
+        });
+        _registry.SetActive("gw-node-race");
+        var resolver = new MockCredentialResolver
+        {
+            OperatorCredential = new GatewayCredential("operator-token", false, "test"),
+            NodeCredential = new GatewayCredential("node-token", false, "test")
+        };
+        var factory = new MockClientFactory();
+        var firstStartEntered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var node = new ScriptedNodeConnector
+        {
+            ConnectAsyncAction = async (connector, _, cancellationToken) =>
+            {
+                if (connector.ConnectCount == 1)
+                {
+                    firstStartEntered.TrySetResult();
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                    return;
+                }
+
+                connector.SimulateStatus(ConnectionStatus.Connecting);
+                connector.SimulatePairing(PairingStatus.Paired);
+                connector.SimulateStatus(ConnectionStatus.Connected);
+            }
+        };
+        using var manager = new GatewayConnectionManager(
+            resolver,
+            factory,
+            _registry,
+            NullLogger.Instance,
+            nodeConnector: node,
+            isNodeEnabled: () => true,
+            shouldStartNodeConnection: (_, _) => true);
+
+        await manager.ConnectAsync("gw-node-race");
+        var operatorLifecycle = Assert.Single(factory.CreatedClients);
+        operatorLifecycle.SimulateHandshake();
+        await firstStartEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        await manager.ConnectNodeOnlyAsync("gw-node-race");
+        Assert.Equal(2, node.ConnectCount);
+        Assert.True(node.IsConnected);
+
+        operatorLifecycle.SimulateHandshake();
+        // slopwatch-ignore: SW004 Bounded delay lets the async handshake handler attempt node startup.
+        await Task.Delay(100);
+
+        Assert.Equal(2, node.ConnectCount);
+        Assert.Single(factory.CreatedClients);
+        Assert.False(operatorLifecycle.IsDisposed);
+    }
+
+    [Fact]
     public async Task ActivityCollector_ExcludesActivitiesFromUnrelatedExecutionContext()
     {
         using var activities = new ActivityCollector();
@@ -221,6 +360,28 @@ public class GatewayConnectionManagerTests : IDisposable
 
         Assert.Single(_factory.CreatedClients);
         Assert.NotNull(_manager.OperatorClient);
+    }
+
+    [Fact]
+    public async Task ConnectAsync_WhenIdentityLoadFails_ReportsPersistedIdentityError()
+    {
+        SetupGateway("gw-1", "wss://test");
+        _resolver.OperatorCredential = new GatewayCredential("tok", false, "test");
+        _factory.CreateException = new DeviceIdentityLoadException(
+            Path.Combine(_tempDir, "device-key-ed25519.json"),
+            new JsonException("simulated corrupt identity"));
+
+        await _manager.ConnectAsync("gw-1");
+
+        Assert.Equal(RoleConnectionState.Error, _manager.CurrentSnapshot.OperatorState);
+        Assert.Equal(
+            DeviceIdentityLoadException.RecoveryMessage,
+            _manager.CurrentSnapshot.OperatorError);
+        Assert.Null(_manager.OperatorClient);
+        Assert.Contains(
+            _manager.Diagnostics.GetAll(),
+            item => item.Category == "identity" &&
+                item.Message == "Stored device identity could not be loaded");
     }
 
     [Fact]
@@ -508,7 +669,7 @@ public class GatewayConnectionManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task ConnectAsync_CorruptDeviceTokenWithSharedFallback_IsVisibleInSnapshot()
+    public async Task ConnectAsync_CorruptDeviceTokenWithSharedFallback_BlocksBeforeClientCreation()
     {
         _registry.AddOrUpdate(new GatewayRecord
         {
@@ -530,12 +691,43 @@ public class GatewayConnectionManagerTests : IDisposable
 
         await manager.ConnectAsync("gw-1");
 
-        Assert.Single(factory.CreatedCredentials);
-        Assert.Equal("shared-token", factory.CreatedCredentials[0].Token);
-        Assert.Equal(CredentialResolver.SourceSharedGatewayToken, manager.CurrentSnapshot.OperatorCredentialSource);
+        Assert.Empty(factory.CreatedCredentials);
+        Assert.Equal(RoleConnectionState.Error, manager.CurrentSnapshot.OperatorState);
+        Assert.Equal(DeviceIdentityLoadException.RecoveryMessage, manager.CurrentSnapshot.OperatorError);
         Assert.Equal(GatewayCredentialResolutionStatus.FallbackUsed, manager.CurrentSnapshot.OperatorCredentialStatus);
         Assert.True(manager.CurrentSnapshot.OperatorCredentialFallbackUsed);
         Assert.Contains("corrupt", manager.CurrentSnapshot.OperatorCredentialDetail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ConnectNodeOnlyAsync_CorruptNodeIdentityWithSharedFallback_BlocksBeforeNodeConnect()
+    {
+        _registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "gw-node-corrupt",
+            Url = "wss://test",
+            SharedGatewayToken = "shared-token"
+        });
+        _registry.SetActive("gw-node-corrupt");
+        var identityDir = _registry.GetIdentityDirectory("gw-node-corrupt");
+        Directory.CreateDirectory(identityDir);
+        File.WriteAllText(Path.Combine(identityDir, "device-key-ed25519.json"), "{ broken json");
+        var node = new CountingNodeConnector();
+        using var manager = new GatewayConnectionManager(
+            new CredentialResolver(DeviceIdentityFileReader.Instance),
+            new MockClientFactory(),
+            _registry,
+            NullLogger.Instance,
+            nodeConnector: node);
+
+        await manager.ConnectNodeOnlyAsync("gw-node-corrupt");
+
+        Assert.Equal(0, node.ConnectCount);
+        Assert.Equal(RoleConnectionState.Error, manager.CurrentSnapshot.NodeState);
+        Assert.Equal(DeviceIdentityLoadException.RecoveryMessage, manager.CurrentSnapshot.NodeError);
+        Assert.Equal(GatewayCredentialResolutionStatus.FallbackUsed, manager.CurrentSnapshot.NodeCredentialStatus);
+        Assert.True(manager.CurrentSnapshot.NodeCredentialFallbackUsed);
+        Assert.Contains("corrupt", manager.CurrentSnapshot.NodeCredentialDetail, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -676,6 +868,34 @@ public class GatewayConnectionManagerTests : IDisposable
 
         Assert.Equal(1, nodeConnector.ConnectCount);
         Assert.Equal("wss://remote.example", nodeConnector.LastGatewayUrl);
+    }
+
+    [Fact]
+    public async Task HandshakeSucceeded_WhenNodeIdentityLoadFails_ReportsPersistedIdentityError()
+    {
+        SetupGateway("gw-remote", "wss://remote.example", isLocal: false);
+        _resolver.OperatorCredential = new GatewayCredential("op-tok", false, "test");
+        _resolver.NodeCredential = new GatewayCredential("node-tok", false, "test");
+        var nodeConnector = new ThrowingIdentityNodeConnector(_tempDir);
+        using var manager = new GatewayConnectionManager(
+            _resolver,
+            _factory,
+            _registry,
+            NullLogger.Instance,
+            nodeConnector: nodeConnector,
+            isNodeEnabled: () => true);
+
+        await manager.ConnectAsync("gw-remote");
+        await InvokeHandshakeSucceededAsync(manager);
+
+        Assert.Equal(RoleConnectionState.Error, manager.CurrentSnapshot.NodeState);
+        Assert.Equal(
+            DeviceIdentityLoadException.RecoveryMessage,
+            manager.CurrentSnapshot.NodeError);
+        Assert.Contains(
+            manager.Diagnostics.GetAll(),
+            item => item.Category == "identity" &&
+                item.Message == "Stored device identity could not be loaded for node connection");
     }
 
     [Fact]
@@ -2162,6 +2382,7 @@ public class GatewayConnectionManagerTests : IDisposable
 
     private sealed class MockClientFactory : IGatewayClientFactory
     {
+        public Exception? CreateException { get; set; }
         public List<MockLifecycle> CreatedClients { get; } = [];
         public List<GatewayCredential> CreatedCredentials { get; } = [];
         public List<string> CreatedIdentityPaths { get; } = [];
@@ -2169,7 +2390,10 @@ public class GatewayConnectionManagerTests : IDisposable
 
         public IGatewayClientLifecycle Create(string gatewayUrl, GatewayCredential credential, string identityPath, IOpenClawLogger logger)
         {
-            var mock = new MockLifecycle(gatewayUrl);
+            if (CreateException != null)
+                throw CreateException;
+
+            var mock = new MockLifecycle(gatewayUrl, identityPath);
             CreatedClients.Add(mock);
             CreatedCredentials.Add(credential);
             CreatedIdentityPaths.Add(identityPath);
@@ -2195,9 +2419,9 @@ public class GatewayConnectionManagerTests : IDisposable
     {
         private readonly MockGatewayClient _client;
 
-        public MockLifecycle(string url)
+        public MockLifecycle(string url, string identityPath)
         {
-            _client = new MockGatewayClient(url);
+            _client = new MockGatewayClient(url, identityPath);
         }
 
         public OpenClawGatewayClient DataClient => _client;
@@ -2230,8 +2454,8 @@ public class GatewayConnectionManagerTests : IDisposable
 
     private sealed class MockGatewayClient : OpenClawGatewayClient
     {
-        public MockGatewayClient(string url)
-            : base(url, "mock-token", NullLogger.Instance) { }
+        public MockGatewayClient(string url, string identityPath)
+            : base(url, "mock-token", NullLogger.Instance, identityPath: identityPath) { }
 
         public void SimulateTransportConnected() =>
             RaiseTransportConnected();
@@ -2538,6 +2762,47 @@ public class GatewayConnectionManagerTests : IDisposable
         public void Dispose() { }
     }
 
+    private sealed class ThrowingIdentityNodeConnector(string identityDirectory) : INodeConnector
+    {
+        public bool IsConnected => false;
+        public PairingStatus PairingStatus => PairingStatus.Unknown;
+        public string? NodeDeviceId => null;
+        public NodeConnectionMode Mode => NodeConnectionMode.Disabled;
+
+#pragma warning disable CS0067 // Events required by interface but not fired in tests
+        public event EventHandler<ConnectionStatus>? StatusChanged;
+        public event EventHandler<PairingStatusEventArgs>? PairingStatusChanged;
+        public event EventHandler<DeviceTokenReceivedEventArgs>? DeviceTokenReceived;
+        public event EventHandler<NodeClientCreatedEventArgs>? ClientCreated;
+#pragma warning restore CS0067
+
+        public Task ConnectAsync(
+            string gatewayUrl,
+            GatewayCredential credential,
+            string identityPath,
+            bool useV2Signature = false) =>
+            throw CreateFailure();
+
+        public Task ConnectAsync(
+            string gatewayUrl,
+            GatewayCredential credential,
+            string identityPath,
+            bool useV2Signature,
+            CancellationToken cancellationToken) =>
+            throw CreateFailure();
+
+        public Task DisconnectAsync() => Task.CompletedTask;
+
+        public void Dispose()
+        {
+        }
+
+        private DeviceIdentityLoadException CreateFailure() =>
+            new(
+                Path.Combine(identityDirectory, "device-key-ed25519.json"),
+                new JsonException("simulated corrupt node identity"));
+    }
+
     private sealed class SupersedingNodeConnector : INodeConnector
     {
         private int _connectCount;
@@ -2746,6 +3011,7 @@ public class GatewayConnectionManagerTests : IDisposable
         /// gateway URL — use SimulateStatus / SimulatePairing to walk the state machine.
         /// </summary>
         public Action<ScriptedNodeConnector, string>? ConnectAction { get; set; }
+        public Func<ScriptedNodeConnector, string, CancellationToken, Task>? ConnectAsyncAction { get; set; }
         public Action<ScriptedNodeConnector>? DisconnectAction { get; set; }
         public Exception? DisconnectException { get; set; }
 
@@ -2758,15 +3024,19 @@ public class GatewayConnectionManagerTests : IDisposable
         public event EventHandler<NodeClientCreatedEventArgs>? ClientCreated;
 #pragma warning restore CS0067
 
-        public Task ConnectAsync(string gatewayUrl, GatewayCredential credential, string identityPath, bool useV2Signature = false)
-        {
-            ConnectCount++;
-            LastGatewayUrl = gatewayUrl;
-            ConnectAction?.Invoke(this, gatewayUrl);
-            return Task.CompletedTask;
-        }
-
         public Task ConnectAsync(
+            string gatewayUrl,
+            GatewayCredential credential,
+            string identityPath,
+            bool useV2Signature = false) =>
+            ConnectAsync(
+                gatewayUrl,
+                credential,
+                identityPath,
+                useV2Signature,
+                CancellationToken.None);
+
+        public async Task ConnectAsync(
             string gatewayUrl,
             GatewayCredential credential,
             string identityPath,
@@ -2774,7 +3044,15 @@ public class GatewayConnectionManagerTests : IDisposable
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ConnectAsync(gatewayUrl, credential, identityPath, useV2Signature);
+            ConnectCount++;
+            LastGatewayUrl = gatewayUrl;
+            if (ConnectAsyncAction != null)
+            {
+                await ConnectAsyncAction(this, gatewayUrl, cancellationToken);
+                return;
+            }
+
+            ConnectAction?.Invoke(this, gatewayUrl);
         }
 
         public Task DisconnectAsync()

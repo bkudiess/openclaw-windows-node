@@ -154,9 +154,7 @@ public class WindowsNodeClient : WebSocketClientBase
     {
         var storedNodeToken = TryLoadStoredNodeToken(dataPath, logger);
         if (!string.IsNullOrEmpty(storedNodeToken))
-        {
             return storedNodeToken;
-        }
 
         var gatewayToken = NormalizeOptionalCredential(token);
         if (!string.IsNullOrEmpty(gatewayToken))
@@ -180,16 +178,7 @@ public class WindowsNodeClient : WebSocketClientBase
 
     private static string? TryLoadStoredNodeToken(string dataPath, IOpenClawLogger? logger)
     {
-        try
-        {
-            var identity = new DeviceIdentity(dataPath, logger);
-            identity.Initialize();
-            return string.IsNullOrWhiteSpace(identity.NodeDeviceToken) ? null : identity.NodeDeviceToken;
-        }
-        catch
-        {
-            return null;
-        }
+        return DeviceIdentity.TryReadStoredDeviceTokenForRole(dataPath, "node", logger);
     }
     
     /// <summary>
