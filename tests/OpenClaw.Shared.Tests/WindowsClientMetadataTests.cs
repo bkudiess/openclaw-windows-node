@@ -64,7 +64,7 @@ public sealed class WindowsClientMetadataTests
         }
     }
 
-    [IntegrationFact]
+    [Fact]
     public async Task OperatorReconnect_AfterRestartPreservesIdentityTokenSourceAndMetadata()
     {
         var dataPath = CreateTempDirectory();
@@ -185,8 +185,10 @@ public sealed class WindowsClientMetadataTests
 
     private static void AssertCanonicalMetadata(JsonElement clientMetadata)
     {
-        Assert.Equal(WindowsClientMetadata.Platform, clientMetadata.GetProperty("platform").GetString());
-        Assert.Equal(WindowsClientMetadata.DeviceFamily, clientMetadata.GetProperty("deviceFamily").GetString());
+        Assert.Equal("windows", WindowsClientMetadata.Platform);
+        Assert.Equal("Windows", WindowsClientMetadata.DeviceFamily);
+        Assert.Equal("windows", clientMetadata.GetProperty("platform").GetString());
+        Assert.Equal("Windows", clientMetadata.GetProperty("deviceFamily").GetString());
     }
 
     private static string CreateTempDirectory()
