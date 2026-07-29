@@ -193,7 +193,43 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
 
         var startedGeneration = await StartNodeConnectionAsync(preparedGeneration.Value);
         if (startedGeneration.HasValue)
+        {
             EmitStateChanged();
+        }
+        else
+        {
+            if (Interlocked.Read(ref _generation) != preparedGeneration.Value ||
+                _tunnelManager?.IsActive != true)
+            {
+                return;
+            }
+
+            var enteredTransition = await _transitionSemaphore
+                .WaitAsync(TimeSpan.FromSeconds(1))
+                .ConfigureAwait(false);
+            if (!enteredTransition)
+            {
+                _logger.Warn("[ConnMgr] Timed out waiting to clean up failed node-only tunnel");
+                _diagnostics.Record(
+                    "tunnel",
+                    "Timed out waiting to clean up failed node-only tunnel");
+                return;
+            }
+
+            try
+            {
+                if (Interlocked.Read(ref _generation) == preparedGeneration.Value &&
+                    _activeLifecycle == null &&
+                    _tunnelManager?.IsActive == true)
+                {
+                    await StopTunnelAfterFailedConnectionAsync("node-only connection failure");
+                }
+            }
+            finally
+            {
+                _transitionSemaphore.Release();
+            }
+        }
     }
 
     /// <summary>Core connect logic. Caller must hold <see cref="_transitionSemaphore"/>.</summary>
@@ -376,6 +412,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 _stateMachine.TryTransition(
                     ConnectionTrigger.WebSocketError,
                     DeviceIdentityLoadException.RecoveryMessage);
+                await StopTunnelAfterFailedConnectionAsync("operator identity load failure");
                 CompleteOperatorTelemetryAttempt(
                     gen,
                     "failure",
@@ -521,6 +558,21 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
 
         var nodeCredentialResolution = _credentialResolver.ResolveNodeDetailed(record, perGatewayIdentityDir);
         var nodeCredential = nodeCredentialResolution.Credential;
+        if (HasPersistedIdentityFailure(nodeCredentialResolution))
+        {
+            _diagnostics.RecordCredentialResolutionResult(nodeCredentialResolution);
+            _diagnostics.Record(
+                "identity",
+                "Stored device identity could not be loaded for node-only connection",
+                nodeCredentialResolution.Detail);
+            _stateMachine.SetNodeCredentialResolution(nodeCredentialResolution);
+            _stateMachine.BlockNodeStart(
+                DeviceIdentityLoadException.RecoveryMessage,
+                preserveCredentialResolution: true);
+            EmitStateChanged();
+            RecordNodePreflightTelemetryFailure(ConnectionErrorCategory.InternalError);
+            return null;
+        }
         if (nodeCredential == null)
         {
             _logger.Warn("[ConnMgr] No node credential available for node-only connect");
@@ -585,6 +637,30 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             _logger.Error($"[ConnMgr] SSH tunnel start failed for node-only connect: {ex.Message}");
             _diagnostics.Record("tunnel", "SSH tunnel start failed for node-only connect", ex.Message);
             return false;
+        }
+    }
+
+    private async Task StopTunnelAfterFailedConnectionAsync(string operation)
+    {
+        if (_tunnelManager?.IsActive != true)
+            return;
+
+        try
+        {
+            var stopTask = _tunnelManager.StopAsync();
+            if (await Task.WhenAny(stopTask, Task.Delay(TimeSpan.FromSeconds(5))) != stopTask)
+            {
+                _logger.Warn($"[ConnMgr] Tunnel stop timed out after {operation}");
+                return;
+            }
+
+            await stopTask;
+            _diagnostics.Record("tunnel", $"SSH tunnel stopped after {operation}");
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"[ConnMgr] Tunnel stop failed after {operation}: {ex.Message}");
+            _diagnostics.Record("tunnel", $"SSH tunnel stop failed after {operation}", ex.Message);
         }
     }
 
@@ -1167,6 +1243,11 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 catch (Exception ex)
                 {
                     _logger.Warn($"[ConnMgr] Failed to persist {e.Role} device token: {ex.Message}");
+                    _diagnostics.Record(
+                        "identity",
+                        $"Failed to persist {e.Role} device token",
+                        ex.Message);
+                    return;
                 }
             }
 
@@ -1709,10 +1790,6 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 "identity",
                 $"Stored device identity could not be loaded while {operation}",
                 detail);
-            _stateMachine.TryTransition(
-                ConnectionTrigger.WebSocketError,
-                DeviceIdentityLoadException.RecoveryMessage);
-            EmitStateChanged();
             return false;
         }
     }
@@ -1991,6 +2068,14 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         var nodeGeneration = Interlocked.Read(ref _nodeConnectionGeneration);
         if (!IsCurrentNodeAttempt(lifecycleGeneration, nodeGeneration))
             return;
+
+        lock (_nodeOperationLock)
+        {
+            Interlocked.CompareExchange(
+                ref _nodeStartLifecycleGeneration,
+                -1,
+                lifecycleGeneration);
+        }
 
         CompleteNodeTelemetryAttempt(
             nodeGeneration,

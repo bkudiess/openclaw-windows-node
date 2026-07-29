@@ -200,6 +200,82 @@ public class GatewayConnectionManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task TerminalNodeFailure_AllowsNextOperatorHandshakeToRestartNode()
+    {
+        SetupGateway("gw-terminal-node", "wss://test");
+        _resolver.OperatorCredential = new GatewayCredential("operator-token", false, "test");
+        _resolver.NodeCredential = new GatewayCredential("node-token", false, "test");
+        var node = new ScriptedNodeConnector
+        {
+            ConnectAction = (connector, _) => connector.SimulateStatus(ConnectionStatus.Connected)
+        };
+        using var manager = new GatewayConnectionManager(
+            _resolver,
+            _factory,
+            _registry,
+            NullLogger.Instance,
+            nodeConnector: node,
+            isNodeEnabled: () => true,
+            shouldStartNodeConnection: (_, _) => true);
+
+        await manager.ConnectAsync("gw-terminal-node");
+        var operatorLifecycle = Assert.Single(_factory.CreatedClients);
+        operatorLifecycle.SimulateHandshake();
+        await WaitUntilAsync(() => node.ConnectCount == 1);
+
+        node.SimulateConnectionFailure(GatewayErrorKind.TokenDrift);
+        node.SimulateStatus(ConnectionStatus.Error);
+        operatorLifecycle.SimulateHandshake();
+
+        await WaitUntilAsync(() => node.ConnectCount == 2);
+        Assert.Equal(RoleConnectionState.Connected, manager.CurrentSnapshot.NodeState);
+    }
+
+    [Fact]
+    public async Task OptionalTokenProbeFailure_DoesNotMarkConnectedOperatorAsError()
+    {
+        _registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "gw-token-probe",
+            Url = "wss://test",
+            BootstrapToken = "bootstrap-token"
+        });
+        _registry.SetActive("gw-token-probe");
+        var identityDir = _registry.GetIdentityDirectory("gw-token-probe");
+        var identity = new DeviceIdentity(identityDir, NullLogger.Instance);
+        identity.Initialize();
+        identity.StoreDeviceTokenForRole("operator", "operator-token");
+        identity.StoreDeviceTokenForRole("node", "node-token");
+        var node = new ScriptedNodeConnector();
+        using var manager = new GatewayConnectionManager(
+            new CredentialResolver(DeviceIdentityFileReader.Instance),
+            _factory,
+            _registry,
+            NullLogger.Instance,
+            nodeConnector: node);
+
+        await manager.ConnectAsync("gw-token-probe");
+        var operatorLifecycle = Assert.Single(_factory.CreatedClients);
+        operatorLifecycle.SimulateHandshake();
+        await WaitUntilAsync(() =>
+            manager.CurrentSnapshot.OperatorState == RoleConnectionState.Connected);
+
+        var identityPath = Path.Combine(identityDir, "device-key-ed25519.json");
+        using (new FileStream(identityPath, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            node.SimulateStatus(ConnectionStatus.Connected);
+            await WaitUntilAsync(() =>
+                manager.Diagnostics.GetAll().Any(item =>
+                    item.Category == "identity" &&
+                    item.Message.Contains("clearing bootstrap credentials", StringComparison.Ordinal)));
+        }
+
+        Assert.Equal(RoleConnectionState.Connected, manager.CurrentSnapshot.OperatorState);
+        Assert.Same(operatorLifecycle.DataClient, manager.OperatorClient);
+        Assert.False(operatorLifecycle.IsDisposed);
+    }
+
+    [Fact]
     public async Task ExplicitNodeStart_SupersedesAutomaticStartWithoutClearingLifecycleGuard()
     {
         _registry.AddOrUpdate(new GatewayRecord
@@ -382,6 +458,36 @@ public class GatewayConnectionManagerTests : IDisposable
             _manager.Diagnostics.GetAll(),
             item => item.Category == "identity" &&
                 item.Message == "Stored device identity could not be loaded");
+    }
+
+    [Fact]
+    public async Task ConnectAsync_WhenIdentityLoadFailsAfterTunnelStart_StopsTunnel()
+    {
+        _registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "gw-ssh-identity",
+            Url = "wss://remote.example",
+            SshTunnel = new SshTunnelConfig("user", "host.example", 18789, 45678)
+        });
+        _registry.SetActive("gw-ssh-identity");
+        _resolver.OperatorCredential = new GatewayCredential("tok", false, "test");
+        _factory.CreateException = new DeviceIdentityLoadException(
+            Path.Combine(_tempDir, "device-key-ed25519.json"),
+            new JsonException("simulated corrupt identity"));
+        var tunnel = new CountingTunnelManager();
+        using var manager = new GatewayConnectionManager(
+            _resolver,
+            _factory,
+            _registry,
+            NullLogger.Instance,
+            tunnelManager: tunnel);
+
+        await manager.ConnectAsync("gw-ssh-identity");
+
+        Assert.Equal(1, tunnel.StartCount);
+        Assert.Equal(1, tunnel.StopCount);
+        Assert.False(tunnel.IsActive);
+        Assert.Equal(RoleConnectionState.Error, manager.CurrentSnapshot.OperatorState);
     }
 
     [Fact]
@@ -1984,6 +2090,93 @@ public class GatewayConnectionManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task ConnectNodeOnlyAsync_CorruptIdentityBlocksBeforeTunnelStart()
+    {
+        _registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "gw-ssh-corrupt",
+            Url = "wss://remote.example",
+            SshTunnel = new SshTunnelConfig("user", "host.example", 18789, 45678)
+        });
+        _registry.SetActive("gw-ssh-corrupt");
+        _resolver.OperatorCredential = null;
+        _resolver.NodeResolution = new GatewayCredentialResolution(
+            new GatewayCredential(
+                "fallback-token",
+                IsBootstrapToken: false,
+                Source: CredentialResolver.SourceSharedGatewayToken),
+            GatewayCredentialResolutionStatus.FallbackUsed,
+            FallbackUsed: true,
+            Detail: "Stored node identity is corrupt.",
+            PrimaryStatus: GatewayCredentialResolutionStatus.Corrupt);
+        var node = new CountingNodeConnector();
+        var tunnel = new CountingTunnelManager();
+        using var manager = new GatewayConnectionManager(
+            _resolver,
+            _factory,
+            _registry,
+            NullLogger.Instance,
+            nodeConnector: node,
+            tunnelManager: tunnel);
+
+        await manager.ConnectNodeOnlyAsync("gw-ssh-corrupt");
+
+        Assert.Equal(0, tunnel.StartCount);
+        Assert.Equal(0, node.ConnectCount);
+        Assert.Equal(RoleConnectionState.Error, manager.CurrentSnapshot.NodeState);
+        Assert.Equal(DeviceIdentityLoadException.RecoveryMessage, manager.CurrentSnapshot.NodeError);
+    }
+
+    [Fact]
+    public async Task ConnectNodeOnlyAsync_SupersededAttemptDoesNotStopSuccessorTunnel()
+    {
+        _registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "gw-node-tunnel-race",
+            Url = "wss://remote.example",
+            SshTunnel = new SshTunnelConfig("user", "host.example", 18789, 45678)
+        });
+        _registry.SetActive("gw-node-tunnel-race");
+        _resolver.OperatorCredential = null;
+        _resolver.NodeCredential = new GatewayCredential("node-token", false, "test");
+        var firstStartEntered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var node = new ScriptedNodeConnector
+        {
+            ConnectAsyncAction = async (connector, _, cancellationToken) =>
+            {
+                if (connector.ConnectCount == 1)
+                {
+                    firstStartEntered.TrySetResult();
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                    return;
+                }
+
+                connector.SimulateStatus(ConnectionStatus.Connected);
+            }
+        };
+        var tunnel = new CountingTunnelManager();
+        using var manager = new GatewayConnectionManager(
+            _resolver,
+            _factory,
+            _registry,
+            NullLogger.Instance,
+            nodeConnector: node,
+            tunnelManager: tunnel);
+
+        var superseded = manager.ConnectNodeOnlyAsync("gw-node-tunnel-race");
+        await firstStartEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await manager.ConnectNodeOnlyAsync("gw-node-tunnel-race");
+        await superseded;
+
+        Assert.Equal(2, node.ConnectCount);
+        Assert.Equal(2, tunnel.StartCount);
+        Assert.Equal(0, tunnel.StopCount);
+        Assert.True(tunnel.IsActive);
+        Assert.Equal(RoleConnectionState.Connected, manager.CurrentSnapshot.NodeState);
+    }
+
+    [Fact]
     public async Task ConnectNodeOnlyAsync_TunnelStartFailure_ReportsBlockedNode()
     {
         _registry.AddOrUpdate(new GatewayRecord
@@ -2940,14 +3133,16 @@ public class GatewayConnectionManagerTests : IDisposable
     private sealed class CountingTunnelManager : ISshTunnelManager
     {
         public int StartCount { get; private set; }
+        public int StopCount { get; private set; }
         public SshTunnelConfig? LastConfig { get; private set; }
-        public bool IsActive => StartCount > 0;
+        public bool IsActive { get; private set; }
         public string? LocalTunnelUrl { get; private set; }
 
         public Task<string> StartAsync(SshTunnelConfig config, CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();
             StartCount++;
+            IsActive = true;
             LastConfig = config;
             LocalTunnelUrl = $"ws://localhost:{config.LocalPort}";
             return Task.FromResult(LocalTunnelUrl);
@@ -2955,6 +3150,8 @@ public class GatewayConnectionManagerTests : IDisposable
 
         public Task StopAsync()
         {
+            StopCount++;
+            IsActive = false;
             LocalTunnelUrl = null;
             return Task.CompletedTask;
         }

@@ -99,6 +99,12 @@ public sealed class AppRefactorContractTests
         AssertInOrder(init, "TryStartLocalMcpOnlyNode()", "No stored device token");
         Assert.Contains("catch (DeviceIdentityLoadException ex)", init);
         Assert.Contains("ShowTransientConnectionError(ex.Message)", init);
+        AssertInOrder(
+            init,
+            "catch (DeviceIdentityLoadException ex)",
+            "ShowTransientConnectionError(ex.Message)",
+            "TryStartLocalMcpOnlyNode()",
+            "return;");
         Assert.Contains("Active gateway has no usable credential", source);
     }
 
@@ -285,7 +291,8 @@ public sealed class AppRefactorContractTests
 
         Assert.Contains("catch (DeviceIdentityLoadException ex)", connectMethod);
         Assert.Contains("ShowTransientConnectionError(ex.Message)", connectMethod);
-        Assert.Contains("return true;", connectMethod);
+        Assert.Equal(2, Regex.Matches(connectMethod, "catch \\(DeviceIdentityLoadException ex\\)").Count);
+        Assert.Equal(2, Regex.Matches(connectMethod, "ShowTransientConnectionError\\(ex.Message\\);\\s*return false;").Count);
         Assert.Contains("GatewayCredentialResolutionStatus.Unreadable", resolutionMethod);
         Assert.Contains("GatewayCredentialResolutionStatus.Corrupt", resolutionMethod);
         Assert.Contains("throw new DeviceIdentityLoadException", resolutionMethod);

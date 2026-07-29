@@ -1681,6 +1681,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             {
                 Logger.Error($"Stored device identity load failed during startup: {ex.InnerException?.Message}");
                 ShowTransientConnectionError(ex.Message);
+                TryStartLocalMcpOnlyNode();
                 return;
             }
 
@@ -1764,7 +1765,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         {
             Logger.Error($"Stored device identity load failed during {context}: {ex.InnerException?.Message}");
             ShowTransientConnectionError(ex.Message);
-            return true;
+            return false;
         }
 
         if (credential == null)
@@ -1778,7 +1779,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
             {
                 Logger.Error($"Stored node identity load failed during {context}: {ex.InnerException?.Message}");
                 ShowTransientConnectionError(ex.Message);
-                return true;
+                return false;
             }
 
             if (nodeCredential != null && IsGatewayNodeEnabled())

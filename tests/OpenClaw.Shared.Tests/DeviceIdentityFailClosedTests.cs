@@ -37,6 +37,22 @@ public sealed class DeviceIdentityFailClosedTests
     }
 
     [Fact]
+    public void Initialize_WhenFirstWriteFails_ThrowsTypedFailureWithoutTempFiles()
+    {
+        using var temp = new TempDirectory("identity-create-failure-");
+        var fileSystem = new WriteFailureFileSystem(
+            new UnauthorizedAccessException("simulated write denial"));
+
+        var error = Assert.Throws<DeviceIdentityLoadException>(
+            () => new DeviceIdentity(temp.Path, NullLogger.Instance, fileSystem).Initialize());
+
+        Assert.IsType<UnauthorizedAccessException>(error.InnerException);
+        Assert.Equal(DeviceIdentityLoadException.RecoveryMessage, error.Message);
+        Assert.False(File.Exists(temp.Combine(IdentityFileName)));
+        AssertNoTempFiles(temp.Path);
+    }
+
+    [Fact]
     public void Initialize_WhenIdentityIsValid_ReloadsSameIdentity()
     {
         using var temp = new TempDirectory("identity-reload-");
@@ -251,6 +267,54 @@ public sealed class DeviceIdentityFailClosedTests
         Assert.Equal(DeviceTokenReadStatus.Corrupt, result.Status);
         Assert.Null(result.Token);
         Assert.Equal(originalBytes, File.ReadAllBytes(path));
+        AssertNoTempFiles(temp.Path);
+    }
+
+    [Fact]
+    public void TryClearAllDeviceTokens_WhenKeyMaterialIsInvalid_DoesNotMutate()
+    {
+        using var temp = new TempDirectory("identity-clear-invalid-");
+        var path = temp.Combine(IdentityFileName);
+        var json = JsonSerializer.Serialize(new
+        {
+            PrivateKeyBase64 = Convert.ToBase64String(new byte[Ed25519.SecretKeySize - 1]),
+            DeviceId = new string('0', 64),
+            Algorithm = "Ed25519",
+            DeviceToken = "operator-token"
+        });
+        File.WriteAllText(path, json);
+        var originalBytes = File.ReadAllBytes(path);
+
+        Assert.False(DeviceIdentity.TryClearAllDeviceTokens(temp.Path));
+
+        Assert.Equal(originalBytes, File.ReadAllBytes(path));
+        AssertNoTempFiles(temp.Path);
+    }
+
+    [Theory]
+    [InlineData("operator")]
+    [InlineData("node")]
+    public void StoreDeviceTokenForRole_WhenAtomicReplaceFails_PreservesDurableAndInMemoryToken(string role)
+    {
+        using var temp = new TempDirectory("identity-token-write-failure-");
+        var identity = new DeviceIdentity(temp.Path, NullLogger.Instance);
+        identity.Initialize();
+        identity.StoreDeviceTokenForRole(role, "old-token", ["old.scope"]);
+        var path = temp.Combine(IdentityFileName);
+        var originalBytes = File.ReadAllBytes(path);
+
+        using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            var error = Assert.Throws<DeviceIdentityLoadException>(
+                () => identity.StoreDeviceTokenForRole(role, "new-token", ["new.scope"]));
+            Assert.True(error.InnerException is IOException or UnauthorizedAccessException);
+        }
+
+        Assert.Equal(originalBytes, File.ReadAllBytes(path));
+        Assert.Equal("old-token", role == "operator" ? identity.DeviceToken : identity.NodeDeviceToken);
+        Assert.Equal(
+            ["old.scope"],
+            role == "operator" ? identity.DeviceTokenScopes : identity.NodeDeviceTokenScopes);
         AssertNoTempFiles(temp.Path);
     }
 
@@ -507,7 +571,7 @@ public sealed class DeviceIdentityFailClosedTests
         public virtual string ReadAllText(string path) =>
             DeviceIdentityFileSystem.Instance.ReadAllText(path);
 
-        public void WriteAllText(string path, string content) =>
+        public virtual void WriteAllText(string path, string content) =>
             DeviceIdentityFileSystem.Instance.WriteAllText(path, content);
 
         public void MoveFileNoOverwrite(string source, string destination) =>
@@ -518,6 +582,11 @@ public sealed class DeviceIdentityFailClosedTests
 
         public void DeleteFile(string path) =>
             DeviceIdentityFileSystem.Instance.DeleteFile(path);
+    }
+
+    private sealed class WriteFailureFileSystem(Exception failure) : DelegatingFileSystem
+    {
+        public override void WriteAllText(string path, string content) => throw failure;
     }
 
     private sealed record ProcessResult(

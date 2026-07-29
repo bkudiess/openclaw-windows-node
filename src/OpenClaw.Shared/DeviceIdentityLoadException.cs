@@ -7,7 +7,7 @@ namespace OpenClaw.Shared;
 public sealed class DeviceIdentityLoadException : Exception
 {
     public const string RecoveryMessage =
-        "Saved device identity could not be loaded. OpenClaw did not replace it. Check file access or reset pairing explicitly.";
+        "Device identity could not be loaded or saved. OpenClaw did not replace an existing identity. Check access to the identity file shown in diagnostics. If it exists and you intend to reset pairing, move it aside explicitly, then reconnect.";
 
     public DeviceIdentityLoadException(string identityPath, Exception innerException)
         : base(RecoveryMessage, innerException)
