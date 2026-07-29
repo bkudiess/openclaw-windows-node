@@ -57,9 +57,9 @@ public sealed class ExecApprovalV2UiPromptHandler : IExecApprovalV2PromptHandler
                 _logger.Warn("[EXEC-APPROVALS] prompt: command exceeds display limit; denying (cannot review in full)");
                 return ExecApprovalPromptOutcome.Deny;
             }
-            if (commandStatus.Redacted)
+            if (commandStatus.UnsafeConcealment)
             {
-                _logger.Warn("[EXEC-APPROVALS] prompt: command contains redacted content; denying (cannot review in full)");
+                _logger.Warn("[EXEC-APPROVALS] prompt: redaction would hide command syntax; denying (cannot review in full)");
                 return ExecApprovalPromptOutcome.Deny;
             }
             var commandText = commandStatus.Text;

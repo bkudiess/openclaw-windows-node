@@ -26,10 +26,20 @@ public static class ExecApprovalCommandDisplaySanitizer
         return SanitizeInternal(text).Text;
     }
 
-    public static (string Text, bool Truncated, bool Oversized, bool Redacted) SanitizeWithStatus(string text)
+    public static (
+        string Text,
+        bool Truncated,
+        bool Oversized,
+        bool Redacted,
+        bool UnsafeConcealment) SanitizeWithStatus(string text)
     {
         var result = SanitizeInternal(text);
-        return (result.Text, result.Truncated, result.Oversized, result.Redacted);
+        return (
+            result.Text,
+            result.Truncated,
+            result.Oversized,
+            result.Redacted,
+            result.UnsafeConcealment);
     }
 
     public static string SanitizeWarningText(string text)
@@ -51,7 +61,8 @@ public static class ExecApprovalCommandDisplaySanitizer
                 oversizedMarker ?? OversizedMarker,
                 Truncated: false,
                 Oversized: true,
-                Redacted: false);
+                Redacted: false,
+                UnsafeConcealment: false);
         }
 
         var rawRedacted = ExecApprovalSecretRedactor.Redact(text);
@@ -63,14 +74,28 @@ public static class ExecApprovalCommandDisplaySanitizer
                 strippedRedacted,
                 strippedView.Text,
                 StringComparison.Ordinal);
+        var rawMask = redacted
+            ? ExecApprovalSecretRedactor.ComputeRedactionBitmap(text)
+            : Array.Empty<bool>();
+        var strippedMask = redacted
+            ? ExecApprovalSecretRedactor.ComputeRedactionBitmap(strippedView.Text)
+            : Array.Empty<bool>();
+        var rawReviewSafe = ExecApprovalSecretRedactor.RedactReviewSafeUrlQueryValues(text);
+        var strippedReviewSafe =
+            ExecApprovalSecretRedactor.RedactReviewSafeUrlQueryValues(strippedView.Text);
+        var unsafeConcealment = redacted
+            && (!string.Equals(rawRedacted, rawReviewSafe, StringComparison.Ordinal)
+                || !string.Equals(
+                    strippedRedacted,
+                    strippedReviewSafe,
+                    StringComparison.Ordinal));
 
         if (strippedRedacted == strippedView.Text)
             return TruncateForDisplay(
                 EscapeInvisibles(rawRedacted, preserveLineBreaks),
-                redacted);
+                redacted,
+                unsafeConcealment);
 
-        var rawMask = ExecApprovalSecretRedactor.ComputeRedactionBitmap(text);
-        var strippedMask = ExecApprovalSecretRedactor.ComputeRedactionBitmap(strippedView.Text);
         var bypassDetected = false;
         for (var i = 0; i < strippedMask.Length; i++)
         {
@@ -84,7 +109,8 @@ public static class ExecApprovalCommandDisplaySanitizer
         if (!bypassDetected)
             return TruncateForDisplay(
                 EscapeInvisibles(rawRedacted, preserveLineBreaks),
-                redacted);
+                redacted,
+                unsafeConcealment);
 
         var unionMask = (bool[])rawMask.Clone();
         for (var i = 0; i < strippedMask.Length; i++)
@@ -95,7 +121,8 @@ public static class ExecApprovalCommandDisplaySanitizer
 
         return TruncateForDisplay(
             RenderUnionMask(text, unionMask, preserveLineBreaks),
-            redacted: true);
+            redacted: true,
+            unsafeConcealment);
     }
 
     private static string NormalizeDisplayLineBreaks(string text)
@@ -197,7 +224,8 @@ public static class ExecApprovalCommandDisplaySanitizer
 
     private static SanitizedDisplayText TruncateForDisplay(
         string text,
-        bool redacted = false)
+        bool redacted = false,
+        bool unsafeConcealment = false)
     {
         if (text.Length <= MaxOutput)
         {
@@ -205,14 +233,16 @@ public static class ExecApprovalCommandDisplaySanitizer
                 text,
                 Truncated: false,
                 Oversized: false,
-                Redacted: redacted);
+                Redacted: redacted,
+                UnsafeConcealment: unsafeConcealment);
         }
 
         return new SanitizedDisplayText(
             TruncateUtf16Safe(text, MaxOutput) + TruncationMarker,
             Truncated: true,
             Oversized: false,
-            Redacted: redacted);
+            Redacted: redacted,
+            UnsafeConcealment: unsafeConcealment);
     }
 
     private static string TruncateUtf16Safe(string input, int maxLength)
@@ -283,7 +313,8 @@ public static class ExecApprovalCommandDisplaySanitizer
         string Text,
         bool Truncated,
         bool Oversized,
-        bool Redacted);
+        bool Redacted,
+        bool UnsafeConcealment);
 
     private sealed record StrippedView(string Text, int[] StrippedToOriginal);
 }

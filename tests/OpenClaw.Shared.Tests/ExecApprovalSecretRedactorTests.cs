@@ -172,6 +172,72 @@ public class ExecApprovalSecretRedactorTests
             result);
     }
 
+    [Fact]
+    public void Redact_EscapedNewlinePemPrivateKey_RedactsEntirePayload()
+    {
+        const string input =
+            "-----BEGIN PRIVATE KEY-----\\n"
+            + "QUJDREVGR0hJSktMTU5PUA==\\n"
+            + "-----END PRIVATE KEY-----";
+
+        var result = ExecApprovalSecretRedactor.Redact(input);
+
+        Assert.Equal(
+            "-----BEGIN PRIVATE KEY-----\\n"
+            + "…redacted…\\n"
+            + "-----END PRIVATE KEY-----",
+            result);
+    }
+
+    [Fact]
+    public void Redact_ShortPaddedFinalPemLine_RedactsEntirePayload()
+    {
+        const string input =
+            "-----BEGIN PRIVATE KEY-----\n"
+            + "QUJDREVGR0hJSktMTU5PUA==\n"
+            + "Ag==\n"
+            + "-----END PRIVATE KEY-----";
+
+        var result = ExecApprovalSecretRedactor.Redact(input);
+
+        Assert.Equal(
+            "-----BEGIN PRIVATE KEY-----\n"
+            + "…redacted…\n"
+            + "-----END PRIVATE KEY-----",
+            result);
+    }
+
+    [Fact]
+    public void Redact_MixedLineEndingPemPrivateKey_RedactsEntirePayload()
+    {
+        const string input =
+            "-----BEGIN PRIVATE KEY-----\r\n"
+            + "QUJDREVGR0hJSktMTU5PUA==\n"
+            + "Ag==\r\n"
+            + "-----END PRIVATE KEY-----";
+
+        var result = ExecApprovalSecretRedactor.Redact(input);
+
+        Assert.DoesNotContain("QUJDREVGR0hJSktMTU5PUA", result, StringComparison.Ordinal);
+        Assert.DoesNotContain("Ag==", result, StringComparison.Ordinal);
+        Assert.Contains("redacted", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Redact_UnwrappedPemPrivateKeyBody_RedactsEntirePayload()
+    {
+        var body = new string('A', 256);
+        var input =
+            "-----BEGIN PRIVATE KEY-----\n"
+            + body
+            + "\n-----END PRIVATE KEY-----";
+
+        var result = ExecApprovalSecretRedactor.Redact(input);
+
+        Assert.DoesNotContain(body, result, StringComparison.Ordinal);
+        Assert.Contains("redacted", result, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData("short-token", "***")]
     [InlineData("abcdef1234567890ghij", "abcdef\u2026ghij")]

@@ -58,6 +58,7 @@ public static class ExecApprovalSecretRedactor
     private static readonly Regex EmptyShellParameterExpansionTailRe = CreateRegex(@"^[-=?+]\}$", DefaultRegexOptions);
     private static readonly Regex AuthHeaderStartRe = CreateRegex(@"(?:Authorization|Proxy-Authorization)(?:\\+[""'])?\s*[:=]\s*(?:\\+[""'])?", IgnoreCaseRegexOptions);
     private static readonly Regex StructuredAuthHeaderSerializedKeyRe = CreateRegex(@"[""'](?:Authorization|Proxy-Authorization)[""']\s*[:=]\s*[""']", IgnoreCaseRegexOptions);
+    private static readonly Regex PemLineBreakRe = CreateRegex(@"\r?\n|\\r\\n|\\n", DefaultRegexOptions);
 
     internal static IReadOnlyCollection<string> RegisteredSecretValues { get; set; } = Array.Empty<string>();
 
@@ -91,6 +92,7 @@ public static class ExecApprovalSecretRedactor
         }
 
         var bitmap = new bool[text.Length];
+        MarkRegisteredSecretValueRedactions(text, bitmap);
         MarkStructuredAuthHeaderRedactions(text, bitmap);
         MarkUrlQueryPairRedactions(text, bitmap);
         MarkFormBodyRedactions(text, bitmap);
@@ -119,12 +121,7 @@ public static class ExecApprovalSecretRedactor
 
     private static string RedactRegisteredSecretValues(string text)
     {
-        if (RegisteredSecretValues.Count == 0)
-        {
-            return text;
-        }
-
-        var values = RegisteredSecretValues.Where(value => !string.IsNullOrEmpty(value)).OrderByDescending(value => value.Length).ToArray();
+        var values = GetRegisteredSecretValues();
         if (values.Length == 0 || !values.Select(value => value[0]).Distinct().Any(text.Contains))
         {
             return text;
@@ -133,6 +130,13 @@ public static class ExecApprovalSecretRedactor
         var matcher = CreateRegex(string.Join("|", values.Select(Regex.Escape)), DefaultRegexOptions);
         return matcher.Replace(text, match => MaskToken(match.Value));
     }
+
+    private static string[] GetRegisteredSecretValues() =>
+        RegisteredSecretValues
+            .Where(value => !string.IsNullOrEmpty(value))
+            .Distinct(StringComparer.Ordinal)
+            .OrderByDescending(value => value.Length)
+            .ToArray();
 
     private static string SliceUtf16Safe(string value, int start, int? end = null)
     {
@@ -173,7 +177,7 @@ public static class ExecApprovalSecretRedactor
 
     private static string RedactMatch(Match match, RedactRegex pattern, string input)
     {
-        if (match.Value.Contains("PRIVATE KEY-----", StringComparison.Ordinal))
+        if (match.Value.Contains("PRIVATE KEY-----", StringComparison.OrdinalIgnoreCase))
         {
             return RedactPemBlock(match.Value);
         }
@@ -438,8 +442,60 @@ public static class ExecApprovalSecretRedactor
 
     private static string RedactPemBlock(string block)
     {
-        var lines = Regex.Split(block, @"\r?\n").Where(line => line.Length > 0).ToArray();
-        return lines.Length < 2 ? Mask : lines[0] + "\n…redacted…\n" + lines[^1];
+        var lines = PemLineBreakRe.Split(block).Where(line => line.Length > 0).ToArray();
+        if (lines.Length < 2)
+            return Mask;
+
+        var separator = block.Contains("\r\n", StringComparison.Ordinal)
+            ? "\r\n"
+            : block.Contains('\n')
+                ? "\n"
+                : block.Contains("\\r\\n", StringComparison.Ordinal)
+                    ? "\\r\\n"
+                    : "\\n";
+        return lines[0] + separator + "…redacted…" + separator + lines[^1];
+    }
+
+    internal static bool IsShellReference(string value) =>
+        ShellReferenceBareRe.IsMatch(value) || ShellReferenceBracedRe.IsMatch(value);
+
+    internal static string RedactReviewSafeUrlQueryValues(string text)
+    {
+        if (string.IsNullOrEmpty(text) || !text.Contains('?'))
+        {
+            return text;
+        }
+
+        return UrlQueryPairRe.Replace(text, match =>
+        {
+            var key = match.Groups[2].Value;
+            var token = match.Groups[3].Value;
+            if (!IsSensitiveBodyKey(key) || !IsReviewSafeQueryToken(token))
+                return match.Value;
+
+            return match.Groups[1].Value
+                + key
+                + "="
+                + MaskSecretValue(token, hinted: true);
+        });
+    }
+
+    private static bool IsReviewSafeQueryToken(string token)
+    {
+        var value = SplitSecretValueForMask(token).Maskable;
+        if (string.IsNullOrEmpty(value) || IsShellReference(value))
+            return true;
+
+        foreach (var character in value)
+        {
+            if (!char.IsAsciiLetterOrDigit(character)
+                && character is not ('-' or '_' or '.' or '~' or '+' or '/' or '=' or ':'))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool IsShellReferenceToKey(string key, string value)
@@ -849,7 +905,7 @@ public static class ExecApprovalSecretRedactor
 
     private static void MarkPatternMatchRedaction(bool[] bitmap, string input, Match match, RedactRegex pattern)
     {
-        if (match.Value.Contains("PRIVATE KEY-----", StringComparison.Ordinal))
+        if (match.Value.Contains("PRIVATE KEY-----", StringComparison.OrdinalIgnoreCase))
         {
             MarkBitmapRange(bitmap, match.Index, match.Index + match.Length);
             return;
@@ -884,6 +940,23 @@ public static class ExecApprovalSecretRedactor
             var secretValue = SplitSecretValueForMask(token);
             var valueOffset = match.Groups[3].Index;
             MarkBitmapRange(bitmap, valueOffset + secretValue.MaskStart, valueOffset + secretValue.MaskEnd);
+        }
+    }
+
+    private static void MarkRegisteredSecretValueRedactions(string text, bool[] bitmap)
+    {
+        foreach (var value in GetRegisteredSecretValues())
+        {
+            var start = 0;
+            while (start < text.Length)
+            {
+                var index = text.IndexOf(value, start, StringComparison.Ordinal);
+                if (index < 0)
+                    break;
+
+                MarkBitmapRange(bitmap, index, index + value.Length);
+                start = index + value.Length;
+            }
         }
     }
 
@@ -1041,6 +1114,18 @@ public static class ExecApprovalSecretRedactor
         var authorizationBasicPattern = @"Authorization(?:\\+)?[""']?[ \t]*[:=](?:[ \t]|\\[trn]|\r?\n[ \t]*)*(?:\\+)?[""']?Basic(?:[ \t]|\\[trn]|\r?\n[ \t]*)+((?>[-A-Za-z0-9._~+/=:]+))(?!…)";
         var authorizationBotPattern = @"Authorization(?:\\+)?[""']?[ \t]*[:=](?:[ \t]|\\[trn]|\r?\n[ \t]*)*(?:\\+)?[""']?Bot(?:[ \t]|\\[trn]|\r?\n[ \t]*)+((?>[-A-Za-z0-9._~+/=:]+))(?!…)";
         var standaloneBearerPattern = @"\bBearer\s+([-A-Za-z0-9._~+/=]{18,})(?![-A-Za-z0-9._~+/=])";
+        var pemNewlinePattern = @"(?:\r?\n|\\r\\n|\\n)";
+        var pemBase64LinePattern =
+            @"(?=[A-Za-z0-9+/])(?:[A-Za-z0-9+/]{4})*"
+            + @"(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?";
+        var pemPrivateKeyPattern =
+            @"-----BEGIN (?<pemType>(?:[A-Z0-9]+ )*PRIVATE KEY)-----"
+            + pemNewlinePattern
+            + @"(?:Proc-Type:[ \t]*4,ENCRYPTED" + pemNewlinePattern
+            + @"DEK-Info:[ \t]*[A-Z0-9-]{3,32},[A-F0-9]{16,64}"
+            + pemNewlinePattern + pemNewlinePattern + @")?"
+            + @"(?:" + pemBase64LinePattern + pemNewlinePattern + @"){1,4096}"
+            + @"-----END \k<pemType>-----";
 
         var patterns = new List<RedactRegex>
         {
@@ -1064,13 +1149,7 @@ public static class ExecApprovalSecretRedactor
             Add(@"(^|[\s,;])(?:" + FormBodyFirstPairKeys + @")=([^&\s]+)(?=&[A-Za-z_][A-Za-z0-9_.-]*=)", IgnoreCaseRegexOptions),
             Add(standaloneAssignmentQuotedPattern, IgnoreCaseRegexOptions, shellReferencePreserving: true),
             Add(standaloneAssignmentPattern, IgnoreCaseRegexOptions, shellReferencePreserving: true),
-            Add(
-                @"-----BEGIN (?<pemType>(?:[A-Z0-9]+ )*PRIVATE KEY)-----\r?\n"
-                + @"(?:Proc-Type:[ \t]*4,ENCRYPTED\r?\n"
-                + @"DEK-Info:[ \t]*[A-Z0-9-]{3,32},[A-F0-9]{16,64}\r?\n\r?\n)?"
-                + @"(?:(?:[A-Za-z0-9+/]{4,128}={0,2})\r?\n){1,1024}"
-                + @"-----END \k<pemType>-----",
-                IgnoreCaseRegexOptions),
+            Add(pemPrivateKeyPattern, IgnoreCaseRegexOptions),
             Add(@"(?<![A-Za-z0-9_])(sk-[A-Za-z0-9_-]{8,})(?![A-Za-z0-9_])", IgnoreCaseRegexOptions),
             Add(@"(ghp_[A-Za-z0-9]{10,})", IgnoreCaseRegexOptions),
             Add(@"(github_pat_[A-Za-z0-9_]{10,})", IgnoreCaseRegexOptions),

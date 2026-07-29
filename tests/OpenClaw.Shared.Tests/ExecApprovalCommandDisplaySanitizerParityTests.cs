@@ -185,7 +185,7 @@ public class ExecApprovalCommandDisplaySanitizerParityTests
     [Fact]
     public void KeepsPemPrivateKeyContextVisibleWhenRawRedactionAlreadyCoversTheKey()
     {
-        const string keyBody = "ABCDEF0123456789abcdef";
+        const string keyBody = "QUJDREVGR0hJSktMTU5PUA==";
         var cmd = "echo -----BEGIN RSA PRIVATE KEY-----\n" + keyBody + "\n-----END RSA PRIVATE KEY----- > key.pem";
 
         var result = ExecApprovalCommandDisplaySanitizer.Sanitize(cmd);
@@ -207,7 +207,55 @@ public class ExecApprovalCommandDisplaySanitizerParityTests
         var result = ExecApprovalCommandDisplaySanitizer.SanitizeWithStatus(command);
 
         Assert.True(result.Redacted);
+        Assert.True(result.UnsafeConcealment);
         Assert.Contains("redacted", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void EscapedNewlinePemPrivateKey_IsUnsafeConcealment()
+    {
+        const string command =
+            "echo -----BEGIN PRIVATE KEY-----\\n"
+            + "QUJDREVGR0hJSktMTU5PUA==\\n"
+            + "-----END PRIVATE KEY-----";
+
+        var result = ExecApprovalCommandDisplaySanitizer.SanitizeWithStatus(command);
+
+        Assert.True(result.Redacted);
+        Assert.True(result.UnsafeConcealment);
+        Assert.DoesNotContain("QUJDREVGR0hJSktMTU5PUA", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ShortPaddedFinalPemLine_IsUnsafeConcealment()
+    {
+        const string command =
+            "echo -----BEGIN PRIVATE KEY-----\n"
+            + "QUJDREVGR0hJSktMTU5PUA==\n"
+            + "Ag==\n"
+            + "-----END PRIVATE KEY-----";
+
+        var result = ExecApprovalCommandDisplaySanitizer.SanitizeWithStatus(command);
+
+        Assert.True(result.Redacted);
+        Assert.True(result.UnsafeConcealment);
+        Assert.DoesNotContain("Ag==", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MixedLineEndingPemPrivateKey_IsUnsafeConcealment()
+    {
+        const string command =
+            "echo -----BEGIN PRIVATE KEY-----\r\n"
+            + "QUJDREVGR0hJSktMTU5PUA==\n"
+            + "Ag==\r\n"
+            + "-----END PRIVATE KEY-----";
+
+        var result = ExecApprovalCommandDisplaySanitizer.SanitizeWithStatus(command);
+
+        Assert.True(result.Redacted);
+        Assert.True(result.UnsafeConcealment);
+        Assert.DoesNotContain("QUJDREVGR0hJSktMTU5PUA", result.Text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -224,6 +272,7 @@ public class ExecApprovalCommandDisplaySanitizerParityTests
         var result = ExecApprovalCommandDisplaySanitizer.SanitizeWithStatus(command);
 
         Assert.True(result.Redacted);
+        Assert.True(result.UnsafeConcealment);
         Assert.DoesNotContain("Proc-Type", result.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("QUJDREVGR0hJSktMTU5PUA", result.Text, StringComparison.Ordinal);
     }
@@ -239,6 +288,7 @@ public class ExecApprovalCommandDisplaySanitizerParityTests
         var result = ExecApprovalCommandDisplaySanitizer.SanitizeWithStatus(command);
 
         Assert.False(result.Redacted);
+        Assert.False(result.UnsafeConcealment);
         Assert.Contains("Remove-Item", result.Text, StringComparison.Ordinal);
     }
 
@@ -256,6 +306,7 @@ public class ExecApprovalCommandDisplaySanitizerParityTests
         var result = ExecApprovalCommandDisplaySanitizer.SanitizeWithStatus(command);
 
         Assert.False(result.Redacted);
+        Assert.False(result.UnsafeConcealment);
         Assert.Contains("Remove-Item", result.Text, StringComparison.Ordinal);
     }
 
@@ -268,6 +319,67 @@ public class ExecApprovalCommandDisplaySanitizerParityTests
         var result = ExecApprovalCommandDisplaySanitizer.SanitizeWithStatus(command);
 
         Assert.True(result.Redacted);
+        Assert.True(result.UnsafeConcealment);
+    }
+
+    [Theory]
+    [InlineData("curl https://example.test/search?key=$GOOGLE_KEY")]
+    [InlineData("gh search code https://github.com/search?code=abc")]
+    public void BenignHeuristicRedactions_AreReviewSafe(string command)
+    {
+        var result = ExecApprovalCommandDisplaySanitizer.SanitizeWithStatus(command);
+
+        Assert.True(result.Redacted);
+        Assert.False(result.UnsafeConcealment);
+    }
+
+    [Fact]
+    public void RedactionThatHidesCommandSyntax_IsUnsafeConcealment()
+    {
+        const string command =
+            "powershell -Command https://example.test/search?code=abc;Remove-Item";
+
+        var result = ExecApprovalCommandDisplaySanitizer.SanitizeWithStatus(command);
+
+        Assert.True(result.Redacted);
+        Assert.True(result.UnsafeConcealment);
+    }
+
+    [Fact]
+    public void UnmappedSerializedAuthRedaction_CannotPiggybackOnMappedQueryRedaction()
+    {
+        const string command =
+            "powershell -Command {\\\"Authorization\\\":\\\"aaaaaa$(whoami)zzzz\\\"} "
+            + "https://example.test/search?code=abc";
+
+        var result = ExecApprovalCommandDisplaySanitizer.SanitizeWithStatus(command);
+
+        Assert.True(result.Redacted);
+        Assert.True(result.UnsafeConcealment);
+        Assert.DoesNotContain("$(whoami)", result.Text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("cmd /c sk-abcdefgh.exe")]
+    [InlineData("powershell -File sk-abcdefgh.ps1")]
+    public void TokenShapedExecutableOrScript_IsUnsafeConcealment(string command)
+    {
+        var result = ExecApprovalCommandDisplaySanitizer.SanitizeWithStatus(command);
+
+        Assert.True(result.Redacted);
+        Assert.True(result.UnsafeConcealment);
+    }
+
+    [Fact]
+    public void SensitiveNamedPowerShellDriveScript_IsUnsafeConcealment()
+    {
+        const string command =
+            "powershell -Command \"& 'api_key:\\sk-abcdefgh.ps1'\"";
+
+        var result = ExecApprovalCommandDisplaySanitizer.SanitizeWithStatus(command);
+
+        Assert.True(result.Redacted);
+        Assert.True(result.UnsafeConcealment);
     }
 
     [Fact]

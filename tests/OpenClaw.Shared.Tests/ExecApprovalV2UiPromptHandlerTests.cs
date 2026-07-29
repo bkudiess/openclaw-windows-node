@@ -92,7 +92,7 @@ public class ExecApprovalV2UiPromptHandlerTests
     }
 
     [Fact]
-    public async Task RedactedCommand_DeniesWithoutShowingDialog()
+    public async Task AssignmentRedaction_DeniesWithoutShowingDialog()
     {
         var dialogShown = false;
         var handler = Handler((_, _) =>
@@ -103,6 +103,97 @@ public class ExecApprovalV2UiPromptHandlerTests
 
         var result = await handler.PromptAsync(
             Request(command: "echo API_SECRET=sk-abc123456789012345678"));
+
+        Assert.Equal(ExecApprovalPromptOutcome.Deny, result);
+        Assert.False(dialogShown);
+    }
+
+    [Theory]
+    [InlineData("curl https://example.test/search?key=$GOOGLE_KEY")]
+    [InlineData("gh search code https://github.com/search?code=abc")]
+    public async Task BenignHeuristicRedaction_RemainsApprovable(string command)
+    {
+        var dialogShown = false;
+        var handler = Handler((_, _) =>
+        {
+            dialogShown = true;
+            return Task.FromResult(ExecApprovalPromptOutcome.AllowOnce);
+        });
+
+        var result = await handler.PromptAsync(Request(command: command));
+
+        Assert.Equal(ExecApprovalPromptOutcome.AllowOnce, result);
+        Assert.True(dialogShown);
+    }
+
+    [Fact]
+    public async Task RedactionThatHidesCommandSyntax_DeniesWithoutShowingDialog()
+    {
+        var dialogShown = false;
+        var handler = Handler((_, _) =>
+        {
+            dialogShown = true;
+            return Task.FromResult(ExecApprovalPromptOutcome.AllowOnce);
+        });
+
+        var result = await handler.PromptAsync(
+            Request(command: "powershell -Command https://example.test/search?code=abc;Remove-Item"));
+
+        Assert.Equal(ExecApprovalPromptOutcome.Deny, result);
+        Assert.False(dialogShown);
+    }
+
+    [Fact]
+    public async Task UnmappedSerializedAuthRedaction_DeniesWithoutShowingDialog()
+    {
+        var dialogShown = false;
+        var handler = Handler((_, _) =>
+        {
+            dialogShown = true;
+            return Task.FromResult(ExecApprovalPromptOutcome.AllowOnce);
+        });
+        const string command =
+            "powershell -Command {\\\"Authorization\\\":\\\"aaaaaa$(whoami)zzzz\\\"} "
+            + "https://example.test/search?code=abc";
+
+        var result = await handler.PromptAsync(Request(command: command));
+
+        Assert.Equal(ExecApprovalPromptOutcome.Deny, result);
+        Assert.False(dialogShown);
+    }
+
+    [Theory]
+    [InlineData("cmd /c sk-abcdefgh.exe")]
+    [InlineData("powershell -File sk-abcdefgh.ps1")]
+    public async Task TokenShapedExecutableOrScript_DeniesWithoutShowingDialog(
+        string command)
+    {
+        var dialogShown = false;
+        var handler = Handler((_, _) =>
+        {
+            dialogShown = true;
+            return Task.FromResult(ExecApprovalPromptOutcome.AllowOnce);
+        });
+
+        var result = await handler.PromptAsync(Request(command: command));
+
+        Assert.Equal(ExecApprovalPromptOutcome.Deny, result);
+        Assert.False(dialogShown);
+    }
+
+    [Fact]
+    public async Task SensitiveNamedPowerShellDriveScript_DeniesWithoutShowingDialog()
+    {
+        var dialogShown = false;
+        var handler = Handler((_, _) =>
+        {
+            dialogShown = true;
+            return Task.FromResult(ExecApprovalPromptOutcome.AllowOnce);
+        });
+        const string command =
+            "powershell -Command \"& 'api_key:\\sk-abcdefgh.ps1'\"";
+
+        var result = await handler.PromptAsync(Request(command: command));
 
         Assert.Equal(ExecApprovalPromptOutcome.Deny, result);
         Assert.False(dialogShown);
@@ -120,6 +211,46 @@ public class ExecApprovalV2UiPromptHandlerTests
         const string command =
             "echo -----BEGIN PRIVATE KEY-----\n"
             + "QUJDREVGR0hJSktMTU5PUA==\n"
+            + "-----END PRIVATE KEY-----";
+
+        var result = await handler.PromptAsync(Request(command: command));
+
+        Assert.Equal(ExecApprovalPromptOutcome.Deny, result);
+        Assert.False(dialogShown);
+    }
+
+    [Theory]
+    [InlineData("echo -----BEGIN PRIVATE KEY-----\\nAg==\\n-----END PRIVATE KEY-----")]
+    [InlineData("echo -----BEGIN PRIVATE KEY-----\nAg==\n-----END PRIVATE KEY-----")]
+    public async Task SerializedOrShortPaddedPemPrivateKey_DeniesWithoutShowingDialog(
+        string command)
+    {
+        var dialogShown = false;
+        var handler = Handler((_, _) =>
+        {
+            dialogShown = true;
+            return Task.FromResult(ExecApprovalPromptOutcome.AllowOnce);
+        });
+
+        var result = await handler.PromptAsync(Request(command: command));
+
+        Assert.Equal(ExecApprovalPromptOutcome.Deny, result);
+        Assert.False(dialogShown);
+    }
+
+    [Fact]
+    public async Task MixedLineEndingPemPrivateKey_DeniesWithoutShowingDialog()
+    {
+        var dialogShown = false;
+        var handler = Handler((_, _) =>
+        {
+            dialogShown = true;
+            return Task.FromResult(ExecApprovalPromptOutcome.AllowOnce);
+        });
+        const string command =
+            "echo -----BEGIN PRIVATE KEY-----\r\n"
+            + "QUJDREVGR0hJSktMTU5PUA==\n"
+            + "Ag==\r\n"
             + "-----END PRIVATE KEY-----";
 
         var result = await handler.PromptAsync(Request(command: command));
