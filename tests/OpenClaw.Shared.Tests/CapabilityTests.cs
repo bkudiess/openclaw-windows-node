@@ -807,7 +807,63 @@ public class SystemCapabilityTests
                     Directory.Delete(tempDir, true);
                 }
             }
-    private static ExecApprovalsFile V2File(string? pattern = null) => new()
+
+            [Theory]
+            [InlineData("defaults", "security", -1)]
+            [InlineData("defaults", "ask", 99)]
+            [InlineData("defaults", "askFallback", 99)]
+            [InlineData("wildcard", "security", -1)]
+            [InlineData("wildcard", "ask", 99)]
+            [InlineData("wildcard", "askFallback", 99)]
+            [InlineData("agent", "security", -1)]
+            [InlineData("agent", "ask", 99)]
+            [InlineData("agent", "askFallback", 99)]
+            public async Task ExecApprovalsSet_RejectsNumericEnumValues(
+                string scope,
+                string field,
+                int value)
+            {
+                var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(tempDir);
+                try
+                {
+                    var store = new ExecApprovalsStore(tempDir, NullLogger.Instance);
+                    var before = await store.GetSnapshotAsync();
+                    var policy = $"\"{field}\":{value}";
+                    var fileJson = scope switch
+                    {
+                        "defaults" =>
+                            $"{{\"version\":1,\"defaults\":{{{policy}}},\"agents\":{{}}}}",
+                        "wildcard" =>
+                            $"{{\"version\":1,\"defaults\":{{}},\"agents\":{{\"*\":{{{policy}}}}}}}",
+                        _ =>
+                            $"{{\"version\":1,\"defaults\":{{}},\"agents\":{{\"main\":{{{policy}}}}}}}",
+                    };
+                    var argsJson =
+                        $"{{\"baseHash\":\"{before.Hash}\",\"file\":{fileJson}}}";
+
+                    var cap = new SystemCapability(NullLogger.Instance);
+                    cap.SetApprovalsStore(store);
+                    var response = await cap.ExecuteAsync(new NodeInvokeRequest
+                    {
+                        Id = "set-numeric-enum",
+                        Command = "system.execApprovals.set",
+                        Args = Parse(argsJson),
+                    });
+
+                    Assert.False(response.Ok);
+                    Assert.Contains(
+                        "Invalid exec approvals file",
+                        response.Error,
+                        StringComparison.OrdinalIgnoreCase);
+                }
+                finally
+                {
+                    Directory.Delete(tempDir, true);
+                }
+            }
+
+            private static ExecApprovalsFile V2File(string? pattern = null) => new()
     {
         Version = 1,
         Defaults = new ExecApprovalsDefaults

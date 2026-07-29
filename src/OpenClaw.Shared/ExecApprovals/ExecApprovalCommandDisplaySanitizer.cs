@@ -26,10 +26,10 @@ public static class ExecApprovalCommandDisplaySanitizer
         return SanitizeInternal(text).Text;
     }
 
-    public static (string Text, bool Truncated, bool Oversized) SanitizeWithStatus(string text)
+    public static (string Text, bool Truncated, bool Oversized, bool Redacted) SanitizeWithStatus(string text)
     {
         var result = SanitizeInternal(text);
-        return (result.Text, result.Truncated, result.Oversized);
+        return (result.Text, result.Truncated, result.Oversized, result.Redacted);
     }
 
     public static string SanitizeWarningText(string text)
@@ -50,15 +50,24 @@ public static class ExecApprovalCommandDisplaySanitizer
             return new SanitizedDisplayText(
                 oversizedMarker ?? OversizedMarker,
                 Truncated: false,
-                Oversized: true);
+                Oversized: true,
+                Redacted: false);
         }
 
         var rawRedacted = ExecApprovalSecretRedactor.Redact(text);
         var strippedView = BuildStrippedView(text);
         var strippedRedacted = ExecApprovalSecretRedactor.Redact(strippedView.Text);
+        var redacted =
+            !string.Equals(rawRedacted, text, StringComparison.Ordinal)
+            || !string.Equals(
+                strippedRedacted,
+                strippedView.Text,
+                StringComparison.Ordinal);
 
         if (strippedRedacted == strippedView.Text)
-            return TruncateForDisplay(EscapeInvisibles(rawRedacted, preserveLineBreaks));
+            return TruncateForDisplay(
+                EscapeInvisibles(rawRedacted, preserveLineBreaks),
+                redacted);
 
         var rawMask = ExecApprovalSecretRedactor.ComputeRedactionBitmap(text);
         var strippedMask = ExecApprovalSecretRedactor.ComputeRedactionBitmap(strippedView.Text);
@@ -73,7 +82,9 @@ public static class ExecApprovalCommandDisplaySanitizer
         }
 
         if (!bypassDetected)
-            return TruncateForDisplay(EscapeInvisibles(rawRedacted, preserveLineBreaks));
+            return TruncateForDisplay(
+                EscapeInvisibles(rawRedacted, preserveLineBreaks),
+                redacted);
 
         var unionMask = (bool[])rawMask.Clone();
         for (var i = 0; i < strippedMask.Length; i++)
@@ -82,7 +93,9 @@ public static class ExecApprovalCommandDisplaySanitizer
                 unionMask[strippedView.StrippedToOriginal[i]] = true;
         }
 
-        return TruncateForDisplay(RenderUnionMask(text, unionMask, preserveLineBreaks));
+        return TruncateForDisplay(
+            RenderUnionMask(text, unionMask, preserveLineBreaks),
+            redacted: true);
     }
 
     private static string NormalizeDisplayLineBreaks(string text)
@@ -182,15 +195,24 @@ public static class ExecApprovalCommandDisplaySanitizer
         return rendered.ToString();
     }
 
-    private static SanitizedDisplayText TruncateForDisplay(string text)
+    private static SanitizedDisplayText TruncateForDisplay(
+        string text,
+        bool redacted = false)
     {
         if (text.Length <= MaxOutput)
-            return new SanitizedDisplayText(text, Truncated: false, Oversized: false);
+        {
+            return new SanitizedDisplayText(
+                text,
+                Truncated: false,
+                Oversized: false,
+                Redacted: redacted);
+        }
 
         return new SanitizedDisplayText(
             TruncateUtf16Safe(text, MaxOutput) + TruncationMarker,
             Truncated: true,
-            Oversized: false);
+            Oversized: false,
+            Redacted: redacted);
     }
 
     private static string TruncateUtf16Safe(string input, int maxLength)
@@ -257,7 +279,11 @@ public static class ExecApprovalCommandDisplaySanitizer
         builder.Append("\\u{").Append(codePoint.ToString("X")).Append('}');
     }
 
-    private sealed record SanitizedDisplayText(string Text, bool Truncated, bool Oversized);
+    private sealed record SanitizedDisplayText(
+        string Text,
+        bool Truncated,
+        bool Oversized,
+        bool Redacted);
 
     private sealed record StrippedView(string Text, int[] StrippedToOriginal);
 }

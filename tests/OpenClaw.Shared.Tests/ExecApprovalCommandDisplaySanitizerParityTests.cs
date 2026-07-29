@@ -197,6 +197,80 @@ public class ExecApprovalCommandDisplaySanitizerParityTests
     }
 
     [Fact]
+    public void RealPemPrivateKey_SetsRedactedStatus()
+    {
+        const string command =
+            "echo -----BEGIN PRIVATE KEY-----\n"
+            + "QUJDREVGR0hJSktMTU5PUA==\n"
+            + "-----END PRIVATE KEY-----";
+
+        var result = ExecApprovalCommandDisplaySanitizer.SanitizeWithStatus(command);
+
+        Assert.True(result.Redacted);
+        Assert.Contains("redacted", result.Text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TraditionalEncryptedPemPrivateKey_SetsRedactedStatus()
+    {
+        const string command =
+            "echo -----BEGIN RSA PRIVATE KEY-----\n"
+            + "Proc-Type: 4,ENCRYPTED\n"
+            + "DEK-Info: AES-256-CBC,00112233445566778899AABBCCDDEEFF\n"
+            + "\n"
+            + "QUJDREVGR0hJSktMTU5PUA==\n"
+            + "-----END RSA PRIVATE KEY-----";
+
+        var result = ExecApprovalCommandDisplaySanitizer.SanitizeWithStatus(command);
+
+        Assert.True(result.Redacted);
+        Assert.DoesNotContain("Proc-Type", result.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("QUJDREVGR0hJSktMTU5PUA", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FakePemMarkers_DoNotHideArbitraryShellText()
+    {
+        const string command =
+            "echo -----BEGIN PRIVATE KEY-----\n"
+            + "Remove-Item C:\\important\\* -Recurse\n"
+            + "-----END PRIVATE KEY-----";
+
+        var result = ExecApprovalCommandDisplaySanitizer.SanitizeWithStatus(command);
+
+        Assert.False(result.Redacted);
+        Assert.Contains("Remove-Item", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FakeEncryptedPemHeaders_DoNotHideArbitraryShellText()
+    {
+        const string command =
+            "echo -----BEGIN RSA PRIVATE KEY-----\n"
+            + "Proc-Type: 4,ENCRYPTED\n"
+            + "DEK-Info: AES-256-CBC,00112233445566778899AABBCCDDEEFF\n"
+            + "\n"
+            + "Remove-Item C:\\important\\* -Recurse\n"
+            + "-----END RSA PRIVATE KEY-----";
+
+        var result = ExecApprovalCommandDisplaySanitizer.SanitizeWithStatus(command);
+
+        Assert.False(result.Redacted);
+        Assert.Contains("Remove-Item", result.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SecretToken_SetsRedactedStatus()
+    {
+        const string command =
+            "echo API_SECRET=sk-abc123456789012345678";
+
+        var result = ExecApprovalCommandDisplaySanitizer.SanitizeWithStatus(command);
+
+        Assert.True(result.Redacted);
+    }
+
+    [Fact]
     public void TruncatesTheRedactedOutputSoLargeCommandsAreBounded()
     {
         var padding = new string('x', 20 * 1024);

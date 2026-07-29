@@ -531,6 +531,10 @@ public class SystemCapability : NodeCapabilityBase
         ExecApprovalsFile current,
         ExecApprovalsFile desired)
     {
+        var enumError = ValidateDefinedPolicyEnums(desired);
+        if (enumError is not null)
+            return enumError;
+
         foreach (var (agentId, agent) in desired.Agents ?? [])
         {
             if (string.IsNullOrWhiteSpace(agentId))
@@ -567,6 +571,70 @@ public class SystemCapability : NodeCapabilityBase
             }
         }
 
+        return null;
+    }
+
+    private static string? ValidateDefinedPolicyEnums(ExecApprovalsFile file)
+    {
+        var error = ValidateDefinedPolicyEnums(file.Defaults, "defaults");
+        if (error is not null)
+            return error;
+
+        foreach (var (agentId, agent) in file.Agents ?? [])
+        {
+            error = ValidateDefinedPolicyEnums(agent, $"agent '{agentId}'");
+            if (error is not null)
+                return error;
+        }
+
+        return null;
+    }
+
+    private static string? ValidateDefinedPolicyEnums(
+        ExecApprovalsDefaults? policy,
+        string scope)
+    {
+        if (policy is null)
+            return null;
+        if (policy.Security.HasValue
+            && !Enum.IsDefined(typeof(ExecSecurity), policy.Security.Value))
+        {
+            return $"Invalid security value for {scope}.";
+        }
+        if (policy.Ask.HasValue
+            && !Enum.IsDefined(typeof(ExecAsk), policy.Ask.Value))
+        {
+            return $"Invalid ask value for {scope}.";
+        }
+        if (policy.AskFallback.HasValue
+            && !Enum.IsDefined(typeof(ExecSecurity), policy.AskFallback.Value))
+        {
+            return $"Invalid askFallback value for {scope}.";
+        }
+        return null;
+    }
+
+    private static string? ValidateDefinedPolicyEnums(
+        ExecApprovalsAgent? policy,
+        string scope)
+    {
+        if (policy is null)
+            return $"Exec approval {scope} is invalid.";
+        if (policy.Security.HasValue
+            && !Enum.IsDefined(typeof(ExecSecurity), policy.Security.Value))
+        {
+            return $"Invalid security value for {scope}.";
+        }
+        if (policy.Ask.HasValue
+            && !Enum.IsDefined(typeof(ExecAsk), policy.Ask.Value))
+        {
+            return $"Invalid ask value for {scope}.";
+        }
+        if (policy.AskFallback.HasValue
+            && !Enum.IsDefined(typeof(ExecSecurity), policy.AskFallback.Value))
+        {
+            return $"Invalid askFallback value for {scope}.";
+        }
         return null;
     }
 

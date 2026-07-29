@@ -57,6 +57,11 @@ public sealed class ExecApprovalV2UiPromptHandler : IExecApprovalV2PromptHandler
                 _logger.Warn("[EXEC-APPROVALS] prompt: command exceeds display limit; denying (cannot review in full)");
                 return ExecApprovalPromptOutcome.Deny;
             }
+            if (commandStatus.Redacted)
+            {
+                _logger.Warn("[EXEC-APPROVALS] prompt: command contains redacted content; denying (cannot review in full)");
+                return ExecApprovalPromptOutcome.Deny;
+            }
             var commandText = commandStatus.Text;
             var agentLabel = ExecApprovalCommandDisplaySanitizer.Sanitize(request.AgentId);
             var cwdText = request.Cwd is null ? null : ExecApprovalCommandDisplaySanitizer.Sanitize(request.Cwd);

@@ -152,6 +152,26 @@ public class ExecApprovalSecretRedactorTests
         Assert.Empty(ExecApprovalSecretRedactor.ComputeRedactionBitmap(null!));
     }
 
+    [Fact]
+    public void Redact_TraditionalEncryptedPemPrivateKey_RedactsEntirePayload()
+    {
+        const string input =
+            "-----BEGIN RSA PRIVATE KEY-----\n"
+            + "Proc-Type: 4,ENCRYPTED\n"
+            + "DEK-Info: AES-256-CBC,00112233445566778899AABBCCDDEEFF\n"
+            + "\n"
+            + "QUJDREVGR0hJSktMTU5PUA==\n"
+            + "-----END RSA PRIVATE KEY-----";
+
+        var result = ExecApprovalSecretRedactor.Redact(input);
+
+        Assert.Equal(
+            "-----BEGIN RSA PRIVATE KEY-----\n"
+            + "…redacted…\n"
+            + "-----END RSA PRIVATE KEY-----",
+            result);
+    }
+
     [Theory]
     [InlineData("short-token", "***")]
     [InlineData("abcdef1234567890ghij", "abcdef\u2026ghij")]

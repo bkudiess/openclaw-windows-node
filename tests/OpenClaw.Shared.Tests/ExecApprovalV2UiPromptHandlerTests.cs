@@ -92,6 +92,87 @@ public class ExecApprovalV2UiPromptHandlerTests
     }
 
     [Fact]
+    public async Task RedactedCommand_DeniesWithoutShowingDialog()
+    {
+        var dialogShown = false;
+        var handler = Handler((_, _) =>
+        {
+            dialogShown = true;
+            return Task.FromResult(ExecApprovalPromptOutcome.AllowOnce);
+        });
+
+        var result = await handler.PromptAsync(
+            Request(command: "echo API_SECRET=sk-abc123456789012345678"));
+
+        Assert.Equal(ExecApprovalPromptOutcome.Deny, result);
+        Assert.False(dialogShown);
+    }
+
+    [Fact]
+    public async Task PemPrivateKey_DeniesWithoutShowingDialog()
+    {
+        var dialogShown = false;
+        var handler = Handler((_, _) =>
+        {
+            dialogShown = true;
+            return Task.FromResult(ExecApprovalPromptOutcome.AllowOnce);
+        });
+        const string command =
+            "echo -----BEGIN PRIVATE KEY-----\n"
+            + "QUJDREVGR0hJSktMTU5PUA==\n"
+            + "-----END PRIVATE KEY-----";
+
+        var result = await handler.PromptAsync(Request(command: command));
+
+        Assert.Equal(ExecApprovalPromptOutcome.Deny, result);
+        Assert.False(dialogShown);
+    }
+
+    [Fact]
+    public async Task TraditionalEncryptedPemPrivateKey_DeniesWithoutShowingDialog()
+    {
+        var dialogShown = false;
+        var handler = Handler((_, _) =>
+        {
+            dialogShown = true;
+            return Task.FromResult(ExecApprovalPromptOutcome.AllowOnce);
+        });
+        const string command =
+            "echo -----BEGIN RSA PRIVATE KEY-----\n"
+            + "Proc-Type: 4,ENCRYPTED\n"
+            + "DEK-Info: AES-256-CBC,00112233445566778899AABBCCDDEEFF\n"
+            + "\n"
+            + "QUJDREVGR0hJSktMTU5PUA==\n"
+            + "-----END RSA PRIVATE KEY-----";
+
+        var result = await handler.PromptAsync(Request(command: command));
+
+        Assert.Equal(ExecApprovalPromptOutcome.Deny, result);
+        Assert.False(dialogShown);
+    }
+
+    [Fact]
+    public async Task FakePemMarkers_ShowVisibleShellPayload()
+    {
+        ExecApprovalPromptView? captured = null;
+        var handler = Handler((view, _) =>
+        {
+            captured = view;
+            return Task.FromResult(ExecApprovalPromptOutcome.Deny);
+        });
+        const string command =
+            "echo -----BEGIN PRIVATE KEY-----\n"
+            + "Remove-Item C:\\important\\* -Recurse\n"
+            + "-----END PRIVATE KEY-----";
+
+        var result = await handler.PromptAsync(Request(command: command));
+
+        Assert.Equal(ExecApprovalPromptOutcome.Deny, result);
+        Assert.NotNull(captured);
+        Assert.Contains("Remove-Item", captured!.CommandText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task DialogThrowingSynchronously_Denies_WithoutThrowing()
     {
         var handler = Handler((_, _) => throw new InvalidOperationException("boom"));

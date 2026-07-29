@@ -1064,7 +1064,13 @@ public static class ExecApprovalSecretRedactor
             Add(@"(^|[\s,;])(?:" + FormBodyFirstPairKeys + @")=([^&\s]+)(?=&[A-Za-z_][A-Za-z0-9_.-]*=)", IgnoreCaseRegexOptions),
             Add(standaloneAssignmentQuotedPattern, IgnoreCaseRegexOptions, shellReferencePreserving: true),
             Add(standaloneAssignmentPattern, IgnoreCaseRegexOptions, shellReferencePreserving: true),
-            Add(@"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----", IgnoreCaseRegexOptions),
+            Add(
+                @"-----BEGIN (?<pemType>(?:[A-Z0-9]+ )*PRIVATE KEY)-----\r?\n"
+                + @"(?:Proc-Type:[ \t]*4,ENCRYPTED\r?\n"
+                + @"DEK-Info:[ \t]*[A-Z0-9-]{3,32},[A-F0-9]{16,64}\r?\n\r?\n)?"
+                + @"(?:(?:[A-Za-z0-9+/]{4,128}={0,2})\r?\n){1,1024}"
+                + @"-----END \k<pemType>-----",
+                IgnoreCaseRegexOptions),
             Add(@"(?<![A-Za-z0-9_])(sk-[A-Za-z0-9_-]{8,})(?![A-Za-z0-9_])", IgnoreCaseRegexOptions),
             Add(@"(ghp_[A-Za-z0-9]{10,})", IgnoreCaseRegexOptions),
             Add(@"(github_pat_[A-Za-z0-9_]{10,})", IgnoreCaseRegexOptions),

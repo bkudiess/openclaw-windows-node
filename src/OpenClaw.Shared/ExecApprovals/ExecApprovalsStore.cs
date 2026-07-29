@@ -22,7 +22,12 @@ public sealed class ExecApprovalsStore
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.KebabCaseLower) },
+        Converters =
+        {
+            new JsonStringEnumConverter(
+                JsonNamingPolicy.KebabCaseLower,
+                allowIntegerValues: false),
+        },
     };
 
     private readonly string _filePath;

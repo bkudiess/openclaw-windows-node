@@ -143,6 +143,18 @@ public class ExecApprovalsStoreTests : IDisposable
         Assert.Contains(_log.Warnings, w => w.Contains("malformed"));
     }
 
+    [Fact]
+    public void ResolveReadOnly_NumericEnumValue_ReturnsDefaultDenyAndWarns()
+    {
+        WriteFile(
+            """{"version":1,"defaults":{"security":-1},"agents":{}}""");
+
+        var resolved = Store().ResolveReadOnly("main");
+
+        Assert.Equal(ExecSecurity.Deny, resolved.Defaults.Security);
+        Assert.Contains(_log.Warnings, warning => warning.Contains("malformed"));
+    }
+
     // ── Unsupported version → default-deny + warning ─────────────────────────
 
     [Fact]
