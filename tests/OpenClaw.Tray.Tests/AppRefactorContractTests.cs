@@ -105,6 +105,184 @@ public sealed class AppRefactorContractTests
         Assert.Contains("private async Task<bool> VerifyAsync", coordinator);
         Assert.DoesNotContain("private async Task<bool> SafeProbeAsync", app);
         Assert.DoesNotContain("private async Task<bool> VerifyAsync", app);
+        Assert.Contains("WslKeepAlivePolicy.IsSameSetupManagedGateway(", startup);
+    }
+
+    [Fact]
+    public void GatewayRecordEdits_HoldSharedLifecycleLease()
+    {
+        var root = TestRepositoryPaths.GetRepositoryRoot();
+        var connectionPage = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "Pages",
+            "ConnectionPage.xaml.cs"));
+        var statusWindow = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "Windows",
+            "ConnectionStatusWindow.xaml.cs"));
+        var pageEdit = ExtractMethod(connectionPage, "DoDirectConnectFromAddFormAsync");
+        var windowEdit = ExtractMethod(statusWindow, "OnDirectConnectAsync");
+
+        AssertInOrder(
+            pageEdit,
+            "BeginManualGatewayLifecycleOperationAsync",
+            "DisconnectAsync",
+            "_gatewayRegistry.AddOrUpdate(record)");
+        Assert.Contains("gatewayLifecycleLease?.Dispose()", pageEdit);
+        AssertInOrder(
+            windowEdit,
+            "BeginManualGatewayLifecycleOperationAsync",
+            "DisconnectAsync",
+            "_registry.AddOrUpdate(record)");
+        Assert.Contains("gatewayLifecycleLease?.Dispose()", windowEdit);
+    }
+
+    [Fact]
+    public void SavedGatewaySwitch_LeavesActiveIdMutationToManager()
+    {
+        var root = TestRepositoryPaths.GetRepositoryRoot();
+        var connectionPage = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "Pages",
+            "ConnectionPage.xaml.cs"));
+        var switchMethod = ExtractMethod(connectionPage, "OnConnectSavedGatewayAsync");
+
+        Assert.DoesNotContain("_gatewayRegistry.SetActive(gwId)", switchMethod);
+        AssertInOrder(
+            switchMethod,
+            "await _connectionManager.SwitchGatewayAsync(gwId)",
+            "LoadSavedGateways()",
+            "RefreshFromSnapshot(_lastSnapshot)");
+    }
+
+    [Fact]
+    public void CredentialReplacementFlows_DoNotBlindlyClearDeviceTokens()
+    {
+        var root = TestRepositoryPaths.GetRepositoryRoot();
+        var manager = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "OpenClaw.Connection",
+            "GatewayConnectionManager.cs"));
+        var statusWindow = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "Windows",
+            "ConnectionStatusWindow.xaml.cs"));
+        var setupCode = ExtractMethod(manager, "ApplySetupCodeAsync");
+        var sharedToken = ExtractMethod(manager, "ConnectWithSharedTokenAsync");
+        var directConnect = ExtractMethod(statusWindow, "OnDirectConnectAsync");
+
+        Assert.DoesNotContain("ClearStoredTokens", setupCode);
+        Assert.DoesNotContain("ClearStoredTokens", sharedToken);
+        Assert.DoesNotContain("ClearStoredTokens", directConnect);
+        Assert.Contains("ConnectWithSharedTokenAsync(url, token, sshConfig)", directConnect);
+        Assert.Contains("isolatedValidationTunnel", sharedToken);
+        Assert.Contains("StartAsync(validationConfig", sharedToken);
+        Assert.Contains("ValidateSharedTokenBeforeReplacementAsync(", sharedToken);
+        Assert.Contains("_validationTunnelFactory()", sharedToken);
+        Assert.Contains("StopAndDisposeValidationTunnelAsync(isolatedValidationTunnel)", sharedToken);
+    }
+
+    [Fact]
+    public void StatusWindowDirectConnect_WaitsForManagerStateBeforeReportingConnected()
+    {
+        var root = TestRepositoryPaths.GetRepositoryRoot();
+        var statusWindow = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "Windows",
+            "ConnectionStatusWindow.xaml.cs"));
+        var directConnect = ExtractMethod(statusWindow, "OnDirectConnectAsync");
+        var setupConnect = ExtractMethod(statusWindow, "OnConnectAsync");
+        var stateChanged = ExtractMethod(statusWindow, "OnManagerStateChanged");
+
+        Assert.Contains("ConnectionStatus_Connecting", directConnect);
+        Assert.DoesNotContain("ConnectionStatus_ConnectedTo", directConnect);
+        Assert.Contains("ConnectionStatus_Applying", setupConnect);
+        Assert.DoesNotContain("ConnectionStatus_ConnectedTo", setupConnect);
+        Assert.DoesNotContain("SetupCodeOutcome.Success =>", setupConnect);
+        Assert.Contains("SaveConnectionSettings(url, sshConfig)", directConnect);
+        Assert.Contains("result.GatewayCommitted", directConnect);
+        Assert.Contains("SynchronizeConnectionSettingsWithActiveGatewayAsync", directConnect);
+        AssertInOrder(
+            directConnect,
+            "ConnectionStatus_Connecting",
+            "ConnectWithSharedTokenAsync(url, token, sshConfig)");
+        Assert.Contains("snapshot.OperatorState == RoleConnectionState.Error", stateChanged);
+        Assert.Contains("snapshot.OperatorError", stateChanged);
+        Assert.Contains("SetupCodeResult.Text = errorText", stateChanged);
+        Assert.Contains("SetupCodeResult.Text = connectedText", stateChanged);
+        Assert.Contains("OverallConnectionState.Degraded", stateChanged);
+        Assert.Contains("HubWindow_Pill_Degraded", stateChanged);
+        Assert.Contains("OverallConnectionState.Connected or OverallConnectionState.Ready", stateChanged);
+    }
+
+    [Fact]
+    public void DirectConnectRollback_RestoresNullActiveGatewayExactly()
+    {
+        var root = TestRepositoryPaths.GetRepositoryRoot();
+        var connectionPage = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "Pages",
+            "ConnectionPage.xaml.cs"));
+        var rollback = ExtractMethod(connectionPage, "RollbackDirectConnect");
+
+        Assert.Contains("_gatewayRegistry.SetActive(previousActiveId);", rollback);
+        Assert.DoesNotContain("if (previousActiveId != null)", rollback);
+    }
+
+    [Fact]
+    public void DirectConnectRollback_UsesTransactionalTokenClearAfterLifecycleLease()
+    {
+        var root = TestRepositoryPaths.GetRepositoryRoot();
+        var connectionPage = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "Pages",
+            "ConnectionPage.xaml.cs"));
+        var directConnect = ExtractMethod(connectionPage, "DoDirectConnectFromAddFormAsync");
+        var rollback = ExtractMethod(connectionPage, "RollbackDirectConnect");
+
+        AssertInOrder(
+            directConnect,
+            "BeginManualGatewayLifecycleOperationAsync",
+            "var previousActiveId = _gatewayRegistry.ActiveGatewayId",
+            "await _connectionManager.DisconnectAsync()",
+            "BeginTransactionalTokenClear(identityDir)");
+        AssertInOrder(
+            directConnect,
+            "BeginTransactionalTokenClear(identityDir)",
+            "Stop and await the failed attempt",
+            "RollbackDirectConnect");
+        Assert.Contains("if (!clearResult.Success)", directConnect);
+        Assert.DoesNotContain("safeIdentityRollback = null", directConnect);
+        Assert.Contains("candidateRecordSnapshot", directConnect);
+        AssertInOrder(
+            directConnect,
+            "_gatewayRegistry.Save();",
+            "candidateRegistryCommitted = true",
+            "BeginTransactionalTokenClear(identityDir)");
+        AssertInOrder(
+            rollback,
+            "_gatewayRegistry.Save();",
+            "RestoreTransactionalTokenClear(");
+        Assert.Contains("RestoreTransactionalTokenClear(", rollback);
+        Assert.Contains("DeviceTokenRestoreOutcome.Superseded", rollback);
+        Assert.Contains("DeviceTokenRestoreOutcome.Failed", rollback);
+        Assert.Contains("ReconcileSettingsToCandidate", rollback);
+        Assert.Contains("SaveOrThrow()", rollback);
     }
 
     [Fact]

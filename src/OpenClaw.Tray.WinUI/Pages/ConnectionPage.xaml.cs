@@ -2510,15 +2510,14 @@ public sealed partial class ConnectionPage : Page
         btn.IsEnabled = false;
         try
         {
-            _gatewayRegistry.SetActive(gwId);
             _userIntent = UserIntent.None;
-            LoadSavedGateways();
-            RefreshFromSnapshot(_lastSnapshot);
             // Await the switch so any failure surfaces in the strip via the
             // catch below rather than becoming a silent unobserved task
             // exception. The state-change events that drive the rest of the
             // UI continue to fire while this awaits.
             await _connectionManager.SwitchGatewayAsync(gwId);
+            LoadSavedGateways();
+            RefreshFromSnapshot(_lastSnapshot);
         }
         catch (Exception ex)
         {
@@ -2829,8 +2828,22 @@ public sealed partial class ConnectionPage : Page
 
         AddSaveButton.IsEnabled = false;
         AddResultText.Text = LocalizationHelper.GetString("ConnectionPage_Connecting");
+        IDisposable gatewayLifecycleLease;
+        try
+        {
+            gatewayLifecycleLease =
+                await _connectionManager.BeginManualGatewayLifecycleOperationAsync();
+        }
+        catch (Exception ex)
+        {
+            AddSaveButton.IsEnabled = true;
+            AddResultText.Text = $"✗ {ex.Message}";
+            return;
+        }
 
-        // Snapshot previous state for rollback (mirrors legacy logic exactly)
+        // Snapshot only after acquiring the shared lifecycle lease. This prevents a
+        // concurrent direct-connect surface from committing a newer record/settings
+        // state while this edit waits and later rolling that newer state back.
         var previousActiveId = _gatewayRegistry.ActiveGatewayId;
         var previousSettings = CurrentApp.Settings;
         var prevGatewayUrl = previousSettings?.GatewayUrl;
@@ -2854,17 +2867,9 @@ public sealed partial class ConnectionPage : Page
         var existingRecordSnapshot = existing;
         var recordId = existing?.Id ?? Guid.NewGuid().ToString();
 
-        // Hoisted out of the try block so the catch handler can pass the
-        // backup to RollbackDirectConnect for credential restore.
-        // identityBackupSentinel = file size + last-write-time captured at
-        // backup time. Rollback uses it to skip the restore if the file was
-        // touched in the meantime (e.g. successful late pairing wrote a new
-        // valid token while the connect attempt was still failing).
-        string? identityKeyPath = null;
-        string? identityBackup = null;
-        long identityBackupLength = -1;
-        DateTime identityBackupMtimeUtc = DateTime.MinValue;
-        bool identityCleared = false;
+        DeviceTokenClearTransaction? identityRollback = null;
+        GatewayRecord? candidateRecordSnapshot = null;
+        var candidateRegistryCommitted = false;
 
         try
         {
@@ -2880,9 +2885,11 @@ public sealed partial class ConnectionPage : Page
                 SshTunnel = sshConfig,
                 LastConnected = existing?.LastConnected,
             }.PreserveAdvancedFields(existing); // keep per-gateway BrowserControlPort across edits
+            candidateRecordSnapshot = record;
             _gatewayRegistry.AddOrUpdate(record);
             _gatewayRegistry.SetActive(recordId);
             _gatewayRegistry.Save();
+            candidateRegistryCommitted = true;
 
             // Identity-token handling.
             //   - When the user provides a NEW shared token, the previous
@@ -2893,30 +2900,14 @@ public sealed partial class ConnectionPage : Page
             //     them would silently force a re-pair the user didn't ask
             //     for and would violate the "never downgrade a paired
             //     device" architecture rule.
-            //   - When we DO clear, snapshot the identity JSON first so
-            //     RollbackDirectConnect can restore the user's credentials
-            //     if the connection then fails.
             var identityDir = _gatewayRegistry.GetIdentityDirectory(recordId);
-            identityKeyPath = Path.Combine(identityDir, "device-key-ed25519.json");
-            try
-            {
-                if (File.Exists(identityKeyPath))
-                {
-                    identityBackup = File.ReadAllText(identityKeyPath);
-                    var info = new FileInfo(identityKeyPath);
-                    identityBackupLength = info.Length;
-                    identityBackupMtimeUtc = info.LastWriteTimeUtc;
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"ConnectionPage: Failed to snapshot gateway identity before direct connect; rollback will skip restore: {ex.Message}");
-            }
-
             if (!string.IsNullOrWhiteSpace(token))
             {
-                DeviceIdentityStore.ClearStoredTokens(identityDir);
-                identityCleared = true;
+                var clearResult = DeviceIdentityStore.BeginTransactionalTokenClear(identityDir);
+                if (!clearResult.Success)
+                    throw new InvalidOperationException(
+                        $"Stored device credentials could not be cleared safely: {clearResult.Error}");
+                identityRollback = clearResult.Transaction;
             }
 
             if (previousSettings != null)
@@ -2931,7 +2922,7 @@ public sealed partial class ConnectionPage : Page
                     previousSettings.SshTunnelRemotePort = sshConfig.RemotePort;
                     previousSettings.SshTunnelLocalPort = sshConfig.LocalPort;
                 }
-                previousSettings.Save();
+                previousSettings.SaveOrThrow();
             }
 
             if (useSsh)
@@ -2955,16 +2946,34 @@ public sealed partial class ConnectionPage : Page
         catch (Exception ex)
         {
             AddResultText.Text = $"✗ {ex.Message}";
-            RollbackDirectConnect(previousActiveId, isNewRecord, recordId, existingRecordSnapshot,
+            try
+            {
+                // Stop and await the failed attempt before conditionally restoring
+                // tokens, so no late pairing writer can race the rollback.
+                await _connectionManager.DisconnectAsync();
+            }
+            catch (Exception disconnectEx)
+            {
+                // The transactional restore compares the cleared-state hash while holding the
+                // identity lock, so it remains safe even if disconnect cleanup reports a failure.
+                Logger.Warn($"ConnectionPage: Failed to stop direct connect before rollback: {disconnectEx.Message}");
+            }
+            var rollbackError = RollbackDirectConnect(
+                previousActiveId,
+                isNewRecord,
+                recordId,
+                existingRecordSnapshot,
+                candidateRecordSnapshot,
+                candidateRegistryCommitted,
                 previousSettings, prevGatewayUrl, prevUseSsh, prevSshUser, prevSshHost,
                 prevSshPort, prevSshRemotePort, prevSshLocalPort,
-                identityCleared ? identityKeyPath : null,
-                identityCleared ? identityBackup : null,
-                identityCleared ? identityBackupLength : -1,
-                identityCleared ? identityBackupMtimeUtc : DateTime.MinValue);
+                identityRollback);
+            if (!string.IsNullOrWhiteSpace(rollbackError))
+                AddResultText.Text = $"{AddResultText.Text} {rollbackError}";
         }
         finally
         {
+            gatewayLifecycleLease?.Dispose();
             AddSaveButton.IsEnabled = true;
         }
     }
@@ -3071,71 +3080,119 @@ public sealed partial class ConnectionPage : Page
         return snapshot;
     }
 
-    private void RollbackDirectConnect(
+    private string? RollbackDirectConnect(
         string? previousActiveId, bool isNewRecord, string recordId,
-        GatewayRecord? existingRecordSnapshot, SettingsManager? settings,
+        GatewayRecord? existingRecordSnapshot, GatewayRecord? candidateRecordSnapshot,
+        bool candidateRegistryCommitted,
+        SettingsManager? settings,
         string? prevGatewayUrl, bool prevUseSsh, string? prevSshUser,
         string? prevSshHost, int prevSshPort, int prevSshRemotePort, int prevSshLocalPort,
-        string? identityKeyPath = null, string? identityBackup = null,
-        long identityBackupLength = -1, DateTime identityBackupMtimeUtc = default)
+        DeviceTokenClearTransaction? identityRollback = null)
     {
-        if (_gatewayRegistry == null) return;
+        if (_gatewayRegistry == null)
+            return "Gateway rollback could not run because the registry is unavailable.";
 
-        if (isNewRecord)
-            _gatewayRegistry.Remove(recordId);
-        else if (existingRecordSnapshot != null)
-            _gatewayRegistry.AddOrUpdate(existingRecordSnapshot);
-
-        if (previousActiveId != null)
-            _gatewayRegistry.SetActive(previousActiveId);
-        _gatewayRegistry.Save();
-
-        // Restore the device-token JSON we cleared at the top of
-        // DoDirectConnectFromAddFormAsync. Without this, a failed direct
-        // connect after the user had typed a (possibly wrong) shared token
-        // would permanently destroy the device token earned during the
-        // last successful pairing — forcing a full re-pair the user never
-        // asked for. Skip the restore if the file changed since backup
-        // (e.g. a late-arriving successful pairing wrote a fresh token in
-        // the meantime — that token is more valuable than our backup).
-        if (!string.IsNullOrEmpty(identityKeyPath) && identityBackup != null)
+        try
         {
-            try
+            if (isNewRecord)
+                _gatewayRegistry.Remove(recordId);
+            else if (existingRecordSnapshot != null)
+                _gatewayRegistry.AddOrUpdate(existingRecordSnapshot);
+
+            _gatewayRegistry.SetActive(previousActiveId);
+            _gatewayRegistry.Save();
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"ConnectionPage: Gateway registry rollback failed: {ex.Message}");
+            if (!candidateRegistryCommitted)
             {
-                bool fileUnchanged = false;
-                if (File.Exists(identityKeyPath))
-                {
-                    var info = new FileInfo(identityKeyPath);
-                    fileUnchanged = info.Length == identityBackupLength
-                                    && info.LastWriteTimeUtc == identityBackupMtimeUtc;
-                }
-                else
-                {
-                    // ClearStoredTokens may have rewritten the file with a
-                    // smaller body — that's the expected post-clear state,
-                    // so treat as unchanged-from-clear and restore.
-                    fileUnchanged = true;
-                }
-                if (fileUnchanged)
-                    DeviceIdentity.AtomicWriteKeyFileRaw(identityKeyPath, identityBackup);
-                // else: another writer touched the file; preserve it.
+                return $"Gateway update was not saved, and rollback persistence also failed: {ex.Message}";
             }
-            catch (Exception ex)
+
+            // Registry writes are atomic, so a failed rollback leaves the already-committed
+            // candidate on disk. Keep in-memory registry, identity, and settings aligned to it.
+            if (candidateRecordSnapshot is not null)
             {
-                Logger.Warn($"ConnectionPage: Failed to restore gateway identity after direct connect rollback: {ex.Message}");
+                _gatewayRegistry.AddOrUpdate(candidateRecordSnapshot);
+                _gatewayRegistry.SetActive(recordId);
+            }
+
+            var reconciliationError = ReconcileSettingsToCandidate(settings, candidateRecordSnapshot);
+            return string.IsNullOrWhiteSpace(reconciliationError)
+                ? $"Gateway rollback failed; the new gateway remains active: {ex.Message}"
+                : $"Gateway rollback failed; the new gateway remains active: {ex.Message} {reconciliationError}";
+        }
+
+        var errors = new List<string>();
+
+        // Restore only after the previous registry state is durable. The conditional restore
+        // cannot overwrite a newer pairing writer because it compares the cleared-state hash
+        // while holding the shared identity lock.
+        if (identityRollback is not null)
+        {
+            var restore = DeviceIdentityStore.RestoreTransactionalTokenClear(
+                identityRollback,
+                new AppLogger());
+            if (restore.Outcome == DeviceTokenRestoreOutcome.Superseded)
+                Logger.Info("ConnectionPage: Identity rollback skipped because newer credentials were written.");
+            else if (restore.Outcome == DeviceTokenRestoreOutcome.Failed)
+            {
+                var message = $"Identity rollback failed: {restore.Error}";
+                Logger.Warn($"ConnectionPage: {message}");
+                errors.Add(message);
             }
         }
 
         if (settings != null)
         {
-            settings.GatewayUrl = prevGatewayUrl ?? string.Empty;
-            settings.UseSshTunnel = prevUseSsh;
-            settings.SshTunnelUser = prevSshUser ?? string.Empty;
-            settings.SshTunnelHost = prevSshHost ?? string.Empty;
-            settings.SshTunnelSshPort = prevSshPort;
-            settings.SshTunnelRemotePort = prevSshRemotePort;
-            settings.SshTunnelLocalPort = prevSshLocalPort;
-            settings.Save();
+            try
+            {
+                settings.GatewayUrl = prevGatewayUrl ?? string.Empty;
+                settings.UseSshTunnel = prevUseSsh;
+                settings.SshTunnelUser = prevSshUser ?? string.Empty;
+                settings.SshTunnelHost = prevSshHost ?? string.Empty;
+                settings.SshTunnelSshPort = prevSshPort;
+                settings.SshTunnelRemotePort = prevSshRemotePort;
+                settings.SshTunnelLocalPort = prevSshLocalPort;
+                settings.SaveOrThrow();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"ConnectionPage: Settings rollback failed: {ex.Message}");
+                errors.Add($"Settings rollback failed: {ex.Message}");
+            }
+        }
+
+        return errors.Count == 0 ? null : string.Join(" ", errors);
+    }
+
+    private static string? ReconcileSettingsToCandidate(
+        SettingsManager? settings,
+        GatewayRecord? candidate)
+    {
+        if (settings is null || candidate is null)
+            return "Candidate settings could not be reconciled.";
+
+        try
+        {
+            settings.GatewayUrl = candidate.Url;
+            settings.UseSshTunnel = candidate.SshTunnel is not null;
+            if (candidate.SshTunnel is { } ssh)
+            {
+                settings.SshTunnelUser = ssh.User;
+                settings.SshTunnelHost = ssh.Host;
+                settings.SshTunnelSshPort = ssh.SshPort;
+                settings.SshTunnelRemotePort = ssh.RemotePort;
+                settings.SshTunnelLocalPort = ssh.LocalPort;
+            }
+            settings.SaveOrThrow();
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"ConnectionPage: Candidate settings reconciliation failed: {ex.Message}");
+            return $"Candidate settings reconciliation failed: {ex.Message}";
         }
     }
 
