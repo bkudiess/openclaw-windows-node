@@ -24,9 +24,6 @@ public class WindowsNodeClient : WebSocketClientBase
     private FrozenDictionary<string, CommandDispatchEntry> _commandMap =
         FrozenDictionary<string, CommandDispatchEntry>.Empty;
     private readonly NodeRegistration _registration;
-    private const string WindowsPlatform = "windows";
-    private const string WindowsDeviceFamily = "Windows";
-    
     // Connection state
     private bool _isConnected;
     private string? _nodeId;
@@ -139,8 +136,8 @@ public class WindowsNodeClient : WebSocketClientBase
         {
             Id = _deviceIdentity.DeviceId,
             Version = AppVersionInfo.Version,
-            Platform = WindowsPlatform,
-            DeviceFamily = WindowsDeviceFamily,
+            Platform = WindowsClientMetadata.Platform,
+            DeviceFamily = WindowsClientMetadata.DeviceFamily,
             DisplayName = $"Windows Node ({Environment.MachineName})"
         };
     }
@@ -154,9 +151,7 @@ public class WindowsNodeClient : WebSocketClientBase
     {
         var storedNodeToken = TryLoadStoredNodeToken(dataPath, logger);
         if (!string.IsNullOrEmpty(storedNodeToken))
-        {
             return storedNodeToken;
-        }
 
         var gatewayToken = NormalizeOptionalCredential(token);
         if (!string.IsNullOrEmpty(gatewayToken))
@@ -180,16 +175,7 @@ public class WindowsNodeClient : WebSocketClientBase
 
     private static string? TryLoadStoredNodeToken(string dataPath, IOpenClawLogger? logger)
     {
-        try
-        {
-            var identity = new DeviceIdentity(dataPath, logger);
-            identity.Initialize();
-            return string.IsNullOrWhiteSpace(identity.NodeDeviceToken) ? null : identity.NodeDeviceToken;
-        }
-        catch
-        {
-            return null;
-        }
+        return DeviceIdentity.TryReadStoredDeviceTokenForRole(dataPath, "node", logger);
     }
     
     /// <summary>
@@ -784,15 +770,16 @@ public class WindowsNodeClient : WebSocketClientBase
                     _isPaired = true;
                     _pairingApprovedAwaitingReconnect = false;
                     _logger.Info("Received device token - we are now paired!");
-                    _deviceIdentity.StoreDeviceTokenForRole("node", deviceToken, TryGetAuthScopes(authPayload));
-                    DeviceTokenReceived?.Invoke(this, new DeviceTokenReceivedEventArgs(deviceToken, TryGetAuthScopes(authPayload), "node"));
+                    var scopes = TryGetAuthScopes(authPayload);
+                    TryStoreHandshakeDeviceToken(deviceToken, scopes);
+                    DeviceTokenReceived?.Invoke(this, new DeviceTokenReceivedEventArgs(deviceToken, scopes, "node"));
                     EmitPairingStatusOnTransition(new PairingStatusEventArgs(
                         PairingStatus.Paired,
                         _deviceIdentity.DeviceId,
                         wasWaiting ? "Pairing approved!" : null));
                 }
             }
-            
+
             _logger.Info($"Node registered successfully! ID: {_nodeId ?? _deviceIdentity.DeviceId[..16]}");
             
             // Pairing happens at connect time via device identity, no separate request needed.
@@ -832,9 +819,22 @@ public class WindowsNodeClient : WebSocketClientBase
                         _deviceIdentity.DeviceId));
                 }
             }
-            
+
             RaiseStatusChanged(ConnectionStatus.Connected);
             HandshakeSucceeded?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private void TryStoreHandshakeDeviceToken(string token, string[]? scopes)
+    {
+        try
+        {
+            _deviceIdentity.StoreDeviceTokenForRole("node", token, scopes);
+        }
+        catch (DeviceIdentityLoadException ex)
+        {
+            _logger.Error(
+                $"Failed to persist node device token during handshake; connection remains active: {ex.InnerException?.Message}");
         }
     }
 
@@ -936,7 +936,6 @@ public class WindowsNodeClient : WebSocketClientBase
         }
 
         _logger.Error($"Node registration failed: {TokenSanitizer.Sanitize(error)} (code: {errorCode})");
-        ConnectionFailure?.Invoke(this, ClassifyConnectionFailure(error, effectiveErrorCode));
         RaiseStatusChanged(ConnectionStatus.Error);
     }
 
