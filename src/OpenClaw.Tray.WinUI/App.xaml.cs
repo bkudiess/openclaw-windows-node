@@ -875,10 +875,9 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
                         record,
                         ct,
                         canContinue: () =>
-                            string.Equals(
-                                _gatewayRegistry?.ActiveGatewayId,
-                                record.Id,
-                                StringComparison.Ordinal) &&
+                            OpenClawTray.Services.WslKeepAlivePolicy.IsSameSetupManagedGateway(
+                                record,
+                                _gatewayRegistry?.GetActive()) &&
                             (_connectionManager?.IsAutomaticReconnectAllowed(record.Id) ?? false))
                     : Task.FromResult(new ManagedLocalPortConflictRepairResult(
                         ManagedLocalPortConflictRepairOutcome.NotNeeded)),

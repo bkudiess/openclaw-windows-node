@@ -97,6 +97,7 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
     private readonly bool _tokenIsBootstrapToken;
     private readonly bool _bootstrapPairAsNode;
     private readonly bool _ignoreStoredDeviceToken;
+    private readonly bool _persistHandshakeDeviceTokens;
 
     /// <summary>True when the gateway reported "pairing required" for this device.</summary>
     public bool IsPairingRequired => Volatile.Read(ref _pairingRequiredAwaitingApproval);
@@ -266,12 +267,13 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
     protected void RaiseConnectionFailure(GatewayErrorKind kind) =>
         ConnectionFailure?.Invoke(this, kind);
 
-    public OpenClawGatewayClient(string gatewayUrl, string token, IOpenClawLogger? logger = null, bool tokenIsBootstrapToken = false, bool bootstrapPairAsNode = false, string? identityPath = null, bool ignoreStoredDeviceToken = false)
+    public OpenClawGatewayClient(string gatewayUrl, string token, IOpenClawLogger? logger = null, bool tokenIsBootstrapToken = false, bool bootstrapPairAsNode = false, string? identityPath = null, bool ignoreStoredDeviceToken = false, bool persistHandshakeDeviceTokens = true)
         : base(gatewayUrl, token, logger)
     {
         _tokenIsBootstrapToken = tokenIsBootstrapToken;
         _bootstrapPairAsNode = bootstrapPairAsNode;
         _ignoreStoredDeviceToken = ignoreStoredDeviceToken;
+        _persistHandshakeDeviceTokens = persistHandshakeDeviceTokens;
         _currentGatewayUrl = gatewayUrl;
         var dataPath = identityPath ?? OpenClawAppIdentity.ResolveRoamingDataDirectory(
             Environment.GetEnvironmentVariable);
@@ -1996,6 +1998,9 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
 
     private bool TryStoreHandshakeDeviceToken(string role, string token, string[]? scopes)
     {
+        if (!_persistHandshakeDeviceTokens)
+            return false;
+
         try
         {
             _deviceIdentity.StoreDeviceTokenForRole(role, token, scopes);

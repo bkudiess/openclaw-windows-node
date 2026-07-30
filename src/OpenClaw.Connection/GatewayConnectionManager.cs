@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Net;
+using System.Net.Sockets;
 using OpenClaw.Shared;
 using OpenClaw.Shared.Telemetry;
 
@@ -59,6 +61,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
     private readonly Func<TimeSpan, Task> _reconnectDelay;
     private readonly Func<GatewayRecord, CancellationToken, Task<GatewayEndpointProvenance>>?
         _endpointProvenanceProbe;
+    private readonly Func<ISshTunnelManager> _validationTunnelFactory;
     private readonly SemaphoreSlim _transitionSemaphore = new(1, 1);
     private readonly SemaphoreSlim _nodeStartSemaphore = new(1, 1);
     private readonly object _nodeOperationLock = new();
@@ -134,7 +137,8 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         Func<GatewayRecord, string, bool>? shouldStartNodeConnection = null,
         Func<TimeSpan, Task>? reconnectDelay = null,
         Func<GatewayRecord, CancellationToken, Task<GatewayEndpointProvenance>>?
-            endpointProvenanceProbe = null)
+            endpointProvenanceProbe = null,
+        Func<ISshTunnelManager>? validationTunnelFactory = null)
     {
         _credentialResolver = credentialResolver ?? throw new ArgumentNullException(nameof(credentialResolver));
         _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
@@ -148,6 +152,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         _shouldStartNodeConnection = shouldStartNodeConnection;
         _reconnectDelay = reconnectDelay ?? Task.Delay;
         _endpointProvenanceProbe = endpointProvenanceProbe;
+        _validationTunnelFactory = validationTunnelFactory ?? (() => new SshTunnelService(_logger));
         _diagnostics = diagnostics ?? new ConnectionDiagnostics(clock: clock);
         _diagnostics.EventRecorded += (_, e) => DiagnosticEvent?.Invoke(this, e);
 
@@ -996,6 +1001,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
     public async Task SwitchGatewayAsync(string gatewayId)
     {
         ThrowIfDisposed();
+        using var lifecycleLease = await BeginManualGatewayLifecycleOperationAsync();
         await _transitionSemaphore.WaitAsync();
         try
         {
@@ -1058,6 +1064,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         if (!GatewayUrlHelper.IsValidGatewayUrl(gatewayUrl))
             return new SetupCodeResult(SetupCodeOutcome.InvalidUrl, "Invalid gateway URL");
 
+        using var lifecycleLease = await BeginManualGatewayLifecycleOperationAsync();
         await _transitionSemaphore.WaitAsync();
         try
         {
@@ -1104,15 +1111,20 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             if (!Directory.Exists(identityDir))
                 Directory.CreateDirectory(identityDir);
 
-            // Clear stored device tokens so we start fresh with the bootstrap token.
-            // The keypair (device ID) stays — only the tokens are wiped.
-            DeviceIdentityStore.ClearStoredTokens(identityDir, _logger);
+            // Force bootstrap for this connection without destroying durable device tokens.
+            // A successful pairing replaces them; a failed attempt leaves the prior pairing intact.
             _diagnostics.Record("setup", $"Setup code applied for {GatewayUrlHelper.SanitizeForDisplay(gatewayUrl)}");
 
             // 5. Connect to new gateway
             if (!string.IsNullOrWhiteSpace(decoded.Token))
                 _forceBootstrapForGatewayRecordId = recordId;
             await ConnectCoreAsync(recordId);
+            if (_stateMachine.Current.OperatorState == RoleConnectionState.Error)
+            {
+                return new SetupCodeResult(
+                    SetupCodeOutcome.ConnectionFailed,
+                    _stateMachine.Current.OperatorError ?? "Gateway connection failed.");
+            }
         }
         finally
         {
@@ -1130,8 +1142,12 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         if (!GatewayUrlHelper.IsValidGatewayUrl(gatewayUrl))
             return new SetupCodeResult(SetupCodeOutcome.InvalidUrl, "Invalid gateway URL");
 
+        ISshTunnelManager? isolatedValidationTunnel = null;
+        var gatewayCommitted = false;
+
         try
         {
+            using var lifecycleLease = await BeginManualGatewayLifecycleOperationAsync();
             await _transitionSemaphore.WaitAsync();
             try
             {
@@ -1144,9 +1160,58 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
 
                 if (existing != null && hasDurableTokens)
                 {
+                    var validationUrl = gatewayUrl;
+                    if (sshTunnel is not null)
+                    {
+                        if (_tunnelManager is null)
+                        {
+                            return new SetupCodeResult(
+                                SetupCodeOutcome.ConnectionFailed,
+                                "SSH tunnel manager is unavailable; shared token was not sent.");
+                        }
+
+                        if (_tunnelManager.IsActive &&
+                            _tunnelManager.ActiveConfig == sshTunnel)
+                        {
+                            // Re-enter StartAsync even for exact reuse so the service proves
+                            // PID/start-time ownership before a shared credential is sent.
+                            validationUrl = await _tunnelManager
+                                .StartAsync(sshTunnel, CancellationToken.None)
+                                .ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            var excludedPorts = new HashSet<int>();
+                            if (_tunnelManager.ActiveConfig is { } activeConfig)
+                            {
+                                excludedPorts.Add(activeConfig.LocalPort);
+                                if (activeConfig.IncludeBrowserProxyForward)
+                                    excludedPorts.Add(activeConfig.LocalPort + 2);
+                            }
+                            var validationConfig = sshTunnel with
+                            {
+                                IncludeBrowserProxyForward = false,
+                                LocalPort = GetAvailableLoopbackPort(excludedPorts),
+                            };
+                            isolatedValidationTunnel = _validationTunnelFactory();
+                            try
+                            {
+                                validationUrl = await isolatedValidationTunnel
+                                    .StartAsync(validationConfig, CancellationToken.None)
+                                    .ConfigureAwait(false);
+                            }
+                            catch (Exception ex)
+                            {
+                                return new SetupCodeResult(
+                                    SetupCodeOutcome.ConnectionFailed,
+                                    $"SSH tunnel validation failed: {ex.Message}");
+                            }
+                        }
+                    }
+
                     var validationRecord = existing with
                     {
-                        Url = gatewayUrl,
+                        Url = validationUrl,
                         SharedGatewayToken = token,
                         SshTunnel = sshTunnel,
                     };
@@ -1155,9 +1220,9 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                         IsBootstrapToken: false,
                         CredentialResolver.SourceSharedGatewayToken);
                     var validationAuthorization = await AuthorizeCredentialForEndpointAsync(
-                            validationRecord,
-                            validationCredential,
-                            CancellationToken.None).ConfigureAwait(false);
+                        validationRecord,
+                        validationCredential,
+                        CancellationToken.None).ConfigureAwait(false);
                     if (!validationAuthorization.Allowed)
                     {
                         return new SetupCodeResult(
@@ -1166,21 +1231,22 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                     }
 
                     var validation = await ValidateSharedTokenBeforeReplacementAsync(
-                        gatewayUrl,
+                        validationUrl,
                         token,
                         identityDir,
-                        existing);
+                        validationRecord);
                     if (validation.Outcome != SetupCodeOutcome.Success)
                         return validation;
                 }
 
-                var record = (existing ?? new GatewayRecord { Id = recordId }) with
-                {
-                    Url = gatewayUrl,
-                    SharedGatewayToken = token,
-                    BootstrapToken = null,
-                    SshTunnel = sshTunnel,
-                };
+                var record = ((existing ?? new GatewayRecord { Id = recordId }) with
+                    {
+                        Url = gatewayUrl,
+                        SharedGatewayToken = token,
+                        BootstrapToken = null,
+                        SshTunnel = sshTunnel,
+                    })
+                    .PreserveAdvancedFields(existing);
                 var previousRecord = existing;
                 var previousActiveId = _registry.ActiveGatewayId;
                 _registry.AddOrUpdate(record);
@@ -1188,6 +1254,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 try
                 {
                     _registry.Save();
+                    gatewayCommitted = true;
                 }
                 catch (Exception ex)
                 {
@@ -1199,24 +1266,44 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                     _logger.Warn($"[ConnMgr] Failed to persist shared-token gateway update: {ex.Message}");
                     return new SetupCodeResult(SetupCodeOutcome.ConnectionFailed, ex.Message);
                 }
+
+                if (isolatedValidationTunnel is not null)
+                {
+                    await StopAndDisposeValidationTunnelAsync(isolatedValidationTunnel).ConfigureAwait(false);
+                    isolatedValidationTunnel = null;
+                }
                 SetGatewayConnectionIntent(recordId, shouldBeConnected: true);
 
                 // Disconnect current gateway only after replacement credentials have been validated and persisted.
                 await DisconnectCoreAsync();
 
-                // Clear stored device tokens so the shared token is used.
+                // The replacement shared token was validated above. Preserve durable device tokens;
+                // they remain the preferred credential until a successful re-pair replaces them.
                 if (!Directory.Exists(identityDir))
                     Directory.CreateDirectory(identityDir);
-                DeviceIdentityStore.ClearStoredTokens(identityDir, _logger);
 
                 // Connect to the gateway
                 await ConnectCoreAsync(recordId);
+                if (_stateMachine.Current.OperatorState == RoleConnectionState.Error)
+                {
+                    return new SetupCodeResult(
+                        SetupCodeOutcome.ConnectionFailed,
+                        _stateMachine.Current.OperatorError ?? "Gateway connection failed.",
+                        GatewayUrl: gatewayUrl,
+                        GatewayCommitted: true);
+                }
             }
             finally
             {
+                if (isolatedValidationTunnel is not null)
+                    await StopAndDisposeValidationTunnelAsync(isolatedValidationTunnel).ConfigureAwait(false);
+
                 _transitionSemaphore.Release();
             }
-            return new SetupCodeResult(SetupCodeOutcome.Success, GatewayUrl: gatewayUrl);
+            return new SetupCodeResult(
+                SetupCodeOutcome.Success,
+                GatewayUrl: gatewayUrl,
+                GatewayCommitted: true);
         }
         catch (DeviceIdentityLoadException ex)
         {
@@ -1228,12 +1315,18 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 detail);
             return new SetupCodeResult(
                 SetupCodeOutcome.ConnectionFailed,
-                DeviceIdentityLoadException.RecoveryMessage);
+                DeviceIdentityLoadException.RecoveryMessage,
+                GatewayUrl: gatewayCommitted ? gatewayUrl : null,
+                GatewayCommitted: gatewayCommitted);
         }
         catch (Exception ex)
         {
             _logger.Error($"[ConnMgr] ConnectWithSharedToken failed: {ex.Message}");
-            return new SetupCodeResult(SetupCodeOutcome.ConnectionFailed, ex.Message);
+            return new SetupCodeResult(
+                SetupCodeOutcome.ConnectionFailed,
+                ex.Message,
+                GatewayUrl: gatewayCommitted ? gatewayUrl : null,
+                GatewayCommitted: gatewayCommitted);
         }
     }
 
@@ -1252,7 +1345,8 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             tokenIsBootstrapToken: false,
             bootstrapPairAsNode: false,
             identityPath: identityDir,
-            ignoreStoredDeviceToken: true)
+            ignoreStoredDeviceToken: true,
+            persistHandshakeDeviceTokens: false)
         {
             UseV2Signature = existing.IsLocal || existing.RequiresV2Signature
         };
@@ -1294,6 +1388,44 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             try { await client.DisconnectAsync(); }
             catch (Exception ex) { _logger.Warn($"[ConnMgr] Shared-token validation disconnect failed: {ex.Message}"); }
         }
+    }
+
+    private async Task StopAndDisposeValidationTunnelAsync(ISshTunnelManager tunnel)
+    {
+        try
+        {
+            if (tunnel.IsActive)
+                await tunnel.StopAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"[ConnMgr] Failed to stop the isolated SSH validation tunnel: {ex.Message}");
+        }
+        finally
+        {
+            tunnel.Dispose();
+        }
+    }
+
+    private static int GetAvailableLoopbackPort(IReadOnlySet<int> excludedPorts)
+    {
+        for (var attempt = 0; attempt < 16; attempt++)
+        {
+            var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            try
+            {
+                var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+                if (!excludedPorts.Contains(port))
+                    return port;
+            }
+            finally
+            {
+                listener.Stop();
+            }
+        }
+
+        throw new InvalidOperationException("Unable to allocate an isolated SSH validation port.");
     }
 
     // ─── Event Handlers ───

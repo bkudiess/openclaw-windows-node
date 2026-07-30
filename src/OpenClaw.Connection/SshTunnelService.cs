@@ -39,6 +39,16 @@ public sealed class SshTunnelService : ISshTunnelManager
     }
 
     public bool IsActive => IsRunning;
+    public SshTunnelConfig? ActiveConfig
+    {
+        get
+        {
+            lock (_stateLock)
+            {
+                return IsRunningLocked() ? _currentConfig : null;
+            }
+        }
+    }
     public string? LocalTunnelUrl => IsActive ? $"ws://localhost:{CurrentLocalPort}" : null;
     public string? CurrentUser { get; private set; }
     public string? CurrentHost { get; private set; }
@@ -144,7 +154,10 @@ public sealed class SshTunnelService : ISshTunnelManager
             new SshTunnelConfig(user, host, remotePort, localPort, includeBrowserProxyForward, sshPort),
             SshTunnelOwner.Settings);
 
-    private void EnsureStartedCore(SshTunnelConfig tunnel, SshTunnelOwner owner)
+    private void EnsureStartedCore(
+        SshTunnelConfig tunnel,
+        SshTunnelOwner owner,
+        Action<SshTunnelConfig>? beforeStart = null)
     {
         lock (_operationLock)
         {
@@ -171,6 +184,7 @@ public sealed class SshTunnelService : ISshTunnelManager
             }
 
             StopLocked();
+            beforeStart?.Invoke(tunnel);
             lock (_stateLock)
             {
                 Status = TunnelStatus.Starting;
@@ -450,17 +464,169 @@ public sealed class SshTunnelService : ISshTunnelManager
         Stop();
     }
 
-    public Task<string> StartAsync(SshTunnelConfig config, CancellationToken ct)
+    public async Task<string> StartAsync(SshTunnelConfig config, CancellationToken ct)
     {
-        EnsureStartedCore(config, SshTunnelOwner.GatewayConnectionManager);
-        var localUrl = $"ws://localhost:{config.LocalPort}";
-        return Task.FromResult(localUrl);
+        Process? process = null;
+        long generation = 0;
+        try
+        {
+            EnsureStartedCore(
+                config,
+                SshTunnelOwner.GatewayConnectionManager,
+                tunnel =>
+                {
+                    EnsurePortIsUnoccupied(WindowsTcpListenerSnapshot.Capture(), tunnel.LocalPort);
+                    if (tunnel.IncludeBrowserProxyForward)
+                        EnsurePortIsUnoccupied(WindowsTcpListenerSnapshot.Capture(), tunnel.LocalPort + 2);
+                });
+
+            var normalizedConfig = config with
+            {
+                User = config.User.Trim(),
+                Host = config.Host.Trim(),
+            };
+            DateTime processStartTimeUtc;
+            lock (_stateLock)
+            {
+                if (!IsRunningLocked() ||
+                    _process is null ||
+                    !Equals(_currentConfig, normalizedConfig) ||
+                    _currentOwner != SshTunnelOwner.GatewayConnectionManager)
+                {
+                    throw new InvalidOperationException("SSH tunnel changed before listener ownership could be verified.");
+                }
+
+                process = _process;
+                generation = _lifecycleGeneration;
+                processStartTimeUtc = process.StartTime.ToUniversalTime();
+            }
+
+            var processId = process.Id;
+            await WaitForOwnedLocalListenerAsync(
+                config.LocalPort,
+                process,
+                generation,
+                processId,
+                processStartTimeUtc,
+                ct).ConfigureAwait(false);
+            if (config.IncludeBrowserProxyForward)
+            {
+                await WaitForOwnedLocalListenerAsync(
+                    config.LocalPort + 2,
+                    process,
+                    generation,
+                    processId,
+                    processStartTimeUtc,
+                    ct).ConfigureAwait(false);
+            }
+            return $"ws://localhost:{config.LocalPort}";
+        }
+        catch
+        {
+            if (process is not null)
+                StopIfCurrent(process, generation);
+            throw;
+        }
     }
 
     public Task StopAsync()
     {
         Stop();
         return Task.CompletedTask;
+    }
+
+    private async Task WaitForOwnedLocalListenerAsync(
+        int localPort,
+        Process process,
+        long generation,
+        int processId,
+        DateTime processStartTimeUtc,
+        CancellationToken cancellationToken)
+    {
+        var deadline = Stopwatch.GetTimestamp() + (long)(TimeSpan.FromSeconds(5).TotalSeconds * Stopwatch.Frequency);
+        while (Stopwatch.GetTimestamp() < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_stateLock)
+            {
+                if (generation != _lifecycleGeneration ||
+                    !ReferenceEquals(_process, process) ||
+                    !IsRunningLocked())
+                {
+                    throw new InvalidOperationException(
+                        LastError ?? "SSH tunnel changed before its local listener became ready.");
+                }
+            }
+
+            if (ValidateListenerOwnership(
+                WindowsTcpListenerSnapshot.Capture(),
+                localPort,
+                processId,
+                processStartTimeUtc))
+            {
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(50), cancellationToken).ConfigureAwait(false);
+        }
+
+        throw new TimeoutException($"SSH tunnel did not establish ownership of local listener port {localPort}.");
+    }
+
+    private void StopIfCurrent(Process process, long generation)
+    {
+        lock (_operationLock)
+        {
+            lock (_stateLock)
+            {
+                if (generation != _lifecycleGeneration ||
+                    !ReferenceEquals(_process, process))
+                {
+                    return;
+                }
+            }
+
+            StopLocked();
+        }
+    }
+
+    internal static void EnsurePortIsUnoccupied(
+        WindowsTcpListenerSnapshotResult snapshot,
+        int localPort)
+    {
+        EnsureCompleteListenerSnapshot(snapshot);
+        if (snapshot.Listeners.Any(listener => listener.Port == localPort))
+            throw new InvalidOperationException($"Local port {localPort} is already owned by another process.");
+    }
+
+    internal static bool ValidateListenerOwnership(
+        WindowsTcpListenerSnapshotResult snapshot,
+        int localPort,
+        int processId,
+        DateTime processStartTimeUtc)
+    {
+        EnsureCompleteListenerSnapshot(snapshot);
+        var listeners = snapshot.Listeners
+            .Where(listener => listener.Port == localPort)
+            .ToArray();
+        if (listeners.Length == 0)
+            return false;
+
+        if (listeners.Any(listener =>
+            listener.ProcessId != processId ||
+            listener.ProcessStartTimeUtc != processStartTimeUtc))
+        {
+            throw new InvalidOperationException(
+                $"Local port {localPort} is not owned exclusively by the launched SSH process.");
+        }
+
+        return true;
+    }
+
+    private static void EnsureCompleteListenerSnapshot(WindowsTcpListenerSnapshotResult snapshot)
+    {
+        if (!snapshot.Ipv4Complete || !snapshot.Ipv6Complete)
+            throw new InvalidOperationException("TCP listener ownership could not be verified.");
     }
 }
 

@@ -94,7 +94,28 @@ public sealed partial class ConnectionStatusWindow : WindowEx
             else if (snapshot.OverallState is OverallConnectionState.Connected or OverallConnectionState.Ready)
             {
                 ConnectButton.Content = LocalizationHelper.GetString("ConnectionStatus_Connect");
-                DirectConnectResult.Text = LocalizationHelper.GetString("ConnectionStatus_Connected");
+                var connectedText = LocalizationHelper.GetString("ConnectionStatus_Connected");
+                SetupCodeResult.Text = connectedText;
+                DirectConnectResult.Text = connectedText;
+            }
+            else if (snapshot.OverallState == OverallConnectionState.Degraded)
+            {
+                var degradedText = LocalizationHelper.GetString("HubWindow_Pill_Degraded");
+                SetupCodeResult.Text = degradedText;
+                DirectConnectResult.Text = degradedText;
+            }
+            else if (snapshot.OperatorState == RoleConnectionState.Error)
+            {
+                ConnectButton.Content = LocalizationHelper.GetString("ConnectionStatus_Connect");
+                var errorText = $"✗ {snapshot.OperatorError ?? LocalizationHelper.GetString("ConnectionPage_GatewayConnectionFailed")}";
+                SetupCodeResult.Text = errorText;
+                DirectConnectResult.Text = errorText;
+            }
+            else if (snapshot.OperatorState == RoleConnectionState.Connecting)
+            {
+                var connectingText = LocalizationHelper.GetString("ConnectionStatus_Connecting");
+                SetupCodeResult.Text = connectingText;
+                DirectConnectResult.Text = connectingText;
             }
             else
             {
@@ -306,11 +327,8 @@ public sealed partial class ConnectionStatusWindow : WindowEx
             try
             {
                 var result = await _manager.ApplySetupCodeAsync(code);
-                SetupCodeResult.Text = result.Outcome switch
-                {
-                    SetupCodeOutcome.Success => string.Format(LocalizationHelper.GetString("ConnectionStatus_ConnectedTo"), GatewayUrlHelper.SanitizeForDisplay(result.GatewayUrl ?? "")),
-                    _ => $"✗ {result.ErrorMessage ?? result.Outcome.ToString()}"
-                };
+                if (result.Outcome != SetupCodeOutcome.Success)
+                    SetupCodeResult.Text = $"✗ {result.ErrorMessage ?? result.Outcome.ToString()}";
             }
             finally
             {
@@ -322,7 +340,6 @@ public sealed partial class ConnectionStatusWindow : WindowEx
             // Reconnect to active gateway
             SetupCodeResult.Text = LocalizationHelper.GetString("ConnectionStatus_Reconnecting");
             await _manager.ReconnectAsync();
-            SetupCodeResult.Text = "";
         }
     }
 
@@ -396,8 +413,35 @@ public sealed partial class ConnectionStatusWindow : WindowEx
         }
 
         DirectConnectResult.Text = useSsh ? LocalizationHelper.GetString("ConnectionStatus_StartingSshTunnel") : LocalizationHelper.GetString("ConnectionStatus_Connecting");
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            var result = await _manager.ConnectWithSharedTokenAsync(url, token, sshConfig);
+            if (result.GatewayCommitted)
+            {
+                try
+                {
+                    await SynchronizeConnectionSettingsWithActiveGatewayAsync();
+                }
+                catch (Exception ex)
+                {
+                    DirectConnectResult.Text = $"✗ {ex.Message}";
+                    return;
+                }
+            }
+
+            if (result.Outcome != SetupCodeOutcome.Success)
+            {
+                DirectConnectResult.Text = $"✗ {result.ErrorMessage}";
+                return;
+            }
+            return;
+        }
+
+        IDisposable? gatewayLifecycleLease = null;
         try
         {
+            gatewayLifecycleLease =
+                await _manager.BeginManualGatewayLifecycleOperationAsync();
             await _manager.DisconnectAsync();
 
             // Create/update gateway record with shared token + SSH config
@@ -407,7 +451,7 @@ public sealed partial class ConnectionStatusWindow : WindowEx
             {
                 Id = recordId,
                 Url = url,
-                SharedGatewayToken = string.IsNullOrWhiteSpace(token) ? null : token,
+                SharedGatewayToken = existing?.SharedGatewayToken,
                 BootstrapToken = null,
                 SshTunnel = sshConfig,
             }.PreserveAdvancedFields(existing); // keep per-gateway BrowserControlPort across reconnect/edit
@@ -415,34 +459,53 @@ public sealed partial class ConnectionStatusWindow : WindowEx
             _registry.SetActive(recordId);
             _registry.Save();
 
-            // Clear stored device tokens so the shared token is used
-            var identityDir = _registry.GetIdentityDirectory(recordId);
-            DeviceIdentityStore.ClearStoredTokens(identityDir);
+            SaveConnectionSettings(url, sshConfig);
 
-            // Start SSH tunnel and save settings
+            // Start the tunnel before connecting. The manager's start is idempotent against this config.
             if (useSsh && sshConfig != null)
             {
                 var app = (App)Microsoft.UI.Xaml.Application.Current;
-                var settings = app.Settings;
-                settings.GatewayUrl = url;
-                settings.UseSshTunnel = true;
-                settings.SshTunnelUser = sshConfig.User;
-                settings.SshTunnelHost = sshConfig.Host;
-                settings.SshTunnelSshPort = sshConfig.SshPort;
-                settings.SshTunnelRemotePort = sshConfig.RemotePort;
-                settings.SshTunnelLocalPort = sshConfig.LocalPort;
-                settings.Save();
                 app.EnsureSshTunnelStarted();
-                DirectConnectResult.Text = LocalizationHelper.GetString("ConnectionStatus_Connecting");
             }
 
             await _manager.ConnectAsync(recordId);
-            DirectConnectResult.Text = string.Format(LocalizationHelper.GetString("ConnectionStatus_ConnectedTo"), GatewayUrlHelper.SanitizeForDisplay(url));
         }
         catch (Exception ex)
         {
             DirectConnectResult.Text = $"✗ {ex.Message}";
         }
+        finally
+        {
+            gatewayLifecycleLease?.Dispose();
+        }
+    }
+
+    private static void SaveConnectionSettings(string gatewayUrl, SshTunnelConfig? sshConfig)
+    {
+        var app = (App)Microsoft.UI.Xaml.Application.Current;
+        var settings = app.Settings;
+        settings.GatewayUrl = gatewayUrl;
+        settings.UseSshTunnel = sshConfig is not null;
+        if (sshConfig is not null)
+        {
+            settings.SshTunnelUser = sshConfig.User;
+            settings.SshTunnelHost = sshConfig.Host;
+            settings.SshTunnelSshPort = sshConfig.SshPort;
+            settings.SshTunnelRemotePort = sshConfig.RemotePort;
+            settings.SshTunnelLocalPort = sshConfig.LocalPort;
+        }
+        settings.SaveOrThrow();
+    }
+
+    private async Task SynchronizeConnectionSettingsWithActiveGatewayAsync()
+    {
+        if (_manager is null || _registry is null)
+            throw new InvalidOperationException("Gateway connection services are unavailable.");
+
+        using var lifecycleLease = await _manager.BeginManualGatewayLifecycleOperationAsync();
+        var active = _registry.GetActive()
+            ?? throw new InvalidOperationException("The committed gateway is no longer active.");
+        SaveConnectionSettings(active.Url, active.SshTunnel);
     }
 
     // ── Timeline with colors ──

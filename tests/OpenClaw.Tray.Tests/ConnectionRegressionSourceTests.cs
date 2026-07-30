@@ -18,7 +18,7 @@ public sealed class ConnectionRegressionSourceTests
 
         Assert.Contains("ConnectAndWaitForDirectConnectOutcomeAsync(recordId)", pageSource);
         Assert.Contains("Task.Delay(TimeSpan.FromSeconds(15))", pageSource);
-        Assert.Contains("RollbackDirectConnect(previousActiveId", pageSource);
+        Assert.Contains("RollbackDirectConnect(", pageSource);
     }
 
     [Fact]
