@@ -943,6 +943,10 @@ public sealed partial class ConnectionPage : Page
                         gatewayUrl: activeGateway?.Url ?? settings.GatewayUrl,
                         browserControlPort: activeGateway?.BrowserControlPort,
                         sshTunnel: activeGateway?.SshTunnel);
+                var browserEndpointVerified =
+                    BrowserProxyActivation.IsSshBrowserEndpointVerified(
+                        activeGateway?.SshTunnel,
+                        activeGateway?.BrowserControlPort);
                 var pillFp = BuildCapabilityPillFingerprint(
                     plan.NodeCard,
                     plan.NodeEffectiveCapabilities,
@@ -950,7 +954,8 @@ public sealed partial class ConnectionPage : Page
                     settings,
                     hasSharedGatewayToken,
                     nodeSessionLive,
-                    requiresRemoteBrowserEndpoint);
+                    requiresRemoteBrowserEndpoint,
+                    browserEndpointVerified);
                 if (_capabilityPillsFingerprint != pillFp)
                 {
                     _capabilityPillsFingerprint = pillFp;
@@ -960,7 +965,8 @@ public sealed partial class ConnectionPage : Page
                         settings,
                         hasSharedGatewayToken,
                         nodeSessionLive,
-                        requiresRemoteBrowserEndpoint);
+                        requiresRemoteBrowserEndpoint,
+                        browserEndpointVerified);
                 }
 
                 NodeCapabilityPillsHost.Visibility =
@@ -1213,7 +1219,14 @@ public sealed partial class ConnectionPage : Page
         return new Border { Child = grid };
     }
 
-    private enum CapabilityPillState { Active, Pending, NeedsSharedToken, Off }
+    private enum CapabilityPillState
+    {
+        Active,
+        Pending,
+        NeedsSharedToken,
+        NeedsVerifiedEndpoint,
+        Off
+    }
 
     private WrapPanel BuildCapabilityPills(
         IReadOnlyList<string> effective,
@@ -1221,7 +1234,8 @@ public sealed partial class ConnectionPage : Page
         SettingsManager settings,
         bool hasSharedGatewayToken,
         bool nodeSessionLive,
-        bool requiresRemoteBrowserEndpoint)
+        bool requiresRemoteBrowserEndpoint,
+        bool browserEndpointVerified)
     {
         var panel = new WrapPanel { HorizontalSpacing = 6, VerticalSpacing = 6 };
         var effectiveSet = new HashSet<string>(
@@ -1252,7 +1266,8 @@ public sealed partial class ConnectionPage : Page
                     effective: effectiveSet.Contains(name),
                     pendingDeclared: pendingSet.Contains(name),
                     hasSharedGatewayToken: hasSharedGatewayToken,
-                    nodeSessionLive: nodeSessionLive)
+                    nodeSessionLive: nodeSessionLive,
+                    browserEndpointVerified: browserEndpointVerified)
                 : effectiveSet.Contains(name)
                     ? BrowserProxyActivation.CapabilityPillKind.Active
                     : (pendingSet.Contains(name) || enabled)
@@ -1262,6 +1277,7 @@ public sealed partial class ConnectionPage : Page
             {
                 BrowserProxyActivation.CapabilityPillKind.Active => CapabilityPillState.Active,
                 BrowserProxyActivation.CapabilityPillKind.NeedsSharedToken => CapabilityPillState.NeedsSharedToken,
+                BrowserProxyActivation.CapabilityPillKind.NeedsVerifiedEndpoint => CapabilityPillState.NeedsVerifiedEndpoint,
                 BrowserProxyActivation.CapabilityPillKind.PendingApproval => CapabilityPillState.Pending,
                 _ => CapabilityPillState.Off,
             };
@@ -1346,6 +1362,16 @@ public sealed partial class ConnectionPage : Page
                 ResolveBrush("SystemFillColorCriticalBrush"),
                 ResolveBrush("SystemFillColorCriticalBrush"),
                 "ConnectionPage_NodePillState_NeedsGatewayToken",
+                FluentIconCatalog.StatusWarn),
+            CapabilityPillState.NeedsVerifiedEndpoint => (
+                TintBrush(
+                    "SystemFillColorCautionBrush",
+                    "SystemFillColorCautionBackgroundBrush",
+                    CapabilityPillFillOpacity,
+                    isHighContrast),
+                ResolveBrush("SystemFillColorCautionBrush"),
+                ResolveBrush("SystemFillColorCautionBrush"),
+                "CommandCenter_BrowserProxyHostNotDetected",
                 FluentIconCatalog.StatusWarn),
             _ => (
                 ResolveBrush("SubtleFillColorTertiaryBrush"),
@@ -1443,7 +1469,8 @@ public sealed partial class ConnectionPage : Page
         SettingsManager settings,
         bool hasSharedGatewayToken,
         bool nodeSessionLive,
-        bool requiresRemoteBrowserEndpoint)
+        bool requiresRemoteBrowserEndpoint,
+        bool browserEndpointVerified)
     {
         var eff = string.Join(
             ",",
@@ -1461,7 +1488,7 @@ public sealed partial class ConnectionPage : Page
             settings.NodeLocationEnabled ? '1' : '0',
             settings.NodeTtsEnabled ? '1' : '0',
             settings.NodeSttEnabled ? '1' : '0');
-        return $"{state}|{eff}|{pend}|{toggles}|{(hasSharedGatewayToken ? '1' : '0')}|{(nodeSessionLive ? '1' : '0')}|{(requiresRemoteBrowserEndpoint ? '1' : '0')}";
+        return $"{state}|{eff}|{pend}|{toggles}|{(hasSharedGatewayToken ? '1' : '0')}|{(nodeSessionLive ? '1' : '0')}|{(requiresRemoteBrowserEndpoint ? '1' : '0')}|{(browserEndpointVerified ? '1' : '0')}";
     }
 
     /// <summary>

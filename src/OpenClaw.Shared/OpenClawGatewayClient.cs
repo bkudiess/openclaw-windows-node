@@ -214,6 +214,14 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
     public event EventHandler<JsonElement>? ConfigUpdated;
     public event EventHandler<JsonElement>? ConfigSchemaUpdated;
 
+    /// <summary>
+    /// Optional fail-closed authorization invoked after connect.challenge and immediately before
+    /// the credential-bearing connect message. Validation clients use this to re-prove the exact
+    /// local listener after the WebSocket has connected, closing listener-replacement races.
+    /// </summary>
+    public Func<CancellationToken, Task<ReconnectAuthorizationResult>>?
+        HandshakeAuthorizationAsync { get; set; }
+
     // New events for agent events, pairing, and models
     public event EventHandler<AgentEventInfo>? AgentEventReceived;
     public event EventHandler<PairingListInfo>? NodePairListUpdated;
@@ -1878,6 +1886,13 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
         // Handle handshake acknowledgement payload.
         if (payload.TryGetProperty("type", out var t) && t.GetString() == "hello-ok")
         {
+            if (HandshakeAuthorizationAsync is not null &&
+                !string.Equals(requestMethod, "connect", StringComparison.Ordinal))
+            {
+                _logger.Warn("[HANDSHAKE] Ignoring uncorrelated hello-ok on guarded validation connection.");
+                return;
+            }
+
             _logger.Info($"[HANDSHAKE] Received hello-ok!");
             Volatile.Write(ref _pairingRequiredAwaitingApproval, false);
             Volatile.Write(ref _pairingRequiredRequestId, null);
@@ -3057,6 +3072,21 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
     {
         try
         {
+            if (HandshakeAuthorizationAsync is not null)
+            {
+                var authorization = await HandshakeAuthorizationAsync(CancellationToken.None)
+                    .ConfigureAwait(false);
+                if (!authorization.Allowed)
+                {
+                    _authFailed = true;
+                    RaiseConnectionFailure(authorization.FailureKind);
+                    RaiseAuthenticationFailed(
+                        authorization.Detail ?? "Connection authorization failed.");
+                    RaiseStatusChanged(ConnectionStatus.Error);
+                    return;
+                }
+            }
+
             await SendConnectMessageAsync(nonce);
         }
         catch (Exception ex)

@@ -909,6 +909,57 @@ public class OpenClawGatewayClientTests
     }
 
     [Fact]
+    public void GuardedValidation_IgnoresUncorrelatedHelloOk()
+    {
+        var helper = new GatewayClientTestHelper();
+        var handshakeSucceeded = false;
+        helper.Client.HandshakeAuthorizationAsync = _ => Task.FromResult(
+            new ReconnectAuthorizationResult(true, GatewayErrorKind.Unknown, string.Empty));
+        helper.Client.HandshakeSucceeded += (_, _) => handshakeSucceeded = true;
+
+        helper.ProcessRawMessage("""
+        {
+          "type": "res",
+          "id": "unsolicited",
+          "payload": {
+            "type": "hello-ok",
+            "protocol": 4,
+            "server": { "version": "hostile" }
+          }
+        }
+        """);
+
+        Assert.False(handshakeSucceeded);
+        Assert.False(helper.Client.HasHandshakeSnapshot);
+    }
+
+    [Fact]
+    public void GuardedValidation_AcceptsHelloOkForTrackedConnectRequest()
+    {
+        var helper = new GatewayClientTestHelper();
+        var handshakeSucceeded = false;
+        helper.Client.HandshakeAuthorizationAsync = _ => Task.FromResult(
+            new ReconnectAuthorizationResult(true, GatewayErrorKind.Unknown, string.Empty));
+        helper.Client.HandshakeSucceeded += (_, _) => handshakeSucceeded = true;
+        helper.TrackPendingRequest("tracked-connect", "connect");
+
+        helper.ProcessRawMessage("""
+        {
+          "type": "res",
+          "id": "tracked-connect",
+          "payload": {
+            "type": "hello-ok",
+            "protocol": 4,
+            "server": { "version": "expected" }
+          }
+        }
+        """);
+
+        Assert.True(handshakeSucceeded);
+        Assert.True(helper.Client.HasHandshakeSnapshot);
+    }
+
+    [Fact]
     public void OperatorBootstrap_HelloOkWithNodeHandoffToken_StoresNodeToken()
     {
         var helper = new GatewayClientTestHelper(
