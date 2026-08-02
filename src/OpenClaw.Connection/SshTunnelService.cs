@@ -464,6 +464,80 @@ public sealed class SshTunnelService : ISshTunnelManager
         Stop();
     }
 
+    public Task<bool> IsOwnedListenerReadyAsync(
+        SshTunnelConfig config,
+        int destinationPort,
+        CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var isConfiguredForward =
+            destinationPort == config.LocalPort ||
+            (config.IncludeBrowserProxyForward && destinationPort == config.LocalPort + 2);
+        if (!isConfiguredForward)
+            return Task.FromResult(false);
+
+        var normalizedConfig = config with
+        {
+            User = config.User.Trim(),
+            Host = config.Host.Trim(),
+        };
+
+        Process process;
+        long generation;
+        int processId;
+        DateTime processStartTimeUtc;
+        lock (_stateLock)
+        {
+            if (!IsRunningLocked() ||
+                _process is null ||
+                !Equals(_currentConfig, normalizedConfig) ||
+                _currentOwner != SshTunnelOwner.GatewayConnectionManager)
+            {
+                return Task.FromResult(false);
+            }
+
+            process = _process;
+            generation = _lifecycleGeneration;
+            processId = process.Id;
+            try
+            {
+                processStartTimeUtc = process.StartTime.ToUniversalTime();
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug($"SSH listener ownership process inspection failed: {ex.Message}");
+                return Task.FromResult(false);
+            }
+        }
+
+        try
+        {
+            if (!ValidateListenerOwnership(
+                    WindowsTcpListenerSnapshot.Capture(),
+                    destinationPort,
+                     processId,
+                     processStartTimeUtc))
+            {
+                return Task.FromResult(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"SSH listener ownership verification failed: {ex.Message}");
+            return Task.FromResult(false);
+        }
+
+        lock (_stateLock)
+        {
+            return Task.FromResult(
+                generation == _lifecycleGeneration &&
+                ReferenceEquals(_process, process) &&
+                IsRunningLocked() &&
+                Equals(_currentConfig, normalizedConfig) &&
+                _currentOwner == SshTunnelOwner.GatewayConnectionManager);
+        }
+    }
+
     public async Task<string> StartAsync(SshTunnelConfig config, CancellationToken ct)
     {
         Process? process = null;

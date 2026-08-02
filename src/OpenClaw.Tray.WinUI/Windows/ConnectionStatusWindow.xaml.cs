@@ -12,6 +12,7 @@ using OpenClaw.Connection;
 using System;
 using System.IO;
 using System.Text;
+using System.Threading;
 using WinUIEx;
 
 namespace OpenClawTray.Windows;
@@ -29,6 +30,7 @@ public sealed partial class ConnectionStatusWindow : WindowEx
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly StringBuilder _plainBuffer = new();
     private DateTime _lastStateChangeTime = DateTime.Now;
+    private long _statusMessageGeneration;
 
     private static readonly SolidColorBrush GreenBrush = new(ColorHelper.FromArgb(255, 76, 175, 80));
     private static readonly SolidColorBrush AmberBrush = new(ColorHelper.FromArgb(255, 255, 193, 7));
@@ -77,8 +79,12 @@ public sealed partial class ConnectionStatusWindow : WindowEx
 
     private void OnManagerStateChanged(object? sender, GatewayConnectionSnapshot snapshot)
     {
+        var statusMessageGeneration = Volatile.Read(ref _statusMessageGeneration);
         _dispatcherQueue.TryEnqueue(() =>
         {
+            if (statusMessageGeneration != Volatile.Read(ref _statusMessageGeneration))
+                return;
+
             _lastStateChangeTime = DateTime.Now;
             RefreshStateMachine(snapshot);
             RefreshGateways();
@@ -104,18 +110,25 @@ public sealed partial class ConnectionStatusWindow : WindowEx
                 SetupCodeResult.Text = degradedText;
                 DirectConnectResult.Text = degradedText;
             }
-            else if (snapshot.OperatorState == RoleConnectionState.Error)
+            else if (snapshot.OverallState == OverallConnectionState.Error)
             {
                 ConnectButton.Content = LocalizationHelper.GetString("ConnectionStatus_Connect");
-                var errorText = $"✗ {snapshot.OperatorError ?? LocalizationHelper.GetString("ConnectionPage_GatewayConnectionFailed")}";
+                var errorText = $"✗ {snapshot.OperatorError ?? snapshot.NodeError ?? LocalizationHelper.GetString("ConnectionPage_GatewayConnectionFailed")}";
                 SetupCodeResult.Text = errorText;
                 DirectConnectResult.Text = errorText;
             }
-            else if (snapshot.OperatorState == RoleConnectionState.Connecting)
+            else if (snapshot.OverallState == OverallConnectionState.Connecting)
             {
                 var connectingText = LocalizationHelper.GetString("ConnectionStatus_Connecting");
                 SetupCodeResult.Text = connectingText;
                 DirectConnectResult.Text = connectingText;
+            }
+            else if (snapshot.OverallState is OverallConnectionState.Idle or OverallConnectionState.Disconnecting)
+            {
+                ConnectButton.Content = LocalizationHelper.GetString("ConnectionStatus_Connect");
+                var disconnectedText = LocalizationHelper.GetString("ConnectionStatus_Disconnected");
+                SetupCodeResult.Text = disconnectedText;
+                DirectConnectResult.Text = disconnectedText;
             }
             else
             {
@@ -318,6 +331,7 @@ public sealed partial class ConnectionStatusWindow : WindowEx
     private async Task OnConnectAsync()
     {
         if (_manager == null) return;
+        InvalidatePendingStatusMessages();
 
         var code = SetupCodeBox.Text?.Trim();
         if (!string.IsNullOrEmpty(code))
@@ -328,7 +342,10 @@ public sealed partial class ConnectionStatusWindow : WindowEx
             {
                 var result = await _manager.ApplySetupCodeAsync(code);
                 if (result.Outcome != SetupCodeOutcome.Success)
+                {
+                    InvalidatePendingStatusMessages();
                     SetupCodeResult.Text = $"✗ {result.ErrorMessage ?? result.Outcome.ToString()}";
+                }
             }
             finally
             {
@@ -352,6 +369,7 @@ public sealed partial class ConnectionStatusWindow : WindowEx
     private async Task OnDisconnectClickAsync()
     {
         if (_manager == null) return;
+        InvalidatePendingStatusMessages();
         await _manager.DisconnectByUserAsync();
         SetupCodeResult.Text = LocalizationHelper.GetString("ConnectionStatus_Disconnected");
     }
@@ -370,6 +388,7 @@ public sealed partial class ConnectionStatusWindow : WindowEx
     private async Task OnDirectConnectAsync()
     {
         if (_manager == null || _registry == null) return;
+        InvalidatePendingStatusMessages();
 
         var url = DirectUrlBox.Text?.Trim();
         var token = DirectTokenBox.Text?.Trim();
@@ -424,6 +443,7 @@ public sealed partial class ConnectionStatusWindow : WindowEx
                 }
                 catch (Exception ex)
                 {
+                    InvalidatePendingStatusMessages();
                     DirectConnectResult.Text = $"✗ {ex.Message}";
                     return;
                 }
@@ -431,6 +451,7 @@ public sealed partial class ConnectionStatusWindow : WindowEx
 
             if (result.Outcome != SetupCodeOutcome.Success)
             {
+                InvalidatePendingStatusMessages();
                 DirectConnectResult.Text = $"✗ {result.ErrorMessage}";
                 return;
             }
@@ -438,27 +459,43 @@ public sealed partial class ConnectionStatusWindow : WindowEx
         }
 
         IDisposable? gatewayLifecycleLease = null;
+        var registryMutated = false;
+        var candidateRegistryCommitted = false;
+        var settingsMutationAttempted = false;
+        var connectionAttemptStarted = false;
+        string? previousActiveId = null;
+        GatewayRecord? previousRecord = null;
+        GatewayRecord? candidateRecord = null;
+        ConnectionSettingsSnapshot? previousSettings = null;
+        string? recordId = null;
+        var isNewRecord = false;
         try
         {
             gatewayLifecycleLease =
                 await _manager.BeginManualGatewayLifecycleOperationAsync();
-            await _manager.DisconnectAsync();
-
-            // Create/update gateway record with shared token + SSH config
-            var existing = _registry.FindByUrl(url);
-            var recordId = existing?.Id ?? Guid.NewGuid().ToString();
-            var record = new GatewayRecord
+            previousActiveId = _registry.ActiveGatewayId;
+            previousSettings = CaptureConnectionSettings();
+            previousRecord = _registry.FindByUrl(url);
+            isNewRecord = previousRecord is null;
+            recordId = previousRecord?.Id ?? Guid.NewGuid().ToString();
+            candidateRecord = new GatewayRecord
             {
                 Id = recordId,
                 Url = url,
-                SharedGatewayToken = existing?.SharedGatewayToken,
+                SharedGatewayToken = previousRecord?.SharedGatewayToken,
                 BootstrapToken = null,
                 SshTunnel = sshConfig,
-            }.PreserveAdvancedFields(existing); // keep per-gateway BrowserControlPort across reconnect/edit
-            _registry.AddOrUpdate(record);
-            _registry.SetActive(recordId);
-            _registry.Save();
+            }.PreserveAdvancedFields(previousRecord);
 
+            await _manager.DisconnectAsync();
+
+            _registry.AddOrUpdate(candidateRecord);
+            _registry.SetActive(recordId);
+            registryMutated = true;
+            _registry.Save();
+            candidateRegistryCommitted = true;
+
+            settingsMutationAttempted = true;
             SaveConnectionSettings(url, sshConfig);
 
             // Start the tunnel before connecting. The manager's start is idempotent against this config.
@@ -468,11 +505,40 @@ public sealed partial class ConnectionStatusWindow : WindowEx
                 app.EnsureSshTunnelStarted();
             }
 
+            connectionAttemptStarted = true;
             await _manager.ConnectAsync(recordId);
         }
         catch (Exception ex)
         {
-            DirectConnectResult.Text = $"✗ {ex.Message}";
+            string? cleanupError = null;
+            if (connectionAttemptStarted)
+            {
+                try
+                {
+                    await _manager.DisconnectAsync();
+                }
+                catch (Exception cleanupEx)
+                {
+                    cleanupError = $"Failed to stop the rejected connection attempt: {cleanupEx.Message}";
+                }
+            }
+
+            var rollbackError = registryMutated && recordId is not null
+                ? RollbackDirectConnectState(
+                    previousActiveId,
+                    isNewRecord,
+                    recordId,
+                    previousRecord,
+                    candidateRecord,
+                    candidateRegistryCommitted,
+                    settingsMutationAttempted,
+                    previousSettings)
+                : null;
+            InvalidatePendingStatusMessages();
+            DirectConnectResult.Text = $"✗ {string.Join(
+                " ",
+                new[] { ex.Message, cleanupError, rollbackError }
+                    .Where(message => !string.IsNullOrWhiteSpace(message)))}";
         }
         finally
         {
@@ -497,6 +563,84 @@ public sealed partial class ConnectionStatusWindow : WindowEx
         settings.SaveOrThrow();
     }
 
+    private void InvalidatePendingStatusMessages() =>
+        Interlocked.Increment(ref _statusMessageGeneration);
+
+    private static ConnectionSettingsSnapshot CaptureConnectionSettings()
+    {
+        var settings = ((App)Microsoft.UI.Xaml.Application.Current).Settings;
+        return new ConnectionSettingsSnapshot(
+            settings.GatewayUrl,
+            settings.UseSshTunnel,
+            settings.SshTunnelUser,
+            settings.SshTunnelHost,
+            settings.SshTunnelSshPort,
+            settings.SshTunnelRemotePort,
+            settings.SshTunnelLocalPort);
+    }
+
+    private string? RollbackDirectConnectState(
+        string? previousActiveId,
+        bool isNewRecord,
+        string recordId,
+        GatewayRecord? previousRecord,
+        GatewayRecord? candidateRecord,
+        bool candidateRegistryCommitted,
+        bool settingsMutationAttempted,
+        ConnectionSettingsSnapshot? previousSettings)
+    {
+        if (_registry is null)
+            return "Gateway rollback could not run because the registry is unavailable.";
+
+        try
+        {
+            if (isNewRecord)
+                _registry.Remove(recordId);
+            else if (previousRecord is not null)
+                _registry.AddOrUpdate(previousRecord);
+            _registry.SetActive(previousActiveId);
+            _registry.Save();
+        }
+        catch (Exception ex)
+        {
+            if (candidateRegistryCommitted && candidateRecord is not null)
+            {
+                _registry.AddOrUpdate(candidateRecord);
+                _registry.SetActive(recordId);
+                try
+                {
+                    SaveConnectionSettings(candidateRecord.Url, candidateRecord.SshTunnel);
+                    ((App)Microsoft.UI.Xaml.Application.Current).EnsureSshTunnelStarted();
+                }
+                catch (Exception settingsEx)
+                {
+                    return $"Gateway rollback failed; the new gateway remains active: {ex.Message} " +
+                           $"Candidate settings reconciliation failed: {settingsEx.Message}";
+                }
+            }
+
+            return candidateRegistryCommitted
+                ? $"Gateway rollback failed; the new gateway remains active: {ex.Message}"
+                : $"Gateway update was not saved, and rollback persistence also failed: {ex.Message}";
+        }
+
+        if (settingsMutationAttempted && previousSettings is not null)
+        {
+            try
+            {
+                var app = (App)Microsoft.UI.Xaml.Application.Current;
+                previousSettings.Restore(app.Settings);
+                app.EnsureSshTunnelStarted();
+            }
+            catch (Exception ex)
+            {
+                return $"Settings rollback failed: {ex.Message}";
+            }
+        }
+
+        return null;
+    }
+
     private async Task SynchronizeConnectionSettingsWithActiveGatewayAsync()
     {
         if (_manager is null || _registry is null)
@@ -506,6 +650,28 @@ public sealed partial class ConnectionStatusWindow : WindowEx
         var active = _registry.GetActive()
             ?? throw new InvalidOperationException("The committed gateway is no longer active.");
         SaveConnectionSettings(active.Url, active.SshTunnel);
+    }
+
+    private sealed record ConnectionSettingsSnapshot(
+        string GatewayUrl,
+        bool UseSshTunnel,
+        string SshUser,
+        string SshHost,
+        int SshPort,
+        int SshRemotePort,
+        int SshLocalPort)
+    {
+        public void Restore(SettingsManager settings)
+        {
+            settings.GatewayUrl = GatewayUrl;
+            settings.UseSshTunnel = UseSshTunnel;
+            settings.SshTunnelUser = SshUser;
+            settings.SshTunnelHost = SshHost;
+            settings.SshTunnelSshPort = SshPort;
+            settings.SshTunnelRemotePort = SshRemotePort;
+            settings.SshTunnelLocalPort = SshLocalPort;
+            settings.SaveOrThrow();
+        }
     }
 
     // ── Timeline with colors ──

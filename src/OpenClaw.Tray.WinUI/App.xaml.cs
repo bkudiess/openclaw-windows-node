@@ -2246,7 +2246,22 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
                     if (record is null || !uri.IsLoopback)
                         return false;
                     if (record.SshTunnel is not null)
-                        return _sshTunnelService?.IsActive == true;
+                    {
+                        var browserForwardPort = record.SshTunnel.LocalPort + 2;
+                        if (!record.SshTunnel.IncludeBrowserProxyForward ||
+                            uri.Port != browserForwardPort)
+                        {
+                            return false;
+                        }
+
+                        return _sshTunnelService is not null &&
+                            await _sshTunnelService
+                                .IsOwnedListenerReadyAsync(
+                                    record.SshTunnel,
+                                    uri.Port,
+                                    cancellationToken)
+                                .ConfigureAwait(false);
+                    }
                     if (_managedLocalPortProvenance is null ||
                         GatewayRecordEditing.ResolveManagedDistroName(record) is null)
                     {
