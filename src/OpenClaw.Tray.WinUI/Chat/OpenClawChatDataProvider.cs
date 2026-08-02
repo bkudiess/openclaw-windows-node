@@ -31,6 +31,10 @@ internal static class LocalizationHelper
         "Chat_Permission_ResultSubmittedFormat" => "Approval {0} submitted for {1}.",
         "Chat_Error_SendReturnedStatusFormat" => "Gateway returned send status '{0}'.",
         "Chat_Error_SendFailedFormat" => "Send failed: {0}",
+        "Chat_Notification_ClearThinkingFailed" => "Reasoning setting not changed",
+        "Chat_Error_ClearThinkingFailedFormat" => "Could not use default reasoning: {0}",
+        "Chat_Error_ClearThinkingCanceled" => "The change was canceled.",
+        "Chat_Error_ClearThinkingInterrupted" => "The gateway connection changed before the update was confirmed.",
         _ => resourceKey
     };
 }
@@ -98,6 +102,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
     private readonly string _lastChatStateFilePath;
     private readonly TimeSpan _lastChatStateSaveDelay;
     private readonly Func<TimeSpan, CancellationToken, Func<Task>, Task> _scheduleHistoryRetry;
+    private readonly ThinkingLevelClearReconciler _thinkingLevelClearReconciler;
     private readonly Action? _historyFailureReservedForTesting;
     private System.Threading.Timer? _toolMetaSaveTimer; // debounce cache writes
     private long _toolMetaSaveVersion;
@@ -251,7 +256,9 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
         string? lastChatStateFilePath = null,
         TimeSpan? lastChatStateSaveDelay = null,
         Func<TimeSpan, CancellationToken, Func<Task>, Task>? historyRetryScheduler = null,
-        Action? historyFailureReservedForTesting = null)
+        Action? historyFailureReservedForTesting = null,
+        TimeSpan? thinkingLevelConfirmationTimeout = null,
+        Func<TimeSpan, Func<Task>, Task>? thinkingLevelRetryScheduler = null)
     {
         _bridge = bridge ?? throw new ArgumentNullException(nameof(bridge));
         _post = post;
@@ -272,6 +279,14 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
         });
         _historyFailureReservedForTesting = historyFailureReservedForTesting;
         _status = bridge.CurrentStatus;
+        _thinkingLevelClearReconciler = new ThinkingLevelClearReconciler(
+            connected: _status == ConnectionStatus.Connected,
+            confirmationTimeout: thinkingLevelConfirmationTimeout,
+            delay: thinkingLevelRetryScheduler is null
+                ? null
+                : (delay, cancellationToken) =>
+                    thinkingLevelRetryScheduler(delay, static () => Task.CompletedTask)
+                        .WaitAsync(cancellationToken));
         _persistedAbortedIds = LoadAbortedIds();
         _toolMetaCache = LoadToolMetaCache(_toolMetaCacheFilePath);
         _attachmentMetaCache = LoadAttachmentMetaCache(_attachmentMetaCacheFilePath);
@@ -316,13 +331,44 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
         cancellationToken.ThrowIfCancellationRequested();
         // Seed from whatever the bridge already knows about.
         var sessions = _bridge.GetSessionList() ?? Array.Empty<SessionInfo>();
+        List<ThinkingLevelClearReconciler.RefreshRequest>? thinkingLevelsToRefresh = null;
+        ChatDataSnapshot snapshot;
         lock (_gate)
         {
-            _sessions = sessions;
+            _sessions = sessions.Select(session =>
+            {
+                if (string.IsNullOrEmpty(session.Key))
+                    return session;
+
+                var resolution = _thinkingLevelClearReconciler.ObserveSnapshot(
+                    session.Key,
+                    session.ThinkingLevel);
+                if (resolution.RefreshRequest is { } refresh)
+                    (thinkingLevelsToRefresh ??= []).Add(refresh);
+                if (string.Equals(
+                        session.ThinkingLevel,
+                        resolution.EffectiveThinkingLevel,
+                        StringComparison.Ordinal))
+                {
+                    return session;
+                }
+
+                var reconciled = session.Clone();
+                reconciled.ThinkingLevel = resolution.EffectiveThinkingLevel;
+                return reconciled;
+            }).ToArray();
             EnsureTimelinesForSessionsLocked();
             RememberLastSessionStateLocked();
-            return Task.FromResult(BuildSnapshotLocked());
+            snapshot = BuildSnapshotLocked();
         }
+
+        if (thinkingLevelsToRefresh is not null)
+        {
+            foreach (var refresh in thinkingLevelsToRefresh)
+                ObserveBackgroundTask(ExecuteThinkingLevelRefreshAsync(refresh));
+        }
+
+        return Task.FromResult(snapshot);
     }
 
     internal void RememberSelectedThread(string? threadId)
@@ -1776,7 +1822,176 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
     public async Task SetThinkingLevelAsync(string threadId, string thinkingLevel, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        await _bridge.PatchSessionThinkingLevelAsync(threadId, thinkingLevel);
+        ThinkingLevelClearReconciler.ConcreteSelection selection;
+        lock (_gate)
+        {
+            var canonicalThinkingLevel = _sessions
+                .FirstOrDefault(session => string.Equals(session.Key, threadId, StringComparison.Ordinal))
+                ?.ThinkingLevel;
+            selection = _thinkingLevelClearReconciler.BeginConcreteSelection(
+                threadId,
+                thinkingLevel,
+                canonicalThinkingLevel);
+        }
+
+        try
+        {
+            await _bridge.PatchSessionThinkingLevelAsync(threadId, thinkingLevel);
+        }
+        catch
+        {
+            _thinkingLevelClearReconciler.RejectConcreteSelection(selection);
+            throw;
+        }
+    }
+
+    public async Task ClearThinkingLevelAsync(string threadId, CancellationToken cancellationToken = default)
+    {
+        ThinkingLevelClearReconciler.ClearOperation operation;
+        var failureSurfaced = false;
+        lock (_gate)
+        {
+            var canonicalThinkingLevel = _sessions
+                .FirstOrDefault(session => string.Equals(session.Key, threadId, StringComparison.Ordinal))
+                ?.ThinkingLevel;
+            operation = _thinkingLevelClearReconciler.BeginClear(
+                threadId,
+                canonicalThinkingLevel);
+        }
+
+        try
+        {
+            var result = await _bridge.ClearSessionThinkingLevelAsync(threadId, cancellationToken);
+            if (!result.Ok)
+            {
+                var failure = new InvalidOperationException(
+                    result.Error ??
+                    (result.IsSupported
+                        ? "The gateway rejected the reasoning change."
+                        : "The gateway does not support clearing the reasoning override."));
+                if (_thinkingLevelClearReconciler.RejectPatch(operation, failure))
+                {
+                    SurfaceThinkingLevelClearFailure(threadId, failure, cancellationToken);
+                    failureSurfaced = true;
+                    throw failure;
+                }
+
+                await _thinkingLevelClearReconciler
+                    .WaitForConfirmationAsync(operation, cancellationToken)
+                    .ConfigureAwait(false);
+                throw failure;
+            }
+
+            if (_thinkingLevelClearReconciler.TryAcknowledgePatch(operation, out var refresh))
+                ObserveBackgroundTask(ExecuteThinkingLevelRefreshAsync(refresh));
+
+            var outcome = await _thinkingLevelClearReconciler
+                .WaitForConfirmationAsync(operation, cancellationToken)
+                .ConfigureAwait(false);
+            if (outcome == ThinkingLevelClearReconciler.ClearOutcome.Confirmed)
+            {
+                // Correlated confirmation occurs while ApplySessionsUpdated holds this lock.
+                // Reacquiring it prevents the clear from returning before the snapshot is stored.
+                lock (_gate)
+                {
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            if (!failureSurfaced &&
+                _thinkingLevelClearReconciler.RejectPatch(operation, ex))
+            {
+                SurfaceThinkingLevelClearFailure(threadId, ex, cancellationToken);
+            }
+            else if (!failureSurfaced &&
+                     !operation.PatchAcknowledged &&
+                     operation.State == ThinkingLevelClearReconciler.ReconciliationState.Interrupted)
+            {
+                SurfaceThinkingLevelClearFailure(threadId, ex, cancellationToken);
+            }
+
+            throw;
+        }
+    }
+
+    private async Task ExecuteThinkingLevelRefreshAsync(
+        ThinkingLevelClearReconciler.RefreshRequest request)
+    {
+        if (!_thinkingLevelClearReconciler.TryGetRefreshCancellationToken(
+                request,
+                out var requestCancellation))
+            return;
+
+        try
+        {
+            var sessions = await _bridge
+                .RequestSessionsSnapshotAsync(requestCancellation)
+                .ConfigureAwait(false);
+            if (sessions is null)
+            {
+                throw new NotSupportedException(
+                    "Response-correlated sessions.list is not supported by this chat bridge.");
+            }
+            if (!sessions.Any(session => string.Equals(
+                    session.Key,
+                    request.ThreadId,
+                    StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException(
+                    $"sessions.list did not include the expected session '{request.ThreadId}'.");
+            }
+
+            ApplySessionsUpdated(sessions, request);
+        }
+        catch (OperationCanceledException) when (requestCancellation.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            var retry = await _thinkingLevelClearReconciler
+                .RetryAfterFailureAsync(request)
+                .ConfigureAwait(false);
+            if (retry is { } next)
+                ObserveBackgroundTask(ExecuteThinkingLevelRefreshAsync(next));
+        }
+    }
+
+    private static void ObserveBackgroundTask(Task task)
+    {
+        _ = task.ContinueWith(
+            static completed => _ = completed.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
+    private void SurfaceThinkingLevelClearFailure(
+        string threadId,
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        var reason = exception switch
+        {
+            ThinkingLevelClearInterruptedException =>
+                LocalizationHelper.GetString("Chat_Error_ClearThinkingInterrupted"),
+            OperationCanceledException when !cancellationToken.IsCancellationRequested &&
+                                            _bridge.CurrentStatus != ConnectionStatus.Connected =>
+                LocalizationHelper.GetString("Chat_Error_ClearThinkingInterrupted"),
+            OperationCanceledException =>
+                LocalizationHelper.GetString("Chat_Error_ClearThinkingCanceled"),
+            _ => exception.Message
+        };
+        var message = string.Format(
+            CultureInfo.CurrentCulture,
+            LocalizationHelper.GetString("Chat_Error_ClearThinkingFailedFormat"),
+            reason);
+        ApplyEventAndPublish(threadId, new ChatErrorEvent(message));
+        RaiseNotification(new ChatProviderNotification(
+            ChatProviderNotificationKind.Error,
+            threadId,
+            LocalizationHelper.GetString("Chat_Notification_ClearThinkingFailed"),
+            message));
     }
 
     public async Task EnsureCommandCatalogAsync(CancellationToken cancellationToken = default)
@@ -2029,6 +2244,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
             _locallyInitiatedThreads.Clear();
             _resetSubmittedLocalEchoTexts.Clear();
         }
+        _thinkingLevelClearReconciler.Dispose();
         CancelAndDisposeHistoryGeneration(historyGenerationToCancel);
         timerToDispose?.Dispose();
         chatStateTimerToDispose?.Dispose();
@@ -2062,6 +2278,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
 
     private void OnStatusChanged(object? sender, ConnectionStatus status)
     {
+        IReadOnlyList<ThinkingLevelClearReconciler.RefreshRequest> thinkingLevelsToRefresh;
         ChatDataSnapshot snapshot;
         bool justReconnected;
         string[] threadsToInterrupt;
@@ -2079,6 +2296,8 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
             var justDisconnected = (status == ConnectionStatus.Disconnected || status == ConnectionStatus.Error)
                                    && _status == ConnectionStatus.Connected;
             _status = status;
+            thinkingLevelsToRefresh = _thinkingLevelClearReconciler
+                .OnConnectionChanged(status == ConnectionStatus.Connected);
 
             // Reset the sessions-list-received gate whenever we leave the
             // Connected state. Any cached sessions belong to the previous
@@ -2155,6 +2374,11 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
         CancelAndDisposeHistoryGeneration(historyGenerationToCancel);
         Publish(snapshot);
 
+        foreach (var refresh in thinkingLevelsToRefresh)
+        {
+            ObserveBackgroundTask(ExecuteThinkingLevelRefreshAsync(refresh));
+        }
+
         // MEDIUM 5: synthesize the turn-end + status note for any threads
         // that were mid-turn when the connection dropped.
         var interruptedMsg = LocalizationHelper.GetString("Chat_Notification_ConnectionInterrupted");
@@ -2197,14 +2421,83 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
 
     private void OnSessionsUpdated(object? sender, SessionInfo[] sessions)
     {
+        ApplySessionsUpdated(sessions, refreshRequest: null);
+    }
+
+    private bool ApplySessionsUpdated(
+        SessionInfo[]? sessions,
+        ThinkingLevelClearReconciler.RefreshRequest? refreshRequest)
+    {
         ChatDataSnapshot snapshot;
         string[] queuedThreadsToDrain;
+        bool shouldPublish;
+        List<ThinkingLevelClearReconciler.RefreshRequest>? thinkingLevelsToRefresh = null;
         lock (_gate)
         {
+            if (_disposed)
+                return false;
+
+            var incomingSessions = sessions ?? Array.Empty<SessionInfo>();
+            ThinkingLevelClearReconciler.SnapshotResolution? correlatedResolution = null;
+            if (refreshRequest is { } correlatedRequest)
+            {
+                var correlatedSession = incomingSessions.FirstOrDefault(session =>
+                    string.Equals(
+                        session.Key,
+                        correlatedRequest.ThreadId,
+                        StringComparison.Ordinal));
+                var resolution = _thinkingLevelClearReconciler.ApplyCorrelatedSnapshot(
+                    correlatedRequest,
+                    correlatedSession?.ThinkingLevel);
+                if (!resolution.Accepted)
+                    return false;
+
+                correlatedResolution = resolution;
+                if (resolution.RefreshRequest is { } retry)
+                    (thinkingLevelsToRefresh ??= []).Add(retry);
+            }
+
+            var previousThreads = refreshRequest is null
+                ? null
+                : BuildSnapshotLocked().Threads;
             var previousUsage = _sessions
                 .Where(s => !string.IsNullOrEmpty(s.Key))
                 .ToDictionary(s => s.Key, s => (s.InputTokens, s.OutputTokens, s.TotalTokens, s.ContextTokens));
-            _sessions = sessions ?? Array.Empty<SessionInfo>();
+            var reconciledSessions = new SessionInfo[incomingSessions.Length];
+            for (var index = 0; index < incomingSessions.Length; index++)
+            {
+                var incoming = incomingSessions[index];
+                reconciledSessions[index] = incoming;
+                if (string.IsNullOrEmpty(incoming.Key))
+                    continue;
+
+                ThinkingLevelClearReconciler.SnapshotResolution resolution;
+                if (refreshRequest is { } request &&
+                    string.Equals(request.ThreadId, incoming.Key, StringComparison.Ordinal))
+                {
+                    resolution = correlatedResolution!.Value;
+                }
+                else
+                {
+                    resolution = _thinkingLevelClearReconciler.ObserveSnapshot(
+                        incoming.Key,
+                        incoming.ThinkingLevel);
+                    if (resolution.RefreshRequest is { } refresh)
+                        (thinkingLevelsToRefresh ??= []).Add(refresh);
+                }
+
+                if (!string.Equals(
+                        incoming.ThinkingLevel,
+                        resolution.EffectiveThinkingLevel,
+                        StringComparison.Ordinal))
+                {
+                    var reconciled = incoming.Clone();
+                    reconciled.ThinkingLevel = resolution.EffectiveThinkingLevel;
+                    reconciledSessions[index] = reconciled;
+                }
+            }
+
+            _sessions = reconciledSessions;
             SeedSessionIdsFromSessionsLocked(_sessions);
             _sessionsListReceived = true;
             EnsureTimelinesForSessionsLocked();
@@ -2219,6 +2512,8 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                     SnapshotLatestAssistantUsageLocked(s, ResolveTimelineKeyForSessionLocked(s));
             }
             snapshot = BuildSnapshotLocked();
+            shouldPublish = previousThreads is null ||
+                            !previousThreads.SequenceEqual(snapshot.Threads);
 
             if (_status == ConnectionStatus.Connected)
             {
@@ -2229,12 +2524,20 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                 queuedThreadsToDrain = Array.Empty<string>();
             }
         }
-        Publish(snapshot);
+        if (shouldPublish)
+            Publish(snapshot);
+
+        if (thinkingLevelsToRefresh is not null)
+        {
+            foreach (var refresh in thinkingLevelsToRefresh)
+                ObserveBackgroundTask(ExecuteThinkingLevelRefreshAsync(refresh));
+        }
 
         foreach (var threadId in queuedThreadsToDrain)
         {
             TryDispatchNextQueuedSend(threadId);
         }
+        return true;
     }
 
     internal static bool ShouldPreserveLiveEntryDuringAuthoritativeReload(
