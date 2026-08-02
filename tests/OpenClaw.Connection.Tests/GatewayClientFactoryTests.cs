@@ -111,6 +111,47 @@ public sealed class GatewayClientFactoryTests
         }
     }
 
+    [Fact]
+    public async Task HandshakeAuthorization_BlocksCredentialBearingConnectMessage()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "openclaw-gateway-factory-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var client = new OpenClawGatewayClient(
+                "ws://127.0.0.1:18789",
+                "replacement-token",
+                NullLogger.Instance,
+                identityPath: tempDir,
+                ignoreStoredDeviceToken: true,
+                persistHandshakeDeviceTokens: false);
+            var authorizationCalls = 0;
+            string? failure = null;
+            ConnectionStatus? lastStatus = null;
+            client.HandshakeAuthorizationAsync = _ =>
+            {
+                authorizationCalls++;
+                return Task.FromResult(new ReconnectAuthorizationResult(
+                    false,
+                    GatewayErrorKind.LocalPortConflict,
+                    "validation listener ownership lost"));
+            };
+            client.AuthenticationFailed += (_, message) => failure = message;
+            client.StatusChanged += (_, status) => lastStatus = status;
+
+            await InvokeSendConnectSafeAsync(client);
+
+            Assert.Equal(1, authorizationCalls);
+            Assert.Equal("validation listener ownership lost", failure);
+            Assert.Equal(ConnectionStatus.Error, lastStatus);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
     private static string GetConnectRole(OpenClawGatewayClient client)
     {
         var method = typeof(OpenClawGatewayClient).GetMethod(
@@ -142,5 +183,16 @@ public sealed class GatewayClientFactoryTests
 
         Assert.NotNull(method);
         return Assert.IsType<bool>(method.Invoke(client, [role, token, null]));
+    }
+
+    private static async Task InvokeSendConnectSafeAsync(OpenClawGatewayClient client)
+    {
+        var method = typeof(OpenClawGatewayClient).GetMethod(
+            "SendConnectSafeAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+        var task = Assert.IsAssignableFrom<Task>(method.Invoke(client, [null]));
+        await task;
     }
 }

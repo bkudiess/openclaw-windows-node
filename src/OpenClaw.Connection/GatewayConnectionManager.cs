@@ -719,6 +719,9 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 requireSshTunnelOwnership: true).ConfigureAwait(false);
             if (!tunnelAuthorization.Allowed)
             {
+                if (!preservesOperatorConnection)
+                    await StopTunnelAfterFailedConnectionAsync("node-only ownership proof failure");
+
                 _stateMachine.SetNodeCredentialResolution(nodeCredentialResolution);
                 _stateMachine.BlockNodeStart(
                     tunnelAuthorization.Detail,
@@ -1171,6 +1174,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             return new SetupCodeResult(SetupCodeOutcome.InvalidUrl, "Invalid gateway URL");
 
         ISshTunnelManager? isolatedValidationTunnel = null;
+        SshTunnelConfig? isolatedValidationConfig = null;
         var gatewayCommitted = false;
 
         try
@@ -1198,42 +1202,31 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                                 "SSH tunnel manager is unavailable; shared token was not sent.");
                         }
 
-                        if (_tunnelManager.IsActive &&
-                            _tunnelManager.ActiveConfig == sshTunnel)
+                        var excludedPorts = new HashSet<int>();
+                        if (_tunnelManager.ActiveConfig is { } activeConfig)
                         {
-                            // Re-enter StartAsync even for exact reuse so the service proves
-                            // PID/start-time ownership before a shared credential is sent.
-                            validationUrl = await _tunnelManager
-                                .StartAsync(sshTunnel, CancellationToken.None)
+                            excludedPorts.Add(activeConfig.LocalPort);
+                            if (activeConfig.IncludeBrowserProxyForward)
+                                excludedPorts.Add(activeConfig.LocalPort + 2);
+                        }
+                        var validationConfig = sshTunnel with
+                        {
+                            IncludeBrowserProxyForward = false,
+                            LocalPort = GetAvailableLoopbackPort(excludedPorts),
+                        };
+                        isolatedValidationConfig = validationConfig;
+                        isolatedValidationTunnel = _validationTunnelFactory();
+                        try
+                        {
+                            validationUrl = await isolatedValidationTunnel
+                                .StartAsync(validationConfig, CancellationToken.None)
                                 .ConfigureAwait(false);
                         }
-                        else
+                        catch (Exception ex)
                         {
-                            var excludedPorts = new HashSet<int>();
-                            if (_tunnelManager.ActiveConfig is { } activeConfig)
-                            {
-                                excludedPorts.Add(activeConfig.LocalPort);
-                                if (activeConfig.IncludeBrowserProxyForward)
-                                    excludedPorts.Add(activeConfig.LocalPort + 2);
-                            }
-                            var validationConfig = sshTunnel with
-                            {
-                                IncludeBrowserProxyForward = false,
-                                LocalPort = GetAvailableLoopbackPort(excludedPorts),
-                            };
-                            isolatedValidationTunnel = _validationTunnelFactory();
-                            try
-                            {
-                                validationUrl = await isolatedValidationTunnel
-                                    .StartAsync(validationConfig, CancellationToken.None)
-                                    .ConfigureAwait(false);
-                            }
-                            catch (Exception ex)
-                            {
-                                return new SetupCodeResult(
-                                    SetupCodeOutcome.ConnectionFailed,
-                                    $"SSH tunnel validation failed: {ex.Message}");
-                            }
+                            return new SetupCodeResult(
+                                SetupCodeOutcome.ConnectionFailed,
+                                $"SSH tunnel validation failed: {ex.Message}");
                         }
                     }
 
@@ -1262,7 +1255,9 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                         validationUrl,
                         token,
                         identityDir,
-                        validationRecord);
+                        validationRecord,
+                        isolatedValidationTunnel,
+                        isolatedValidationConfig);
                     if (validation.Outcome != SetupCodeOutcome.Success)
                         return validation;
                 }
@@ -1299,6 +1294,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 {
                     await StopAndDisposeValidationTunnelAsync(isolatedValidationTunnel).ConfigureAwait(false);
                     isolatedValidationTunnel = null;
+                    isolatedValidationConfig = null;
                 }
                 SetGatewayConnectionIntent(recordId, shouldBeConnected: true);
 
@@ -1362,7 +1358,9 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         string gatewayUrl,
         string token,
         string identityDir,
-        GatewayRecord existing)
+        GatewayRecord existing,
+        ISshTunnelManager? validationTunnel,
+        SshTunnelConfig? validationTunnelConfig)
     {
         Directory.CreateDirectory(identityDir);
         var diagLogger = new DiagnosticTeeLogger(_logger, _diagnostics);
@@ -1386,6 +1384,14 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 false,
                 GatewayErrorKind.Auth,
                 "Shared-token validation is one-shot."));
+        if (validationTunnel is not null && validationTunnelConfig is not null)
+        {
+            client.HandshakeAuthorizationAsync = cancellationToken =>
+                AuthorizeValidationTunnelHandshakeAsync(
+                    validationTunnel,
+                    validationTunnelConfig,
+                    cancellationToken);
+        }
 
         var completion = new TaskCompletionSource<SetupCodeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         client.HandshakeSucceeded += (_, _) =>
@@ -1416,6 +1422,25 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             try { await client.DisconnectAsync(); }
             catch (Exception ex) { _logger.Warn($"[ConnMgr] Shared-token validation disconnect failed: {ex.Message}"); }
         }
+    }
+
+    internal static async Task<ReconnectAuthorizationResult> AuthorizeValidationTunnelHandshakeAsync(
+        ISshTunnelManager validationTunnel,
+        SshTunnelConfig validationTunnelConfig,
+        CancellationToken cancellationToken)
+    {
+        var allowed = await validationTunnel
+            .IsOwnedListenerReadyAsync(
+                validationTunnelConfig,
+                validationTunnelConfig.LocalPort,
+                cancellationToken)
+            .ConfigureAwait(false);
+        return allowed
+            ? new ReconnectAuthorizationResult(true, GatewayErrorKind.Unknown, string.Empty)
+            : new ReconnectAuthorizationResult(
+                false,
+                GatewayErrorKind.LocalPortConflict,
+                "The isolated SSH validation listener changed before authentication, so the shared token was not sent.");
     }
 
     private async Task StopAndDisposeValidationTunnelAsync(ISshTunnelManager tunnel)

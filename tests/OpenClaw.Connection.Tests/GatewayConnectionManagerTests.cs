@@ -1133,7 +1133,7 @@ public class GatewayConnectionManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task ConnectWithSharedTokenAsync_ExactActiveSshConfigRevalidatesOwnedListener()
+    public async Task ConnectWithSharedTokenAsync_ExactActiveSshConfigUsesIsolatedValidationTunnel()
     {
         var ssh = new SshTunnelConfig("user", "host.example", 18789, 45678);
         _registry.AddOrUpdate(new GatewayRecord
@@ -1148,14 +1148,15 @@ public class GatewayConnectionManagerTests : IDisposable
         identity.Initialize();
         identity.StoreDeviceTokenForRole("operator", "operator-token");
         var activeTunnel = new CountingTunnelManager();
+        var validationTunnel = new CountingTunnelManager { FailStart = true };
         await activeTunnel.StartAsync(ssh, CancellationToken.None);
-        activeTunnel.FailStart = true;
         using var manager = new GatewayConnectionManager(
             _resolver,
             _factory,
             _registry,
             NullLogger.Instance,
-            tunnelManager: activeTunnel);
+            tunnelManager: activeTunnel,
+            validationTunnelFactory: () => validationTunnel);
 
         var result = await manager.ConnectWithSharedTokenAsync(
             "wss://remote.example",
@@ -1163,8 +1164,33 @@ public class GatewayConnectionManagerTests : IDisposable
             ssh);
 
         Assert.Equal(SetupCodeOutcome.ConnectionFailed, result.Outcome);
-        Assert.Equal(2, activeTunnel.StartCount);
+        Assert.Equal(1, activeTunnel.StartCount);
+        Assert.True(activeTunnel.IsActive);
+        Assert.Equal(ssh, activeTunnel.ActiveConfig);
+        var attemptedConfig = Assert.Single(validationTunnel.StartedConfigs);
+        Assert.NotEqual(ssh.LocalPort, attemptedConfig.LocalPort);
+        Assert.Equal(ssh.Host, attemptedConfig.Host);
+        Assert.True(validationTunnel.IsDisposed);
         Assert.Null(_registry.GetById("gw-ssh")?.SharedGatewayToken);
+    }
+
+    [Fact]
+    public async Task ValidationHandshakeAuthorization_BlocksAfterListenerOwnershipIsLost()
+    {
+        var config = new SshTunnelConfig("user", "host.example", 18789, 45679);
+        var tunnel = new CountingTunnelManager();
+        await tunnel.StartAsync(config, CancellationToken.None);
+        tunnel.OwnedListenerReady = false;
+
+        var authorization =
+            await GatewayConnectionManager.AuthorizeValidationTunnelHandshakeAsync(
+                tunnel,
+                config,
+                CancellationToken.None);
+
+        Assert.False(authorization.Allowed);
+        Assert.Equal(GatewayErrorKind.LocalPortConflict, authorization.FailureKind);
+        Assert.Contains("shared token was not sent", authorization.Detail);
     }
 
     [Fact]
@@ -3160,6 +3186,40 @@ public class GatewayConnectionManagerTests : IDisposable
         Assert.Equal(2222, tunnel.LastConfig?.SshPort);
         Assert.Equal("ws://localhost:45678", node.LastGatewayUrl);
         Assert.Equal(CredentialResolver.SourceNodeDeviceToken, manager.CurrentSnapshot.NodeCredentialSource);
+    }
+
+    [Fact]
+    public async Task ConnectNodeOnlyAsync_OwnershipFailureStopsStartedTunnel()
+    {
+        _registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "gw-ssh",
+            Url = "wss://remote.example",
+            SshTunnel = new SshTunnelConfig("user", "host.example", 18789, 45678)
+        });
+        _registry.SetActive("gw-ssh");
+        _resolver.OperatorCredential = null;
+        _resolver.NodeCredential = new GatewayCredential(
+            "node-token",
+            IsBootstrapToken: false,
+            Source: CredentialResolver.SourceNodeDeviceToken);
+        var node = new CountingNodeConnector();
+        var tunnel = new CountingTunnelManager { OwnedListenerReady = false };
+        using var manager = new GatewayConnectionManager(
+            _resolver,
+            _factory,
+            _registry,
+            NullLogger.Instance,
+            nodeConnector: node,
+            tunnelManager: tunnel);
+
+        await manager.ConnectNodeOnlyAsync("gw-ssh");
+
+        Assert.Equal(1, tunnel.StartCount);
+        Assert.Equal(1, tunnel.StopCount);
+        Assert.False(tunnel.IsActive);
+        Assert.Equal(0, node.ConnectCount);
+        Assert.Equal(RoleConnectionState.Error, manager.CurrentSnapshot.NodeState);
     }
 
     [Fact]
