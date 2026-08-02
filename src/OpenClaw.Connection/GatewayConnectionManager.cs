@@ -430,6 +430,13 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 try
                 {
                     connectUrl = await _tunnelManager.StartAsync(tunnel, _operationCts!.Token);
+                    var tunnelAuthorization = await AuthorizeCredentialForEndpointAsync(
+                        record,
+                        credential,
+                        _operationCts.Token,
+                        requireSshTunnelOwnership: true).ConfigureAwait(false);
+                    if (!tunnelAuthorization.Allowed)
+                        throw new InvalidOperationException(tunnelAuthorization.Detail);
                     _diagnostics.Record("tunnel", $"SSH tunnel started → {connectUrl}");
                 }
                 catch (Exception ex)
@@ -437,6 +444,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                     _logger.Error($"[ConnMgr] SSH tunnel start failed: {ex.Message}");
                     _diagnostics.Record("tunnel", "SSH tunnel start failed", ex.Message);
                     _stateMachine.TryTransition(ConnectionTrigger.WebSocketError, $"SSH tunnel failed: {ex.Message}");
+                    await StopTunnelAfterFailedConnectionAsync("SSH tunnel startup or authorization failure");
                     CompleteOperatorTelemetryAttempt(
                         gen,
                         "failure",
@@ -489,7 +497,8 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 var authorization = await AuthorizeCredentialForEndpointAsync(
                     record,
                     credential,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken,
+                    requireSshTunnelOwnership: true).ConfigureAwait(false);
                 return new ReconnectAuthorizationResult(
                     authorization.Allowed,
                     authorization.FailureKind,
@@ -701,6 +710,25 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             return null;
         }
 
+        if (record.SshTunnel is not null)
+        {
+            var tunnelAuthorization = await AuthorizeCredentialForEndpointAsync(
+                record,
+                nodeCredential,
+                _operationCts?.Token ?? CancellationToken.None,
+                requireSshTunnelOwnership: true).ConfigureAwait(false);
+            if (!tunnelAuthorization.Allowed)
+            {
+                _stateMachine.SetNodeCredentialResolution(nodeCredentialResolution);
+                _stateMachine.BlockNodeStart(
+                    tunnelAuthorization.Detail,
+                    preserveCredentialResolution: true);
+                EmitStateChanged();
+                RecordNodePreflightTelemetryFailure(ConnectionErrorCategory.AuthFailure);
+                return null;
+            }
+        }
+
         return Interlocked.Read(ref _generation) == gen ? gen : null;
     }
 
@@ -711,8 +739,8 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
 
         if (_tunnelManager == null)
         {
-            _diagnostics.Record("tunnel", "No tunnel manager available; using configured local tunnel URL for node-only connect");
-            return true;
+            _diagnostics.Record("tunnel", "No tunnel manager available for node-only SSH connection");
+            return false;
         }
 
         var tunnel = record.SshTunnel;
@@ -1646,7 +1674,15 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             return true;
         }
         if (record.SshTunnel is not null)
-            return true;
+        {
+            return _tunnelManager is not null &&
+                await _tunnelManager
+                    .IsOwnedListenerReadyAsync(
+                        record.SshTunnel,
+                        record.SshTunnel.LocalPort,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+        }
         if (string.IsNullOrWhiteSpace(record.Url))
             return false;
         return Uri.TryCreate(record.Url, UriKind.Absolute, out var uri) &&
@@ -1657,8 +1693,33 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
     private async Task<EndpointCredentialAuthorization> AuthorizeCredentialForEndpointAsync(
         GatewayRecord record,
         GatewayCredential credential,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool requireSshTunnelOwnership = false)
     {
+        if (record.SshTunnel is not null)
+        {
+            if (!requireSshTunnelOwnership)
+                return EndpointCredentialAuthorization.AllowedResult;
+
+            if (_tunnelManager is null ||
+                !await _tunnelManager
+                    .IsOwnedListenerReadyAsync(
+                        record.SshTunnel,
+                        record.SshTunnel.LocalPort,
+                        cancellationToken)
+                    .ConfigureAwait(false))
+            {
+                return new EndpointCredentialAuthorization(
+                    false,
+                    _tunnelManager?.IsActive == true
+                        ? GatewayErrorKind.LocalPortConflict
+                        : GatewayErrorKind.Network,
+                    "The configured SSH listener is not owned by the active OpenClaw tunnel, so credentials were not sent.");
+            }
+
+            return EndpointCredentialAuthorization.AllowedResult;
+        }
+
         var isStrongCredential =
             credential.IsBootstrapToken ||
             string.Equals(
@@ -1670,7 +1731,6 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 CredentialResolver.SourceBootstrapToken,
                 StringComparison.Ordinal);
         var isManagedLoopback =
-            record.SshTunnel is null &&
             (record.IsLocal || GatewayRecordEditing.ResolveManagedDistroName(record) is not null) &&
             GatewayRecordEditing.IsLoopbackEndpoint(record.Url);
         if (!isManagedLoopback)
@@ -2692,7 +2752,8 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         var nodeEndpointAuthorization = await AuthorizeCredentialForEndpointAsync(
             record,
             nodeCredential,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            requireSshTunnelOwnership: true).ConfigureAwait(false);
         if (!nodeEndpointAuthorization.Allowed)
         {
             _diagnostics.Record(
@@ -2747,7 +2808,8 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 var authorization = await AuthorizeCredentialForEndpointAsync(
                     record,
                     nodeCredential,
-                    reconnectCancellationToken).ConfigureAwait(false);
+                    reconnectCancellationToken,
+                    requireSshTunnelOwnership: true).ConfigureAwait(false);
                 return new ReconnectAuthorizationResult(
                     authorization.Allowed,
                     authorization.FailureKind,

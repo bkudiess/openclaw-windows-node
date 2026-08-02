@@ -3156,6 +3156,7 @@ public sealed partial class ConnectionPage : Page
                 settings.SshTunnelRemotePort = prevSshRemotePort;
                 settings.SshTunnelLocalPort = prevSshLocalPort;
                 settings.SaveOrThrow();
+                CurrentApp.EnsureSshTunnelStarted();
             }
             catch (Exception ex)
             {
@@ -3187,6 +3188,7 @@ public sealed partial class ConnectionPage : Page
                 settings.SshTunnelLocalPort = ssh.LocalPort;
             }
             settings.SaveOrThrow();
+            CurrentApp.EnsureSshTunnelStarted();
             return null;
         }
         catch (Exception ex)

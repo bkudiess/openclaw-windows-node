@@ -137,7 +137,7 @@ public sealed class AppRefactorContractTests
             windowEdit,
             "BeginManualGatewayLifecycleOperationAsync",
             "DisconnectAsync",
-            "_registry.AddOrUpdate(record)");
+            "_registry.AddOrUpdate(candidateRecord)");
         Assert.Contains("gatewayLifecycleLease?.Dispose()", windowEdit);
     }
 
@@ -204,6 +204,7 @@ public sealed class AppRefactorContractTests
         var directConnect = ExtractMethod(statusWindow, "OnDirectConnectAsync");
         var setupConnect = ExtractMethod(statusWindow, "OnConnectAsync");
         var stateChanged = ExtractMethod(statusWindow, "OnManagerStateChanged");
+        var rollback = ExtractMethod(statusWindow, "RollbackDirectConnectState");
 
         Assert.Contains("ConnectionStatus_Connecting", directConnect);
         Assert.DoesNotContain("ConnectionStatus_ConnectedTo", directConnect);
@@ -217,13 +218,42 @@ public sealed class AppRefactorContractTests
             directConnect,
             "ConnectionStatus_Connecting",
             "ConnectWithSharedTokenAsync(url, token, sshConfig)");
-        Assert.Contains("snapshot.OperatorState == RoleConnectionState.Error", stateChanged);
+        Assert.Contains("snapshot.OverallState == OverallConnectionState.Error", stateChanged);
         Assert.Contains("snapshot.OperatorError", stateChanged);
         Assert.Contains("SetupCodeResult.Text = errorText", stateChanged);
         Assert.Contains("SetupCodeResult.Text = connectedText", stateChanged);
         Assert.Contains("OverallConnectionState.Degraded", stateChanged);
         Assert.Contains("HubWindow_Pill_Degraded", stateChanged);
         Assert.Contains("OverallConnectionState.Connected or OverallConnectionState.Ready", stateChanged);
+        Assert.Contains("OverallConnectionState.Idle or OverallConnectionState.Disconnecting", stateChanged);
+        Assert.Contains("ConnectionStatus_Disconnected", stateChanged);
+        Assert.Contains("statusMessageGeneration", stateChanged);
+        Assert.Contains("Volatile.Read(ref _statusMessageGeneration)", stateChanged);
+        AssertInOrder(
+            directConnect,
+            "BeginManualGatewayLifecycleOperationAsync",
+            "previousActiveId = _registry.ActiveGatewayId",
+            "await _manager.DisconnectAsync()",
+            "_registry.AddOrUpdate(candidateRecord)",
+            "_registry.Save()",
+            "SaveConnectionSettings(url, sshConfig)");
+        Assert.Contains("RollbackDirectConnectState(", directConnect);
+        AssertInOrder(
+            directConnect,
+            "connectionAttemptStarted = true",
+            "await _manager.ConnectAsync(recordId)",
+            "if (connectionAttemptStarted)",
+            "await _manager.DisconnectAsync()",
+            "RollbackDirectConnectState(");
+        Assert.Contains("candidateRegistryCommitted", rollback);
+        Assert.Contains("_registry.Save()", rollback);
+        Assert.Contains("previousSettings.Restore(app.Settings)", rollback);
+        Assert.Contains("app.EnsureSshTunnelStarted()", rollback);
+        AssertInOrder(
+            directConnect,
+            "RollbackDirectConnectState(",
+            "InvalidatePendingStatusMessages()",
+            "DirectConnectResult.Text =");
     }
 
     [Fact]
@@ -283,6 +313,19 @@ public sealed class AppRefactorContractTests
         Assert.Contains("DeviceTokenRestoreOutcome.Failed", rollback);
         Assert.Contains("ReconcileSettingsToCandidate", rollback);
         Assert.Contains("SaveOrThrow()", rollback);
+        Assert.Contains("CurrentApp.EnsureSshTunnelStarted()", rollback);
+        Assert.Contains("CurrentApp.EnsureSshTunnelStarted()", connectionPage);
+    }
+
+    [Fact]
+    public void BrowserAuthorization_RequiresExactOwnedSshListener()
+    {
+        var source = ReadAppSources();
+
+        Assert.Contains("uri.Port != browserForwardPort", source);
+        Assert.Contains("IsOwnedListenerReadyAsync(", source);
+        Assert.Contains("uri.Port,", source);
+        Assert.DoesNotContain("_sshTunnelService?.IsActive == true", source);
     }
 
     [Fact]

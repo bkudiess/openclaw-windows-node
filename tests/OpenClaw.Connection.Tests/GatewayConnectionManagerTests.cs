@@ -1096,6 +1096,43 @@ public class GatewayConnectionManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task SshReconnectAuthorization_RequiresCurrentOwnedListener()
+    {
+        var ssh = new SshTunnelConfig("user", "host.example", 18789, 45678);
+        _registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "gw-ssh",
+            Url = "wss://remote.example",
+            SharedGatewayToken = "shared-token",
+            SshTunnel = ssh,
+        });
+        _registry.SetActive("gw-ssh");
+        _resolver.OperatorCredential = new GatewayCredential(
+            "shared-token",
+            IsBootstrapToken: false,
+            CredentialResolver.SourceSharedGatewayToken);
+        var tunnel = new CountingTunnelManager();
+        using var manager = new GatewayConnectionManager(
+            _resolver,
+            _factory,
+            _registry,
+            NullLogger.Instance,
+            tunnelManager: tunnel);
+
+        await manager.ConnectAsync("gw-ssh");
+        var lifecycle = Assert.Single(_factory.CreatedClients);
+        var authorizeReconnect = Assert.IsType<Func<CancellationToken, Task<ReconnectAuthorizationResult>>>(
+            lifecycle.DataClient.ReconnectAuthorizationAsync);
+
+        tunnel.OwnedListenerReady = false;
+        var authorization = await authorizeReconnect(CancellationToken.None);
+
+        Assert.False(authorization.Allowed);
+        Assert.Equal(GatewayErrorKind.LocalPortConflict, authorization.FailureKind);
+        Assert.Contains("credentials were not sent", authorization.Detail);
+    }
+
+    [Fact]
     public async Task ConnectWithSharedTokenAsync_ExactActiveSshConfigRevalidatesOwnedListener()
     {
         var ssh = new SshTunnelConfig("user", "host.example", 18789, 45678);
@@ -3062,12 +3099,14 @@ public class GatewayConnectionManagerTests : IDisposable
         _resolver.OperatorCredential = new GatewayCredential("operator-token", false, "test");
         _resolver.NodeCredential = new GatewayCredential("node-token", false, "test");
         var node = new CountingNodeConnector();
+        var tunnel = new CountingTunnelManager();
         using var manager = new GatewayConnectionManager(
             _resolver,
             _factory,
             _registry,
             NullLogger.Instance,
-            nodeConnector: node);
+            nodeConnector: node,
+            tunnelManager: tunnel);
 
         await manager.ConnectAsync("gw-1");
         await InvokeHandshakeSucceededAsync(manager);
@@ -4183,8 +4222,21 @@ public class GatewayConnectionManagerTests : IDisposable
         public SshTunnelConfig? ActiveConfig => IsActive ? LastConfig : null;
         public string? LocalTunnelUrl { get; private set; }
         public bool RestartPending { get; set; }
+        public bool OwnedListenerReady { get; set; } = true;
 
         public bool IsRestartPending(SshTunnelExit tunnelExit) => RestartPending;
+        public Task<bool> IsOwnedListenerReadyAsync(
+            SshTunnelConfig config,
+            int destinationPort,
+            CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult(
+                OwnedListenerReady &&
+                IsActive &&
+                ActiveConfig == config &&
+                IsConfiguredForward(config, destinationPort));
+        }
 
         public Task<string> StartAsync(SshTunnelConfig config, CancellationToken ct)
         {
@@ -4227,6 +4279,17 @@ public class GatewayConnectionManagerTests : IDisposable
         public bool RestartPending { get; set; }
 
         public bool IsRestartPending(SshTunnelExit tunnelExit) => RestartPending;
+        public Task<bool> IsOwnedListenerReadyAsync(
+            SshTunnelConfig config,
+            int destinationPort,
+            CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult(
+                IsActive &&
+                ActiveConfig == config &&
+                IsConfiguredForward(config, destinationPort));
+        }
 
         public async Task<string> StartAsync(SshTunnelConfig config, CancellationToken ct)
         {
@@ -4251,6 +4314,14 @@ public class GatewayConnectionManagerTests : IDisposable
         public string? LocalTunnelUrl => null;
 
         public bool IsRestartPending(SshTunnelExit tunnelExit) => false;
+        public Task<bool> IsOwnedListenerReadyAsync(
+            SshTunnelConfig config,
+            int destinationPort,
+            CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult(false);
+        }
 
         public Task<string> StartAsync(SshTunnelConfig config, CancellationToken ct) =>
             throw new InvalidOperationException("tunnel failed");
@@ -4259,6 +4330,10 @@ public class GatewayConnectionManagerTests : IDisposable
 
         public void Dispose() { }
     }
+
+    private static bool IsConfiguredForward(SshTunnelConfig config, int destinationPort) =>
+        destinationPort == config.LocalPort ||
+        (config.IncludeBrowserProxyForward && destinationPort == config.LocalPort + 2);
 
     /// <summary>
     /// Test connector that fires StatusChanged / PairingStatusChanged events synchronously
