@@ -227,12 +227,23 @@ public class FlattenedToolOutputDetectionTests
     [InlineData("Command still running (session foo, pid 1)", "bash")]
     [InlineData("Process exited with code 0", "bash")]
     [InlineData("Exec completed (oceanic, code 0)", "exec")]
-    [InlineData("OpenClaw 2026.4.23 — Usage: openclaw help", "exec")]
+    [InlineData("OpenClaw 2026.4.23 — Usage: openclaw help", "Tool")]
     [InlineData("  1. using System;\n  2. using System.IO;\n  3. namespace Foo;", "view")]
     [InlineData("src/Main.cs:42:    var x = 1;", "grep")]
     [InlineData("commit abc123\nAuthor: User\nDate: Mon Jan 1", "git")]
     [InlineData("diff --git a/foo.cs b/foo.cs", "git")]
     public void ClassifiesKindCorrectly(string text, string expected)
+    {
+        Assert.Equal(expected, OpenClawChatDataProvider.ClassifyFlattenedToolOutput(text));
+    }
+
+    [Theory]
+    [InlineData("system.run completed", "system.run")]
+    [InlineData("browser.proxy https://example.test", "browser.proxy")]
+    [InlineData("canvas.navigate opened the canvas", "canvas.navigate")]
+    [InlineData("Apply Patch updated two files", "Apply Patch")]
+    [InlineData("Bash completed", "Bash")]
+    public void ClassifyFlattenedToolOutput_PreservesKnownIdentity(string text, string expected)
     {
         Assert.Equal(expected, OpenClawChatDataProvider.ClassifyFlattenedToolOutput(text));
     }
@@ -253,12 +264,12 @@ public class FlattenedToolOutputDetectionTests
     // ── Additional classifier edge cases ──
 
     [Theory]
-    [InlineData("Cloning into 'repo'...\nremote: Enumerating objects: 100", "exec")]
-    [InlineData("On branch main\nYour branch is up to date with 'origin/main'.", "exec")]
-    [InlineData("fatal: not a git repository", "exec")]
-    [InlineData("src/foo.cs\nsrc/bar.cs\nsrc/baz.cs", "exec")]
+    [InlineData("Cloning into 'repo'...\nremote: Enumerating objects: 100", "Tool")]
+    [InlineData("On branch main\nYour branch is up to date with 'origin/main'.", "Tool")]
+    [InlineData("fatal: not a git repository", "Tool")]
+    [InlineData("src/foo.cs\nsrc/bar.cs\nsrc/baz.cs", "Tool")]
     [InlineData("  1. first line\n  2. second line\n  3. third line", "view")]
-    [InlineData("--- a/src/main.cs\n+++ b/src/main.cs\n@@ -1,3 +1,4 @@", "exec")]
+    [InlineData("--- a/src/main.cs\n+++ b/src/main.cs\n@@ -1,3 +1,4 @@", "Tool")]
     public void ClassifiesAdditionalKindsCorrectly(string text, string expected)
     {
         Assert.Equal(expected, OpenClawChatDataProvider.ClassifyFlattenedToolOutput(text));
@@ -268,10 +279,8 @@ public class FlattenedToolOutputDetectionTests
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("x")]
-    public void ClassifyFlattenedToolOutput_EmptyOrTiny_ReturnsExecDefault(string text)
+    public void ClassifyFlattenedToolOutput_EmptyOrTiny_ReturnsTruthfulGenericFallback(string text)
     {
-        // Even empty/tiny text should return a non-empty kind (default "exec")
-        var kind = OpenClawChatDataProvider.ClassifyFlattenedToolOutput(text);
-        Assert.False(string.IsNullOrEmpty(kind));
+        Assert.Equal("Tool", OpenClawChatDataProvider.ClassifyFlattenedToolOutput(text));
     }
 }
