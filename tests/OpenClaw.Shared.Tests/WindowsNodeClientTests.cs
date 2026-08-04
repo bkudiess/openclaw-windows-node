@@ -1541,6 +1541,56 @@ public class WindowsNodeClientTests
     }
 
     [Fact]
+    public async Task HandleConnectChallenge_HandshakeAuthorizationDeniesBeforeCredentialFrame()
+    {
+        var dataPath = Path.Combine(Path.GetTempPath(), $"openclaw-node-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dataPath);
+
+        try
+        {
+            using var client = new CapturingWindowsNodeClient(
+                "ws://localhost:18789",
+                "synthetic-node-credential",
+                dataPath);
+            var authorizationCalls = 0;
+            GatewayErrorKind? failureKind = null;
+            ConnectionStatus? lastStatus = null;
+            client.HandshakeAuthorizationAsync = _ =>
+            {
+                authorizationCalls++;
+                return Task.FromResult(new ReconnectAuthorizationResult(
+                    false,
+                    GatewayErrorKind.LocalPortConflict,
+                    "node listener ownership lost; credentials were not sent"));
+            };
+            client.ConnectionFailure += (_, kind) => failureKind = kind;
+            client.StatusChanged += (_, status) => lastStatus = status;
+
+            await InvokeHandleEventAsync(
+                client,
+                """
+                {
+                  "type": "event",
+                  "event": "connect.challenge",
+                  "payload": {
+                    "nonce": "node-listener-replacement",
+                    "ts": 1785824000000
+                  }
+                }
+                """);
+
+            Assert.Equal(1, authorizationCalls);
+            Assert.Empty(client.SentMessages);
+            Assert.Equal(GatewayErrorKind.LocalPortConflict, failureKind);
+            Assert.Equal(ConnectionStatus.Error, lastStatus);
+        }
+        finally
+        {
+            Directory.Delete(dataPath, true);
+        }
+    }
+
+    [Fact]
     public void BuildNodeConnectMessage_IncludesCanonicalWindowsDeviceFamily()
     {
         var dataPath = Path.Combine(Path.GetTempPath(), $"openclaw-node-test-{Guid.NewGuid():N}");

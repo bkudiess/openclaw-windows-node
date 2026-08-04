@@ -484,7 +484,8 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 return;
             }
 
-            lifecycle.DataClient.ReconnectAuthorizationAsync = async cancellationToken =>
+            async Task<ReconnectAuthorizationResult> AuthorizeLiveCredentialHandoffAsync(
+                CancellationToken cancellationToken)
             {
                 if (!IsCurrentGatewayAttempt(gen, record.Id) ||
                     !IsAutomaticReconnectAllowed(record.Id))
@@ -503,7 +504,12 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                     authorization.Allowed,
                     authorization.FailureKind,
                     authorization.Detail);
-            };
+            }
+
+            lifecycle.DataClient.HandshakeAuthorizationAsync =
+                AuthorizeLiveCredentialHandoffAsync;
+            lifecycle.DataClient.ReconnectAuthorizationAsync =
+                AuthorizeLiveCredentialHandoffAsync;
             _activeLifecycle = lifecycle;
             OperatorClientChanged?.Invoke(this, new OperatorClientChangedEventArgs
             {
@@ -2823,7 +2829,8 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
 
         if (_nodeConnector is INodeConnectorReconnectPolicy reconnectPolicy)
         {
-            reconnectPolicy.ReconnectAuthorizationAsync = async reconnectCancellationToken =>
+            async Task<ReconnectAuthorizationResult> AuthorizeNodeCredentialHandoffAsync(
+                CancellationToken authorizationCancellationToken)
             {
                 if (!IsExpectedNodeStartCurrent(expectedLifecycleGeneration, nodeGeneration))
                     return new ReconnectAuthorizationResult(
@@ -2833,13 +2840,18 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 var authorization = await AuthorizeCredentialForEndpointAsync(
                     record,
                     nodeCredential,
-                    reconnectCancellationToken,
+                    authorizationCancellationToken,
                     requireSshTunnelOwnership: true).ConfigureAwait(false);
                 return new ReconnectAuthorizationResult(
                     authorization.Allowed,
                     authorization.FailureKind,
                     authorization.Detail);
-            };
+            }
+
+            reconnectPolicy.HandshakeAuthorizationAsync =
+                AuthorizeNodeCredentialHandoffAsync;
+            reconnectPolicy.ReconnectAuthorizationAsync =
+                AuthorizeNodeCredentialHandoffAsync;
         }
 
         try

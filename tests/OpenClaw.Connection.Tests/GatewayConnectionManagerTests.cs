@@ -1133,6 +1133,100 @@ public class GatewayConnectionManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task SshInitialHandshakeAuthorization_RechecksOwnershipAfterTransportConnect()
+    {
+        var ssh = new SshTunnelConfig("user", "host.example", 18789, 45678);
+        _registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "gw-ssh",
+            Url = "wss://remote.example",
+            SharedGatewayToken = "shared-token",
+            SshTunnel = ssh,
+        });
+        _registry.SetActive("gw-ssh");
+        _resolver.OperatorCredential = new GatewayCredential(
+            "shared-token",
+            IsBootstrapToken: false,
+            CredentialResolver.SourceSharedGatewayToken);
+        var tunnel = new CountingTunnelManager();
+        using var manager = new GatewayConnectionManager(
+            _resolver,
+            _factory,
+            _registry,
+            NullLogger.Instance,
+            tunnelManager: tunnel);
+
+        await manager.ConnectAsync("gw-ssh");
+        var lifecycle = Assert.Single(_factory.CreatedClients);
+        Assert.NotNull(lifecycle.DataClient.HandshakeAuthorizationAsync);
+        var failure = new TaskCompletionSource<string>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var errorStatus = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        lifecycle.DataClient.AuthenticationFailed += (_, message) =>
+            failure.TrySetResult(message);
+        lifecycle.DataClient.StatusChanged += (_, status) =>
+        {
+            if (status == ConnectionStatus.Error)
+                errorStatus.TrySetResult();
+        };
+
+        lifecycle.SimulateTransportConnected();
+        var checksBeforeChallenge = tunnel.OwnedListenerCheckCount;
+        tunnel.OwnedListenerReady = false;
+        lifecycle.SimulateConnectChallenge();
+
+        var failureMessage = await failure.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await errorStatus.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(checksBeforeChallenge + 1, tunnel.OwnedListenerCheckCount);
+        Assert.Contains("credentials were not sent", failureMessage);
+    }
+
+    [Fact]
+    public async Task SshNodeInitialHandshakeAuthorization_RequiresCurrentOwnedListener()
+    {
+        var ssh = new SshTunnelConfig("user", "host.example", 18789, 45678);
+        _registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "gw-ssh",
+            Url = "wss://remote.example",
+            SharedGatewayToken = "shared-token",
+            SshTunnel = ssh,
+        });
+        _registry.SetActive("gw-ssh");
+        _resolver.NodeCredential = new GatewayCredential(
+            "shared-token",
+            IsBootstrapToken: false,
+            CredentialResolver.SourceSharedGatewayToken);
+        var tunnel = new CountingTunnelManager();
+        var node = new CountingNodeConnector();
+        using var manager = new GatewayConnectionManager(
+            _resolver,
+            _factory,
+            _registry,
+            NullLogger.Instance,
+            nodeConnector: node,
+            isNodeEnabled: () => true,
+            tunnelManager: tunnel);
+
+        await manager.ConnectNodeOnlyAsync("gw-ssh");
+        var authorizeHandshake = Assert.IsType<
+            Func<CancellationToken, Task<ReconnectAuthorizationResult>>>(
+            node.HandshakeAuthorizationAsync);
+        Assert.NotNull(node.ReconnectAuthorizationAsync);
+
+        var checksBeforeChallenge = tunnel.OwnedListenerCheckCount;
+        tunnel.OwnedListenerReady = false;
+        var authorization = await authorizeHandshake(CancellationToken.None);
+
+        Assert.Equal(checksBeforeChallenge + 1, tunnel.OwnedListenerCheckCount);
+        Assert.False(authorization.Allowed);
+        Assert.Equal(GatewayErrorKind.LocalPortConflict, authorization.FailureKind);
+        Assert.Contains("credentials were not sent", authorization.Detail);
+    }
+
+    [Fact]
     public async Task ConnectWithSharedTokenAsync_ExactActiveSshConfigUsesIsolatedValidationTunnel()
     {
         var ssh = new SshTunnelConfig("user", "host.example", 18789, 45678);
@@ -3772,6 +3866,9 @@ public class GatewayConnectionManagerTests : IDisposable
         public void SimulateHandshake() =>
             _client.SimulateHandshakeSucceeded();
 
+        public void SimulateConnectChallenge() =>
+            _client.SimulateConnectChallenge();
+
         public void SimulateV2SignatureFallback() =>
             _client.SimulateV2SignatureFallback();
 
@@ -3788,6 +3885,27 @@ public class GatewayConnectionManagerTests : IDisposable
 
         public void SimulateTransportConnected() =>
             RaiseTransportConnected();
+
+        public void SimulateConnectChallenge()
+        {
+            using var document = JsonDocument.Parse(
+                """
+                {
+                  "type": "event",
+                  "event": "connect.challenge",
+                  "payload": {
+                    "nonce": "initial-handshake-proof",
+                    "ts": 1785816000000
+                  }
+                }
+                """);
+            var method = typeof(OpenClawGatewayClient).GetMethod(
+                "HandleConnectChallenge",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic);
+            Assert.NotNull(method);
+            method.Invoke(this, [document.RootElement.Clone()]);
+        }
 
         public void SimulateConnectionFailure(GatewayErrorKind kind) =>
             RaiseConnectionFailure(kind);
@@ -4052,7 +4170,7 @@ public class GatewayConnectionManagerTests : IDisposable
             _captured.Add((identityPath, token, role));
     }
 
-    private sealed class CountingNodeConnector : INodeConnector
+    private sealed class CountingNodeConnector : INodeConnector, INodeConnectorReconnectPolicy
     {
         public int ConnectCount { get; private set; }
         public string? LastGatewayUrl { get; private set; }
@@ -4061,6 +4179,10 @@ public class GatewayConnectionManagerTests : IDisposable
         public PairingStatus PairingStatus { get; private set; } = PairingStatus.Unknown;
         public string? NodeDeviceId => "test-node";
         public NodeConnectionMode Mode => IsConnected ? NodeConnectionMode.Gateway : NodeConnectionMode.Disabled;
+        public Func<CancellationToken, Task<ReconnectAuthorizationResult>>?
+            HandshakeAuthorizationAsync { get; set; }
+        public Func<CancellationToken, Task<ReconnectAuthorizationResult>>?
+            ReconnectAuthorizationAsync { get; set; }
 
 #pragma warning disable CS0067 // Events required by interface but not fired in tests
         public event EventHandler<ConnectionStatus>? StatusChanged;
@@ -4283,6 +4405,7 @@ public class GatewayConnectionManagerTests : IDisposable
         public string? LocalTunnelUrl { get; private set; }
         public bool RestartPending { get; set; }
         public bool OwnedListenerReady { get; set; } = true;
+        public int OwnedListenerCheckCount { get; private set; }
 
         public bool IsRestartPending(SshTunnelExit tunnelExit) => RestartPending;
         public Task<bool> IsOwnedListenerReadyAsync(
@@ -4291,6 +4414,7 @@ public class GatewayConnectionManagerTests : IDisposable
             CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();
+            OwnedListenerCheckCount++;
             return Task.FromResult(
                 OwnedListenerReady &&
                 IsActive &&

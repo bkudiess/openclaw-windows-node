@@ -76,6 +76,12 @@ public class WindowsNodeClient : WebSocketClientBase
     public event EventHandler? TransportConnected;
     /// <summary>Raised with a finite classification before a terminal handshake error is published.</summary>
     public event EventHandler<GatewayErrorKind>? ConnectionFailure;
+    /// <summary>
+    /// Optional fail-closed authorization invoked after connect.challenge and immediately before
+    /// the credential-bearing node connect frame.
+    /// </summary>
+    public Func<CancellationToken, Task<ReconnectAuthorizationResult>>?
+        HandshakeAuthorizationAsync { get; set; }
 
     protected override void OnReconnectAuthorizationDenied(
         ReconnectAuthorizationResult authorization)
@@ -619,8 +625,22 @@ public class WindowsNodeClient : WebSocketClientBase
         }
 
         _logger.Info($"[HANDSHAKE] Received connect.challenge: nonce={nonce}, ts={challengeTimestampMs?.ToString() ?? "missing"}");
-        
+
         _pendingNonce = nonce;
+        if (HandshakeAuthorizationAsync is not null)
+        {
+            var authorization = await HandshakeAuthorizationAsync(CancellationToken.None)
+                .ConfigureAwait(false);
+            if (!authorization.Allowed)
+            {
+                _logger.Warn(
+                    $"[HANDSHAKE] Node credential handoff blocked: {authorization.Detail}");
+                ConnectionFailure?.Invoke(this, authorization.FailureKind);
+                RaiseStatusChanged(ConnectionStatus.Error);
+                return;
+            }
+        }
+
         await SendNodeConnectAsync(nonce, challengeTimestampMs);
     }
     

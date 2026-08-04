@@ -447,22 +447,28 @@ jobs:
             }
           }
 
-          $sshOwnershipProofName = "UnownedListenerIsRejectedThenOwnedTunnelRecoversWithoutRepairing"
-          $sshOwnershipProof = @(
-            $trx.TestRun.Results.UnitTestResult |
-              Where-Object { $_.testName -like "*$sshOwnershipProofName*" }
-          ) | Select-Object -First 1
-          if ($null -eq $sshOwnershipProof) {
-            Write-Error "E2E shard '${{ matrix.name }}' did not report the SSH ownership proof test '$sshOwnershipProofName'. Check the setup-connect filter before merging."
-            exit 1
-          }
+          $sshOwnershipProofNames = @(
+            "UnownedListenerIsRejectedThenOwnedTunnelRecoversWithoutRepairing",
+            "InitialHandshakeListenerReplacementWithholdsCredentialFrame",
+            "InitialNodeHandshakeListenerReplacementWithholdsCredentialFrame"
+          )
+          foreach ($sshOwnershipProofName in $sshOwnershipProofNames) {
+            $sshOwnershipProof = @(
+              $trx.TestRun.Results.UnitTestResult |
+                Where-Object { $_.testName -like "*$sshOwnershipProofName*" }
+            ) | Select-Object -First 1
+            if ($null -eq $sshOwnershipProof) {
+              Write-Error "E2E shard '${{ matrix.name }}' did not report the SSH ownership proof test '$sshOwnershipProofName'. Check the setup-connect filter before merging."
+              exit 1
+            }
 
-          $sshOwnershipOutcome = [string]$sshOwnershipProof.outcome
-          if ($sshOwnershipOutcome -ne "Passed") {
-            Write-Error "SSH ownership E2E proof '$sshOwnershipProofName' had outcome '$sshOwnershipOutcome'; this proof must pass and may not skip."
-            exit 1
+            $sshOwnershipOutcome = [string]$sshOwnershipProof.outcome
+            if ($sshOwnershipOutcome -ne "Passed") {
+              Write-Error "SSH ownership E2E proof '$sshOwnershipProofName' had outcome '$sshOwnershipOutcome'; this proof must pass and may not skip."
+              exit 1
+            }
+            Write-Host "SSH ownership E2E proof passed: $sshOwnershipProofName"
           }
-          Write-Host "SSH ownership E2E proof passed: $sshOwnershipProofName"
         }
 
     - name: Upload E2E Test Results & Logs

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Net;
 using System.Net.Sockets;
+using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -344,6 +345,158 @@ public sealed class SshOwnershipAdversarialProofTests
         }
     }
 
+    [E2EFact]
+    public async Task InitialHandshakeListenerReplacementWithholdsCredentialFrame()
+    {
+        var proofDir = Path.Combine(_fixture.ArtifactDir, "pr1076-proof");
+        Directory.CreateDirectory(proofDir);
+        var registryDir = Path.Combine(
+            Path.GetTempPath(),
+            $"openclaw-initial-handshake-proof-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(registryDir);
+
+        await using var server = new InitialHandshakeChallengeServer();
+        try
+        {
+            var registry = new GatewayRegistry(registryDir);
+            var tunnelConfig = new SshTunnelConfig(
+                "proof-user",
+                "proof-host",
+                RemotePort: server.Port,
+                LocalPort: E2ESetupFixture.AllocateFreePort());
+            var record = new GatewayRecord
+            {
+                Id = "initial-handshake-proof",
+                Url = "wss://proof.invalid",
+                SharedGatewayToken = "synthetic-proof-credential",
+                SshTunnel = tunnelConfig,
+            };
+            registry.AddOrUpdate(record);
+            registry.SetActive(record.Id);
+            var tunnel = new InitialHandshakeRaceTunnelManager(server.WebSocketUrl);
+            using var manager = new GatewayConnectionManager(
+                new CredentialResolver(DeviceIdentityFileReader.Instance),
+                new GatewayClientFactory(),
+                registry,
+                NullLogger.Instance,
+                tunnelManager: tunnel);
+
+            await manager.ConnectAsync(record.Id);
+            await server.Accepted.WaitAsync(TimeSpan.FromSeconds(10));
+            var checksBeforeChallenge = tunnel.OwnedListenerCheckCount;
+
+            tunnel.OwnedListenerReady = false;
+            var connectFrames = await server.SendChallengeAndCountConnectFramesAsync(
+                TimeSpan.FromSeconds(2));
+            var snapshot = await WaitForOperatorErrorAsync(manager, TimeSpan.FromSeconds(5));
+
+            Assert.Equal(checksBeforeChallenge + 1, tunnel.OwnedListenerCheckCount);
+            Assert.Equal(0, connectFrames);
+            Assert.Contains(
+                "credentials were not sent",
+                snapshot.OperatorError,
+                StringComparison.OrdinalIgnoreCase);
+
+            File.WriteAllText(
+                Path.Combine(proofDir, "initial-handshake-replacement.json"),
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        head = ResolveHeadSha(),
+                        webSocketAcceptedBeforeListenerReplacement = true,
+                        listenerOwnedAtTunnelStart = true,
+                        listenerOwnedAtCredentialHandoff = false,
+                        ownershipChecksBeforeChallenge = checksBeforeChallenge,
+                        ownershipChecksAfterChallenge = tunnel.OwnedListenerCheckCount,
+                        credentialBearingConnectFramesReceived = connectFrames,
+                        operatorState = snapshot.OperatorState.ToString(),
+                        error = snapshot.OperatorError,
+                    },
+                    new JsonSerializerOptions { WriteIndented = true }));
+        }
+        finally
+        {
+            try { Directory.Delete(registryDir, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [E2EFact]
+    public async Task InitialNodeHandshakeListenerReplacementWithholdsCredentialFrame()
+    {
+        var proofDir = Path.Combine(_fixture.ArtifactDir, "pr1076-proof");
+        Directory.CreateDirectory(proofDir);
+        var registryDir = Path.Combine(
+            Path.GetTempPath(),
+            $"openclaw-initial-node-handshake-proof-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(registryDir);
+
+        await using var server = new InitialHandshakeChallengeServer();
+        try
+        {
+            var registry = new GatewayRegistry(registryDir);
+            var tunnelConfig = new SshTunnelConfig(
+                "proof-user",
+                "proof-host",
+                RemotePort: server.Port,
+                LocalPort: server.Port);
+            var record = new GatewayRecord
+            {
+                Id = "initial-node-handshake-proof",
+                Url = "wss://proof.invalid",
+                SharedGatewayToken = "synthetic-node-proof-credential",
+                SshTunnel = tunnelConfig,
+            };
+            registry.AddOrUpdate(record);
+            registry.SetActive(record.Id);
+            var tunnel = new InitialHandshakeRaceTunnelManager(server.WebSocketUrl);
+            var nodeConnector = new NodeConnector(NullLogger.Instance);
+            using var manager = new GatewayConnectionManager(
+                new CredentialResolver(DeviceIdentityFileReader.Instance),
+                new GatewayClientFactory(),
+                registry,
+                NullLogger.Instance,
+                nodeConnector: nodeConnector,
+                isNodeEnabled: () => true,
+                tunnelManager: tunnel);
+
+            await manager.ConnectNodeOnlyAsync(record.Id);
+            await server.Accepted.WaitAsync(TimeSpan.FromSeconds(10));
+            var checksBeforeChallenge = tunnel.OwnedListenerCheckCount;
+
+            tunnel.OwnedListenerReady = false;
+            var connectFrames = await server.SendChallengeAndCountConnectFramesAsync(
+                TimeSpan.FromSeconds(2));
+            var snapshot = await WaitForNodeErrorAsync(manager, TimeSpan.FromSeconds(5));
+
+            Assert.True(
+                tunnel.OwnedListenerCheckCount > checksBeforeChallenge,
+                "Node credential handoff did not re-check listener ownership after the challenge.");
+            Assert.Equal(0, connectFrames);
+            Assert.Equal(RoleConnectionState.Error, snapshot.NodeState);
+
+            File.WriteAllText(
+                Path.Combine(proofDir, "initial-node-handshake-replacement.json"),
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        head = ResolveHeadSha(),
+                        webSocketAcceptedBeforeListenerReplacement = true,
+                        listenerOwnedAtTunnelStart = true,
+                        listenerOwnedAtCredentialHandoff = false,
+                        ownershipChecksBeforeChallenge = checksBeforeChallenge,
+                        ownershipChecksAfterChallenge = tunnel.OwnedListenerCheckCount,
+                        credentialBearingConnectFramesReceived = connectFrames,
+                        nodeState = snapshot.NodeState.ToString(),
+                        error = snapshot.NodeError,
+                    },
+                    new JsonSerializerOptions { WriteIndented = true }));
+        }
+        finally
+        {
+            try { Directory.Delete(registryDir, recursive: true); } catch (IOException) { }
+        }
+    }
+
     private async Task ConfigureProofSshAsync(
         string profileDir,
         string sshDir,
@@ -511,6 +664,40 @@ public sealed class SshOwnershipAdversarialProofTests
         throw new TimeoutException(
             "Connection diagnostics predicate was not satisfied. Last: " +
             TokenSanitizer.SanitizeLogMessage(last));
+    }
+
+    private static async Task<GatewayConnectionSnapshot> WaitForOperatorErrorAsync(
+        GatewayConnectionManager manager,
+        TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow.Add(timeout);
+        while (DateTime.UtcNow < deadline)
+        {
+            var snapshot = manager.CurrentSnapshot;
+            if (snapshot.OperatorState == RoleConnectionState.Error)
+                return snapshot;
+            await Task.Delay(25);
+        }
+
+        throw new TimeoutException(
+            $"Operator did not enter Error state. Last: {manager.CurrentSnapshot.OperatorState}");
+    }
+
+    private static async Task<GatewayConnectionSnapshot> WaitForNodeErrorAsync(
+        GatewayConnectionManager manager,
+        TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow.Add(timeout);
+        while (DateTime.UtcNow < deadline)
+        {
+            var snapshot = manager.CurrentSnapshot;
+            if (snapshot.NodeState == RoleConnectionState.Error)
+                return snapshot;
+            await Task.Delay(25);
+        }
+
+        throw new TimeoutException(
+            $"Node did not enter Error state. Last: {manager.CurrentSnapshot.NodeState}");
     }
 
     private static void AssertReady(JsonElement status)
@@ -709,5 +896,203 @@ public sealed class SshOwnershipAdversarialProofTests
         string ExecutablePath,
         string CommandLine,
         string HostAddress);
+
+    private sealed class InitialHandshakeRaceTunnelManager(string webSocketUrl)
+        : ISshTunnelManager
+    {
+        public bool OwnedListenerReady { get; set; } = true;
+        public int OwnedListenerCheckCount { get; private set; }
+        public bool IsActive { get; private set; }
+        public SshTunnelConfig? ActiveConfig { get; private set; }
+        public string? LocalTunnelUrl => IsActive ? webSocketUrl : null;
+
+        public bool IsRestartPending(SshTunnelExit tunnelExit) => false;
+
+        public Task<bool> IsOwnedListenerReadyAsync(
+            SshTunnelConfig config,
+            int destinationPort,
+            CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            OwnedListenerCheckCount++;
+            return Task.FromResult(
+                OwnedListenerReady &&
+                IsActive &&
+                ActiveConfig == config &&
+                destinationPort == config.LocalPort);
+        }
+
+        public Task<string> StartAsync(SshTunnelConfig config, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            IsActive = true;
+            ActiveConfig = config;
+            return Task.FromResult(webSocketUrl);
+        }
+
+        public Task StopAsync()
+        {
+            IsActive = false;
+            ActiveConfig = null;
+            return Task.CompletedTask;
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class InitialHandshakeChallengeServer : IAsyncDisposable
+    {
+        private readonly HttpListener _listener;
+        private readonly CancellationTokenSource _cts = new();
+        private readonly TaskCompletionSource<WebSocket> _socket =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly Task _acceptTask;
+
+        public InitialHandshakeChallengeServer()
+        {
+            Exception? lastError = null;
+            for (var attempt = 0; attempt < 10; attempt++)
+            {
+                var candidate = E2ESetupFixture.AllocateFreePort();
+                var listener = new HttpListener();
+                listener.Prefixes.Add($"http://127.0.0.1:{candidate}/");
+                try
+                {
+                    listener.Start();
+                    _listener = listener;
+                    Port = candidate;
+                    WebSocketUrl = $"ws://127.0.0.1:{candidate}/";
+                    _acceptTask = Task.Run(AcceptAsync);
+                    return;
+                }
+                catch (HttpListenerException ex)
+                {
+                    lastError = ex;
+                    listener.Close();
+                }
+            }
+
+            throw new InvalidOperationException(
+                "Could not bind initial-handshake proof server.",
+                lastError);
+        }
+
+        public int Port { get; }
+        public string WebSocketUrl { get; }
+        public Task Accepted => _socket.Task;
+
+        public async Task<int> SendChallengeAndCountConnectFramesAsync(TimeSpan observation)
+        {
+            var socket = await _socket.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var challenge = JsonSerializer.Serialize(new
+            {
+                type = "event",
+                @event = "connect.challenge",
+                payload = new
+                {
+                    nonce = "initial-handshake-proof",
+                    ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                },
+            });
+            await socket.SendAsync(
+                Encoding.UTF8.GetBytes(challenge),
+                WebSocketMessageType.Text,
+                endOfMessage: true,
+                CancellationToken.None);
+
+            var connectFrames = 0;
+            var deadline = DateTime.UtcNow.Add(observation);
+            while (DateTime.UtcNow < deadline)
+            {
+                using var receiveCts = new CancellationTokenSource(
+                    deadline - DateTime.UtcNow);
+                string? frame;
+                try
+                {
+                    frame = await ReceiveTextAsync(socket, receiveCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+
+                if (frame is null)
+                    break;
+                using var document = JsonDocument.Parse(frame);
+                var root = document.RootElement;
+                if (root.TryGetProperty("type", out var type) &&
+                    type.GetString() == "req" &&
+                    root.TryGetProperty("method", out var method) &&
+                    method.GetString() == "connect")
+                {
+                    connectFrames++;
+                }
+            }
+
+            return connectFrames;
+        }
+
+        private async Task AcceptAsync()
+        {
+            try
+            {
+                var context = await _listener.GetContextAsync();
+                var webSocket = await context.AcceptWebSocketAsync(subProtocol: null);
+                _socket.TrySetResult(webSocket.WebSocket);
+            }
+            catch (Exception ex) when (
+                ex is HttpListenerException or ObjectDisposedException &&
+                _cts.IsCancellationRequested)
+            {
+                _socket.TrySetCanceled(_cts.Token);
+            }
+        }
+
+        private static async Task<string?> ReceiveTextAsync(
+            WebSocket socket,
+            CancellationToken cancellationToken)
+        {
+            var buffer = new byte[16 * 1024];
+            using var stream = new MemoryStream();
+            while (true)
+            {
+                var result = await socket.ReceiveAsync(buffer, cancellationToken);
+                if (result.MessageType == WebSocketMessageType.Close)
+                    return null;
+                stream.Write(buffer, 0, result.Count);
+                if (result.EndOfMessage)
+                    return Encoding.UTF8.GetString(stream.ToArray());
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            _cts.Cancel();
+            _listener.Stop();
+            _listener.Close();
+            if (_socket.Task.IsCompletedSuccessfully)
+            {
+                var socket = _socket.Task.Result;
+                if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
+                {
+                    try
+                    {
+                        await socket.CloseOutputAsync(
+                            WebSocketCloseStatus.NormalClosure,
+                            "proof complete",
+                            CancellationToken.None);
+                    }
+                    catch (WebSocketException)
+                    {
+                    }
+                }
+                socket.Dispose();
+            }
+            try { await _acceptTask; } catch (OperationCanceledException) { }
+            _cts.Dispose();
+        }
+    }
 
 }
