@@ -1,0 +1,8 @@
+{
+  "connectionState": "Ready",
+  "operatorState": "Connected",
+  "nodeState": "Connected",
+  "sharedGatewayTokenPresent": true,
+  "browserControlPortConfigured": true,
+  "browserProxyCaveat": "Browser control is enabled, but the configured SSH browser endpoint is not the managed browser-proxy forward. Enable the SSH browser-proxy forward and use the local tunnel port plus 2."
+}
