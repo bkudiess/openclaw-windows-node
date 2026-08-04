@@ -92,6 +92,7 @@ public sealed partial class ConnectionPage : Page
     public ConnectionPage()
     {
         InitializeComponent();
+        Loaded += (_, _) => _ = VisualTestCapture.CaptureAsync(this, "Connection");
     }
 
     private IGatewayTerminalLauncher TerminalLauncher =>

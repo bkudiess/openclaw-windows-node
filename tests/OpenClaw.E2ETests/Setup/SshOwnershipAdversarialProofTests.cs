@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Net;
 using System.Net.Sockets;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -79,6 +78,11 @@ public sealed class SshOwnershipAdversarialProofTests
             _fixture.SetTrayEnvironmentVariable("HOME", profileDir);
             _fixture.SetTrayEnvironmentVariable("USERPROFILE", profileDir);
             _fixture.SetTrayEnvironmentVariable("OPENCLAW_E2E_SSH_CONFIG_FILE", sshConfigPath);
+            if (captureUiProof)
+            {
+                _fixture.SetTrayEnvironmentVariable("OPENCLAW_VISUAL_TEST", "1");
+                _fixture.SetTrayEnvironmentVariable("OPENCLAW_VISUAL_TEST_DIR", proofDir);
+            }
             await _fixture.StartTrayAsync();
 
             var ownedListeners = WindowsTcpListenerSnapshot.Capture().Listeners
@@ -256,6 +260,8 @@ public sealed class SshOwnershipAdversarialProofTests
             _fixture.RemoveTrayEnvironmentVariable("HOME");
             _fixture.RemoveTrayEnvironmentVariable("USERPROFILE");
             _fixture.RemoveTrayEnvironmentVariable("OPENCLAW_E2E_SSH_CONFIG_FILE");
+            _fixture.RemoveTrayEnvironmentVariable("OPENCLAW_VISUAL_TEST");
+            _fixture.RemoveTrayEnvironmentVariable("OPENCLAW_VISUAL_TEST_DIR");
             if (sshdPid > 0)
             {
                 var sshdUnit = $"openclaw-pr1076-sshd-{sshPort}.service";
@@ -524,75 +530,68 @@ public sealed class SshOwnershipAdversarialProofTests
 
     private async Task NavigateAndCaptureAsync(string page, string outputPath)
     {
+        var captureStartedAt = DateTime.UtcNow;
         using var navigate = await _fixture.Client!.CallToolExpectSuccessAsync(
             "app.navigate",
             new { page });
         Assert.True(navigate.RootElement.GetProperty("navigated").GetBoolean());
-        var processId = Assert.IsType<int>(_fixture.TrayProcessId);
-        using var process = Process.GetProcessById(processId);
-        var deadline = DateTime.UtcNow.AddSeconds(15);
-        nint handle = 0;
+        var captureDirectory = Path.Combine(
+            Path.GetDirectoryName(outputPath)!,
+            "Connection");
+        var deadline = DateTime.UtcNow.AddSeconds(30);
         while (DateTime.UtcNow < deadline)
         {
-            process.Refresh();
-            handle = process.MainWindowHandle;
-            if (handle != 0)
-                break;
-            await Task.Delay(250);
-        }
-        Assert.NotEqual(0, handle);
-        Assert.True(GetWindowRect(handle, out var rect));
-        var width = rect.Right - rect.Left;
-        var height = rect.Bottom - rect.Top;
-        Assert.True(width > 100 && height > 100);
-        Assert.True(SetWindowPos(handle, 0, 100, 100, width, height, 0x0040));
-        ShowWindow(handle, 5);
-        SetForegroundWindow(handle);
-        await Task.Delay(2000);
-        Assert.True(GetWindowRect(handle, out rect));
-        width = rect.Right - rect.Left;
-        height = rect.Bottom - rect.Top;
-        Assert.True(width > 100 && height > 100);
-        for (var attempt = 0; attempt < 10; attempt++)
-        {
-            using var bitmap = new Bitmap(width, height);
-            var captured = false;
-            using (var graphics = Graphics.FromImage(bitmap))
+            var capture = Directory.Exists(captureDirectory)
+                ? Directory.EnumerateFiles(captureDirectory, "capture-*.png")
+                    .Select(path => new FileInfo(path))
+                    .Where(file => file.LastWriteTimeUtc >= captureStartedAt.AddSeconds(-1))
+                    .OrderByDescending(file => file.LastWriteTimeUtc)
+                    .FirstOrDefault()
+                : null;
+            if (capture is not null)
             {
-                var deviceContext = graphics.GetHdc();
                 try
                 {
-                    captured = PrintWindow(handle, deviceContext, 0x00000002);
+                    var isComposedFrame = false;
+                    using (var stream = new FileStream(
+                               capture.FullName,
+                               FileMode.Open,
+                               FileAccess.Read,
+                               FileShare.ReadWrite))
+                    using (var bitmap = new Bitmap(stream))
+                    {
+                        var sampledColors = new HashSet<int>();
+                        var xStep = Math.Max(1, bitmap.Width / 40);
+                        var yStep = Math.Max(1, bitmap.Height / 40);
+                        for (var y = 0; y < bitmap.Height; y += yStep)
+                        {
+                            for (var x = 0; x < bitmap.Width; x += xStep)
+                                sampledColors.Add(bitmap.GetPixel(x, y).ToArgb());
+                        }
+                        isComposedFrame = sampledColors.Count >= 8;
+                    }
+
+                    if (isComposedFrame)
+                    {
+                        File.Copy(capture.FullName, outputPath, overwrite: true);
+                        return;
+                    }
                 }
-                finally
+                catch (ArgumentException)
                 {
-                    graphics.ReleaseHdc(deviceContext);
+                    // Capture is still being encoded; retry.
+                }
+                catch (IOException)
+                {
+                    // Capture is still being encoded; retry.
                 }
             }
 
-            if (captured)
-            {
-                var sampledColors = new HashSet<int>();
-                var xStep = Math.Max(1, width / 40);
-                var yStep = Math.Max(1, height / 40);
-                for (var y = 0; y < height; y += yStep)
-                {
-                    for (var x = 0; x < width; x += xStep)
-                        sampledColors.Add(bitmap.GetPixel(x, y).ToArgb());
-                }
-
-                if (sampledColors.Count >= 8)
-                {
-                    bitmap.Save(outputPath, System.Drawing.Imaging.ImageFormat.Png);
-                    return;
-                }
-            }
-
-            await Task.Delay(500);
+            await Task.Delay(250);
         }
 
         throw new InvalidOperationException(
-            "Settings window did not produce a composed UI frame for proof capture.");
+            "Connection page did not produce a composed XAML frame for proof capture.");
     }
 
     private static async Task<ProcessResult> RunProcessAsync(
@@ -691,39 +690,4 @@ public sealed class SshOwnershipAdversarialProofTests
         string CommandLine,
         string HostAddress);
 
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetWindowRect(nint hWnd, out Rect rect);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetForegroundWindow(nint hWnd);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool ShowWindow(nint hWnd, int command);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetWindowPos(
-        nint hWnd,
-        nint hWndInsertAfter,
-        int x,
-        int y,
-        int width,
-        int height,
-        uint flags);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool PrintWindow(nint hWnd, nint hdcBlt, uint flags);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Rect
-    {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
-    }
 }
