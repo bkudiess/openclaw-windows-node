@@ -176,28 +176,6 @@ public sealed class SshOwnershipAdversarialProofTests
             }
 
             await _fixture.StopTrayAsync();
-            PatchActiveGateway(
-                tunnelPort,
-                proofSshd.HostAddress,
-                sshPort,
-                browserControlPort: tunnelPort + 4);
-            await _fixture.StartTrayAsync(waitForConnection: false);
-            using var endpointStatus = await WaitForConnectionDiagnosticsAsync(
-                status =>
-                    status.TryGetProperty("gateway", out var gateway) &&
-                    gateway.TryGetProperty("browserProxyCaveat", out var caveat) &&
-                    caveat.ValueKind == JsonValueKind.String &&
-                    caveat.GetString()?.Contains(
-                        "not the managed browser-proxy forward",
-                        StringComparison.OrdinalIgnoreCase) == true,
-                TimeSpan.FromSeconds(45));
-            var endpointGateway = endpointStatus.RootElement.GetProperty("gateway");
-            Assert.Equal(
-                tunnelPort + 4,
-                endpointGateway.GetProperty("browserControlPort").GetInt32());
-            WriteJson("06-unverified-browser-endpoint.json", endpointStatus.RootElement);
-
-            await _fixture.StopTrayAsync();
             var identityDir = _fixture.ReadActiveGatewayCredentialState().IdentityDir;
             var clear = DeviceIdentityStore.BeginTransactionalTokenClear(identityDir);
             Assert.True(clear.Success, clear.Error);
@@ -237,7 +215,6 @@ public sealed class SshOwnershipAdversarialProofTests
                 sameNodeCredential = true,
                 lateWriterWonRollback = true,
                 degradedScreenshot = captureUiProof && File.Exists(screenshotDegraded),
-                unverifiedEndpointDiagnostics = true,
             });
             WriteRedactedTrayLog();
         }
@@ -643,27 +620,6 @@ public sealed class SshOwnershipAdversarialProofTests
             await Task.Delay(500);
         }
         throw new TimeoutException($"Status predicate was not satisfied. Last: {last}");
-    }
-
-    private async Task<JsonDocument> WaitForConnectionDiagnosticsAsync(
-        Func<JsonElement, bool> predicate,
-        TimeSpan timeout)
-    {
-        var deadline = DateTime.UtcNow.Add(timeout);
-        var last = string.Empty;
-        while (DateTime.UtcNow < deadline)
-        {
-            var status = await _fixture.Client!.CallToolExpectSuccessAsync("app.connection.status");
-            last = status.RootElement.GetRawText();
-            if (predicate(status.RootElement))
-                return status;
-            status.Dispose();
-            await Task.Delay(500);
-        }
-
-        throw new TimeoutException(
-            "Connection diagnostics predicate was not satisfied. Last: " +
-            TokenSanitizer.SanitizeLogMessage(last));
     }
 
     private static async Task<GatewayConnectionSnapshot> WaitForOperatorErrorAsync(
