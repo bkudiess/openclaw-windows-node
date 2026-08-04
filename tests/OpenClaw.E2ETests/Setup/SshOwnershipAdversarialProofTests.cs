@@ -41,7 +41,6 @@ public sealed class SshOwnershipAdversarialProofTests
             Environment.GetEnvironmentVariable("OPENCLAW_CAPTURE_UI_PROOF"),
             "1",
             StringComparison.Ordinal);
-        var sshdPid = 0;
         TcpListener? adversary = null;
         (string? Operator, string? Node) beforeTokens = (null, null);
 
@@ -54,7 +53,6 @@ public sealed class SshOwnershipAdversarialProofTests
             await _fixture.StopTrayAsync();
             await ConfigureProofSshAsync(profileDir, sshDir, sshPort);
             var proofSshd = await StartProofSshdAsync(profileDir, sshDir, sshPort);
-            sshdPid = proofSshd.ProcessId;
             WriteObject("00-proof-sshd.json", new
             {
                 unitName = proofSshd.UnitName,
@@ -262,18 +260,13 @@ public sealed class SshOwnershipAdversarialProofTests
             _fixture.RemoveTrayEnvironmentVariable("OPENCLAW_E2E_SSH_CONFIG_FILE");
             _fixture.RemoveTrayEnvironmentVariable("OPENCLAW_VISUAL_TEST");
             _fixture.RemoveTrayEnvironmentVariable("OPENCLAW_VISUAL_TEST_DIR");
-            if (sshdPid > 0)
-            {
-                var sshdUnit = $"openclaw-pr1076-sshd-{sshPort}.service";
-                await _fixture.RunInWslAsync(
-                    $"mainPid=$(systemctl show '{sshdUnit}' -p MainPID --value 2>/dev/null || true); " +
-                    $"if [ \"$mainPid\" = '{sshdPid}' ] && [ \"$(readlink -f /proc/{sshdPid}/exe 2>/dev/null || true)\" = '/usr/sbin/sshd' ]; then " +
-                    $"cmd=$(tr '\\0' ' ' < /proc/{sshdPid}/cmdline); " +
-                    $"if [[ \"$cmd\" == *'-p {sshPort}'* ]]; then systemctl stop '{sshdUnit}'; fi; fi",
-                    TimeSpan.FromSeconds(15),
-                    inputViaStdin: true,
-                    user: "root");
-            }
+            var sshdUnit = $"openclaw-pr1076-sshd-{sshPort}.service";
+            await _fixture.RunInWslAsync(
+                $"systemctl stop '{sshdUnit}' 2>/dev/null || true; " +
+                $"systemctl reset-failed '{sshdUnit}' 2>/dev/null || true",
+                TimeSpan.FromSeconds(15),
+                inputViaStdin: true,
+                user: "root");
             try { Directory.Delete(profileDir, recursive: true); } catch { }
             await _fixture.StartTrayAsync();
         }
@@ -619,9 +612,36 @@ public sealed class SshOwnershipAdversarialProofTests
             throw new InvalidOperationException($"Failed to start {fileName}");
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
-        using var timeoutCts = new CancellationTokenSource(timeout ?? TimeSpan.FromSeconds(30));
-        await process.WaitForExitAsync(timeoutCts.Token);
-        return new ProcessResult(process.ExitCode, await stdout, await stderr);
+        var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(30);
+        using var timeoutCts = new CancellationTokenSource(effectiveTimeout);
+        try
+        {
+            await process.WaitForExitAsync(timeoutCts.Token);
+            return new ProcessResult(process.ExitCode, await stdout, await stderr);
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+        {
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException)
+            {
+                // The process exited between HasExited and Kill.
+            }
+
+            await process.WaitForExitAsync();
+            var timeoutMessage =
+                $"Process timed out after {effectiveTimeout.TotalSeconds:F0} seconds.";
+            var stderrText = await stderr;
+            return new ProcessResult(
+                -1,
+                await stdout,
+                string.IsNullOrWhiteSpace(stderrText)
+                    ? timeoutMessage
+                    : $"{stderrText.TrimEnd()}{Environment.NewLine}{timeoutMessage}");
+        }
     }
 
     private static string? ReadString(JsonElement root, string propertyName)

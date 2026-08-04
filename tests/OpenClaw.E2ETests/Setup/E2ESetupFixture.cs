@@ -52,8 +52,6 @@ public sealed class E2ESetupFixture : IAsyncLifetime
     private readonly string _distroName;
     private readonly Dictionary<string, string> _trayEnvironment = new(StringComparer.Ordinal);
     private Process? _trayProcess;
-    public int? TrayProcessId => _trayProcess is { HasExited: false } ? _trayProcess.Id : null;
-
     public E2ESetupFixture()
         : this(settingsPatch: null)
     {
