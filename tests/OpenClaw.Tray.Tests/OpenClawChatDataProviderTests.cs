@@ -5901,7 +5901,7 @@ public class OpenClawChatDataProviderTests
         var args = Assert.Single(snapshots[^1].Timelines["main"].Entries).ToolArgs!;
         var command = args["command"]!.GetValue<string>();
         Assert.DoesNotContain("abcdef1234567890ghij", command, StringComparison.Ordinal);
-        Assert.True(args["path"]!.GetValue<string>().Length <= OpenClawChatDataProvider.MaxToolDisplayValueChars);
+        Assert.True(args["path"]!.GetValue<string>().Length <= NativeToolProjector.MaxDisplayValueChars);
         Assert.False(args.ContainsKey("environment"));
         Assert.False(args.ContainsKey("payload"));
         Assert.DoesNotContain("must-not-render", args.ToJsonString(), StringComparison.Ordinal);

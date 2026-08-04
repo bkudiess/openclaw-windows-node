@@ -8,7 +8,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using OpenClaw.Chat;
 using OpenClaw.Shared;
-using OpenClaw.Shared.ExecApprovals;
 #if !OPENCLAW_TRAY_TESTS
 using OpenClawTray.Helpers;
 #endif
@@ -78,12 +77,6 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
         WriteIndented = true,
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
-    private static readonly string[] ToolDisplayArgKeys =
-        ["command", "path", "file_path", "query", "url", "pattern"];
-    internal const int MaxToolDisplayValueChars = 240;
-    private const int MaxToolIdentityChars = 80;
-    private readonly record struct ToolIdentity(string Name, ChatToolIdentityStrength Strength);
-
     /// <summary>
     /// Process-wide cache mapping an attachment's filename to its raw image
     /// bytes. Populated by <see cref="SendMessageAsync"/> for image
@@ -1176,8 +1169,8 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
 
                     // Diagnostic: log shape (role + length + heuristic flags) only.
                     // Never log the message text — see HIGH 4 logging audit.
-                    var isFlat = LooksLikeFlattenedToolOutput(text);
-                    var isSys  = LooksLikeSystemControlNote(text);
+                    var isFlat = NativeToolProjector.LooksLikeFlattenedToolOutput(text);
+                    var isSys  = NativeToolProjector.LooksLikeSystemControlNote(text);
                     Logger.Debug($"[ChatHistory] role='{roleLower}' len={text.Length} flat={isFlat} sys={isSys} aborted={shouldMarkAborted}");
 
                     switch (roleLower)
@@ -1203,7 +1196,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                             // exec result reports in ``System (untrusted): ...``
                             // and sends them as role=user) — render dim instead
                             // of as a giant user bubble. See the ChatHistory log.
-                            if (LooksLikeSystemControlNote(text))
+                            if (NativeToolProjector.LooksLikeSystemControlNote(text))
                             {
                                 Logger.Debug($"[ChatHistory]   → routed: SYSTEM (dim status, role=user with control prefix)");
                                 rebuilt = ApplyAndCaptureMeta(
@@ -1246,7 +1239,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                             // raw exec output is replayed as plain assistant text.
                             // Detect these telltale shapes and route them through
                             // the chip pipeline so historic turns look like live ones.
-                            if (LooksLikeSystemControlNote(text))
+                            if (NativeToolProjector.LooksLikeSystemControlNote(text))
                             {
                                 Logger.Debug($"[ChatHistory]   → routed: SYSTEM (dim status)");
                                 rebuilt = ApplyAndCaptureMeta(
@@ -1255,11 +1248,11 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                                     msgMeta);
                                 break;
                             }
-                            if (LooksLikeFlattenedToolOutput(text))
+                            if (NativeToolProjector.LooksLikeFlattenedToolOutput(text))
                             {
                                 var cached = TryMatchCachedTool(cachedTools, msg.Ts);
-                                var kind = cached?.ToolName ?? ClassifyFlattenedToolOutput(text);
-                                var label = cached?.Label ?? ExtractFlattenedToolSummary(text);
+                                var kind = cached?.ToolName ?? NativeToolProjector.ClassifyFlattenedToolOutput(text);
+                                var label = cached?.Label ?? NativeToolProjector.ExtractFlattenedToolSummary(text);
                                 Logger.Debug($"[ChatHistory]   → routed: TOOL chip kind='{kind}' cached={cached is not null}");
                                 rebuilt = ApplyAndCaptureMeta(
                                     rebuilt,
@@ -1268,7 +1261,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                                         kind,
                                         ToolArgs: cached?.ToolArgs,
                                         ToolCallId: cached?.ToolCallId,
-                                        IdentityStrength: cached?.IdentityStrength ?? ClassifyHistoryIdentityStrength(kind),
+                                        IdentityStrength: cached?.IdentityStrength ?? NativeToolProjector.ClassifyHistoryIdentityStrength(kind),
                                         RunId: cached?.RunId),
                                     msgMeta);
                                 rebuilt = ApplyAndCaptureMeta(
@@ -1298,8 +1291,8 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                             // it's tool output.
                             {
                                 var cached = TryMatchCachedTool(cachedTools, msg.Ts);
-                                var kind = cached?.ToolName ?? ClassifyFlattenedToolOutput(text);
-                                var label = cached?.Label ?? ExtractFlattenedToolSummary(text);
+                                var kind = cached?.ToolName ?? NativeToolProjector.ClassifyFlattenedToolOutput(text);
+                                var label = cached?.Label ?? NativeToolProjector.ExtractFlattenedToolSummary(text);
                                 Logger.Debug($"[ChatHistory]   → routed: TOOL chip (role=toolresult, kind='{kind}' cached={cached is not null})");
                                 rebuilt = ApplyAndCaptureMeta(
                                     rebuilt,
@@ -1308,7 +1301,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                                         kind,
                                         ToolArgs: cached?.ToolArgs,
                                         ToolCallId: cached?.ToolCallId,
-                                        IdentityStrength: cached?.IdentityStrength ?? ClassifyHistoryIdentityStrength(kind),
+                                        IdentityStrength: cached?.IdentityStrength ?? NativeToolProjector.ClassifyHistoryIdentityStrength(kind),
                                         RunId: cached?.RunId),
                                     msgMeta);
                                 rebuilt = ApplyAndCaptureMeta(
@@ -2552,7 +2545,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                 return;
             }
 
-            if (LooksLikeSystemControlNote(rawText))
+            if (NativeToolProjector.LooksLikeSystemControlNote(rawText))
             {
                 if (string.IsNullOrEmpty(message.Text)) return;
                 var sysThread = message.SessionKey;
@@ -2640,8 +2633,8 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                 _activeRunIds.TryGetValue(trThread, out trRunId);
             }
             var capped = TruncateForChatEntry(message.Text);
-            var kind = ClassifyFlattenedToolOutput(capped);
-            var label = ExtractFlattenedToolSummary(capped);
+            var kind = NativeToolProjector.ClassifyFlattenedToolOutput(capped);
+            var label = NativeToolProjector.ExtractFlattenedToolSummary(capped);
             _telemetry.ObserveInboundOutput(
                 trThread,
                 trRunId,
@@ -2651,7 +2644,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                 new ChatToolStartEvent(
                     label,
                     kind,
-                    IdentityStrength: ClassifyHistoryIdentityStrength(kind)),
+                    IdentityStrength: NativeToolProjector.ClassifyHistoryIdentityStrength(kind)),
                 trMeta);
             ApplyEventAndPublish(trThread, new ChatToolOutputEvent(capped), trMeta);
             return;
@@ -3004,7 +2997,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                 threadId,
                 tsMs,
                 presentation.ToolName,
-                FirstToolDisplayValue(presentation.ToolArgs),
+                NativeToolProjector.FirstToolDisplayValue(presentation.ToolArgs),
                 presentation.ParentToolCallId,
                 presentation.ToolArgs,
                 presentation.IdentityStrength,
@@ -4066,7 +4059,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                 var role = (history.Messages[i].Role ?? "").ToLowerInvariant();
                 var hText = history.Messages[i].Text;
                 if (role == "user"
-                    && !LooksLikeSystemControlNote(hText)
+                    && !NativeToolProjector.LooksLikeSystemControlNote(hText)
                     && !LooksLikeApprovalSlashCommand(hText))
                 {
                     lastUser = history.Messages[i];
@@ -4503,9 +4496,9 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
         if (evt.Data.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
 
         var phase = evt.Data.TryGetProperty("phase", out var phaseProp) ? phaseProp.GetString() ?? "" : "";
-        var identity = ExtractToolIdentity(evt.Data);
-        var toolArgs = ExtractSafeToolDisplayArgs(evt.Data);
-        var label = ExtractToolLabel(evt.Data, toolArgs);
+        var identity = NativeToolProjector.ExtractToolIdentity(evt.Data);
+        var toolArgs = NativeToolProjector.ExtractSafeToolDisplayArgs(evt.Data);
+        var label = NativeToolProjector.ExtractToolLabel(evt.Data, toolArgs);
         var toolCallId = evt.Data.TryGetProperty("itemId", out var idProp) ? idProp.GetString()
             : (evt.Data.TryGetProperty("callId", out var cProp) ? cProp.GetString() : null);
 
@@ -4519,11 +4512,11 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                 IdentityStrength: identity.Strength,
                 RunId: evt.RunId),
             "result" => new ChatToolOutputEvent(
-                ExtractToolResultText(evt.Data, fallback: label),
+                NativeToolProjector.ExtractToolResultText(evt.Data, fallback: label),
                 ToolCallId: toolCallId,
                 RunId: evt.RunId),
             "error" => new ChatToolErrorEvent(
-                ExtractToolErrorText(evt.Data, fallback: label),
+                NativeToolProjector.ExtractToolErrorText(evt.Data, fallback: label),
                 ToolCallId: toolCallId,
                 RunId: evt.RunId),
             _ => null
@@ -4579,13 +4572,13 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
             if (normalizedPhase is not ("start" or "update"))
                 return null;
 
-            var parentItemId = ExtractParentToolCallId(evt.Data);
+            var parentItemId = NativeToolProjector.ExtractParentToolCallId(evt.Data);
             if (string.IsNullOrWhiteSpace(parentItemId))
                 return null;
 
-            var childIdentity = ExtractToolIdentity(evt.Data);
-            var commandArgs = ExtractSafeToolDisplayArgs(evt.Data);
-            var childItemId = GetStringProperty(evt.Data, "itemId", "commandItemId", "callId");
+            var childIdentity = NativeToolProjector.ExtractToolIdentity(evt.Data);
+            var commandArgs = NativeToolProjector.ExtractSafeToolDisplayArgs(evt.Data);
+            var childItemId = NativeToolProjector.GetStringProperty(evt.Data, "itemId", "commandItemId", "callId");
             return new ChatToolPresentationEvent(
                 parentItemId,
                 childIdentity.Name,
@@ -4599,13 +4592,13 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
         if (!string.Equals(kind, "tool", StringComparison.OrdinalIgnoreCase))
             return null;
 
-        var title = GetStringProperty(evt.Data, "title");
-        var identity = ExtractToolIdentity(evt.Data);
-        var toolArgs = ExtractSafeToolDisplayArgs(evt.Data);
-        var label = FirstToolDisplayValue(toolArgs);
+        var title = NativeToolProjector.GetStringProperty(evt.Data, "title");
+        var identity = NativeToolProjector.ExtractToolIdentity(evt.Data);
+        var toolArgs = NativeToolProjector.ExtractSafeToolDisplayArgs(evt.Data);
+        var label = NativeToolProjector.FirstToolDisplayValue(toolArgs);
         if (string.IsNullOrWhiteSpace(label))
-            label = SanitizeToolDisplayValue(title);
-        var itemId = GetStringProperty(evt.Data, "itemId", "callId");
+            label = NativeToolProjector.SanitizeToolDisplayValue(title);
+        var itemId = NativeToolProjector.GetStringProperty(evt.Data, "itemId", "callId");
 
         return phase.ToLowerInvariant() switch
         {
@@ -4621,7 +4614,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
             // Use the title as a no-op output so the reducer marks Success.
             "end" => new ChatToolOutputEvent(string.Empty, ToolCallId: itemId, RunId: evt.RunId),
             "error" => new ChatToolErrorEvent(
-                SanitizeToolDisplayValue(title),
+                NativeToolProjector.SanitizeToolDisplayValue(title),
                 ToolCallId: itemId,
                 RunId: evt.RunId),
             _ => null
@@ -4644,7 +4637,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
         if (!string.Equals(phase, "end", StringComparison.OrdinalIgnoreCase))
             return null;
 
-        var output = ExtractCommandOutputText(evt.Data);
+        var output = NativeToolProjector.ExtractCommandOutputText(evt.Data);
         if (string.IsNullOrEmpty(output))
             return null;
 
@@ -4654,256 +4647,6 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
             : (evt.Data.TryGetProperty("itemId", out var idProp) ? idProp.GetString() : null);
 
         return new ChatToolOutputEvent(output, ToolCallId: itemId, RunId: evt.RunId);
-    }
-
-    /// <summary>
-    /// Extract a bounded display identity. Explicit gateway names are strongest,
-    /// followed by known canonical names, command-child titles, title heuristics,
-    /// and finally the truthful generic Tool fallback.
-    /// </summary>
-    private static ToolIdentity ExtractToolIdentity(JsonElement data)
-    {
-        var explicitName = GetStringProperty(data, "name", "toolName", "tool");
-        if (!string.IsNullOrWhiteSpace(explicitName))
-            return CanonicalizeToolIdentity(explicitName, ChatToolIdentityStrength.Explicit);
-
-        var title = GetStringProperty(data, "title");
-        if (TryGetTrustedToolTitleIdentity(title, out var known))
-            return new ToolIdentity(known, ChatToolIdentityStrength.Specific);
-
-        return new ToolIdentity("Tool", ChatToolIdentityStrength.Fallback);
-    }
-
-    private static ToolIdentity CanonicalizeToolIdentity(string value, ChatToolIdentityStrength strength)
-    {
-        var sanitized = ExecApprovalCommandDisplaySanitizer.Sanitize(value).Trim();
-        if (sanitized.Length > MaxToolIdentityChars)
-            sanitized = sanitized[..MaxToolIdentityChars];
-
-        if (TryGetKnownToolIdentity(sanitized, out var known))
-            return new ToolIdentity(known, ChatToolIdentityStrength.Specific > strength
-                ? ChatToolIdentityStrength.Specific
-                : strength);
-
-        if (sanitized.Length == 0
-            || sanitized.Any(ch => !(IsAsciiLetterOrDigit(ch) || ch is '.' or '_' or '-' or ' ')))
-        {
-            return new ToolIdentity("Tool", ChatToolIdentityStrength.Fallback);
-        }
-
-        return new ToolIdentity(sanitized, strength);
-    }
-
-    private static bool TryGetTrustedToolTitleIdentity(string? value, out string identity)
-    {
-        identity = string.Empty;
-        if (string.IsNullOrWhiteSpace(value))
-            return false;
-
-        var normalized = value.Trim();
-        foreach (var (alias, canonical) in new[]
-        {
-            ("apply_patch", "Apply Patch"),
-            ("apply patch", "Apply Patch"),
-            ("system.run", "system.run"),
-            ("browser.proxy", "browser.proxy"),
-            ("canvas.navigate", "canvas.navigate"),
-            ("powershell", "PowerShell"),
-            ("pwsh", "PowerShell"),
-            ("bash", "Bash")
-        })
-        {
-            if (!string.Equals(normalized, alias, StringComparison.OrdinalIgnoreCase))
-                continue;
-            identity = canonical;
-            return true;
-        }
-        return false;
-    }
-
-    private static bool IsAsciiLetterOrDigit(char value) =>
-        value is >= 'A' and <= 'Z'
-            or >= 'a' and <= 'z'
-            or >= '0' and <= '9';
-
-    private static bool TryGetKnownToolIdentity(string? value, out string identity)
-    {
-        identity = string.Empty;
-        if (string.IsNullOrWhiteSpace(value))
-            return false;
-
-        var trimmed = value.TrimStart();
-        foreach (var (prefix, canonical) in new[]
-        {
-            ("apply_patch", "Apply Patch"),
-            ("apply patch", "Apply Patch"),
-            ("system.run", "system.run"),
-            ("browser.proxy", "browser.proxy"),
-            ("canvas.navigate", "canvas.navigate"),
-            ("powershell", "PowerShell"),
-            ("pwsh", "PowerShell"),
-            ("bash", "Bash")
-        })
-        {
-            if (trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-                && (trimmed.Length == prefix.Length
-                    || char.IsWhiteSpace(trimmed[prefix.Length])
-                    || trimmed[prefix.Length] is ':' or '(' or '['))
-            {
-                identity = canonical;
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static string ExtractParentToolCallId(JsonElement data)
-    {
-        var parent = GetStringProperty(data, "parentItemId", "parentId", "toolItemId", "parentCallId");
-        if (!string.IsNullOrWhiteSpace(parent))
-            return parent;
-
-        foreach (var containerName in new[] { "details", "parent" })
-        {
-            if (data.TryGetProperty(containerName, out var container)
-                && container.ValueKind == JsonValueKind.Object)
-            {
-                parent = GetStringProperty(container, "parentItemId", "parentId", "toolItemId", "itemId", "callId");
-                if (!string.IsNullOrWhiteSpace(parent))
-                    return parent;
-            }
-        }
-        return string.Empty;
-    }
-
-    private static string GetStringProperty(JsonElement data, params string[] names)
-    {
-        foreach (var name in names)
-        {
-            if (data.TryGetProperty(name, out var value)
-                && value.ValueKind == JsonValueKind.String)
-            {
-                var text = value.GetString();
-                if (!string.IsNullOrWhiteSpace(text))
-                    return text;
-            }
-        }
-        return string.Empty;
-    }
-
-    private static JsonObject? ExtractSafeToolDisplayArgs(JsonElement data)
-    {
-        var displayArgs = new JsonObject();
-        AddSafeToolDisplayArgs(displayArgs, data);
-        foreach (var containerName in new[] { "args", "details", "input" })
-        {
-            if (data.TryGetProperty(containerName, out var container)
-                && container.ValueKind == JsonValueKind.Object)
-            {
-                AddSafeToolDisplayArgs(displayArgs, container);
-            }
-        }
-        return displayArgs.Count == 0 ? null : displayArgs;
-    }
-
-    private static void AddSafeToolDisplayArgs(JsonObject target, JsonElement source)
-    {
-        foreach (var key in ToolDisplayArgKeys)
-        {
-            if (!source.TryGetProperty(key, out var value)
-                || value.ValueKind != JsonValueKind.String)
-            {
-                continue;
-            }
-
-            var sanitized = SanitizeToolDisplayValue(value.GetString());
-            if (string.IsNullOrWhiteSpace(sanitized))
-                continue;
-
-            if (target[key] is JsonValue existing
-                && existing.TryGetValue<string>(out var existingText)
-                && !string.Equals(existingText, sanitized, StringComparison.Ordinal))
-            {
-                var combined = existingText + "\n" + sanitized;
-                target[key] = combined.Length > 512 ? combined[..509] + "..." : combined;
-            }
-            else
-            {
-                target[key] = sanitized;
-            }
-        }
-    }
-
-    private static string SanitizeToolDisplayValue(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return string.Empty;
-
-        var sanitized = ExecApprovalCommandDisplaySanitizer.Sanitize(value).Trim();
-        if (sanitized.Length <= MaxToolDisplayValueChars)
-            return sanitized;
-
-        var end = MaxToolDisplayValueChars - 3;
-        if (end > 0 && char.IsHighSurrogate(sanitized[end - 1]))
-            end--;
-        return sanitized[..end] + "...";
-    }
-
-    private static string FirstToolDisplayValue(JsonObject? args)
-    {
-        if (args is null)
-            return string.Empty;
-
-        foreach (var key in ToolDisplayArgKeys)
-        {
-            if (args[key] is JsonValue value
-                && value.TryGetValue<string>(out var text)
-                && !string.IsNullOrWhiteSpace(text))
-            {
-                return text;
-            }
-        }
-        return string.Empty;
-    }
-
-    /// <summary>
-    /// Extract a printable text payload from a ``command_output`` end event.
-    /// Walks the common fields the gateway uses: ``output``, ``text``,
-    /// ``content``, ``stdout``, ``stderr``, ``preview``, ``body``.
-    /// </summary>
-    private static string ExtractCommandOutputText(System.Text.Json.JsonElement data)
-    {
-        foreach (var key in new[] { "output", "text", "content", "stdout", "preview", "body", "stderr" })
-        {
-            if (data.TryGetProperty(key, out var v))
-            {
-                if (v.ValueKind == System.Text.Json.JsonValueKind.String)
-                {
-                    var s = v.GetString();
-                    if (!string.IsNullOrEmpty(s))
-                        return TruncateForToolOutput(s);
-                }
-                else if (v.ValueKind == System.Text.Json.JsonValueKind.Object &&
-                         v.TryGetProperty("text", out var inner) &&
-                         inner.ValueKind == System.Text.Json.JsonValueKind.String)
-                {
-                    var s = inner.GetString();
-                    if (!string.IsNullOrEmpty(s))
-                        return TruncateForToolOutput(s);
-                }
-            }
-        }
-
-        // Fall back to the title field so the chip body isn't empty.
-        if (data.TryGetProperty("title", out var titleProp) &&
-            titleProp.ValueKind == System.Text.Json.JsonValueKind.String)
-        {
-            var s = titleProp.GetString();
-            if (!string.IsNullOrEmpty(s))
-                return TruncateForToolOutput(s);
-        }
-
-        return string.Empty;
     }
 
     private static ChatEvent? MapJobEvent(AgentEventInfo evt)
@@ -4916,74 +4659,6 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
             "error" => new ChatErrorEvent(evt.Summary ?? "Agent error"),
             _ => null
         };
-    }
-
-    private static string ExtractToolLabel(System.Text.Json.JsonElement data, JsonObject? displayArgs)
-    {
-        var displayValue = FirstToolDisplayValue(displayArgs);
-        if (!string.IsNullOrWhiteSpace(displayValue))
-            return displayValue;
-        return SanitizeToolDisplayValue(GetStringProperty(data, "name", "toolName", "title"));
-    }
-
-    /// <summary>
-    /// Pulls a human-readable result snippet out of an agent tool result
-    /// payload. Tries (in order): <c>data.result.content</c> (per spec),
-    /// <c>data.result</c> as string, <c>data.output</c>, <c>data.content</c>,
-    /// <c>data.text</c>. Falls back to <paramref name="fallback"/>.
-    /// </summary>
-    private static string ExtractToolResultText(System.Text.Json.JsonElement data, string fallback)
-    {
-        if (data.TryGetProperty("result", out var result))
-        {
-            if (result.ValueKind == System.Text.Json.JsonValueKind.String)
-                return TruncateForToolOutput(result.GetString() ?? "");
-            if (result.ValueKind == System.Text.Json.JsonValueKind.Object &&
-                result.TryGetProperty("content", out var resultContent) &&
-                resultContent.ValueKind == System.Text.Json.JsonValueKind.String)
-                return TruncateForToolOutput(resultContent.GetString() ?? "");
-        }
-
-        foreach (var key in new[] { "output", "content", "text", "stdout" })
-        {
-            if (data.TryGetProperty(key, out var v) &&
-                v.ValueKind == System.Text.Json.JsonValueKind.String)
-            {
-                var s = v.GetString();
-                if (!string.IsNullOrEmpty(s)) return TruncateForToolOutput(s);
-            }
-        }
-        return fallback;
-    }
-
-    private static string ExtractToolErrorText(System.Text.Json.JsonElement data, string fallback)
-    {
-        foreach (var key in new[] { "error", "message", "stderr", "content" })
-        {
-            if (data.TryGetProperty(key, out var v))
-            {
-                if (v.ValueKind == System.Text.Json.JsonValueKind.String)
-                {
-                    var s = v.GetString();
-                    if (!string.IsNullOrEmpty(s)) return TruncateForToolOutput(s);
-                }
-                else if (v.ValueKind == System.Text.Json.JsonValueKind.Object &&
-                         v.TryGetProperty("message", out var inner) &&
-                         inner.ValueKind == System.Text.Json.JsonValueKind.String)
-                {
-                    var s = inner.GetString();
-                    if (!string.IsNullOrEmpty(s)) return TruncateForToolOutput(s);
-                }
-            }
-        }
-        return fallback;
-    }
-
-    private const int ToolOutputMaxChars = 4000;
-    private static string TruncateForToolOutput(string text)
-    {
-        if (text.Length <= ToolOutputMaxChars) return text;
-        return text[..ToolOutputMaxChars] + "\n…(truncated)";
     }
 
     /// <summary>
@@ -5054,24 +4729,6 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
     // ── chat.history flattened-tool-output recovery ──
 
     /// <summary>
-    /// True when an assistant- or user-role <c>chat.history</c> message
-    /// looks like a gateway control note that the web UI hides. We render
-    /// these as a dim Status entry instead of a full bubble so the
-    /// conversation flow doesn't get overwhelmed by transcript scaffolding.
-    /// </summary>
-    /// <remarks>
-    /// SECURITY (chat-rubber-duck round 2 MEDIUM 2): the previous
-    /// implementation matched on the bare ``System (untrusted):`` /
-    /// ``System:`` prefix. That allowed a user (or a prompt-injected
-    /// model) to craft a real user message that started with that prefix
-    /// and have it silently reclassified as a dim system note (visible
-    /// trust-taxonomy spoofing). We now require BOTH the prefix AND a
-    /// known structural marker that the gateway actually emits.
-    /// Plain user prose like ``System (untrusted): hello world`` no
-    /// longer triggers the hide-as-status path and renders as a regular
-    /// user/assistant bubble.
-    /// </remarks>
-    /// <summary>
     /// True when text is one of the approval slash-commands we send on the
     /// user's behalf (<c>/approve &lt;slug&gt; allow-once</c>,
     /// <c>/approve &lt;slug&gt; allow-always</c>, or
@@ -5094,41 +4751,6 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
 
     private static readonly System.Text.RegularExpressions.Regex s_approvalSlashCommandRegex =
         new(@"^/(?:approve\s+[A-Za-z0-9_-]{4,64}(?:\s+(?:allow-once|allow-always))?|deny\s+[A-Za-z0-9_-]{4,64})\s*$",
-            System.Text.RegularExpressions.RegexOptions.Compiled);
-
-    internal static bool LooksLikeSystemControlNote(string text)
-    {
-        if (string.IsNullOrEmpty(text)) return false;
-        var t = text.TrimStart();
-        bool hasPrefix =
-            t.StartsWith("System (untrusted):", StringComparison.Ordinal) ||
-            t.StartsWith("System:", StringComparison.Ordinal);
-        if (!hasPrefix) return false;
-
-        // We do not control the gateway protocol, and these frames currently
-        // arrive as plain role=user text rather than structured provenance.
-        // Keep this intentionally narrow: prefix + gateway-emitted structural
-        // marker. If gateway wording changes, update this list and tests rather
-        // than loosening to generic "System:" substring matches that could
-        // misclassify ordinary user prose.
-        return t.Contains("Exec completed (", StringComparison.Ordinal)
-            || t.Contains("Process exited with code", StringComparison.Ordinal)
-            || t.Contains("Command still running (session", StringComparison.Ordinal)
-            || t.Contains("An async command you ran", StringComparison.Ordinal)
-            || t.Contains("Tool reported", StringComparison.Ordinal)
-            || t.Contains("exec result for ", StringComparison.Ordinal)
-            || t.Contains("tool_call_", StringComparison.Ordinal)
-            || t.Contains("Reset session", StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// Pre-compiled regex that matches a CLI option flag (e.g. <c>--help</c>,
-    /// <c>--idempotency-key</c>, <c>-h</c>). Used by
-    /// <see cref="LooksLikeFlattenedToolOutput"/> as a strong signal that an
-    /// assistant message is verbatim CLI <c>--help</c> output.
-    /// </summary>
-    private static readonly System.Text.RegularExpressions.Regex s_cliFlagRegex =
-        new(@"(?:^|\s)(?:--[a-z][\w-]*|-[a-zA-Z])(?=\s|=|$)",
             System.Text.RegularExpressions.RegexOptions.Compiled);
 
     // ── Content-block-seam repair ──────────────────────────────────────
@@ -5301,149 +4923,6 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
         return h.ToString("x8");
     }
 
-
-    /// <summary>
-    /// True when an assistant-role <c>chat.history</c> message is almost
-    /// certainly the verbatim output of an exec tool that the gateway
-    /// flattened into plain text on the way out (the spec confirms it
-    /// strips ``<tool_call>`` / ``<function_call>`` XML and tool blocks
-    /// before serving history).
-    ///
-    /// Detection strategy (any one match → flattened tool output):
-    /// <list type="bullet">
-    ///   <item>Verbatim exec terminator markers ("Process exited with code",
-    ///     "Command still running (session", "Exec completed (").</item>
-    ///   <item>Opens with a UNC / POSIX system path that's almost always a
-    ///     tool result (e.g. <c>\\wsl.localhost\</c>, <c>/usr/</c>).</item>
-    ///   <item>Opens with the OpenClaw CLI version banner
-    ///     (<c>"OpenClaw 2026.4.23 ..."</c>) — these are <c>--help</c>
-    ///     dumps captured by an exec tool.</item>
-    ///   <item>Contains both <c>Usage:</c> AND any of <c>Options:</c> /
-    ///     <c>Commands:</c> / <c>Examples:</c> / <c>Aliases:</c> —
-    ///     classic CLI help layout.</item>
-    ///   <item>Has ≥ 5 CLI flag tokens (matches <c>s_cliFlagRegex</c>) —
-    ///     dense flag listings only show up in <c>--help</c> output.</item>
-    /// </list>
-    /// </summary>
-    internal static bool LooksLikeFlattenedToolOutput(string text)
-    {
-        if (string.IsNullOrEmpty(text) || text.Length < 40) return false;
-
-        // ── Strong terminator markers (exec wrappers).
-        if (text.Contains("Process exited with code", StringComparison.Ordinal)) return true;
-        if (text.Contains("Command still running (session", StringComparison.Ordinal)) return true;
-        if (text.Contains("Exec completed (", StringComparison.Ordinal)) return true;
-
-        // ── System-path openings.
-        var head = text.AsSpan(0, Math.Min(80, text.Length));
-        if (head.StartsWith("\\\\wsl.localhost\\")) return true;
-        if (head.StartsWith("/usr/") || head.StartsWith("/home/") || head.StartsWith("/var/") ||
-            head.StartsWith("/etc/") || head.StartsWith("/tmp/")) return true;
-
-        // ── OpenClaw / common CLI tool version banner. Catches ``openclaw
-        // help``, ``openclaw nodes invoke --help``, etc.
-        var trimmed = text.AsSpan().TrimStart();
-        if (trimmed.StartsWith("OpenClaw 20") ||
-            trimmed.StartsWith("OpenClaw v") ||
-            trimmed.StartsWith("openclaw ")) return true;
-
-        // ── Usage: + (Options:|Commands:|Examples:|Aliases:) — generic CLI
-        // help layout regardless of which tool emitted it.
-        if (text.Contains("Usage:", StringComparison.Ordinal) &&
-            (text.Contains("Options:", StringComparison.Ordinal) ||
-             text.Contains("Commands:", StringComparison.Ordinal) ||
-             text.Contains("Examples:", StringComparison.Ordinal) ||
-             text.Contains("Aliases:", StringComparison.Ordinal)))
-            return true;
-
-        // ── Dense ``--flag`` presence (≥ 5 matches is well above false-
-        // positive rate for normal prose). Only run the regex when text is
-        // long enough to potentially carry that many tokens.
-        if (text.Length >= 200)
-        {
-            int flagCount = 0;
-            foreach (System.Text.RegularExpressions.Match _ in s_cliFlagRegex.Matches(text))
-            {
-                if (++flagCount >= 5) return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Best-guess kind label for a flattened-tool-output assistant
-    /// message. Used to populate the tool chip's monospace kind suffix.
-    /// Detects tool types from common output patterns as a heuristic
-    /// fallback when cached metadata is unavailable.
-    /// </summary>
-    internal static string ClassifyFlattenedToolOutput(string text)
-    {
-        if (TryGetKnownToolIdentity(text, out var known))
-            return known;
-        if (string.IsNullOrEmpty(text)) return "Tool";
-
-        // Shell/process markers
-        if (text.Contains("Command still running", StringComparison.Ordinal) ||
-            text.Contains("Process exited with code", StringComparison.Ordinal))
-            return "bash";
-
-        // File read patterns (numbered lines like "1. ", "42. ")
-        if (s_numberedLineRegex.IsMatch(text))
-            return "view";
-
-        // Grep / search result patterns ("path/file.ext:123:matched line")
-        if (s_grepResultRegex.IsMatch(text))
-            return "grep";
-
-        // Directory listing / glob patterns
-        if (text.Contains("Directory:", StringComparison.Ordinal) ||
-            text.Contains("Mode                ", StringComparison.Ordinal))
-            return "glob";
-
-        // Git output
-        if (text.StartsWith("commit ", StringComparison.Ordinal) ||
-            text.StartsWith("diff --git", StringComparison.Ordinal) ||
-            text.Contains("Author:", StringComparison.Ordinal) && text.Contains("Date:", StringComparison.Ordinal))
-            return "git";
-
-        // Edit/write patterns
-        if (text.Contains("successfully created", StringComparison.OrdinalIgnoreCase) ||
-            text.Contains("File written", StringComparison.OrdinalIgnoreCase) ||
-            text.Contains("Applied edit", StringComparison.OrdinalIgnoreCase))
-            return "edit";
-
-        // Exec completed marker
-        if (text.Contains("Exec completed (", StringComparison.Ordinal))
-            return "exec";
-
-        return "Tool";
-    }
-
-    /// <summary>Matches numbered output lines typical of file view output (e.g. "  1. content").</summary>
-    private static readonly System.Text.RegularExpressions.Regex s_numberedLineRegex =
-        new(@"^\s*\d+\.\s", System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.Multiline);
-
-    /// <summary>Matches grep-style results (path:line:content).</summary>
-    private static readonly System.Text.RegularExpressions.Regex s_grepResultRegex =
-        new(@"^[^\s:]+\.\w+:\d+:", System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.Multiline);
-
-    /// <summary>
-    /// Extract a short one-line summary from flattened tool output text
-    /// for use as the tool chip label. Truncates to 80 chars.
-    /// </summary>
-    internal static string ExtractFlattenedToolSummary(string text)
-    {
-        if (string.IsNullOrEmpty(text)) return "";
-        // Use the first non-empty line as the summary
-        var firstLine = text.AsSpan().TrimStart();
-        var lineEnd = firstLine.IndexOfAny('\r', '\n');
-        if (lineEnd > 0) firstLine = firstLine[..lineEnd];
-        var summary = firstLine.Length > 80
-            ? new string(firstLine[..77]) + "…"
-            : new string(firstLine);
-        return summary;
-    }
 
     // ── State helpers ──
 
@@ -5785,7 +5264,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
         requestRemoteBackfill = false;
         var isNormalUserText = roleLower == "user" &&
             !LooksLikeApprovalSlashCommand(rawText) &&
-            !LooksLikeSystemControlNote(rawText);
+            !NativeToolProjector.LooksLikeSystemControlNote(rawText);
 
         if (isNormalUserText &&
             !HasPendingLocalEchoTextLocked(threadId, rawText) &&
@@ -7469,27 +6948,18 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
         return match;
     }
 
-    private static ChatToolIdentityStrength ClassifyHistoryIdentityStrength(string toolName)
-    {
-        if (string.Equals(toolName, "Tool", StringComparison.Ordinal))
-            return ChatToolIdentityStrength.Fallback;
-        return TryGetKnownToolIdentity(toolName, out _)
-            ? ChatToolIdentityStrength.Specific
-            : ChatToolIdentityStrength.Heuristic;
-    }
-
     private static JsonObject? NormalizeCachedToolArgs(JsonObject? args)
     {
         if (args is null)
             return null;
 
         var normalized = new JsonObject();
-        foreach (var key in ToolDisplayArgKeys)
+        foreach (var key in NativeToolProjector.DisplayArgumentKeys)
         {
             if (args[key] is JsonValue value
                 && value.TryGetValue<string>(out var text))
             {
-                var safe = SanitizeToolDisplayValue(NormalizeCachedDisplayText(text));
+                var safe = NativeToolProjector.SanitizeToolDisplayValue(NormalizeCachedDisplayText(text));
                 if (!string.IsNullOrWhiteSpace(safe))
                     normalized[key] = safe;
             }
@@ -7503,7 +6973,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
         var normalizedIncoming = NormalizeCachedToolArgs(incoming);
         if (normalizedIncoming is not null)
         {
-            foreach (var key in ToolDisplayArgKeys)
+            foreach (var key in NativeToolProjector.DisplayArgumentKeys)
             {
                 if (normalizedIncoming[key] is not JsonValue value
                     || !value.TryGetValue<string>(out var incomingText))

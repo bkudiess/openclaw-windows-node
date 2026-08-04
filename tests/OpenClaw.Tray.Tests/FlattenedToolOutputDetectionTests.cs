@@ -5,7 +5,7 @@ using Xunit;
 namespace OpenClaw.Tray.Tests;
 
 /// <summary>
-/// Unit tests for <see cref="OpenClawChatDataProvider"/>'s
+/// Unit tests for <see cref="NativeToolProjector"/>'s
 /// history-flattened-tool-output heuristics. Locks in the recognition of
 /// gateway-flattened ``--help`` dumps, exec terminator markers, and system
 /// control notes so we don't regress when adding new tool families.
@@ -21,7 +21,7 @@ public class FlattenedToolOutputDetectionTests
     {
         // Padded so we clear the 40-char minimum even on the shorter literals.
         text = text.PadRight(50, '.');
-        Assert.True(OpenClawChatDataProvider.LooksLikeFlattenedToolOutput(text),
+        Assert.True(NativeToolProjector.LooksLikeFlattenedToolOutput(text),
             $"Expected to detect: {text}");
     }
 
@@ -34,7 +34,7 @@ public class FlattenedToolOutputDetectionTests
     [InlineData("/tmp/openclaw-foo.lock present, age 14m, owner regisb     ")]
     public void DetectsSystemPathOpenings(string text)
     {
-        Assert.True(OpenClawChatDataProvider.LooksLikeFlattenedToolOutput(text),
+        Assert.True(NativeToolProjector.LooksLikeFlattenedToolOutput(text),
             $"Expected to detect: {text}");
     }
 
@@ -45,7 +45,7 @@ public class FlattenedToolOutputDetectionTests
     public void DetectsOpenClawCliBanner(string text)
     {
         text = text.PadRight(50, '.');
-        Assert.True(OpenClawChatDataProvider.LooksLikeFlattenedToolOutput(text),
+        Assert.True(NativeToolProjector.LooksLikeFlattenedToolOutput(text),
             $"Expected to detect: {text}");
     }
 
@@ -55,14 +55,14 @@ public class FlattenedToolOutputDetectionTests
         // ``Usage:`` + ``Options:`` together is a strong --help signal even
         // without the OpenClaw banner.
         var text = "Usage: somecli [options]\nDoes things.\nOptions: --foo bar";
-        Assert.True(OpenClawChatDataProvider.LooksLikeFlattenedToolOutput(text));
+        Assert.True(NativeToolProjector.LooksLikeFlattenedToolOutput(text));
     }
 
     [Fact]
     public void DetectsCliHelpLayout_UsagePlusCommands()
     {
         var text = "Usage: somecli <verb>\nCommands:\n  list\n  show\n  delete";
-        Assert.True(OpenClawChatDataProvider.LooksLikeFlattenedToolOutput(text));
+        Assert.True(NativeToolProjector.LooksLikeFlattenedToolOutput(text));
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public class FlattenedToolOutputDetectionTests
             "Some prose here that mentions various options including " +
             "--alpha --beta --gamma --delta --epsilon --zeta " +
             "and a bit more padding text to clear the 200 char minimum threshold easily.";
-        Assert.True(OpenClawChatDataProvider.LooksLikeFlattenedToolOutput(text));
+        Assert.True(NativeToolProjector.LooksLikeFlattenedToolOutput(text));
     }
 
     [Theory]
@@ -84,7 +84,7 @@ public class FlattenedToolOutputDetectionTests
     [InlineData("Done — I spoke \"Hello World\".")]
     public void DoesNotMatchNormalProse(string text)
     {
-        Assert.False(OpenClawChatDataProvider.LooksLikeFlattenedToolOutput(text),
+        Assert.False(NativeToolProjector.LooksLikeFlattenedToolOutput(text),
             $"Expected NOT to match: {text}");
     }
 
@@ -92,7 +92,7 @@ public class FlattenedToolOutputDetectionTests
     public void DoesNotMatchShortText()
     {
         // Even with a marker, ``< 40 chars`` is too short to be a real tool dump.
-        Assert.False(OpenClawChatDataProvider.LooksLikeFlattenedToolOutput("Process exited"));
+        Assert.False(NativeToolProjector.LooksLikeFlattenedToolOutput("Process exited"));
     }
 
     [Theory]
@@ -102,7 +102,7 @@ public class FlattenedToolOutputDetectionTests
     [InlineData("system note", false)]
     public void DetectsSystemControlNotes(string text, bool expected)
     {
-        Assert.Equal(expected, OpenClawChatDataProvider.LooksLikeSystemControlNote(text));
+        Assert.Equal(expected, NativeToolProjector.LooksLikeSystemControlNote(text));
     }
 
     // ── chat rubber-duck round 2 MEDIUM 2: prefix tightening ──
@@ -118,7 +118,7 @@ public class FlattenedToolOutputDetectionTests
     [InlineData("System (untrusted): tool_call_abc started")]
     public void LooksLikeSystemControlNote_OnRealSystemNote_ReturnsTrue(string text)
     {
-        Assert.True(OpenClawChatDataProvider.LooksLikeSystemControlNote(text));
+        Assert.True(NativeToolProjector.LooksLikeSystemControlNote(text));
     }
 
     [Theory]
@@ -132,7 +132,7 @@ public class FlattenedToolOutputDetectionTests
     [InlineData("System (untrusted): just chatting")]
     public void LooksLikeSystemControlNote_OnPlainUserMessageWithSystemPrefix_ReturnsFalse(string text)
     {
-        Assert.False(OpenClawChatDataProvider.LooksLikeSystemControlNote(text));
+        Assert.False(NativeToolProjector.LooksLikeSystemControlNote(text));
     }
 
     // ── chat rubber-duck round 2 LOW 4: TruncateChatEvent coverage ──
@@ -234,7 +234,7 @@ public class FlattenedToolOutputDetectionTests
     [InlineData("diff --git a/foo.cs b/foo.cs", "git")]
     public void ClassifiesKindCorrectly(string text, string expected)
     {
-        Assert.Equal(expected, OpenClawChatDataProvider.ClassifyFlattenedToolOutput(text));
+        Assert.Equal(expected, NativeToolProjector.ClassifyFlattenedToolOutput(text));
     }
 
     [Theory]
@@ -245,7 +245,7 @@ public class FlattenedToolOutputDetectionTests
     [InlineData("Bash completed", "Bash")]
     public void ClassifyFlattenedToolOutput_PreservesKnownIdentity(string text, string expected)
     {
-        Assert.Equal(expected, OpenClawChatDataProvider.ClassifyFlattenedToolOutput(text));
+        Assert.Equal(expected, NativeToolProjector.ClassifyFlattenedToolOutput(text));
     }
 
     [Theory]
@@ -257,7 +257,7 @@ public class FlattenedToolOutputDetectionTests
         // ``toolresult`` role sidesteps the heuristic — but the kind label
         // must still produce a recognized tool type so the chip header reads
         // sensibly. Default fallthrough is "exec".
-        var kind = OpenClawChatDataProvider.ClassifyFlattenedToolOutput(text);
+        var kind = NativeToolProjector.ClassifyFlattenedToolOutput(text);
         Assert.False(string.IsNullOrEmpty(kind), $"Empty kind for: {text}");
     }
 
@@ -272,7 +272,7 @@ public class FlattenedToolOutputDetectionTests
     [InlineData("--- a/src/main.cs\n+++ b/src/main.cs\n@@ -1,3 +1,4 @@", "Tool")]
     public void ClassifiesAdditionalKindsCorrectly(string text, string expected)
     {
-        Assert.Equal(expected, OpenClawChatDataProvider.ClassifyFlattenedToolOutput(text));
+        Assert.Equal(expected, NativeToolProjector.ClassifyFlattenedToolOutput(text));
     }
 
     [Theory]
@@ -281,6 +281,6 @@ public class FlattenedToolOutputDetectionTests
     [InlineData("x")]
     public void ClassifyFlattenedToolOutput_EmptyOrTiny_ReturnsTruthfulGenericFallback(string text)
     {
-        Assert.Equal("Tool", OpenClawChatDataProvider.ClassifyFlattenedToolOutput(text));
+        Assert.Equal("Tool", NativeToolProjector.ClassifyFlattenedToolOutput(text));
     }
 }

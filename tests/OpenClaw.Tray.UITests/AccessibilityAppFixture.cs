@@ -276,11 +276,13 @@ public sealed class AccessibilityAppFixture : IDisposable
         if (_nativeChatProofSignalPath is not null
             && _nativeChatProofVisualDirectory is not null)
         {
-            startInfo.Environment["OPENCLAW_ACCESSIBILITY_TOOL_PROOF_SIGNAL"] =
+            startInfo.Environment["OPENCLAW_VISUAL_TEST_SIGNAL"] =
                 _nativeChatProofSignalPath;
             startInfo.Environment["OPENCLAW_VISUAL_TEST"] = "1";
             startInfo.Environment["OPENCLAW_VISUAL_TEST_DIR"] =
                 _nativeChatProofVisualDirectory;
+            startInfo.Environment["OPENCLAW_VISUAL_TEST_SURFACE"] =
+                "NativeToolIdentity";
         }
 
         return Process.Start(startInfo)
