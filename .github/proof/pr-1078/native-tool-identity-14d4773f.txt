@@ -1,0 +1,14 @@
+head=14d4773f1dc83979be88a5c312b6cd38d389dae4
+UIA expanded="Tool call: Bash, Done"
+UIA expanded="Tool call: Apply Patch, Done"
+UIA expanded="Tool call: Tool, Done"
+UIA header="Bash · Done"
+UIA input="command: powershell -NoProfile -Command Get-ChildItem .\src"
+UIA header="Apply Patch · Done"
+UIA input="file_path: src\OpenClaw.Chat\ChatTimelineReducer.cs"
+UIA header="Tool · Done"
+UIA input="command: [redacted]"
+forbidden proof-run-=absent
+forbidden super-secret-value=absent
+screenshot=pr-1078-native-tool-identity-14d4773f.png bytes=72334
+result=pass
