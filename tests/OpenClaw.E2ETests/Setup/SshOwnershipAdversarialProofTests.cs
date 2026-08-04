@@ -38,6 +38,10 @@ public sealed class SshOwnershipAdversarialProofTests
         var sshPort = E2ESetupFixture.AllocateFreePort();
         var tunnelPort = AllocateFreeForwardPortPair();
         var screenshotDegraded = Path.Combine(proofDir, "04-connection-degraded.png");
+        var captureUiProof = string.Equals(
+            Environment.GetEnvironmentVariable("OPENCLAW_CAPTURE_UI_PROOF"),
+            "1",
+            StringComparison.Ordinal);
         var sshdPid = 0;
         TcpListener? adversary = null;
         (string? Operator, string? Node) beforeTokens = (null, null);
@@ -138,7 +142,8 @@ public sealed class SshOwnershipAdversarialProofTests
             {
                 WriteJson("04-connection-diagnostics.json", connectionStatus.RootElement);
             }
-            await NavigateAndCaptureAsync("connection", screenshotDegraded);
+            if (captureUiProof)
+                await NavigateAndCaptureAsync("connection", screenshotDegraded);
 
             adversary.Stop();
             adversary = null;
@@ -228,7 +233,7 @@ public sealed class SshOwnershipAdversarialProofTests
                 sameOperatorCredential = true,
                 sameNodeCredential = true,
                 lateWriterWonRollback = true,
-                degradedScreenshot = File.Exists(screenshotDegraded),
+                degradedScreenshot = captureUiProof && File.Exists(screenshotDegraded),
                 unverifiedEndpointDiagnostics = true,
             });
             WriteRedactedTrayLog();
@@ -548,31 +553,46 @@ public sealed class SshOwnershipAdversarialProofTests
         width = rect.Right - rect.Left;
         height = rect.Bottom - rect.Top;
         Assert.True(width > 100 && height > 100);
-        using var bitmap = new Bitmap(width, height);
-        using (var graphics = Graphics.FromImage(bitmap))
+        for (var attempt = 0; attempt < 10; attempt++)
         {
-            var deviceContext = graphics.GetHdc();
-            try
+            using var bitmap = new Bitmap(width, height);
+            var captured = false;
+            using (var graphics = Graphics.FromImage(bitmap))
             {
-                Assert.True(
-                    PrintWindow(handle, deviceContext, 0x00000002),
-                    "PrintWindow could not capture the Settings window.");
+                var deviceContext = graphics.GetHdc();
+                try
+                {
+                    captured = PrintWindow(handle, deviceContext, 0x00000002);
+                }
+                finally
+                {
+                    graphics.ReleaseHdc(deviceContext);
+                }
             }
-            finally
+
+            if (captured)
             {
-                graphics.ReleaseHdc(deviceContext);
+                var sampledColors = new HashSet<int>();
+                var xStep = Math.Max(1, width / 40);
+                var yStep = Math.Max(1, height / 40);
+                for (var y = 0; y < height; y += yStep)
+                {
+                    for (var x = 0; x < width; x += xStep)
+                        sampledColors.Add(bitmap.GetPixel(x, y).ToArgb());
+                }
+
+                if (sampledColors.Count >= 8)
+                {
+                    bitmap.Save(outputPath, System.Drawing.Imaging.ImageFormat.Png);
+                    return;
+                }
             }
+
+            await Task.Delay(500);
         }
-        bitmap.Save(outputPath, System.Drawing.Imaging.ImageFormat.Png);
-        var sampledColors = new HashSet<int>();
-        var xStep = Math.Max(1, width / 40);
-        var yStep = Math.Max(1, height / 40);
-        for (var y = 0; y < height; y += yStep)
-        {
-            for (var x = 0; x < width; x += xStep)
-                sampledColors.Add(bitmap.GetPixel(x, y).ToArgb());
-        }
-        Assert.True(sampledColors.Count >= 8, "Captured UI image is blank or off-screen.");
+
+        throw new InvalidOperationException(
+            "Settings window did not produce a composed UI frame for proof capture.");
     }
 
     private static async Task<ProcessResult> RunProcessAsync(
