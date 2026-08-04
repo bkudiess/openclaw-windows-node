@@ -44,6 +44,7 @@ public sealed partial class ChatPage : Page
     private IChatPagePanelHost? _panelHost;
     private IChatPagePanelHost PanelHost => _panelHost ??= new ChatPagePanelHost(this);
     private string? _pendingWebViewSessionKey;
+    private int _accessibilityProofCaptureScheduled;
     private static readonly HttpClient s_httpClient = new()
     {
         Timeout = TimeSpan.FromSeconds(3)
@@ -262,6 +263,7 @@ public sealed partial class ChatPage : Page
             PlaceholderPanel.Visibility = Visibility.Collapsed;
             ChatHost.Visibility = Visibility.Visible;
             UpdateNativeChatSurfaceActive();
+            ScheduleAccessibilityToolProofCapture();
             // Check for pending auto-start voice even when already mounted
             if (_hub?.PendingAutoStartVoice == true)
             {
@@ -303,6 +305,7 @@ public sealed partial class ChatPage : Page
         _mountedProvider = provider;
         _mountedThreadId = threadIdToMount;
         UpdateNativeChatSurfaceActive();
+        ScheduleAccessibilityToolProofCapture();
 
         // If the V hotkey (or another caller) requested auto-start voice,
         // trigger it after the UI thread processes the mount (composer needs
@@ -314,6 +317,32 @@ public sealed partial class ChatPage : Page
             {
                 _reactorHost?.TriggerVoiceRecording();
             });
+        }
+    }
+
+    private void ScheduleAccessibilityToolProofCapture()
+    {
+        if (Environment.GetEnvironmentVariable("OPENCLAW_ACCESSIBILITY_TEST_CHAT") != "1"
+            || Environment.GetEnvironmentVariable("OPENCLAW_ACCESSIBILITY_TOOL_PROOF_SIGNAL")
+                is not { Length: > 0 } signalPath
+            || Interlocked.Exchange(ref _accessibilityProofCaptureScheduled, 1) != 0)
+        {
+            return;
+        }
+
+        _ = CaptureAccessibilityToolProofWhenRequestedAsync(signalPath);
+    }
+
+    private async Task CaptureAccessibilityToolProofWhenRequestedAsync(string signalPath)
+    {
+        for (var attempt = 0; attempt < 600; attempt++)
+        {
+            await Task.Delay(100);
+            if (!File.Exists(signalPath))
+                continue;
+
+            await VisualTestCapture.CaptureAsync(ChatHost, "NativeToolIdentity");
+            return;
         }
     }
 

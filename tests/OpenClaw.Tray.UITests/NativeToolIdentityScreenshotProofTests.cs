@@ -26,8 +26,8 @@ public sealed class NativeToolIdentityScreenshotFixture : IDisposable
     public Task NavigateAsync(string pageTag, string pageMarkerAutomationId) =>
         _app.NavigateAsync(pageTag, pageMarkerAutomationId);
 
-    public string? CaptureHubScreenshotIfRequested() =>
-        _app.CaptureHubScreenshotIfRequested();
+    public string? CaptureNativeChatVisualIfRequested() =>
+        _app.CaptureNativeChatVisualIfRequested();
 
     public void Dispose() => _app.Dispose();
 }
@@ -88,7 +88,7 @@ public sealed class NativeToolIdentityScreenshotProofTests
         proof.Add("forbidden proof-run-=absent");
         proof.Add("forbidden super-secret-value=absent");
 
-        if (_app.CaptureHubScreenshotIfRequested() is { } screenshotPath)
+        if (_app.CaptureNativeChatVisualIfRequested() is { } screenshotPath)
         {
             proof.Add(
                 $"screenshot={Path.GetFileName(screenshotPath)} " +
