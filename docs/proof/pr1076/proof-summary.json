@@ -1,14 +1,13 @@
 {
-  "head": "51247cd8910babbfc70a767086fb67b66741b6c4",
-  "distro": "OpenClawE2E-df928d65",
-  "gatewayPort": 56191,
-  "sshPort": 64898,
-  "tunnelPort": 22408,
+  "head": "b7c2a9f2104db970110444ffdf274fc70ff1b335",
+  "distro": "OpenClawE2E-95f4b94a",
+  "gatewayPort": 51726,
+  "sshPort": 52016,
+  "tunnelPort": 30980,
   "ambiguousListenerOwnershipRejectedBeforeCredentialSend": true,
   "recoveredReady": true,
   "sameOperatorCredential": true,
   "sameNodeCredential": true,
   "lateWriterWonRollback": true,
-  "degradedScreenshot": true,
-  "unverifiedEndpointDiagnostics": true
+  "degradedScreenshot": true
 }
