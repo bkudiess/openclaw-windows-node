@@ -34,6 +34,11 @@ public sealed class AccessibilityAppFixture : IDisposable
     public IntPtr HubWindowHandle { get; }
 
     public AccessibilityAppFixture()
+        : this(initializeAxe: true)
+    {
+    }
+
+    internal AccessibilityAppFixture(bool initializeAxe)
     {
         _executablePath = Path.Combine(AppContext.BaseDirectory, "OpenClaw.Tray.WinUI.exe");
         if (!File.Exists(_executablePath))
@@ -60,7 +65,8 @@ public sealed class AccessibilityAppFixture : IDisposable
 
         _process = StartProcess($"{OpenClawTray.AppIdentity.ProtocolScheme}://hub/connection");
         HubWindowHandle = WaitForHubWindow();
-        AxeHelper.Initialize(_process.Id);
+        if (initializeAxe)
+            AxeHelper.Initialize(_process.Id);
     }
 
     public async Task NavigateAsync(string pageTag, string pageMarkerAutomationId)
