@@ -50,7 +50,9 @@ public sealed class E2ESetupFixture : IAsyncLifetime
 
     private readonly string _configPath;
     private readonly string _distroName;
+    private readonly Dictionary<string, string> _trayEnvironment = new(StringComparer.Ordinal);
     private Process? _trayProcess;
+    public int? TrayProcessId => _trayProcess is { HasExited: false } ? _trayProcess.Id : null;
 
     public E2ESetupFixture()
         : this(settingsPatch: null)
@@ -171,25 +173,8 @@ public sealed class E2ESetupFixture : IAsyncLifetime
 
         Log("Teardown starting...");
 
-        // 1. Dispose MCP client
-        Client?.Dispose();
-        Client = null;
-
-        // 2. Kill tray process
-        if (_trayProcess is not null)
-        {
-            try
-            {
-                if (!_trayProcess.HasExited)
-                {
-                    _trayProcess.Kill(entireProcessTree: true);
-                    _trayProcess.WaitForExit(5_000);
-                    Log($"Tray process killed (PID={_trayProcess.Id}).");
-                }
-            }
-            catch (Exception ex) { Log($"Warning: tray kill failed: {ex.Message}"); }
-            finally { _trayProcess.Dispose(); }
-        }
+        // 1-2. Dispose MCP client and stop the exact proof-owned tray.
+        await StopTrayAsync();
 
         // 3. Uninstall via CLI
         Log("Running SetupEngine CLI uninstall...");
@@ -209,6 +194,7 @@ public sealed class E2ESetupFixture : IAsyncLifetime
             ]);
             Log($"Uninstall completed with exit code {exitCode}.");
         }
+
         catch (Exception ex)
         {
             Log($"Warning: uninstall threw: {ex.Message}");
@@ -225,6 +211,67 @@ public sealed class E2ESetupFixture : IAsyncLifetime
 
         Log("Teardown complete.");
     }
+
+    public void SetTrayEnvironmentVariable(string name, string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        _trayEnvironment[name] = value;
+    }
+
+    public void RemoveTrayEnvironmentVariable(string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        _trayEnvironment.Remove(name);
+    }
+
+    public async Task StopTrayAsync()
+    {
+        Client?.Dispose();
+        Client = null;
+
+        if (_trayProcess is null)
+            return;
+
+        var process = _trayProcess;
+        _trayProcess = null;
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                Log($"Tray process killed (PID={process.Id}).");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"Warning: tray kill failed: {ex.Message}");
+        }
+        finally
+        {
+            process.Dispose();
+        }
+    }
+
+    public async Task StartTrayAsync(bool waitForConnection = true)
+    {
+        if (_trayProcess is { HasExited: false })
+            throw new InvalidOperationException("The E2E tray is already running.");
+
+        McpPort = FindFreePort();
+        var exePath = LocateTrayExe();
+        _trayProcess = SpawnTray(exePath);
+        Log($"Tray respawned: PID={_trayProcess.Id}, MCP port={McpPort}");
+        Client = new McpClient(McpEndpoint);
+        await WaitForMcpReady();
+        if (waitForConnection)
+        {
+            await WaitForConnectionReady(TimeSpan.FromSeconds(120));
+            await WaitForNodeListReady(TimeSpan.FromSeconds(90));
+        }
+    }
+
+    public static int AllocateFreePort() => FindFreePort();
 
     // ─── Helpers ───
 
@@ -471,6 +518,8 @@ public sealed class E2ESetupFixture : IAsyncLifetime
         psi.Environment["OPENCLAW_TRAY_LOCALAPPDATA_DIR"] = LocalAppDataRoot;
         psi.Environment["OPENCLAW_MCP_PORT"] = McpPort.ToString();
         psi.Environment["OPENCLAW_SUPPRESS_EXTERNAL_BROWSER"] = "1";
+        foreach (var (key, value) in _trayEnvironment)
+            psi.Environment[key] = value;
 
         var p = Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start tray app process");
@@ -488,7 +537,8 @@ public sealed class E2ESetupFixture : IAsyncLifetime
         string command,
         TimeSpan? timeout = null,
         IReadOnlyDictionary<string, string>? environment = null,
-        bool inputViaStdin = false)
+        bool inputViaStdin = false,
+        string? user = null)
     {
         command = command.Replace("\r", "");
         Log($"WSL command: {SanitizeForLog(command)}");
@@ -505,6 +555,11 @@ public sealed class E2ESetupFixture : IAsyncLifetime
 
         psi.ArgumentList.Add("-d");
         psi.ArgumentList.Add(_distroName);
+        if (!string.IsNullOrWhiteSpace(user))
+        {
+            psi.ArgumentList.Add("-u");
+            psi.ArgumentList.Add(user);
+        }
         psi.ArgumentList.Add("--");
         psi.ArgumentList.Add("bash");
         psi.ArgumentList.Add(inputViaStdin ? "-s" : "-c");

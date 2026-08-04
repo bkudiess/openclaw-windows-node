@@ -124,15 +124,23 @@ public sealed class AppRefactorContractTests
             "OpenClaw.Tray.WinUI",
             "Windows",
             "ConnectionStatusWindow.xaml.cs"));
+        var directConnectService = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "Services",
+            "GatewayDirectConnectService.cs"));
         var pageEdit = ExtractMethod(connectionPage, "DoDirectConnectFromAddFormAsync");
         var windowEdit = ExtractMethod(statusWindow, "OnDirectConnectAsync");
 
+        Assert.Contains("_gatewayDirectConnectService.ConnectAsync(", pageEdit);
+        Assert.DoesNotContain("BeginManualGatewayLifecycleOperationAsync", pageEdit);
+        Assert.DoesNotContain("_gatewayRegistry.AddOrUpdate", pageEdit);
         AssertInOrder(
-            pageEdit,
+            directConnectService,
             "BeginManualGatewayLifecycleOperationAsync",
             "DisconnectAsync",
-            "_gatewayRegistry.AddOrUpdate(record)");
-        Assert.Contains("gatewayLifecycleLease?.Dispose()", pageEdit);
+            "_registry.AddOrUpdate(candidate)");
         AssertInOrder(
             windowEdit,
             "BeginManualGatewayLifecycleOperationAsync",
@@ -179,6 +187,20 @@ public sealed class AppRefactorContractTests
         var setupCode = ExtractMethod(manager, "ApplySetupCodeAsync");
         var sharedToken = ExtractMethod(manager, "ConnectWithSharedTokenAsync");
         var directConnect = ExtractMethod(statusWindow, "OnDirectConnectAsync");
+        var pageDirectConnect = ExtractMethod(
+            File.ReadAllText(Path.Combine(
+                root,
+                "src",
+                "OpenClaw.Tray.WinUI",
+                "Pages",
+                "ConnectionPage.xaml.cs")),
+            "DoDirectConnectFromAddFormAsync");
+        var directConnectService = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "Services",
+            "GatewayDirectConnectService.cs"));
 
         Assert.DoesNotContain("ClearStoredTokens", setupCode);
         Assert.DoesNotContain("ClearStoredTokens", sharedToken);
@@ -189,6 +211,9 @@ public sealed class AppRefactorContractTests
         Assert.Contains("ValidateSharedTokenBeforeReplacementAsync(", sharedToken);
         Assert.Contains("_validationTunnelFactory()", sharedToken);
         Assert.Contains("StopAndDisposeValidationTunnelAsync(isolatedValidationTunnel)", sharedToken);
+        Assert.DoesNotContain("ClearStoredTokens", pageDirectConnect);
+        Assert.DoesNotContain("BeginTransactionalTokenClear", pageDirectConnect);
+        Assert.Contains("BeginTransactionalTokenClear", directConnectService);
     }
 
     [Fact]
@@ -260,15 +285,15 @@ public sealed class AppRefactorContractTests
     public void DirectConnectRollback_RestoresNullActiveGatewayExactly()
     {
         var root = TestRepositoryPaths.GetRepositoryRoot();
-        var connectionPage = File.ReadAllText(Path.Combine(
+        var directConnectService = File.ReadAllText(Path.Combine(
             root,
             "src",
             "OpenClaw.Tray.WinUI",
-            "Pages",
-            "ConnectionPage.xaml.cs"));
-        var rollback = ExtractMethod(connectionPage, "RollbackDirectConnect");
+            "Services",
+            "GatewayDirectConnectService.cs"));
+        var rollback = ExtractMethod(directConnectService, "Rollback");
 
-        Assert.Contains("_gatewayRegistry.SetActive(previousActiveId);", rollback);
+        Assert.Contains("_registry.SetActive(previousActiveId);", rollback);
         Assert.DoesNotContain("if (previousActiveId != null)", rollback);
     }
 
@@ -283,38 +308,79 @@ public sealed class AppRefactorContractTests
             "Pages",
             "ConnectionPage.xaml.cs"));
         var directConnect = ExtractMethod(connectionPage, "DoDirectConnectFromAddFormAsync");
-        var rollback = ExtractMethod(connectionPage, "RollbackDirectConnect");
+        var directConnectService = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "Services",
+            "GatewayDirectConnectService.cs"));
+        var serviceConnect = ExtractMethod(directConnectService, "ConnectAsync");
+        var rollback = ExtractMethod(directConnectService, "Rollback");
 
+        Assert.Contains("_gatewayDirectConnectService.ConnectAsync(", directConnect);
+        Assert.DoesNotContain("_gatewayRegistry.AddOrUpdate", directConnect);
+        Assert.DoesNotContain("BeginTransactionalTokenClear", directConnect);
         AssertInOrder(
-            directConnect,
+            serviceConnect,
             "BeginManualGatewayLifecycleOperationAsync",
-            "var previousActiveId = _gatewayRegistry.ActiveGatewayId",
+            "var previousActiveId = _registry.ActiveGatewayId",
             "await _connectionManager.DisconnectAsync()",
-            "BeginTransactionalTokenClear(identityDir)");
+            "BeginTransactionalTokenClear(identityDir, _logger)");
         AssertInOrder(
-            directConnect,
-            "BeginTransactionalTokenClear(identityDir)",
-            "Stop and await the failed attempt",
-            "RollbackDirectConnect");
-        Assert.Contains("if (!clearResult.Success)", directConnect);
-        Assert.DoesNotContain("safeIdentityRollback = null", directConnect);
-        Assert.Contains("candidateRecordSnapshot", directConnect);
+            serviceConnect,
+            "BeginTransactionalTokenClear(identityDir, _logger)",
+            "ConnectAndWaitForTerminalStateAsync(",
+            "await _connectionManager.DisconnectAsync()",
+            "Rollback(");
+        Assert.Contains("if (!clearResult.Success)", serviceConnect);
+        Assert.Contains("candidateRegistryCommitted", serviceConnect);
         AssertInOrder(
-            directConnect,
-            "_gatewayRegistry.Save();",
+            serviceConnect,
+            "_registry.Save();",
             "candidateRegistryCommitted = true",
-            "BeginTransactionalTokenClear(identityDir)");
+            "BeginTransactionalTokenClear(identityDir, _logger)");
         AssertInOrder(
             rollback,
-            "_gatewayRegistry.Save();",
+            "_registry.Save();",
             "RestoreTransactionalTokenClear(");
         Assert.Contains("RestoreTransactionalTokenClear(", rollback);
         Assert.Contains("DeviceTokenRestoreOutcome.Superseded", rollback);
         Assert.Contains("DeviceTokenRestoreOutcome.Failed", rollback);
-        Assert.Contains("ReconcileSettingsToCandidate", rollback);
-        Assert.Contains("SaveOrThrow()", rollback);
-        Assert.Contains("CurrentApp.EnsureSshTunnelStarted()", rollback);
-        Assert.Contains("CurrentApp.EnsureSshTunnelStarted()", connectionPage);
+        Assert.Contains("ReconcileSettings(candidate)", rollback);
+        Assert.Contains("previousSettings.Restore(_settings)", rollback);
+        Assert.Contains("_reconcileRuntimeTunnel()", rollback);
+    }
+
+    [Fact]
+    public void DirectConnectTransaction_StaysOutOfConnectionPage()
+    {
+        var root = TestRepositoryPaths.GetRepositoryRoot();
+        var page = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "Pages",
+            "ConnectionPage.xaml.cs"));
+        var app = ReadAppSources();
+        var service = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "Services",
+            "GatewayDirectConnectService.cs"));
+        var pageMethod = ExtractMethod(page, "DoDirectConnectFromAddFormAsync");
+
+        Assert.Contains("new GatewayDirectConnectService(", app);
+        Assert.Contains("_gatewayDirectConnectService.ConnectAsync(", pageMethod);
+        Assert.DoesNotContain("BeginManualGatewayLifecycleOperationAsync", pageMethod);
+        Assert.DoesNotContain("_gatewayRegistry.AddOrUpdate", pageMethod);
+        Assert.DoesNotContain("_gatewayRegistry.SetActive", pageMethod);
+        Assert.DoesNotContain("BeginTransactionalTokenClear", pageMethod);
+        Assert.DoesNotContain("SaveOrThrow", pageMethod);
+        Assert.DoesNotContain("RollbackDirectConnect", page);
+        Assert.Contains("BeginManualGatewayLifecycleOperationAsync", service);
+        Assert.Contains("BeginTransactionalTokenClear", service);
+        Assert.Contains("RestoreTransactionalTokenClear", service);
     }
 
     [Fact]
@@ -1414,7 +1480,7 @@ public sealed class AppRefactorContractTests
     {
         var match = Regex.Match(
             source,
-            $@"(?m)^\s*(?:private|protected|public|internal)\s+(?:static\s+)?(?:async\s+)?(?:Task(?:<[^>]+>)?|System\.Threading\.Tasks\.Task|void|bool|int|string\??|object\??|IntPtr|TrayMenuSnapshot|OpenClaw\.Connection\.GatewayCredential\?)\s+{Regex.Escape(methodName)}\s*\(");
+            $@"(?m)^\s*(?:private|protected|public|internal)\s+(?:static\s+)?(?:async\s+)?(?:Task(?:<[^>]+>)?|System\.Threading\.Tasks\.Task|void|bool|int|string\??|object\??|IntPtr|TrayMenuSnapshot|RollbackResult|OpenClaw\.Connection\.GatewayCredential\?)\s+{Regex.Escape(methodName)}\s*\(");
         Assert.True(match.Success, $"Could not find method {methodName}.");
 
         var brace = source.IndexOf('{', match.Index);

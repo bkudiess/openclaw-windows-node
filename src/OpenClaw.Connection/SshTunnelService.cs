@@ -10,6 +10,7 @@ namespace OpenClaw.Connection;
 public sealed class SshTunnelService : ISshTunnelManager
 {
     private readonly IOpenClawLogger _logger;
+    private readonly string? _sshConfigFile;
     private readonly object _operationLock = new();
     private readonly object _stateLock = new();
     private Process? _process;
@@ -22,9 +23,10 @@ public sealed class SshTunnelService : ISshTunnelManager
     /// <summary>Raised when the SSH tunnel exits unexpectedly (not during shutdown).</summary>
     public event EventHandler<SshTunnelExit>? TunnelExited;
 
-    public SshTunnelService(IOpenClawLogger logger)
+    public SshTunnelService(IOpenClawLogger logger, string? sshConfigFile = null)
     {
         _logger = logger;
+        _sshConfigFile = sshConfigFile;
     }
 
     public bool IsRunning
@@ -269,7 +271,14 @@ public sealed class SshTunnelService : ISshTunnelManager
         var psi = new ProcessStartInfo
         {
             FileName = "ssh",
-            Arguments = SshTunnelCommandLine.BuildArguments(user, host, remotePort, localPort, includeBrowserProxyForward, sshPort),
+            Arguments = SshTunnelCommandLine.BuildArguments(
+                user,
+                host,
+                remotePort,
+                localPort,
+                includeBrowserProxyForward,
+                sshPort,
+                _sshConfigFile),
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
