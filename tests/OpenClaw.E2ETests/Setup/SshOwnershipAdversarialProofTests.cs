@@ -60,7 +60,6 @@ public sealed class SshOwnershipAdversarialProofTests
                 processId = proofSshd.ProcessId,
                 executablePath = proofSshd.ExecutablePath,
                 commandLine = proofSshd.CommandLine,
-                hostAddress = proofSshd.HostAddress,
             });
             var identityFile = Path.Combine(sshDir, "id_ed25519").Replace('\\', '/');
             await File.WriteAllTextAsync(
