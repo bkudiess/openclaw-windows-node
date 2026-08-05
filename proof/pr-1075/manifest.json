@@ -1,0 +1,19 @@
+{
+  "pr": 1075,
+  "head": "57ac65dc0dfaefc82e751786f337da0dba0064be",
+  "captureMethod": "Normal non-isolated exact-head launch; native WinUI UI Automation Camera toggle; PrintWindow(PW_RENDERFULLCONTENT); cropped to the Permissions content pane",
+  "initialCameraState": "Off",
+  "capturedCameraState": "On",
+  "stateRestored": true,
+  "originalSha256": "215a91f5b96bbdaffac60996151ab64d7dc5fddf082e2ed0ac07386fd014ca78",
+  "sanitizedSha256": "bfb99d60acce6cfd554192ed4bdf6aca8c4a0f03320eccdcfcccb1253e4a7234",
+  "sanitizedFile": "pr-1075-permissions-camera-on-57ac65dc.png",
+  "width": 874,
+  "height": 746,
+  "sampledColorCount": 47,
+  "redactions": [
+    "HostnameText bounding rectangle",
+    "Cropped out window chrome and navigation"
+  ],
+  "disclosure": "Privacy crop/redaction only; UI state unchanged"
+}
