@@ -1,0 +1,11 @@
+PR: openclaw/openclaw-windows-node#1085
+Exact PR head: 7d5f24587a67c7af704d0b90c18c3f7e8dc148c2
+Surface: Permissions
+Image: permissions-surface-7d5f2458-privacy-crop.png
+Original SHA-256: 1690F62072B97300767016DAFE4D6AB34CB37374308EE81F95A6150D4EFD5835
+Sanitized SHA-256: 810DD5042F3F8808B4AA039F9406D651885179E934FE4A463AFADC75EFB3BE1F
+Disclosure: Privacy crop/redaction only; UI state unchanged
+Redaction: The machine identifier was covered with a solid opaque mask.
+Crop: Unrelated desktop and GitHub Copilot session content was removed.
+Scope: This image proves the exact-head Permissions surface only. It does not prove tray or menu behavior.
+Original publication: The original screenshot was not published.
