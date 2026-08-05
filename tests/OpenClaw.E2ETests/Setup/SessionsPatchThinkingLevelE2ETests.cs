@@ -3,7 +3,7 @@ using OpenClaw.Shared;
 
 namespace OpenClaw.E2ETests.Setup;
 
-[CollectionDefinition("Reasoning Gateway E2E")]
+[CollectionDefinition("Reasoning Gateway E2E", DisableParallelization = true)]
 public sealed class ReasoningGatewayE2ECollection : ICollectionFixture<E2ESetupFixture> { }
 
 [Collection("Reasoning Gateway E2E")]
