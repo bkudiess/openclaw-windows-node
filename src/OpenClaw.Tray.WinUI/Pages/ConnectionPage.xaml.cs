@@ -1320,13 +1320,9 @@ public sealed partial class ConnectionPage : Page
                 "ConnectionPage_NodePillState_NeedsGatewayToken",
                 FluentIconCatalog.StatusWarn),
             CapabilityPillState.NeedsVerifiedEndpoint => (
-                TintBrush(
-                    "SystemFillColorCautionBrush",
-                    "SystemFillColorCautionBackgroundBrush",
-                    CapabilityPillFillOpacity,
-                    isHighContrast),
-                ResolveBrush("SystemFillColorCautionBrush"),
-                ResolveBrush("SystemFillColorCautionBrush"),
+                "ConnectionCapabilityPillPendingBorderStyle",
+                "ConnectionCapabilityPillPendingIconStyle",
+                "ConnectionCapabilityPillPendingTextStyle",
                 "CommandCenter_BrowserProxyHostNotDetected",
                 FluentIconCatalog.StatusWarn),
             _ => (
