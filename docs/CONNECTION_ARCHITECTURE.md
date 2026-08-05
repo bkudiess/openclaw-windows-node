@@ -228,12 +228,12 @@ Both paths dispose old clients before creating new ones.
 
 Setup codes (from QR scan or paste) decode to `{ url, bootstrapToken }` via `SetupCodeDecoder`. The flow:
 
-1. `ApplySetupCodeAsync(code)` decodes and validates
-2. Creates/updates a `GatewayRecord` with the bootstrap token
-3. Clears stored device tokens (fresh pairing)
-4. Connects to the new gateway
-5. Gateway returns `hello-ok.auth.deviceToken` after pairing
-6. Connection manager persists the device token to the identity file
+1. `ApplySetupCodeAsync(code)` decodes and validates the gateway URL and bootstrap token
+2. Creates/updates and persists the active `GatewayRecord`, preserving any shared token and durable per-role device tokens
+3. Disconnects the previous connection only after the record is durable
+4. Forces `auth.bootstrapToken` for this connection attempt without clearing stored device tokens
+5. After successful pairing, the gateway returns `hello-ok.auth.deviceToken` and the connection manager persists the replacement role token
+6. If pairing or connection fails, the previously stored device tokens remain intact, so retrying or returning to the prior pairing does not require an unintended full re-pair
 
 **Approval boundaries**: `GatewayConnectionManager` leaves node-pair command-trust requests and reapproval pending for explicit operator approval. It may automatically approve and reconnect only an explicitly typed device-pair request used for a device role upgrade.
 
