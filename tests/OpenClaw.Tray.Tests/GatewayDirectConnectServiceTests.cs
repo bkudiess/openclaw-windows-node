@@ -102,7 +102,7 @@ public sealed class GatewayDirectConnectServiceTests : IDisposable
         var service = CreateService();
 
         var result = await service.ConnectAsync(new GatewayDirectConnectRequest(
-            "wss://replacement.example",
+            previous.Url,
             SharedToken: "replacement-token",
             FriendlyName: null,
             SshTunnel: null,
@@ -117,9 +117,11 @@ public sealed class GatewayDirectConnectServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Connect_EditingGatewayId_UpdatesInPlaceWithoutDuplicate()
+    public async Task Connect_EndpointChange_ReplacesRecordAndIdentityRealmWithoutDuplicate()
     {
         var previous = AddPreviousGateway();
+        var previousIdentityDir = _registry.GetIdentityDirectory(previous.Id);
+        CreateIdentity(previous.Id).StoreDeviceTokenForRole("operator", "operator-old");
         _manager.NextSnapshot = Connected(previous.Id);
         var service = CreateService();
 
@@ -132,9 +134,90 @@ public sealed class GatewayDirectConnectServiceTests : IDisposable
 
         Assert.Equal(GatewayDirectConnectOutcome.Connected, result.Outcome);
         var record = Assert.Single(_registry.GetAll());
-        Assert.Equal(previous.Id, record.Id);
+        Assert.NotEqual(previous.Id, record.Id);
         Assert.Equal("wss://updated.example", record.Url);
         Assert.Equal("Updated", record.FriendlyName);
+        Assert.Null(_registry.GetById(previous.Id));
+        Assert.False(Directory.Exists(previousIdentityDir));
+    }
+
+    [Fact]
+    public async Task Connect_MetadataOnlyEdit_UpdatesInPlace()
+    {
+        var previous = AddPreviousGateway();
+        _manager.NextSnapshot = Connected(previous.Id);
+        var service = CreateService();
+
+        var result = await service.ConnectAsync(new GatewayDirectConnectRequest(
+            previous.Url,
+            SharedToken: null,
+            FriendlyName: "Updated",
+            SshTunnel: null,
+            EditingGatewayId: previous.Id));
+
+        Assert.Equal(GatewayDirectConnectOutcome.Connected, result.Outcome);
+        var record = Assert.Single(_registry.GetAll());
+        Assert.Equal(previous.Id, record.Id);
+        Assert.Equal("Updated", record.FriendlyName);
+    }
+
+    [Fact]
+    public async Task Connect_EndpointChangeFailure_RestoresOldRealmAndDeletesCandidateIdentity()
+    {
+        var previous = AddPreviousGateway();
+        var previousIdentity = CreateIdentity(previous.Id);
+        previousIdentity.StoreDeviceTokenForRole("operator", "operator-old");
+        _manager.BeforeSnapshot = () =>
+        {
+            var candidateId = Assert.IsType<string>(_manager.LastGatewayId);
+            var candidateIdentity = CreateIdentity(candidateId);
+            candidateIdentity.StoreDeviceTokenForRole("operator", "candidate-token");
+        };
+        _manager.NextSnapshot = Failed(previous.Id, "rejected");
+        var service = CreateService();
+
+        var result = await service.ConnectAsync(new GatewayDirectConnectRequest(
+            "wss://replacement.example",
+            SharedToken: "replacement-token",
+            FriendlyName: null,
+            SshTunnel: null,
+            EditingGatewayId: previous.Id));
+
+        Assert.Equal(GatewayDirectConnectOutcome.Failed, result.Outcome);
+        Assert.Equal(previous.Id, _registry.ActiveGatewayId);
+        Assert.Equal(previous.Url, Assert.Single(_registry.GetAll()).Url);
+        Assert.Equal(
+            "operator-old",
+            DeviceIdentity.TryReadStoredDeviceTokenForRole(
+                _registry.GetIdentityDirectory(previous.Id),
+                "operator"));
+        Assert.False(Directory.Exists(
+            _registry.GetIdentityDirectory(Assert.IsType<string>(_manager.LastGatewayId))));
+    }
+
+    [Fact]
+    public async Task Connect_NodePairingRequired_CommitsGatewayWithoutTimeoutRollback()
+    {
+        _manager.NextSnapshot = new GatewayConnectionSnapshot
+        {
+            OverallState = OverallConnectionState.PairingRequired,
+            OperatorState = RoleConnectionState.Connected,
+            NodeState = RoleConnectionState.PairingRequired,
+            NodePairingStatus = PairingStatus.Pending,
+        };
+        var service = CreateService();
+
+        var result = await service.ConnectAsync(new GatewayDirectConnectRequest(
+            "wss://pairing.example",
+            SharedToken: "replacement-token",
+            FriendlyName: null,
+            SshTunnel: null));
+
+        Assert.Equal(GatewayDirectConnectOutcome.PairingRequired, result.Outcome);
+        Assert.True(result.GatewayCommitted);
+        Assert.Equal(1, _manager.ConnectCount);
+        Assert.Equal(1, _manager.DisconnectCount);
+        Assert.Equal("wss://pairing.example", _registry.GetActive()?.Url);
     }
 
     [Fact]
@@ -230,6 +313,7 @@ public sealed class GatewayDirectConnectServiceTests : IDisposable
         public int LeaseCount { get; private set; }
         public int ConnectCount { get; private set; }
         public int DisconnectCount { get; private set; }
+        public string? LastGatewayId { get; private set; }
         public GatewayConnectionSnapshot NextSnapshot { get; set; } =
             GatewayConnectionSnapshot.Idle;
         public Action? BeforeSnapshot { get; set; }
@@ -243,6 +327,7 @@ public sealed class GatewayDirectConnectServiceTests : IDisposable
         public Task ConnectAsync(string? gatewayId = null)
         {
             ConnectCount++;
+            LastGatewayId = gatewayId;
             BeforeSnapshot?.Invoke();
             CurrentSnapshot = NextSnapshot with
             {

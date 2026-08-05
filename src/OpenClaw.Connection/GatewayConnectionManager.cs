@@ -1369,35 +1369,13 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         SshTunnelConfig? validationTunnelConfig)
     {
         Directory.CreateDirectory(identityDir);
-        var diagLogger = new DiagnosticTeeLogger(_logger, _diagnostics);
-        using var client = new OpenClawGatewayClient(
+        using var client = CreateSharedTokenValidationClient(
             gatewayUrl,
             token,
-            diagLogger,
-            tokenIsBootstrapToken: false,
-            bootstrapPairAsNode: false,
-            identityPath: identityDir,
-            ignoreStoredDeviceToken: true,
-            persistHandshakeDeviceTokens: false)
-        {
-            UseV2Signature = existing.IsLocal || existing.RequiresV2Signature
-        };
-        // This is a one-shot validation client. A reconnect would reuse the strong shared token after
-        // ownership may have changed; fail the validation instead and let the caller retry from a new
-        // provenance preflight.
-        client.ReconnectAuthorizationAsync = _ => Task.FromResult(
-            new ReconnectAuthorizationResult(
-                false,
-                GatewayErrorKind.Auth,
-                "Shared-token validation is one-shot."));
-        if (validationTunnel is not null && validationTunnelConfig is not null)
-        {
-            client.HandshakeAuthorizationAsync = cancellationToken =>
-                AuthorizeValidationTunnelHandshakeAsync(
-                    validationTunnel,
-                    validationTunnelConfig,
-                    cancellationToken);
-        }
+            identityDir,
+            existing,
+            validationTunnel,
+            validationTunnelConfig);
 
         var completion = new TaskCompletionSource<SetupCodeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         client.HandshakeSucceeded += (_, _) =>
@@ -1430,6 +1408,49 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         }
     }
 
+    internal OpenClawGatewayClient CreateSharedTokenValidationClient(
+        string gatewayUrl,
+        string token,
+        string identityDir,
+        GatewayRecord validationRecord,
+        ISshTunnelManager? validationTunnel,
+        SshTunnelConfig? validationTunnelConfig)
+    {
+        var diagLogger = new DiagnosticTeeLogger(_logger, _diagnostics);
+        var client = new OpenClawGatewayClient(
+            gatewayUrl,
+            token,
+            diagLogger,
+            tokenIsBootstrapToken: false,
+            bootstrapPairAsNode: false,
+            identityPath: identityDir,
+            ignoreStoredDeviceToken: true,
+            persistHandshakeDeviceTokens: false)
+        {
+            UseV2Signature =
+                validationRecord.IsLocal || validationRecord.RequiresV2Signature
+        };
+        // This is a one-shot validation client. A reconnect would reuse the strong shared token after
+        // ownership may have changed; fail the validation instead and let the caller retry from a new
+        // provenance preflight.
+        client.ReconnectAuthorizationAsync = _ => Task.FromResult(
+            new ReconnectAuthorizationResult(
+                false,
+                GatewayErrorKind.Auth,
+                "Shared-token validation is one-shot."));
+        client.HandshakeAuthorizationAsync = cancellationToken =>
+            AuthorizeValidationCredentialHandshakeAsync(
+                validationRecord,
+                new GatewayCredential(
+                    token,
+                    IsBootstrapToken: false,
+                    CredentialResolver.SourceSharedGatewayToken),
+                validationTunnel,
+                validationTunnelConfig,
+                cancellationToken);
+        return client;
+    }
+
     internal static async Task<ReconnectAuthorizationResult> AuthorizeValidationTunnelHandshakeAsync(
         ISshTunnelManager validationTunnel,
         SshTunnelConfig validationTunnelConfig,
@@ -1447,6 +1468,33 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 false,
                 GatewayErrorKind.LocalPortConflict,
                 "The isolated SSH validation listener changed before authentication, so the shared token was not sent.");
+    }
+
+    internal async Task<ReconnectAuthorizationResult> AuthorizeValidationCredentialHandshakeAsync(
+        GatewayRecord validationRecord,
+        GatewayCredential validationCredential,
+        ISshTunnelManager? validationTunnel,
+        SshTunnelConfig? validationTunnelConfig,
+        CancellationToken cancellationToken)
+    {
+        if (validationTunnel is not null && validationTunnelConfig is not null)
+        {
+            return await AuthorizeValidationTunnelHandshakeAsync(
+                    validationTunnel,
+                    validationTunnelConfig,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        var authorization = await AuthorizeCredentialForEndpointAsync(
+                validationRecord,
+                validationCredential,
+                cancellationToken)
+            .ConfigureAwait(false);
+        return new ReconnectAuthorizationResult(
+            authorization.Allowed,
+            authorization.FailureKind,
+            authorization.Detail);
     }
 
     private async Task StopAndDisposeValidationTunnelAsync(ISshTunnelManager tunnel)

@@ -26,6 +26,7 @@ public class WindowsNodeClient : WebSocketClientBase
     private readonly NodeRegistration _registration;
     // Connection state
     private bool _isConnected;
+    private string? _pendingConnectRequestId;
     private string? _nodeId;
     private string? _pendingNonce;  // Store nonce from challenge for signing
     private bool _isPendingApproval;  // True when connected but awaiting pairing approval
@@ -128,6 +129,8 @@ public class WindowsNodeClient : WebSocketClientBase
 
     protected override Task OnConnectedAsync()
     {
+        _isConnected = false;
+        Volatile.Write(ref _pendingConnectRequestId, null);
         TransportConnected?.Invoke(this, EventArgs.Empty);
         return Task.CompletedTask;
     }
@@ -303,6 +306,17 @@ public class WindowsNodeClient : WebSocketClientBase
     {
         if (!root.TryGetProperty("event", out var eventProp)) return;
         var eventType = eventProp.GetString();
+
+        if (!_isConnected &&
+            eventType is not "connect.challenge"
+                and not "node.pair.requested"
+                and not "device.pair.requested"
+                and not "node.pair.resolved"
+                and not "device.pair.resolved")
+        {
+            _logger.Warn($"[NODE] Ignoring pre-authentication event: {eventType}");
+            return;
+        }
         
         // Log all events except health/tick/agent for debugging
         if (eventType != "health" && eventType != "tick" && eventType != "agent" && eventType != "chat")
@@ -664,10 +678,15 @@ public class WindowsNodeClient : WebSocketClientBase
         _logger.Info($"[HANDSHAKE]   signature format={(_useV2Signature ? "v2" : "v3")}, platform={_registration.Platform}, family={_registration.DeviceFamily}");
         _logger.Info($"[HANDSHAKE]   auth: {{{authType}}}");
 
-        await SendRawAsync(BuildNodeConnectMessage(nonce, challengeTimestampMs));
+        var requestId = Guid.NewGuid().ToString();
+        Volatile.Write(ref _pendingConnectRequestId, requestId);
+        await SendRawAsync(BuildNodeConnectMessage(nonce, challengeTimestampMs, requestId));
     }
 
-    private string BuildNodeConnectMessage(string? nonce, long? challengeTimestampMs)
+    private string BuildNodeConnectMessage(
+        string? nonce,
+        long? challengeTimestampMs,
+        string? requestId = null)
     {
         // Sign the full payload with Ed25519 - this is how device pairing works
         string? signature = null;
@@ -697,7 +716,7 @@ public class WindowsNodeClient : WebSocketClientBase
         var msg = new
         {
             type = "req",
-            id = Guid.NewGuid().ToString(),
+            id = requestId ?? Guid.NewGuid().ToString(),
             method = "connect",
             @params = new
             {
@@ -751,9 +770,19 @@ public class WindowsNodeClient : WebSocketClientBase
     
     internal void HandleResponse(JsonElement root)
     {
+        var responseId = root.TryGetProperty("id", out var idProp)
+            ? idProp.GetString()
+            : null;
+        var pendingConnectRequestId = Volatile.Read(ref _pendingConnectRequestId);
+        var isConnectResponse =
+            !string.IsNullOrWhiteSpace(pendingConnectRequestId) &&
+            string.Equals(responseId, pendingConnectRequestId, StringComparison.Ordinal);
+
         if (root.TryGetProperty("ok", out var okProp) &&
             okProp.ValueKind == JsonValueKind.False)
         {
+            if (isConnectResponse)
+                Volatile.Write(ref _pendingConnectRequestId, null);
             HandleRequestError(root);
             return;
         }
@@ -767,6 +796,13 @@ public class WindowsNodeClient : WebSocketClientBase
         // Handle hello-ok (successful registration)
         if (payload.TryGetProperty("type", out var t) && t.GetString() == "hello-ok")
         {
+            if (!isConnectResponse)
+            {
+                _logger.Warn("[HANDSHAKE] Ignoring uncorrelated node hello-ok.");
+                return;
+            }
+
+            Volatile.Write(ref _pendingConnectRequestId, null);
             _logger.Info("[HANDSHAKE] Received hello-ok!");
             PublishGatewaySelf(GatewaySelfInfo.FromHelloOk(payload));
             var reconnectingAfterApproval = _pairingApprovedAwaitingReconnect;
@@ -1124,6 +1160,12 @@ public class WindowsNodeClient : WebSocketClientBase
     
     private async Task HandleRequestAsync(JsonElement root)
     {
+        if (!_isConnected)
+        {
+            _logger.Warn("[NODE] Ignoring pre-authentication request.");
+            return;
+        }
+
         if (!root.TryGetProperty("method", out var methodProp)) return;
         var method = methodProp.GetString();
         
@@ -1763,6 +1805,7 @@ public class WindowsNodeClient : WebSocketClientBase
     {
         _activeInvocations.CancelAll();
         _isConnected = false;
+        Volatile.Write(ref _pendingConnectRequestId, null);
         // Don't reset pairing state when disconnected due to pairing — gateway
         // closes the socket after PAIRING_REQUIRED but we're still waiting for approval
         if (!_pairingBlocked)

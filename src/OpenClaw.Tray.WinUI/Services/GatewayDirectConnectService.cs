@@ -73,8 +73,12 @@ internal sealed class GatewayDirectConnectService
         var existing = request.EditingGatewayId is not null
             ? _registry.GetById(request.EditingGatewayId) ?? _registry.FindByUrl(request.GatewayUrl)
             : _registry.FindByUrl(request.GatewayUrl);
-        var isNewRecord = existing is null;
-        var recordId = existing?.Id ?? Guid.NewGuid().ToString();
+        var replacesCredentialRealm = existing is not null &&
+            !IsSameCredentialRealm(existing, request, _registry);
+        var candidateUsesNewIdentity = existing is null || replacesCredentialRealm;
+        var recordId = candidateUsesNewIdentity
+            ? Guid.NewGuid().ToString()
+            : existing!.Id;
         var candidate = BuildCandidate(request, existing, recordId);
         DeviceTokenClearTransaction? identityRollback = null;
         var registryMutated = false;
@@ -86,6 +90,8 @@ internal sealed class GatewayDirectConnectService
         {
             await _connectionManager.DisconnectAsync();
 
+            if (replacesCredentialRealm)
+                _registry.Remove(existing!.Id);
             _registry.AddOrUpdate(candidate);
             _registry.SetActive(recordId);
             registryMutated = true;
@@ -120,8 +126,13 @@ internal sealed class GatewayDirectConnectService
                     "Gateway connection failed.");
             }
 
+            if (replacesCredentialRealm)
+                DeleteIdentityDirectoryBestEffort(existing!.Id, "superseded gateway");
+
             return new GatewayDirectConnectResult(
-                snapshot.OperatorState == RoleConnectionState.PairingRequired
+                snapshot.OverallState == OverallConnectionState.PairingRequired ||
+                snapshot.OperatorState == RoleConnectionState.PairingRequired ||
+                snapshot.NodeState == RoleConnectionState.PairingRequired
                     ? GatewayDirectConnectOutcome.PairingRequired
                     : GatewayDirectConnectOutcome.Connected,
                 snapshot,
@@ -146,7 +157,7 @@ internal sealed class GatewayDirectConnectService
             var rollback = registryMutated
                 ? Rollback(
                     previousActiveId,
-                    isNewRecord,
+                    candidateUsesNewIdentity,
                     existing,
                     candidate,
                     candidateRegistryCommitted,
@@ -184,6 +195,31 @@ internal sealed class GatewayDirectConnectService
             SshTunnel = request.SshTunnel,
             LastConnected = existing?.LastConnected,
         }.PreserveAdvancedFields(existing);
+
+    private static bool IsSameCredentialRealm(
+        GatewayRecord existing,
+        GatewayDirectConnectRequest request,
+        GatewayRegistry registry)
+    {
+        var matchingUrlRecord = registry.FindByUrl(request.GatewayUrl);
+        if (!string.Equals(matchingUrlRecord?.Id, existing.Id, StringComparison.Ordinal))
+            return false;
+
+        return IsSameSshCredentialEndpoint(existing.SshTunnel, request.SshTunnel);
+    }
+
+    private static bool IsSameSshCredentialEndpoint(
+        SshTunnelConfig? current,
+        SshTunnelConfig? candidate)
+    {
+        if (current is null || candidate is null)
+            return current is null && candidate is null;
+
+        return string.Equals(current.User, candidate.User, StringComparison.Ordinal) &&
+            string.Equals(current.Host, candidate.Host, StringComparison.OrdinalIgnoreCase) &&
+            current.SshPort == candidate.SshPort &&
+            current.RemotePort == candidate.RemotePort;
+    }
 
     private async Task<GatewayConnectionSnapshot> ConnectAndWaitForTerminalStateAsync(
         string recordId,
@@ -228,13 +264,15 @@ internal sealed class GatewayDirectConnectService
     private static bool IsTerminal(GatewayConnectionSnapshot snapshot) =>
         snapshot.OverallState is OverallConnectionState.Connected
             or OverallConnectionState.Ready
-            or OverallConnectionState.Degraded ||
+            or OverallConnectionState.Degraded
+            or OverallConnectionState.PairingRequired ||
         snapshot.OperatorState is RoleConnectionState.PairingRequired
-            or RoleConnectionState.Error;
+            or RoleConnectionState.Error ||
+        snapshot.NodeState == RoleConnectionState.PairingRequired;
 
     private RollbackResult Rollback(
         string? previousActiveId,
-        bool isNewRecord,
+        bool candidateUsesNewIdentity,
         GatewayRecord? previousRecord,
         GatewayRecord candidate,
         bool candidateRegistryCommitted,
@@ -244,9 +282,9 @@ internal sealed class GatewayDirectConnectService
     {
         try
         {
-            if (isNewRecord)
+            if (candidateUsesNewIdentity)
                 _registry.Remove(candidate.Id);
-            else if (previousRecord is not null)
+            if (previousRecord is not null)
                 _registry.AddOrUpdate(previousRecord);
             _registry.SetActive(previousActiveId);
             _registry.Save();
@@ -261,6 +299,11 @@ internal sealed class GatewayDirectConnectService
                     Error: $"Gateway update was not saved, and rollback persistence also failed: {ex.Message}");
             }
 
+            if (previousRecord is not null &&
+                !string.Equals(previousRecord.Id, candidate.Id, StringComparison.Ordinal))
+            {
+                _registry.Remove(previousRecord.Id);
+            }
             _registry.AddOrUpdate(candidate);
             _registry.SetActive(candidate.Id);
             var reconciliationError = ReconcileSettings(candidate);
@@ -273,7 +316,15 @@ internal sealed class GatewayDirectConnectService
         }
 
         var errors = new List<string>();
-        if (identityRollback is not null)
+        if (candidateUsesNewIdentity)
+        {
+            var cleanupError = DeleteIdentityDirectory(
+                candidate.Id,
+                "rejected gateway");
+            if (cleanupError is not null)
+                errors.Add(cleanupError);
+        }
+        else if (identityRollback is not null)
         {
             var restore = DeviceIdentityStore.RestoreTransactionalTokenClear(
                 identityRollback,
@@ -305,6 +356,32 @@ internal sealed class GatewayDirectConnectService
         return new RollbackResult(
             CandidateRemainsCommitted: false,
             Error: errors.Count == 0 ? null : string.Join(" ", errors));
+    }
+
+    private void DeleteIdentityDirectoryBestEffort(string gatewayId, string context)
+    {
+        var error = DeleteIdentityDirectory(gatewayId, context);
+        if (error is not null)
+            _logger.Warn(error);
+    }
+
+    private string? DeleteIdentityDirectory(string gatewayId, string context)
+    {
+        var identityDirectory = _registry.GetIdentityDirectory(gatewayId);
+        try
+        {
+            if (Directory.Exists(identityDirectory))
+                Directory.Delete(identityDirectory, recursive: true);
+            return null;
+        }
+        catch (IOException ex)
+        {
+            return $"Failed to remove the {context} identity directory: {ex.Message}";
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return $"Failed to remove the {context} identity directory: {ex.Message}";
+        }
     }
 
     private string? ReconcileSettings(GatewayRecord candidate)

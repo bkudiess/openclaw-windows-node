@@ -74,6 +74,35 @@ public class SetupStepsTests : IDisposable
         Assert.Contains("unknown owner", result.Message);
     }
 
+    [Fact]
+    public void PairingAuthorization_GatesInitialAndReconnectHandshakesForOperatorAndNode()
+    {
+        var context = CreateContext(new SetupConfig
+        {
+            DistroName = "OpenClawGateway",
+            GatewayUrl = "ws://localhost:18789"
+        });
+        var operatorIdentityDir = Path.Combine(_tempDir, "operator-identity");
+        var nodeIdentityDir = Path.Combine(_tempDir, "node-identity");
+        const string gatewayUrl = "ws://localhost:18789";
+        using var operatorClient = new OpenClawGatewayClient(
+            gatewayUrl,
+            "synthetic-operator-token",
+            identityPath: operatorIdentityDir);
+        using var nodeClient = new WindowsNodeClient(
+            gatewayUrl,
+            "synthetic-node-token",
+            nodeIdentityDir);
+
+        PairOperatorStep.ApplyReconnectAuthorization(operatorClient, context);
+        PairOperatorStep.ApplyReconnectAuthorization(nodeClient, context);
+
+        Assert.NotNull(operatorClient.HandshakeAuthorizationAsync);
+        Assert.NotNull(operatorClient.ReconnectAuthorizationAsync);
+        Assert.NotNull(nodeClient.HandshakeAuthorizationAsync);
+        Assert.NotNull(nodeClient.ReconnectAuthorizationAsync);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

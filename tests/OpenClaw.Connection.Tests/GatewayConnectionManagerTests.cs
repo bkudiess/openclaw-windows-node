@@ -1288,6 +1288,52 @@ public class GatewayConnectionManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task NonSshValidationHandshakeAuthorization_RechecksManagedEndpoint()
+    {
+        var probeCalls = 0;
+        using var manager = new GatewayConnectionManager(
+            _resolver,
+            _factory,
+            _registry,
+            NullLogger.Instance,
+            endpointProvenanceProbe: (_, _) =>
+            {
+                probeCalls++;
+                return Task.FromResult(new GatewayEndpointProvenance(
+                    GatewayEndpointProvenanceKind.UnknownListener,
+                    18789,
+                    Detail: "listener changed after transport connect"));
+            });
+        var record = new GatewayRecord
+        {
+            Id = "managed-local-validation",
+            Url = "ws://127.0.0.1:18789",
+            IsLocal = true,
+        };
+        var credential = new GatewayCredential(
+            "replacement-token",
+            IsBootstrapToken: false,
+            CredentialResolver.SourceSharedGatewayToken);
+
+        using var client = manager.CreateSharedTokenValidationClient(
+            record.Url,
+            credential.Token,
+            _registry.GetIdentityDirectory(record.Id),
+            record,
+            validationTunnel: null,
+            validationTunnelConfig: null);
+        var authorizeHandshake = Assert.IsType<
+            Func<CancellationToken, Task<ReconnectAuthorizationResult>>>(
+            client.HandshakeAuthorizationAsync);
+        var authorization = await authorizeHandshake(CancellationToken.None);
+
+        Assert.Equal(1, probeCalls);
+        Assert.False(authorization.Allowed);
+        Assert.Equal(GatewayErrorKind.LocalPortConflict, authorization.FailureKind);
+        Assert.Contains("listener changed", authorization.Detail);
+    }
+
+    [Fact]
     public async Task ConnectWithSharedTokenAsync_ValidationFailurePreservesPreviousSshTunnel()
     {
         var previousSsh = new SshTunnelConfig("old-user", "old.example", 18789, 45670);

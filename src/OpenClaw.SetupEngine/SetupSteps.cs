@@ -1999,7 +1999,8 @@ public sealed class PairOperatorStep : SetupStep
         WebSocketClientBase client,
         SetupContext ctx)
     {
-        client.ReconnectAuthorizationAsync = async cancellationToken =>
+        async Task<ReconnectAuthorizationResult> AuthorizeCredentialHandoffAsync(
+            CancellationToken cancellationToken)
         {
             var failure = await EnsurePairingEndpointTrustedAsync(ctx, cancellationToken).ConfigureAwait(false);
             return failure is null
@@ -2008,7 +2009,20 @@ public sealed class PairOperatorStep : SetupStep
                     false,
                     GatewayErrorKind.LocalPortConflict,
                     failure.Message);
-        };
+        }
+
+        client.ReconnectAuthorizationAsync = AuthorizeCredentialHandoffAsync;
+        switch (client)
+        {
+            case OpenClawGatewayClient gatewayClient:
+                gatewayClient.HandshakeAuthorizationAsync =
+                    AuthorizeCredentialHandoffAsync;
+                break;
+            case WindowsNodeClient nodeClient:
+                nodeClient.HandshakeAuthorizationAsync =
+                    AuthorizeCredentialHandoffAsync;
+                break;
+        }
     }
 
     /// <summary>

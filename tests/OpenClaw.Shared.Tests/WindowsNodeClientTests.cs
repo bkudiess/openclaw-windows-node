@@ -406,11 +406,7 @@ public class WindowsNodeClientTests
                 """;
             var root = JsonDocument.Parse(json).RootElement;
 
-            var handleResponseMethod = typeof(WindowsNodeClient).GetMethod(
-                "HandleResponse",
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            Assert.NotNull(handleResponseMethod);
-            handleResponseMethod!.Invoke(client, [root]);
+            HandleCorrelatedHelloOk(client, root);
 
             Assert.Single(pairingEvents);
             Assert.Equal(PairingStatus.Paired, pairingEvents[0].Status);
@@ -456,7 +452,7 @@ public class WindowsNodeClientTests
                       }
                     }
                     """);
-                client.HandleResponse(document.RootElement);
+                HandleCorrelatedHelloOk(client, document.RootElement);
             }
 
             Assert.True(handshakeSucceeded);
@@ -497,10 +493,7 @@ public class WindowsNodeClientTests
                 """;
             var root = JsonDocument.Parse(json).RootElement;
 
-            var handleResponseMethod = typeof(WindowsNodeClient).GetMethod(
-                "HandleResponse",
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            handleResponseMethod!.Invoke(client, [root]);
+            HandleCorrelatedHelloOk(client, root);
 
             Assert.Single(pairingEvents);
             Assert.Equal(PairingStatus.Pending, pairingEvents[0].Status);
@@ -551,10 +544,7 @@ public class WindowsNodeClientTests
                 """;
             var root = JsonDocument.Parse(json).RootElement;
 
-            var handleResponseMethod = typeof(WindowsNodeClient).GetMethod(
-                "HandleResponse",
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            handleResponseMethod!.Invoke(client, [root]);
+            HandleCorrelatedHelloOk(client, root);
 
             Assert.Single(pairingEvents);
             Assert.Equal(PairingStatus.Paired, pairingEvents[0].Status);
@@ -603,14 +593,10 @@ public class WindowsNodeClientTests
                 """;
             var root = JsonDocument.Parse(json).RootElement;
 
-            var handleResponseMethod = typeof(WindowsNodeClient).GetMethod(
-                "HandleResponse",
-                BindingFlags.NonPublic | BindingFlags.Instance);
-
             // Simulate three WS reconnects, each delivering hello-ok with stored token.
-            handleResponseMethod!.Invoke(client, [root]);
-            handleResponseMethod!.Invoke(client, [root]);
-            handleResponseMethod!.Invoke(client, [root]);
+            HandleCorrelatedHelloOk(client, root);
+            HandleCorrelatedHelloOk(client, root);
+            HandleCorrelatedHelloOk(client, root);
 
             Assert.Single(pairingEvents);
             Assert.Equal(PairingStatus.Paired, pairingEvents[0].Status);
@@ -1171,10 +1157,7 @@ public class WindowsNodeClientTests
                 }
                 """).RootElement;
 
-            var handleResponseMethod = typeof(WindowsNodeClient).GetMethod(
-                "HandleResponse",
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            handleResponseMethod!.Invoke(client, [helloOk]);
+            HandleCorrelatedHelloOk(client, helloOk);
 
             Assert.Single(pairingEvents);
             Assert.Equal(PairingStatus.Paired, pairingEvents[0].Status);
@@ -1590,6 +1573,98 @@ public class WindowsNodeClientTests
         }
     }
 
+    [Theory]
+    [InlineData("event")]
+    [InlineData("req")]
+    public async Task PreAuthenticationNodeInvoke_DoesNotExecuteCapability(string messageType)
+    {
+        var dataPath = Path.Combine(Path.GetTempPath(), $"openclaw-node-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dataPath);
+
+        try
+        {
+            using var client = new CapturingWindowsNodeClient(
+                "ws://localhost:18789",
+                "synthetic-node-credential",
+                dataPath);
+            var capability = new MockCapability("system", "system.run");
+            client.RegisterCapability(capability);
+            var json = messageType == "event"
+                ? """
+                  {
+                    "type": "event",
+                    "event": "node.invoke.request",
+                    "payload": {
+                      "requestId": "preauth-event",
+                      "command": "system.run",
+                      "args": {}
+                    }
+                  }
+                  """
+                : """
+                  {
+                    "type": "req",
+                    "id": "preauth-request",
+                    "method": "node.invoke",
+                    "params": {
+                      "command": "system.run",
+                      "args": {}
+                    }
+                  }
+                  """;
+
+            await InvokeProcessMessageAsync(client, json, authenticated: false);
+            await Task.Delay(50);
+
+            Assert.Equal(0, capability.ExecuteCount);
+            Assert.Empty(client.SentMessages);
+        }
+        finally
+        {
+            Directory.Delete(dataPath, true);
+        }
+    }
+
+    [Fact]
+    public void UncorrelatedHelloOk_DoesNotConnectOrPersistDeviceToken()
+    {
+        var dataPath = Path.Combine(Path.GetTempPath(), $"openclaw-node-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dataPath);
+
+        try
+        {
+            using var client = new WindowsNodeClient(
+                "ws://localhost:18789",
+                "synthetic-node-credential",
+                dataPath);
+            using var document = JsonDocument.Parse(
+                """
+                {
+                  "type": "res",
+                  "id": "attacker-controlled",
+                  "ok": true,
+                  "payload": {
+                    "type": "hello-ok",
+                    "nodeId": "attacker-node",
+                    "auth": {
+                      "deviceToken": "attacker-supplied-token"
+                    }
+                  }
+                }
+                """);
+
+            client.HandleResponse(document.RootElement);
+
+            Assert.False(client.IsConnected);
+            Assert.Null(
+                DeviceIdentity.TryReadStoredDeviceTokenForRole(dataPath, "node"));
+        }
+        finally
+        {
+            Directory.Delete(dataPath, true);
+        }
+    }
+
     [Fact]
     public void BuildNodeConnectMessage_IncludesCanonicalWindowsDeviceFamily()
     {
@@ -1916,6 +1991,28 @@ public class WindowsNodeClientTests
         await task!;
     }
 
+    private static void HandleCorrelatedHelloOk(
+        WindowsNodeClient client,
+        JsonElement response)
+    {
+        const string requestId = "test-connect-request";
+        var pendingRequestField = typeof(WindowsNodeClient).GetField(
+            "_pendingConnectRequestId",
+            BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(pendingRequestField);
+        pendingRequestField.SetValue(client, requestId);
+
+        using var correlated = JsonDocument.Parse(
+            JsonSerializer.Serialize(new
+            {
+                type = "res",
+                id = requestId,
+                ok = true,
+                payload = response.GetProperty("payload"),
+            }));
+        client.HandleResponse(correlated.RootElement);
+    }
+
     private static string InvokeBuildNodeConnectMessage(
         WindowsNodeClient client,
         long? challengeTimestampMs = null,
@@ -1926,7 +2023,7 @@ public class WindowsNodeClientTests
             BindingFlags.NonPublic | BindingFlags.Instance);
         Assert.NotNull(method);
 
-        return (string)method!.Invoke(client, [nonce, challengeTimestampMs])!;
+        return (string)method!.Invoke(client, [nonce, challengeTimestampMs, null])!;
     }
 
     private static (Dictionary<string, string> Auth, string TokenForSignature) InvokeBuildConnectAuth(
@@ -2948,8 +3045,20 @@ public class WindowsNodeClientTests
         }
     }
 
-    private static async Task InvokeProcessMessageAsync(WindowsNodeClient client, string json)
+    private static async Task InvokeProcessMessageAsync(
+        WindowsNodeClient client,
+        string json,
+        bool authenticated = true)
     {
+        if (authenticated)
+        {
+            var connectedField = typeof(WindowsNodeClient).GetField(
+                "_isConnected",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(connectedField);
+            connectedField.SetValue(client, true);
+        }
+
         var processMethod = typeof(WindowsNodeClient).GetMethod(
             "ProcessMessageAsync",
             BindingFlags.NonPublic | BindingFlags.Instance);
