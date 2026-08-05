@@ -103,6 +103,8 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
     private readonly TimeSpan _lastChatStateSaveDelay;
     private readonly Func<TimeSpan, CancellationToken, Func<Task>, Task> _scheduleHistoryRetry;
     private readonly ThinkingLevelClearReconciler _thinkingLevelClearReconciler;
+    private readonly Dictionary<string, long> _confirmedNullThinkingAuthorityTokens =
+        new(StringComparer.Ordinal);
     private readonly Action? _historyFailureReservedForTesting;
     private System.Threading.Timer? _toolMetaSaveTimer; // debounce cache writes
     private long _toolMetaSaveVersion;
@@ -223,6 +225,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
     // was already in flight at disconnect time is discarded on completion rather
     // than resurrecting a catalog for a stale connection.
     private int _commandsEpoch;
+    private long _nextConfirmedNullThinkingAuthorityToken;
     private ConnectionStatus _status;
     private bool _disposed;
 
@@ -335,26 +338,34 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
         ChatDataSnapshot snapshot;
         lock (_gate)
         {
+            ReleaseMissingConfirmedNullThinkingAuthoritiesLocked(sessions);
             _sessions = sessions.Select(session =>
             {
                 if (string.IsNullOrEmpty(session.Key))
                     return session;
 
+                var projectedSession = ApplyConfirmedNullThinkingAuthorityLocked(
+                    session,
+                    releaseOnNull: true);
                 var resolution = _thinkingLevelClearReconciler.ObserveSnapshot(
-                    session.Key,
-                    session.ThinkingLevel);
+                    projectedSession.Key,
+                    projectedSession.ThinkingLevel);
                 if (resolution.RefreshRequest is { } refresh)
                     (thinkingLevelsToRefresh ??= []).Add(refresh);
+                var effectiveThinkingLevel =
+                    _confirmedNullThinkingAuthorityTokens.ContainsKey(projectedSession.Key)
+                        ? null
+                        : resolution.EffectiveThinkingLevel;
                 if (string.Equals(
-                        session.ThinkingLevel,
-                        resolution.EffectiveThinkingLevel,
+                        projectedSession.ThinkingLevel,
+                        effectiveThinkingLevel,
                         StringComparison.Ordinal))
                 {
-                    return session;
+                    return projectedSession;
                 }
 
-                var reconciled = session.Clone();
-                reconciled.ThinkingLevel = resolution.EffectiveThinkingLevel;
+                var reconciled = projectedSession.Clone();
+                reconciled.ThinkingLevel = effectiveThinkingLevel;
                 return reconciled;
             }).ToArray();
             EnsureTimelinesForSessionsLocked();
@@ -1823,11 +1834,16 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
     {
         cancellationToken.ThrowIfCancellationRequested();
         ThinkingLevelClearReconciler.ConcreteSelection selection;
+        long? confirmedNullAuthorityToken;
         lock (_gate)
         {
             var canonicalThinkingLevel = _sessions
                 .FirstOrDefault(session => string.Equals(session.Key, threadId, StringComparison.Ordinal))
                 ?.ThinkingLevel;
+            confirmedNullAuthorityToken =
+                _confirmedNullThinkingAuthorityTokens.TryGetValue(threadId, out var token)
+                    ? token
+                    : null;
             selection = _thinkingLevelClearReconciler.BeginConcreteSelection(
                 threadId,
                 thinkingLevel,
@@ -1837,6 +1853,20 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
         try
         {
             await _bridge.PatchSessionThinkingLevelAsync(threadId, thinkingLevel);
+            if (confirmedNullAuthorityToken is { } expectedToken)
+            {
+                lock (_gate)
+                {
+                    if (!_disposed &&
+                        _confirmedNullThinkingAuthorityTokens.TryGetValue(
+                            threadId,
+                            out var currentToken) &&
+                        currentToken == expectedToken)
+                    {
+                        _confirmedNullThinkingAuthorityTokens.Remove(threadId);
+                    }
+                }
+            }
         }
         catch
         {
@@ -1857,6 +1887,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
             operation = _thinkingLevelClearReconciler.BeginClear(
                 threadId,
                 canonicalThinkingLevel);
+            ObserveBackgroundTask(operation.Confirmation);
         }
 
         try
@@ -2243,6 +2274,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
             _localSentTexts.Clear();
             _locallyInitiatedThreads.Clear();
             _resetSubmittedLocalEchoTexts.Clear();
+            _confirmedNullThinkingAuthorityTokens.Clear();
         }
         _thinkingLevelClearReconciler.Dispose();
         CancelAndDisposeHistoryGeneration(historyGenerationToCancel);
@@ -2290,6 +2322,9 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
 
             justReconnected = status == ConnectionStatus.Connected
                               && _status != ConnectionStatus.Connected;
+            var connectedAuthorityChanged =
+                (status == ConnectionStatus.Connected) !=
+                (_status == ConnectionStatus.Connected);
             // MEDIUM 5: detect Connected → Disconnected/Error transitions so
             // we can synthesise a turn-end + status entry on every thread that
             // had an in-flight turn (otherwise the UI sits "thinking" forever).
@@ -2298,6 +2333,8 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
             _status = status;
             thinkingLevelsToRefresh = _thinkingLevelClearReconciler
                 .OnConnectionChanged(status == ConnectionStatus.Connected);
+            if (connectedAuthorityChanged)
+                _confirmedNullThinkingAuthorityTokens.Clear();
 
             // Reset the sessions-list-received gate whenever we leave the
             // Connected state. Any cached sessions belong to the previous
@@ -2453,9 +2490,24 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                     return false;
 
                 correlatedResolution = resolution;
+                if (resolution.State == ThinkingLevelClearReconciler.ReconciliationState.Confirmed)
+                {
+                    if (resolution.EffectiveThinkingLevel is null)
+                    {
+                        _confirmedNullThinkingAuthorityTokens[correlatedRequest.ThreadId] =
+                            ++_nextConfirmedNullThinkingAuthorityToken;
+                    }
+                    else
+                    {
+                        _confirmedNullThinkingAuthorityTokens.Remove(correlatedRequest.ThreadId);
+                    }
+                }
                 if (resolution.RefreshRequest is { } retry)
                     (thinkingLevelsToRefresh ??= []).Add(retry);
             }
+
+            if (refreshRequest is null)
+                ReleaseMissingConfirmedNullThinkingAuthoritiesLocked(incomingSessions);
 
             var previousThreads = refreshRequest is null
                 ? null
@@ -2467,32 +2519,44 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
             for (var index = 0; index < incomingSessions.Length; index++)
             {
                 var incoming = incomingSessions[index];
-                reconciledSessions[index] = incoming;
+                var isCorrelatedTarget =
+                    refreshRequest is { } request &&
+                    string.Equals(request.ThreadId, incoming.Key, StringComparison.Ordinal);
+                var projectedSession = isCorrelatedTarget
+                    ? incoming
+                    : ApplyConfirmedNullThinkingAuthorityLocked(
+                        incoming,
+                        releaseOnNull: refreshRequest is null);
+                reconciledSessions[index] = projectedSession;
                 if (string.IsNullOrEmpty(incoming.Key))
                     continue;
 
                 ThinkingLevelClearReconciler.SnapshotResolution resolution;
-                if (refreshRequest is { } request &&
-                    string.Equals(request.ThreadId, incoming.Key, StringComparison.Ordinal))
+                if (isCorrelatedTarget)
                 {
                     resolution = correlatedResolution!.Value;
                 }
                 else
                 {
                     resolution = _thinkingLevelClearReconciler.ObserveSnapshot(
-                        incoming.Key,
-                        incoming.ThinkingLevel);
+                        projectedSession.Key,
+                        projectedSession.ThinkingLevel);
                     if (resolution.RefreshRequest is { } refresh)
                         (thinkingLevelsToRefresh ??= []).Add(refresh);
                 }
 
+                var effectiveThinkingLevel =
+                    !isCorrelatedTarget &&
+                    _confirmedNullThinkingAuthorityTokens.ContainsKey(projectedSession.Key)
+                        ? null
+                        : resolution.EffectiveThinkingLevel;
                 if (!string.Equals(
-                        incoming.ThinkingLevel,
-                        resolution.EffectiveThinkingLevel,
+                        projectedSession.ThinkingLevel,
+                        effectiveThinkingLevel,
                         StringComparison.Ordinal))
                 {
-                    var reconciled = incoming.Clone();
-                    reconciled.ThinkingLevel = resolution.EffectiveThinkingLevel;
+                    var reconciled = projectedSession.Clone();
+                    reconciled.ThinkingLevel = effectiveThinkingLevel;
                     reconciledSessions[index] = reconciled;
                 }
             }
@@ -2538,6 +2602,45 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
             TryDispatchNextQueuedSend(threadId);
         }
         return true;
+    }
+
+    private SessionInfo ApplyConfirmedNullThinkingAuthorityLocked(
+        SessionInfo session,
+        bool releaseOnNull)
+    {
+        if (string.IsNullOrEmpty(session.Key) ||
+            !_confirmedNullThinkingAuthorityTokens.ContainsKey(session.Key))
+        {
+            return session;
+        }
+
+        if (session.ThinkingLevel is null)
+        {
+            if (releaseOnNull)
+                _confirmedNullThinkingAuthorityTokens.Remove(session.Key);
+            return session;
+        }
+
+        var projected = session.Clone();
+        projected.ThinkingLevel = null;
+        return projected;
+    }
+
+    private void ReleaseMissingConfirmedNullThinkingAuthoritiesLocked(
+        IReadOnlyCollection<SessionInfo> sessions)
+    {
+        if (_confirmedNullThinkingAuthorityTokens.Count == 0)
+            return;
+
+        var incomingKeys = sessions
+            .Where(session => !string.IsNullOrEmpty(session.Key))
+            .Select(session => session.Key)
+            .ToHashSet(StringComparer.Ordinal);
+        var missingThreads = _confirmedNullThinkingAuthorityTokens.Keys
+            .Where(threadId => !incomingKeys.Contains(threadId))
+            .ToArray();
+        foreach (var threadId in missingThreads)
+            _confirmedNullThinkingAuthorityTokens.Remove(threadId);
     }
 
     internal static bool ShouldPreserveLiveEntryDuringAuthoritativeReload(

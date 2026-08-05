@@ -5,6 +5,7 @@ using OpenClawTray.Chat;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 
 namespace OpenClaw.Tray.Tests;
@@ -2311,6 +2312,426 @@ public class OpenClawChatDataProviderTests
         var thread = Assert.Single(snapshots[^1].Threads);
         Assert.Equal("off", thread.ThinkingLevel);
         Assert.Equal("gpt-5.5", thread.Model);
+    }
+
+    [Fact]
+    public async Task LoadAsync_FirstMountPreservesNonNullBridgeThinkingLevel()
+    {
+        var session = MainSession();
+        session.ThinkingLevel = "off";
+        session.Model = "gpt-5.4";
+        var (bridge, provider, _, _) = CreateProvider([session]);
+
+        var snapshot = await provider.LoadAsync();
+
+        var thread = Assert.Single(snapshot.Threads);
+        Assert.Equal("off", thread.ThinkingLevel);
+        Assert.Equal("gpt-5.4", thread.Model);
+        Assert.Same(session, Assert.Single(bridge.Sessions));
+    }
+
+    [Fact]
+    public async Task LoadAsync_AfterCorrelatedNullMasksRepeatedStaleBridgeReads()
+    {
+        var session = MainSession();
+        session.ThinkingLevel = "off";
+        session.Model = "gpt-5.4";
+        var (bridge, provider, snapshots, _) = CreateProvider([session]);
+        var confirmed = session.Clone();
+        confirmed.ThinkingLevel = null;
+        confirmed.Model = "gpt-5.5";
+        bridge.RequestSessionsSnapshotBehavior = _ =>
+            Task.FromResult<SessionInfo[]?>([confirmed]);
+        await provider.LoadAsync();
+        bridge.RaiseStatus(ConnectionStatus.Connected);
+        snapshots.Clear();
+
+        await provider.ClearThinkingLevelAsync("main");
+
+        Assert.Null(Assert.Single(snapshots[^1].Threads).ThinkingLevel);
+        Assert.Equal("off", Assert.Single(bridge.Sessions).ThinkingLevel);
+        var firstRemount = await provider.LoadAsync();
+        var secondRemount = await provider.LoadAsync();
+        Assert.Null(Assert.Single(firstRemount.Threads).ThinkingLevel);
+        Assert.Null(Assert.Single(secondRemount.Threads).ThinkingLevel);
+        Assert.Equal("gpt-5.4", Assert.Single(secondRemount.Threads).Model);
+        Assert.Equal("off", Assert.Single(bridge.Sessions).ThinkingLevel);
+    }
+
+    [Fact]
+    public async Task SessionsUpdated_ConfirmedNullMasksStaleOffUntilOrdinaryNullReleasesLatch()
+    {
+        var session = MainSession();
+        session.ThinkingLevel = "off";
+        session.Model = "gpt-5.4";
+        var (bridge, provider, snapshots, _) = CreateProvider([session]);
+        var confirmed = session.Clone();
+        confirmed.ThinkingLevel = null;
+        bridge.RequestSessionsSnapshotBehavior = _ =>
+            Task.FromResult<SessionInfo[]?>([confirmed]);
+        await provider.LoadAsync();
+        bridge.RaiseStatus(ConnectionStatus.Connected);
+        await provider.ClearThinkingLevelAsync("main");
+        snapshots.Clear();
+
+        var staleOff = session.Clone();
+        staleOff.Model = "gpt-5.5";
+        bridge.RaiseSessions([staleOff]);
+
+        var masked = Assert.Single(snapshots[^1].Threads);
+        Assert.Null(masked.ThinkingLevel);
+        Assert.Equal("gpt-5.5", masked.Model);
+        Assert.Equal("off", staleOff.ThinkingLevel);
+
+        var ordinaryNull = staleOff.Clone();
+        ordinaryNull.ThinkingLevel = null;
+        ordinaryNull.Model = "gpt-5.6";
+        bridge.RaiseSessions([ordinaryNull]);
+        Assert.Null(Assert.Single(snapshots[^1].Threads).ThinkingLevel);
+
+        var concrete = ordinaryNull.Clone();
+        concrete.ThinkingLevel = "high";
+        concrete.Model = "gpt-5.7";
+        bridge.RaiseSessions([concrete]);
+
+        var accepted = Assert.Single(snapshots[^1].Threads);
+        Assert.Equal("high", accepted.ThinkingLevel);
+        Assert.Equal("gpt-5.7", accepted.Model);
+    }
+
+    [Fact]
+    public async Task Status_AuthorityTransitionClearsConfirmedNullLatch()
+    {
+        var session = MainSession();
+        session.ThinkingLevel = "off";
+        var (bridge, provider, snapshots, _) = CreateProvider([session]);
+        var confirmed = session.Clone();
+        confirmed.ThinkingLevel = null;
+        bridge.RequestSessionsSnapshotBehavior = _ =>
+            Task.FromResult<SessionInfo[]?>([confirmed]);
+        await provider.LoadAsync();
+        bridge.RaiseStatus(ConnectionStatus.Connected);
+        await provider.ClearThinkingLevelAsync("main");
+        snapshots.Clear();
+
+        bridge.RaiseStatus(ConnectionStatus.Disconnected);
+        bridge.RaiseStatus(ConnectionStatus.Connected);
+        var nextGeneration = session.Clone();
+        nextGeneration.Model = "next-generation";
+        bridge.RaiseSessions([nextGeneration]);
+
+        var thread = Assert.Single(snapshots[^1].Threads);
+        Assert.Equal("off", thread.ThinkingLevel);
+        Assert.Equal("next-generation", thread.Model);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_ConfirmedNullLatchDoesNotLeakToNewProvider()
+    {
+        var session = MainSession();
+        session.ThinkingLevel = "off";
+        var (bridgeA, providerA, snapshotsA, _) = CreateProvider([session]);
+        var confirmed = session.Clone();
+        confirmed.ThinkingLevel = null;
+        bridgeA.RequestSessionsSnapshotBehavior = _ =>
+            Task.FromResult<SessionInfo[]?>([confirmed]);
+        await providerA.LoadAsync();
+        bridgeA.RaiseStatus(ConnectionStatus.Connected);
+        await providerA.ClearThinkingLevelAsync("main");
+        Assert.Null(Assert.Single(snapshotsA[^1].Threads).ThinkingLevel);
+
+        await providerA.DisposeAsync();
+
+        var (_, providerB, _, _) = CreateProvider([session.Clone()]);
+        var freshSnapshot = await providerB.LoadAsync();
+        Assert.Equal("off", Assert.Single(freshSnapshot.Threads).ThinkingLevel);
+        await providerB.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task CorrelatedSnapshot_IsAuthoritativeOnlyForTargetConfirmedNullLatch()
+    {
+        var sessionA = MainSession();
+        sessionA.Key = "a";
+        sessionA.ThinkingLevel = "off";
+        var sessionB = MainSession();
+        sessionB.Key = "b";
+        sessionB.IsMain = false;
+        sessionB.DisplayName = "B";
+        sessionB.ThinkingLevel = "off";
+        var (bridge, provider, snapshots, _) = CreateProvider([sessionA, sessionB]);
+        var delayedA = new TaskCompletionSource<SessionInfo[]?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var requestCall = 0;
+        bridge.RequestSessionsSnapshotBehavior = _ =>
+        {
+            return Interlocked.Increment(ref requestCall) switch
+            {
+                1 => delayedA.Task,
+                2 => Task.FromResult<SessionInfo[]?>(
+                [
+                    sessionA.Clone(),
+                    new SessionInfo
+                    {
+                        Key = "b",
+                        DisplayName = "B",
+                        Status = "active",
+                        ThinkingLevel = null,
+                    },
+                ]),
+                _ => Task.FromResult<SessionInfo[]?>(
+                [
+                    new SessionInfo
+                    {
+                        Key = "a",
+                        IsMain = true,
+                        DisplayName = "A",
+                        Status = "active",
+                        ThinkingLevel = null,
+                    },
+                    new SessionInfo
+                    {
+                        Key = "b",
+                        DisplayName = "B",
+                        Status = "active",
+                        ThinkingLevel = null,
+                    },
+                ]),
+            };
+        };
+        await provider.LoadAsync();
+        bridge.RaiseStatus(ConnectionStatus.Connected);
+        snapshots.Clear();
+
+        var clearA = provider.ClearThinkingLevelAsync("a");
+        await WaitForConditionAsync(() => bridge.RequestSessionsSnapshotCallCount == 1);
+        await provider.ClearThinkingLevelAsync("b");
+        Assert.Null(Assert.Single(snapshots[^1].Threads, thread => thread.Id == "b").ThinkingLevel);
+
+        var nonTargetStaleB = sessionB.Clone();
+        nonTargetStaleB.Model = "fresh-b-model";
+        var confirmedA = sessionA.Clone();
+        confirmedA.ThinkingLevel = null;
+        delayedA.SetResult([confirmedA, nonTargetStaleB]);
+        await clearA;
+
+        var afterDelayedA = snapshots[^1];
+        Assert.Null(Assert.Single(afterDelayedA.Threads, thread => thread.Id == "a").ThinkingLevel);
+        var maskedB = Assert.Single(afterDelayedA.Threads, thread => thread.Id == "b");
+        Assert.Null(maskedB.ThinkingLevel);
+        Assert.Equal("fresh-b-model", maskedB.Model);
+        Assert.Equal("off", nonTargetStaleB.ThinkingLevel);
+
+        await provider.ClearThinkingLevelAsync("a");
+        var ordinaryStaleB = sessionB.Clone();
+        ordinaryStaleB.Model = "ordinary-b-model";
+        var ordinaryA = sessionA.Clone();
+        ordinaryA.ThinkingLevel = null;
+        bridge.RaiseSessions([ordinaryA, ordinaryStaleB]);
+
+        var afterNonTargetNull = snapshots[^1];
+        var stillMaskedB = Assert.Single(afterNonTargetNull.Threads, thread => thread.Id == "b");
+        Assert.Null(stillMaskedB.ThinkingLevel);
+        Assert.Equal("ordinary-b-model", stillMaskedB.Model);
+    }
+
+    [Fact]
+    public async Task SetThinkingLevelAsync_SuccessRetiresLatchButFailureRetainsNullAuthority()
+    {
+        var session = MainSession();
+        session.ThinkingLevel = "off";
+        var (bridge, provider, snapshots, _) = CreateProvider([session]);
+        var confirmed = session.Clone();
+        confirmed.ThinkingLevel = null;
+        bridge.RequestSessionsSnapshotBehavior = _ =>
+            Task.FromResult<SessionInfo[]?>([confirmed]);
+        await provider.LoadAsync();
+        bridge.RaiseStatus(ConnectionStatus.Connected);
+        await provider.ClearThinkingLevelAsync("main");
+        snapshots.Clear();
+
+        await provider.SetThinkingLevelAsync("main", "high");
+        var canonicalHigh = session.Clone();
+        canonicalHigh.ThinkingLevel = "high";
+        bridge.RaiseSessions([canonicalHigh]);
+        Assert.Equal("high", Assert.Single(snapshots[^1].Threads).ThinkingLevel);
+
+        await provider.ClearThinkingLevelAsync("main");
+        bridge.PatchSessionThinkingLevelBehavior = (_, _) =>
+            Task.FromException(new InvalidOperationException("concrete patch rejected"));
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => provider.SetThinkingLevelAsync("main", "high"));
+
+        var staleAfterFailure = session.Clone();
+        staleAfterFailure.Model = "fresh-model";
+        bridge.RaiseSessions([staleAfterFailure]);
+        var protectedThread = Assert.Single(snapshots[^1].Threads);
+        Assert.Null(protectedThread.ThinkingLevel);
+        Assert.Equal("fresh-model", protectedThread.Model);
+        Assert.Equal("off", staleAfterFailure.ThinkingLevel);
+    }
+
+    [Fact]
+    public async Task SetThinkingLevelAsync_OlderConcreteCannotRetireNewerConfirmedNullAuthority()
+    {
+        var session = MainSession();
+        session.ThinkingLevel = "off";
+        var (bridge, provider, snapshots, _) = CreateProvider([session]);
+        var confirmed = session.Clone();
+        confirmed.ThinkingLevel = null;
+        bridge.RequestSessionsSnapshotBehavior = _ =>
+            Task.FromResult<SessionInfo[]?>([confirmed]);
+        await provider.LoadAsync();
+        bridge.RaiseStatus(ConnectionStatus.Connected);
+        await provider.ClearThinkingLevelAsync("main");
+        snapshots.Clear();
+
+        var concreteCompletion = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        bridge.PatchSessionThinkingLevelBehavior = (_, _) => concreteCompletion.Task;
+        var olderConcrete = provider.SetThinkingLevelAsync("main", "high");
+        await WaitForConditionAsync(() => bridge.PatchedThinkingLevels.Count == 1);
+
+        await provider.ClearThinkingLevelAsync("main");
+        concreteCompletion.SetResult();
+        await olderConcrete;
+
+        var staleOff = session.Clone();
+        staleOff.Model = "newer-clear-model";
+        bridge.RaiseSessions([staleOff]);
+        var protectedThread = Assert.Single(snapshots[^1].Threads);
+        Assert.Null(protectedThread.ThinkingLevel);
+        Assert.Equal("newer-clear-model", protectedThread.Model);
+        Assert.Equal("off", staleOff.ThinkingLevel);
+    }
+
+    [Fact]
+    public async Task SetThinkingLevelAsync_FailedConcreteCannotProjectOverConfirmedNullAuthority()
+    {
+        var session = MainSession();
+        session.ThinkingLevel = "off";
+        var (bridge, provider, snapshots, _) = CreateProvider([session]);
+        var confirmed = session.Clone();
+        confirmed.ThinkingLevel = null;
+        bridge.RequestSessionsSnapshotBehavior = _ =>
+            Task.FromResult<SessionInfo[]?>([confirmed]);
+        await provider.LoadAsync();
+        bridge.RaiseStatus(ConnectionStatus.Connected);
+        await provider.ClearThinkingLevelAsync("main");
+        snapshots.Clear();
+
+        var clearCompletion = new TaskCompletionSource<SessionCommandResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var concreteCompletion = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var refreshCompletion = new TaskCompletionSource<SessionInfo[]?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        bridge.ClearSessionThinkingLevelBehavior = (_, _) => clearCompletion.Task;
+        bridge.PatchSessionThinkingLevelBehavior = (_, _) => concreteCompletion.Task;
+        bridge.RequestSessionsSnapshotBehavior = _ => refreshCompletion.Task;
+
+        var supersededClear = provider.ClearThinkingLevelAsync("main");
+        var failedConcrete = provider.SetThinkingLevelAsync("main", "high");
+        clearCompletion.SetResult(new SessionCommandResult
+        {
+            Method = "sessions.patch",
+            Ok = false,
+            Key = "main",
+            Error = "superseded clear",
+        });
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => supersededClear);
+
+        var staleOff = session.Clone();
+        staleOff.Model = "fresh-while-concrete-pending";
+        bridge.RaiseSessions([staleOff]);
+        var whilePending = Assert.Single(snapshots[^1].Threads);
+        Assert.Null(whilePending.ThinkingLevel);
+        Assert.Equal("fresh-while-concrete-pending", whilePending.Model);
+
+        concreteCompletion.SetException(new InvalidOperationException("concrete rejected"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => failedConcrete);
+
+        var afterFailure = Assert.Single(snapshots[^1].Threads);
+        Assert.Null(afterFailure.ThinkingLevel);
+        Assert.Equal("fresh-while-concrete-pending", afterFailure.Model);
+        Assert.Equal("off", staleOff.ThinkingLevel);
+        refreshCompletion.SetResult([confirmed]);
+    }
+
+    [Fact]
+    public async Task SessionsUpdated_RowDisappearanceRemovesConfirmedNullLatch()
+    {
+        var session = MainSession();
+        session.ThinkingLevel = "off";
+        var (bridge, provider, snapshots, _) = CreateProvider([session]);
+        var confirmed = session.Clone();
+        confirmed.ThinkingLevel = null;
+        bridge.RequestSessionsSnapshotBehavior = _ =>
+            Task.FromResult<SessionInfo[]?>([confirmed]);
+        await provider.LoadAsync();
+        bridge.RaiseStatus(ConnectionStatus.Connected);
+        await provider.ClearThinkingLevelAsync("main");
+        snapshots.Clear();
+
+        bridge.RaiseSessions([]);
+        bridge.RaiseSessions([session.Clone()]);
+
+        Assert.Equal("off", Assert.Single(snapshots[^1].Threads).ThinkingLevel);
+    }
+
+    [Fact]
+    public async Task ClearThinkingLevelAsync_DirectRejectionConfirmationFaultIsObserved()
+    {
+        const string rejectionMarker = "direct rejection marker";
+        var matchingUnobserved = new ConcurrentQueue<Exception>();
+        EventHandler<UnobservedTaskExceptionEventArgs> handler = (_, args) =>
+        {
+            foreach (var exception in args.Exception.Flatten().InnerExceptions)
+            {
+                if (exception.Message.Contains(rejectionMarker, StringComparison.Ordinal))
+                    matchingUnobserved.Enqueue(exception);
+            }
+            args.SetObserved();
+        };
+        TaskScheduler.UnobservedTaskException += handler;
+
+        try
+        {
+            var providerReference = CreateAbandonedDirectRejectionProvider(rejectionMarker);
+            await AssertEventuallyCollectedAsync(providerReference);
+            Assert.Empty(matchingUnobserved);
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= handler;
+        }
+    }
+
+    [Fact]
+    public async Task ClearThinkingLevelAsync_PostAckDisconnectConfirmationFaultIsObserved()
+    {
+        var matchingUnobserved = new ConcurrentQueue<Exception>();
+        EventHandler<UnobservedTaskExceptionEventArgs> handler = (_, args) =>
+        {
+            foreach (var exception in args.Exception.Flatten().InnerExceptions)
+            {
+                if (exception is ThinkingLevelClearInterruptedException)
+                    matchingUnobserved.Enqueue(exception);
+            }
+            args.SetObserved();
+        };
+        TaskScheduler.UnobservedTaskException += handler;
+
+        try
+        {
+            var providerReference = CreateAbandonedPostAckDisconnectProvider();
+            await AssertEventuallyCollectedAsync(providerReference);
+            Assert.Empty(matchingUnobserved);
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= handler;
+        }
     }
 
     [Fact]
@@ -9696,6 +10117,90 @@ public class OpenClawChatDataProviderTests
             e => e.Kind == ChatTimelineItemKind.PermissionRequest);
         Assert.Equal(ChatPermissionDecision.Allowed, entry.PermissionDecision);
         Assert.Null(snapshots[^1].Timelines["main"].PendingPermission);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference CreateAbandonedDirectRejectionProvider(string rejectionMarker)
+    {
+        var session = MainSession();
+        session.ThinkingLevel = "off";
+        var (bridge, provider, _, _) = CreateProvider([session]);
+        bridge.ClearSessionThinkingLevelBehavior = (key, _) =>
+            Task.FromResult(new SessionCommandResult
+            {
+                Method = "sessions.patch",
+                Ok = false,
+                Key = key,
+                Error = rejectionMarker,
+            });
+        provider.LoadAsync().GetAwaiter().GetResult();
+        bridge.RaiseStatus(ConnectionStatus.Connected);
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => provider.ClearThinkingLevelAsync("main").GetAwaiter().GetResult());
+        Assert.Contains(rejectionMarker, exception.Message, StringComparison.Ordinal);
+        var providerReference = new WeakReference(provider);
+        provider.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        return providerReference;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference CreateAbandonedPostAckDisconnectProvider()
+    {
+        var session = MainSession();
+        session.ThinkingLevel = "off";
+        var (bridge, provider, _, _) = CreateProvider(
+            [session],
+            thinkingLevelConfirmationTimeout: TimeSpan.FromMilliseconds(20));
+        var requestStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var requestCanceled = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        bridge.RequestSessionsSnapshotBehavior = async cancellationToken =>
+        {
+            requestStarted.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return null;
+            }
+            finally
+            {
+                if (cancellationToken.IsCancellationRequested)
+                    requestCanceled.TrySetResult();
+            }
+        };
+        provider.LoadAsync().GetAwaiter().GetResult();
+        bridge.RaiseStatus(ConnectionStatus.Connected);
+
+        provider.ClearThinkingLevelAsync("main").GetAwaiter().GetResult();
+        requestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+        bridge.RaiseStatus(ConnectionStatus.Disconnected);
+        requestCanceled.Task.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+        var providerReference = new WeakReference(provider);
+        provider.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        return providerReference;
+    }
+
+    private static async Task AssertEventuallyCollectedAsync(WeakReference reference)
+    {
+        for (var attempt = 0; attempt < 20 && reference.IsAlive; attempt++)
+        {
+            GC.Collect(
+                GC.MaxGeneration,
+                GCCollectionMode.Forced,
+                blocking: true,
+                compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(
+                GC.MaxGeneration,
+                GCCollectionMode.Forced,
+                blocking: true,
+                compacting: true);
+            await Task.Delay(10);
+        }
+
+        Assert.False(reference.IsAlive, "Expected the abandoned provider to be collected.");
     }
 
     private static async Task WaitForConditionAsync(Func<bool> condition, int attempts = 50)
