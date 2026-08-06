@@ -83,6 +83,12 @@ public enum ChatToolCallStatus
     Interrupted
 }
 
+public enum ChatToolErrorTextQuality
+{
+    Unspecified,
+    SafeSummary
+}
+
 public enum ChatToolIdentityStrength
 {
     Fallback,
@@ -150,7 +156,8 @@ public record ChatTimelineItem(
     System.Collections.Immutable.ImmutableHashSet<string>? ToolCorrelationIds = null,
     long ToolOutcomeSequence = 0,
     string? ToolRunId = null,
-    long ToolLegacyTurn = 0);
+    long ToolLegacyTurn = 0,
+    ChatToolErrorTextQuality ToolErrorTextQuality = ChatToolErrorTextQuality.Unspecified);
 
 public readonly record struct ChatToolCorrelationKey(
     string? RunId,
@@ -198,7 +205,8 @@ public record ChatPendingToolPresentation(
 public record ChatPendingToolOutcome(
     string Text,
     ChatToolCallStatus Status,
-    long Sequence);
+    long Sequence,
+    ChatToolErrorTextQuality ErrorTextQuality = ChatToolErrorTextQuality.Unspecified);
 
 public enum ChatQueuedMessageSendState
 {
@@ -255,7 +263,8 @@ public record ChatToolOutputEvent(
 public record ChatToolErrorEvent(
     string Text,
     string? ToolCallId = null,
-    string? RunId = null) : ChatEvent;
+    string? RunId = null,
+    ChatToolErrorTextQuality ErrorTextQuality = ChatToolErrorTextQuality.Unspecified) : ChatEvent;
 public record ChatToolReplayResetEvent : ChatEvent;
 public record ChatContextChangedEvent(string? Cwd, string? GitBranch) : ChatEvent;
 public record ChatStatusEvent(string Text, ChatTone Tone) : ChatEvent;
