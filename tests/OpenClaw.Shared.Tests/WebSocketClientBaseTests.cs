@@ -70,6 +70,7 @@ public class TestWebSocketClient : WebSocketClientBase
     public string TestToken => _token;
     public IOpenClawLogger TestLogger => _logger;
     public Task TestReconnectWithBackoffAsync() => ReconnectWithBackoffAsync();
+    public void TestAbortCurrentWebSocket() => AbortCurrentWebSocket(CurrentConnectionGeneration);
 }
 
 [Collection("WebSocketClientBase")]
@@ -116,6 +117,34 @@ public class WebSocketClientBaseTests
 
         Assert.Equal(1, authorizationCalls);
         Assert.Equal(0, client.OnConnectedCallCount);
+    }
+
+    [Fact]
+    public async Task AbortCurrentWebSocket_PreventsLaterMessagesOnAcceptedSocket()
+    {
+        using var server = new LoopbackWebSocketServer();
+        await server.StartAsync();
+        using var client = new TestWebSocketClient(server.WebSocketUrl, "strong-token", _logger)
+        {
+            AutoReconnectEnabled = false,
+        };
+        await client.ConnectAsync();
+        await WaitForConditionAsync(
+            () => server.AcceptedCount == 1,
+            TimeSpan.FromSeconds(2));
+
+        client.TestAbortCurrentWebSocket();
+        try
+        {
+            await server.SendTextAsync("stale-socket-message");
+        }
+        catch (WebSocketException)
+        {
+            // The remote endpoint may observe the abort before attempting its send.
+        }
+        await Task.Delay(100);
+
+        Assert.DoesNotContain("stale-socket-message", client.ProcessedMessages);
     }
 
     [Fact]

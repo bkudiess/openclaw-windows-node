@@ -39,6 +39,7 @@ public class WindowsNodeClient : WebSocketClientBase
     private volatile bool _rateLimited;
     private bool _useV2Signature; // true after v3 signature rejected by gateway
     public bool UseV2Signature { get => _useV2Signature; set => _useV2Signature = value; }
+    private int _handshakeAuthorizationBlocked;
     // Bug 3: source-side idempotency for PairingStatusChanged. HandleHelloOk runs on every
     // WS reconnect and re-fires PairingStatus.Paired even when nothing changed, causing a
     // toast storm in the tray UI. Track the last emitted status and only fire on transitions.
@@ -130,6 +131,7 @@ public class WindowsNodeClient : WebSocketClientBase
     protected override Task OnConnectedAsync()
     {
         _isConnected = false;
+        Volatile.Write(ref _handshakeAuthorizationBlocked, 0);
         Volatile.Write(ref _pendingConnectRequestId, null);
         TransportConnected?.Invoke(this, EventArgs.Empty);
         return Task.CompletedTask;
@@ -626,6 +628,13 @@ public class WindowsNodeClient : WebSocketClientBase
     
     private async Task HandleConnectChallengeAsync(JsonElement root)
     {
+        var connectionGeneration = CurrentConnectionGeneration;
+        if (Volatile.Read(ref _handshakeAuthorizationBlocked) != 0)
+        {
+            _logger.Warn("[HANDSHAKE] Ignoring duplicate node challenge on the current socket.");
+            return;
+        }
+
         string? nonce = null;
         long? challengeTimestampMs = null;
         
@@ -645,15 +654,23 @@ public class WindowsNodeClient : WebSocketClientBase
         {
             var authorization = await HandshakeAuthorizationAsync(CancellationToken.None)
                 .ConfigureAwait(false);
+            if (!IsCurrentConnectionGeneration(connectionGeneration))
+                return;
             if (!authorization.Allowed)
             {
+                Volatile.Write(ref _handshakeAuthorizationBlocked, 1);
                 _logger.Warn(
                     $"[HANDSHAKE] Node credential handoff blocked: {authorization.Detail}");
                 ConnectionFailure?.Invoke(this, authorization.FailureKind);
+                AbortCurrentWebSocket(connectionGeneration);
                 RaiseStatusChanged(ConnectionStatus.Error);
                 return;
             }
         }
+
+        if (!IsCurrentConnectionGeneration(connectionGeneration) ||
+            Volatile.Read(ref _handshakeAuthorizationBlocked) != 0)
+            return;
 
         await SendNodeConnectAsync(nonce, challengeTimestampMs);
     }

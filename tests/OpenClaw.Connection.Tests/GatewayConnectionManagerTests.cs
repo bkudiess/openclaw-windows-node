@@ -847,6 +847,29 @@ public class GatewayConnectionManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task ConnectWithSharedTokenAsync_CommittedCallbackFailureRollsBackRegistry()
+    {
+        SetupGateway("gw-1", "wss://test1");
+        _resolver.OperatorCredential = new GatewayCredential(
+            "shared-token",
+            IsBootstrapToken: false,
+            CredentialResolver.SourceSharedGatewayToken);
+
+        var result = await _manager.ConnectWithSharedTokenAsync(
+            "wss://test2",
+            "shared-token",
+            sshTunnel: null,
+            onGatewayCommitted: (_, _) =>
+                throw new InvalidOperationException("settings persistence failed"));
+
+        Assert.Equal(SetupCodeOutcome.ConnectionFailed, result.Outcome);
+        Assert.False(result.GatewayCommitted);
+        Assert.Equal("gw-1", _registry.ActiveGatewayId);
+        Assert.Null(_registry.FindByUrl("wss://test2"));
+        Assert.Empty(_factory.CreatedClients);
+    }
+
+    [Fact]
     public async Task ConnectWithSharedTokenAsync_PostCommitConnectionFailureReportsCommittedGateway()
     {
         SetupGateway("gw-1", "wss://test1");
@@ -956,6 +979,36 @@ public class GatewayConnectionManagerTests : IDisposable
             "node-old",
             DeviceIdentity.TryReadStoredDeviceTokenForRole(identityDir, "node"));
         Assert.True(Assert.Single(_factory.CreatedCredentials).IsBootstrapToken);
+    }
+
+    [Fact]
+    public async Task ApplySetupCodeAsync_IdentityFailureDoesNotForceBootstrapOnLaterConnect()
+    {
+        SetupGateway("gw-1", "wss://test1");
+        var identityDir = _registry.GetIdentityDirectory("gw-1");
+        Directory.CreateDirectory(identityDir);
+        File.WriteAllText(Path.Combine(identityDir, "device-key-ed25519.json"), "{ broken json");
+        var factory = new MockClientFactory();
+        using var manager = new GatewayConnectionManager(
+            new CredentialResolver(DeviceIdentityFileReader.Instance),
+            factory,
+            _registry,
+            NullLogger.Instance);
+
+        var setupResult = await manager.ApplySetupCodeAsync(
+            BuildSetupCode("wss://test1", "bootstrap-token"));
+        Assert.Equal(SetupCodeOutcome.ConnectionFailed, setupResult.Outcome);
+
+        Directory.Delete(identityDir, recursive: true);
+        var identity = new DeviceIdentity(identityDir);
+        identity.Initialize();
+        identity.StoreDeviceTokenForRole("operator", "operator-token");
+        await manager.DisconnectAsync();
+        await manager.ConnectAsync("gw-1");
+
+        var credential = Assert.Single(factory.CreatedCredentials);
+        Assert.False(credential.IsBootstrapToken);
+        Assert.Equal(CredentialResolver.SourceDeviceToken, credential.Source);
     }
 
     [Fact]
@@ -1133,6 +1186,73 @@ public class GatewayConnectionManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task SshConnectWithoutTunnelManager_FailsBeforeClientCreation()
+    {
+        var ssh = new SshTunnelConfig("user", "host.example", 18789, 45678);
+        _registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "gw-ssh",
+            Url = "wss://remote.example",
+            SharedGatewayToken = "shared-token",
+            SshTunnel = ssh,
+        });
+        _registry.SetActive("gw-ssh");
+        _resolver.OperatorCredential = new GatewayCredential(
+            "shared-token",
+            IsBootstrapToken: false,
+            CredentialResolver.SourceSharedGatewayToken);
+        using var manager = new GatewayConnectionManager(
+            _resolver,
+            _factory,
+            _registry,
+            NullLogger.Instance);
+
+        await manager.ConnectAsync("gw-ssh");
+
+        Assert.Empty(_factory.CreatedClients);
+        Assert.Equal(RoleConnectionState.Error, manager.CurrentSnapshot.OperatorState);
+        Assert.Contains("manager is unavailable", manager.CurrentSnapshot.OperatorError);
+    }
+
+    [Fact]
+    public async Task SshHandshakeAuthorization_RejectsListenerFromReplacementTunnelGeneration()
+    {
+        var ssh = new SshTunnelConfig("user", "host.example", 18789, 45678);
+        _registry.AddOrUpdate(new GatewayRecord
+        {
+            Id = "gw-ssh",
+            Url = "wss://remote.example",
+            SharedGatewayToken = "shared-token",
+            SshTunnel = ssh,
+        });
+        _registry.SetActive("gw-ssh");
+        _resolver.OperatorCredential = new GatewayCredential(
+            "shared-token",
+            IsBootstrapToken: false,
+            CredentialResolver.SourceSharedGatewayToken);
+        var tunnel = new CountingTunnelManager();
+        using var manager = new GatewayConnectionManager(
+            _resolver,
+            _factory,
+            _registry,
+            NullLogger.Instance,
+            tunnelManager: tunnel);
+
+        await manager.ConnectAsync("gw-ssh");
+        var lifecycle = Assert.Single(_factory.CreatedClients);
+        var authorizeHandshake = Assert.IsType<
+            Func<CancellationToken, Task<ReconnectAuthorizationResult>>>(
+            lifecycle.DataClient.HandshakeAuthorizationAsync);
+
+        tunnel.OwnershipGeneration++;
+        var authorization = await authorizeHandshake(CancellationToken.None);
+
+        Assert.False(authorization.Allowed);
+        Assert.Equal(GatewayErrorKind.LocalPortConflict, authorization.FailureKind);
+        Assert.Contains("ownership changed after preflight", authorization.Detail);
+    }
+
+    [Fact]
     public async Task SshInitialHandshakeAuthorization_RechecksOwnershipAfterTransportConnect()
     {
         var ssh = new SshTunnelConfig("user", "host.example", 18789, 45678);
@@ -1224,6 +1344,7 @@ public class GatewayConnectionManagerTests : IDisposable
         Assert.False(authorization.Allowed);
         Assert.Equal(GatewayErrorKind.LocalPortConflict, authorization.FailureKind);
         Assert.Contains("credentials were not sent", authorization.Detail);
+        Assert.Contains("credentials were not sent", manager.CurrentSnapshot.NodeError);
     }
 
     [Fact]
@@ -1280,6 +1401,28 @@ public class GatewayConnectionManagerTests : IDisposable
             await GatewayConnectionManager.AuthorizeValidationTunnelHandshakeAsync(
                 tunnel,
                 config,
+                tunnel.OwnershipGeneration,
+                CancellationToken.None);
+
+        Assert.False(authorization.Allowed);
+        Assert.Equal(GatewayErrorKind.LocalPortConflict, authorization.FailureKind);
+        Assert.Contains("shared token was not sent", authorization.Detail);
+    }
+
+    [Fact]
+    public async Task ValidationHandshakeAuthorization_RejectsReplacementTunnelGeneration()
+    {
+        var config = new SshTunnelConfig("user", "host.example", 18789, 45679);
+        var tunnel = new CountingTunnelManager();
+        await tunnel.StartAsync(config, CancellationToken.None);
+        var expectedGeneration = tunnel.OwnershipGeneration;
+        tunnel.OwnershipGeneration++;
+
+        var authorization =
+            await GatewayConnectionManager.AuthorizeValidationTunnelHandshakeAsync(
+                tunnel,
+                config,
+                expectedGeneration,
                 CancellationToken.None);
 
         Assert.False(authorization.Allowed);
@@ -4446,6 +4589,7 @@ public class GatewayConnectionManagerTests : IDisposable
         public bool FailStart { get; set; }
         public List<SshTunnelConfig> StartedConfigs { get; } = [];
         public bool IsActive { get; private set; }
+        public long OwnershipGeneration { get; set; }
         public bool IsDisposed { get; private set; }
         public SshTunnelConfig? ActiveConfig => IsActive ? LastConfig : null;
         public string? LocalTunnelUrl { get; private set; }
@@ -4472,6 +4616,7 @@ public class GatewayConnectionManagerTests : IDisposable
         {
             ct.ThrowIfCancellationRequested();
             StartCount++;
+            OwnershipGeneration++;
             StartedConfigs.Add(config);
             if (FailStart || config == FailForConfig)
             {
@@ -4489,6 +4634,7 @@ public class GatewayConnectionManagerTests : IDisposable
         public Task StopAsync()
         {
             StopCount++;
+            OwnershipGeneration++;
             IsActive = false;
             LocalTunnelUrl = null;
             return Task.CompletedTask;

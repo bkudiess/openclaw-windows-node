@@ -192,7 +192,7 @@ public sealed class GatewayClientFactoryTests
             BindingFlags.Instance | BindingFlags.NonPublic);
 
         Assert.NotNull(method);
-        var task = Assert.IsAssignableFrom<Task>(method.Invoke(client, [null]));
+        var task = Assert.IsAssignableFrom<Task>(method.Invoke(client, [null, 0L]));
         await task;
     }
 }

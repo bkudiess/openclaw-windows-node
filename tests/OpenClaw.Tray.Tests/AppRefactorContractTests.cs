@@ -141,12 +141,10 @@ public sealed class AppRefactorContractTests
             "BeginManualGatewayLifecycleOperationAsync",
             "DisconnectAsync",
             "_registry.AddOrUpdate(candidate)");
-        AssertInOrder(
-            windowEdit,
-            "BeginManualGatewayLifecycleOperationAsync",
-            "DisconnectAsync",
-            "_registry.AddOrUpdate(candidateRecord)");
-        Assert.Contains("gatewayLifecycleLease?.Dispose()", windowEdit);
+        Assert.Contains("GatewayDirectConnectService", windowEdit);
+        Assert.Contains("directConnectService.ConnectAsync(", windowEdit);
+        Assert.DoesNotContain("BeginManualGatewayLifecycleOperationAsync", windowEdit);
+        Assert.DoesNotContain("_registry.AddOrUpdate", windowEdit);
     }
 
     [Fact]
@@ -201,11 +199,17 @@ public sealed class AppRefactorContractTests
             "OpenClaw.Tray.WinUI",
             "Services",
             "GatewayDirectConnectService.cs"));
+        var capabilityHandlers = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "OpenClaw.Tray.WinUI",
+            "App.CapabilityHandlers.cs"));
 
         Assert.DoesNotContain("ClearStoredTokens", setupCode);
         Assert.DoesNotContain("ClearStoredTokens", sharedToken);
         Assert.DoesNotContain("ClearStoredTokens", directConnect);
-        Assert.Contains("ConnectWithSharedTokenAsync(url, token, sshConfig)", directConnect);
+        Assert.Contains("directConnectService.ConnectAsync(", directConnect);
+        Assert.Contains("PreserveExistingSharedTokenWhenMissing: true", directConnect);
         Assert.Contains("isolatedValidationTunnel", sharedToken);
         Assert.Contains("StartAsync(validationConfig", sharedToken);
         Assert.Contains("ValidateSharedTokenBeforeReplacementAsync(", sharedToken);
@@ -214,6 +218,10 @@ public sealed class AppRefactorContractTests
         Assert.DoesNotContain("ClearStoredTokens", pageDirectConnect);
         Assert.DoesNotContain("BeginTransactionalTokenClear", pageDirectConnect);
         Assert.Contains("BeginTransactionalTokenClear", directConnectService);
+        Assert.Contains(
+            "_gatewayDirectConnectService.SynchronizeSettingsWithCommittedGateway(record)",
+            capabilityHandlers);
+        Assert.DoesNotContain("if (result.GatewayCommitted)", capabilityHandlers);
     }
 
     [Fact]
@@ -229,20 +237,19 @@ public sealed class AppRefactorContractTests
         var directConnect = ExtractMethod(statusWindow, "OnDirectConnectAsync");
         var setupConnect = ExtractMethod(statusWindow, "OnConnectAsync");
         var stateChanged = ExtractMethod(statusWindow, "OnManagerStateChanged");
-        var rollback = ExtractMethod(statusWindow, "RollbackDirectConnectState");
 
         Assert.Contains("ConnectionStatus_Connecting", directConnect);
-        Assert.DoesNotContain("ConnectionStatus_ConnectedTo", directConnect);
+        Assert.Contains("ConnectionPage_ConnectedTo", directConnect);
         Assert.Contains("ConnectionStatus_Applying", setupConnect);
         Assert.DoesNotContain("ConnectionStatus_ConnectedTo", setupConnect);
         Assert.DoesNotContain("SetupCodeOutcome.Success =>", setupConnect);
-        Assert.Contains("SaveConnectionSettings(url, sshConfig)", directConnect);
-        Assert.Contains("result.GatewayCommitted", directConnect);
-        Assert.Contains("SynchronizeConnectionSettingsWithActiveGatewayAsync", directConnect);
+        Assert.Contains("directConnectService.ConnectAsync(", directConnect);
+        Assert.Contains("GatewayDirectConnectOutcome.Failed", directConnect);
+        Assert.Contains("PreserveExistingSharedTokenWhenMissing: true", directConnect);
         AssertInOrder(
             directConnect,
             "ConnectionStatus_Connecting",
-            "ConnectWithSharedTokenAsync(url, token, sshConfig)");
+            "directConnectService.ConnectAsync(");
         Assert.Contains("snapshot.OverallState == OverallConnectionState.Error", stateChanged);
         Assert.Contains("snapshot.OperatorError", stateChanged);
         Assert.Contains("SetupCodeResult.Text = errorText", stateChanged);
@@ -254,31 +261,9 @@ public sealed class AppRefactorContractTests
         Assert.Contains("ConnectionStatus_Disconnected", stateChanged);
         Assert.Contains("statusMessageGeneration", stateChanged);
         Assert.Contains("Volatile.Read(ref _statusMessageGeneration)", stateChanged);
-        AssertInOrder(
-            directConnect,
-            "BeginManualGatewayLifecycleOperationAsync",
-            "previousActiveId = _registry.ActiveGatewayId",
-            "await _manager.DisconnectAsync()",
-            "_registry.AddOrUpdate(candidateRecord)",
-            "_registry.Save()",
-            "SaveConnectionSettings(url, sshConfig)");
-        Assert.Contains("RollbackDirectConnectState(", directConnect);
-        AssertInOrder(
-            directConnect,
-            "connectionAttemptStarted = true",
-            "await _manager.ConnectAsync(recordId)",
-            "if (connectionAttemptStarted)",
-            "await _manager.DisconnectAsync()",
-            "RollbackDirectConnectState(");
-        Assert.Contains("candidateRegistryCommitted", rollback);
-        Assert.Contains("_registry.Save()", rollback);
-        Assert.Contains("previousSettings.Restore(app.Settings)", rollback);
-        Assert.Contains("app.EnsureSshTunnelStarted()", rollback);
-        AssertInOrder(
-            directConnect,
-            "RollbackDirectConnectState(",
-            "InvalidatePendingStatusMessages()",
-            "DirectConnectResult.Text =");
+        Assert.DoesNotContain("_registry.Save()", directConnect);
+        Assert.DoesNotContain("SaveOrThrow()", directConnect);
+        Assert.DoesNotContain("RollbackDirectConnectState(", statusWindow);
     }
 
     [Fact]

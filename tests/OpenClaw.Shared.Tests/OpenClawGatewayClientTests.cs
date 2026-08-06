@@ -960,6 +960,98 @@ public class OpenClawGatewayClientTests
     }
 
     [Fact]
+    public async Task HandshakeAuthorizationDenial_BlocksLaterChallengesWithoutDisablingReconnect()
+    {
+        var helper = new GatewayClientTestHelper();
+        var authorizationCalls = 0;
+        var denied = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        helper.Client.HandshakeAuthorizationAsync = _ =>
+        {
+            authorizationCalls++;
+            return Task.FromResult(authorizationCalls == 1
+                ? new ReconnectAuthorizationResult(
+                    false,
+                    GatewayErrorKind.LocalPortConflict,
+                    "listener ownership lost")
+                : ReconnectAuthorizationResult.AllowedResult);
+        };
+        helper.Client.AuthenticationFailed += (_, _) => denied.TrySetResult();
+
+        const string challenge = """
+            {
+              "type": "event",
+              "event": "connect.challenge",
+              "payload": {
+                "nonce": "listener-replacement",
+                "ts": 1785824000000
+              }
+            }
+            """;
+
+        helper.ProcessRawMessage(challenge);
+        await denied.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        helper.ProcessRawMessage(challenge);
+        await Task.Delay(50);
+
+        Assert.Equal(1, authorizationCalls);
+        Assert.False(helper.GetAuthFailedFlag());
+    }
+
+    [Fact]
+    public async Task StaleHandshakeAuthorizationDenial_DoesNotAbortNewerSocket()
+    {
+        using var server = new LoopbackWebSocketServer();
+        await server.StartAsync();
+        using var client = new OpenClawGatewayClient(
+            server.WebSocketUrl,
+            "test-token",
+            new TestLogger(),
+            identityPath: CreateTempIdentityPath());
+        var authorizationStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseAuthorization = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        client.HandshakeAuthorizationAsync = async _ =>
+        {
+            authorizationStarted.TrySetResult();
+            await releaseAuthorization.Task;
+            return new ReconnectAuthorizationResult(
+                false,
+                GatewayErrorKind.LocalPortConflict,
+                "stale listener");
+        };
+
+        await client.ConnectAsync();
+        Assert.Equal(1, server.AcceptedCount);
+        await server.SendTextAsync(
+            """
+            {
+              "type": "event",
+              "event": "connect.challenge",
+              "payload": {
+                "nonce": "old-socket",
+                "ts": 1785824000000
+              }
+            }
+            """);
+        await authorizationStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        await client.ConnectAsync();
+        Assert.Equal(2, server.AcceptedCount);
+        releaseAuthorization.TrySetResult();
+        await server.SendTextAsync("{}");
+        await Task.Delay(100);
+
+        var isConnected = (bool)typeof(WebSocketClientBase)
+            .GetProperty(
+                "IsConnected",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(client)!;
+        Assert.True(isConnected);
+    }
+
+    [Fact]
     public void OperatorBootstrap_HelloOkWithNodeHandoffToken_StoresNodeToken()
     {
         var helper = new GatewayClientTestHelper(

@@ -93,6 +93,8 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
     private bool _pairingRequiredAwaitingApproval;
     private string? _pairingRequiredRequestId;
     private bool _authFailed;
+    private int _handshakeAuthorizationBlocked;
+    private int _handshakeChallengeActive;
     private string? _lastSkillsStatusAgentId;
     private readonly bool _tokenIsBootstrapToken;
     private readonly bool _bootstrapPairAsNode;
@@ -163,6 +165,8 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
 
     protected override Task OnConnectedAsync()
     {
+        Volatile.Write(ref _handshakeAuthorizationBlocked, 0);
+        Volatile.Write(ref _handshakeChallengeActive, 0);
         ResetUnsupportedMethodFlags();
         RaiseTransportConnected();
         return Task.CompletedTask;
@@ -3050,6 +3054,13 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
 
     private void HandleConnectChallenge(JsonElement root)
     {
+        if (Volatile.Read(ref _handshakeAuthorizationBlocked) != 0 ||
+            Interlocked.CompareExchange(ref _handshakeChallengeActive, 1, 0) != 0)
+        {
+            _logger.Warn("[HANDSHAKE] Ignoring duplicate challenge on the current socket.");
+            return;
+        }
+
         string? nonce = null;
         long? ts = null;
         if (root.TryGetProperty("payload", out var payload))
@@ -3065,10 +3076,10 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
         _currentChallengeNonce = nonce;
         
         _logger.Info($"[HANDSHAKE] Received connect.challenge: nonce={nonce}, ts={ts}");
-        _ = SendConnectSafeAsync(nonce);
+        _ = SendConnectSafeAsync(nonce, CurrentConnectionGeneration);
     }
 
-    private async Task SendConnectSafeAsync(string? nonce)
+    private async Task SendConnectSafeAsync(string? nonce, long connectionGeneration)
     {
         try
         {
@@ -3076,22 +3087,34 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
             {
                 var authorization = await HandshakeAuthorizationAsync(CancellationToken.None)
                     .ConfigureAwait(false);
+                if (!IsCurrentConnectionGeneration(connectionGeneration))
+                    return;
                 if (!authorization.Allowed)
                 {
-                    _authFailed = true;
+                    Volatile.Write(ref _handshakeAuthorizationBlocked, 1);
                     RaiseConnectionFailure(authorization.FailureKind);
                     RaiseAuthenticationFailed(
                         authorization.Detail ?? "Connection authorization failed.");
+                    AbortCurrentWebSocket(connectionGeneration);
                     RaiseStatusChanged(ConnectionStatus.Error);
                     return;
                 }
             }
+
+            if (!IsCurrentConnectionGeneration(connectionGeneration) ||
+                Volatile.Read(ref _handshakeAuthorizationBlocked) != 0)
+                return;
 
             await SendConnectMessageAsync(nonce);
         }
         catch (Exception ex)
         {
             _logger.Error($"[HANDSHAKE] FATAL: SendConnectMessageAsync threw: {ex}");
+        }
+        finally
+        {
+            if (IsCurrentConnectionGeneration(connectionGeneration))
+                Volatile.Write(ref _handshakeChallengeActive, 0);
         }
     }
 

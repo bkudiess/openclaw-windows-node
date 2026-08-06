@@ -214,6 +214,60 @@ public sealed class SshTunnelServiceTests
     }
 
     [Fact]
+    public void ListenerOwnershipChecks_IgnoreSamePortOnNonLoopbackAddress()
+    {
+        var startedAt = DateTime.UtcNow;
+        var snapshot = new WindowsTcpListenerSnapshotResult(
+            [
+                new WindowsTcpListenerInfo(
+                    IPAddress.Parse("192.168.10.20"),
+                    45678,
+                    9999,
+                    "other",
+                    @"C:\other.exe",
+                    startedAt),
+                new WindowsTcpListenerInfo(
+                    IPAddress.Loopback,
+                    45678,
+                    4321,
+                    "ssh",
+                    @"C:\Windows\System32\OpenSSH\ssh.exe",
+                    startedAt)
+            ],
+            Ipv4Complete: true,
+            Ipv6Complete: true);
+
+        Assert.True(SshTunnelService.ValidateListenerOwnership(
+            snapshot,
+            45678,
+            4321,
+            startedAt));
+
+        var nonLoopbackOnly = snapshot with { Listeners = [snapshot.Listeners[0]] };
+        SshTunnelService.EnsurePortIsUnoccupied(nonLoopbackOnly, 45678);
+    }
+
+    [Fact]
+    public void EnsurePortIsUnoccupied_RejectsWildcardListener()
+    {
+        var snapshot = new WindowsTcpListenerSnapshotResult(
+            [
+                new WindowsTcpListenerInfo(
+                    IPAddress.Any,
+                    45678,
+                    1234,
+                    "other",
+                    @"C:\other.exe",
+                    DateTime.UtcNow)
+            ],
+            Ipv4Complete: true,
+            Ipv6Complete: true);
+
+        Assert.Throws<InvalidOperationException>(
+            () => SshTunnelService.EnsurePortIsUnoccupied(snapshot, 45678));
+    }
+
+    [Fact]
     public void ValidateListenerOwnership_AcceptsOnlyExactLaunchedProcess()
     {
         var startedAt = DateTime.UtcNow;

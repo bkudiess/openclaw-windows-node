@@ -372,6 +372,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                     record,
                     credential,
                     _operationCts!.Token).ConfigureAwait(false);
+            var expectedEndpointOwnership = endpointAuthorization.OwnershipProof;
             if (_disposed ||
                 Interlocked.Read(ref _generation) != gen ||
                 _operationCts?.IsCancellationRequested != false)
@@ -437,6 +438,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                         requireSshTunnelOwnership: true).ConfigureAwait(false);
                     if (!tunnelAuthorization.Allowed)
                         throw new InvalidOperationException(tunnelAuthorization.Detail);
+                    expectedEndpointOwnership = tunnelAuthorization.OwnershipProof;
                     _diagnostics.Record("tunnel", $"SSH tunnel started → {connectUrl}");
                 }
                 catch (Exception ex)
@@ -455,8 +457,17 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             }
             else if (record.SshTunnel != null)
             {
-                // Tunnel config present but no tunnel manager — use local URL directly
-                connectUrl = $"ws://localhost:{record.SshTunnel.LocalPort}";
+                const string detail =
+                    "SSH tunnel manager is unavailable, so credentials were not sent.";
+                _diagnostics.Record("tunnel", detail);
+                _stateMachine.SetOperatorErrorKind(GatewayErrorKind.Network);
+                _stateMachine.TryTransition(ConnectionTrigger.AuthenticationFailed, detail);
+                CompleteOperatorTelemetryAttempt(
+                    gen,
+                    "failure",
+                    ConnectionErrorCategory.SshTunnelFailure);
+                EmitStateChanged();
+                return;
             }
             var diagLogger = new DiagnosticTeeLogger(_logger, _diagnostics);
             IGatewayClientLifecycle lifecycle;
@@ -500,6 +511,15 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                     credential,
                     cancellationToken,
                     requireSshTunnelOwnership: true).ConfigureAwait(false);
+                if (authorization.Allowed &&
+                    expectedEndpointOwnership is not null &&
+                    authorization.OwnershipProof != expectedEndpointOwnership)
+                {
+                    return new ReconnectAuthorizationResult(
+                        false,
+                        GatewayErrorKind.LocalPortConflict,
+                        "Endpoint ownership changed after preflight, so credentials were not sent.");
+                }
                 return new ReconnectAuthorizationResult(
                     authorization.Allowed,
                     authorization.FailureKind,
@@ -1155,7 +1175,15 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             // 5. Connect to new gateway
             if (!string.IsNullOrWhiteSpace(decoded.Token))
                 _forceBootstrapForGatewayRecordId = recordId;
-            await ConnectCoreAsync(recordId);
+            try
+            {
+                await ConnectCoreAsync(recordId);
+            }
+            finally
+            {
+                if (_forceBootstrapForGatewayRecordId == recordId)
+                    _forceBootstrapForGatewayRecordId = null;
+            }
             if (_stateMachine.Current.OperatorState == RoleConnectionState.Error)
             {
                 return new SetupCodeResult(
@@ -1171,8 +1199,21 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         return new SetupCodeResult(SetupCodeOutcome.Success, GatewayUrl: gatewayUrl);
     }
 
+    public Task<SetupCodeResult> ConnectWithSharedTokenAsync(
+        string gatewayUrl,
+        string token,
+        SshTunnelConfig? sshTunnel = null) =>
+        ConnectWithSharedTokenAsync(
+            gatewayUrl,
+            token,
+            sshTunnel,
+            onGatewayCommitted: null);
+
     public async Task<SetupCodeResult> ConnectWithSharedTokenAsync(
-        string gatewayUrl, string token, SshTunnelConfig? sshTunnel = null)
+        string gatewayUrl,
+        string token,
+        SshTunnelConfig? sshTunnel,
+        Func<GatewayRecord, CancellationToken, Task>? onGatewayCommitted)
     {
         ThrowIfDisposed();
 
@@ -1263,7 +1304,8 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                         identityDir,
                         validationRecord,
                         isolatedValidationTunnel,
-                        isolatedValidationConfig);
+                        isolatedValidationConfig,
+                        isolatedValidationTunnel?.OwnershipGeneration);
                     if (validation.Outcome != SetupCodeOutcome.Success)
                         return validation;
                 }
@@ -1280,9 +1322,16 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 var previousActiveId = _registry.ActiveGatewayId;
                 _registry.AddOrUpdate(record);
                 _registry.SetActive(recordId);
+                var registryPersisted = false;
                 try
                 {
                     _registry.Save();
+                    registryPersisted = true;
+                    if (onGatewayCommitted is not null)
+                    {
+                        await onGatewayCommitted(record, CancellationToken.None)
+                            .ConfigureAwait(false);
+                    }
                     gatewayCommitted = true;
                 }
                 catch (Exception ex)
@@ -1292,8 +1341,28 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                     else
                         _registry.AddOrUpdate(previousRecord);
                     _registry.SetActive(previousActiveId);
+                    string? rollbackError = null;
+                    if (registryPersisted)
+                    {
+                        try
+                        {
+                            _registry.Save();
+                        }
+                        catch (Exception rollbackException)
+                        {
+                            _registry.AddOrUpdate(record);
+                            _registry.SetActive(recordId);
+                            gatewayCommitted = true;
+                            rollbackError =
+                                $" Registry rollback failed; the new gateway remains active: {rollbackException.Message}";
+                        }
+                    }
                     _logger.Warn($"[ConnMgr] Failed to persist shared-token gateway update: {ex.Message}");
-                    return new SetupCodeResult(SetupCodeOutcome.ConnectionFailed, ex.Message);
+                    return new SetupCodeResult(
+                        SetupCodeOutcome.ConnectionFailed,
+                        $"{ex.Message}{rollbackError}",
+                        GatewayUrl: gatewayUrl,
+                        GatewayCommitted: gatewayCommitted);
                 }
 
                 if (isolatedValidationTunnel is not null)
@@ -1366,7 +1435,8 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         string identityDir,
         GatewayRecord existing,
         ISshTunnelManager? validationTunnel,
-        SshTunnelConfig? validationTunnelConfig)
+        SshTunnelConfig? validationTunnelConfig,
+        long? expectedTunnelOwnershipGeneration)
     {
         Directory.CreateDirectory(identityDir);
         using var client = CreateSharedTokenValidationClient(
@@ -1375,7 +1445,8 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             identityDir,
             existing,
             validationTunnel,
-            validationTunnelConfig);
+            validationTunnelConfig,
+            expectedTunnelOwnershipGeneration);
 
         var completion = new TaskCompletionSource<SetupCodeResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         client.HandshakeSucceeded += (_, _) =>
@@ -1414,9 +1485,11 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         string identityDir,
         GatewayRecord validationRecord,
         ISshTunnelManager? validationTunnel,
-        SshTunnelConfig? validationTunnelConfig)
+        SshTunnelConfig? validationTunnelConfig,
+        long? expectedTunnelOwnershipGeneration = null)
     {
         var diagLogger = new DiagnosticTeeLogger(_logger, _diagnostics);
+        expectedTunnelOwnershipGeneration ??= validationTunnel?.OwnershipGeneration;
         var client = new OpenClawGatewayClient(
             gatewayUrl,
             token,
@@ -1447,6 +1520,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                     CredentialResolver.SourceSharedGatewayToken),
                 validationTunnel,
                 validationTunnelConfig,
+                expectedTunnelOwnershipGeneration,
                 cancellationToken);
         return client;
     }
@@ -1454,6 +1528,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
     internal static async Task<ReconnectAuthorizationResult> AuthorizeValidationTunnelHandshakeAsync(
         ISshTunnelManager validationTunnel,
         SshTunnelConfig validationTunnelConfig,
+        long expectedOwnershipGeneration,
         CancellationToken cancellationToken)
     {
         var allowed = await validationTunnel
@@ -1462,7 +1537,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                 validationTunnelConfig.LocalPort,
                 cancellationToken)
             .ConfigureAwait(false);
-        return allowed
+        return allowed && validationTunnel.OwnershipGeneration == expectedOwnershipGeneration
             ? new ReconnectAuthorizationResult(true, GatewayErrorKind.Unknown, string.Empty)
             : new ReconnectAuthorizationResult(
                 false,
@@ -1475,13 +1550,22 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         GatewayCredential validationCredential,
         ISshTunnelManager? validationTunnel,
         SshTunnelConfig? validationTunnelConfig,
+        long? expectedTunnelOwnershipGeneration,
         CancellationToken cancellationToken)
     {
         if (validationTunnel is not null && validationTunnelConfig is not null)
         {
+            if (!expectedTunnelOwnershipGeneration.HasValue)
+            {
+                return new ReconnectAuthorizationResult(
+                    false,
+                    GatewayErrorKind.LocalPortConflict,
+                    "The isolated SSH validation listener ownership could not be pinned, so the shared token was not sent.");
+            }
             return await AuthorizeValidationTunnelHandshakeAsync(
                     validationTunnel,
                     validationTunnelConfig,
+                    expectedTunnelOwnershipGeneration.Value,
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -1510,7 +1594,14 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
         }
         finally
         {
-            tunnel.Dispose();
+            try
+            {
+                tunnel.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"[ConnMgr] Failed to dispose the isolated SSH validation tunnel: {ex.Message}");
+            }
         }
     }
 
@@ -1796,7 +1887,8 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                     "The configured SSH listener is not owned by the active OpenClaw tunnel, so credentials were not sent.");
             }
 
-            return EndpointCredentialAuthorization.AllowedResult;
+            return EndpointCredentialAuthorization.AllowWithProof(
+                EndpointOwnershipProof.ForSshTunnel(_tunnelManager.OwnershipGeneration));
         }
 
         var isStrongCredential =
@@ -1832,7 +1924,8 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
 
         var provenance = await _endpointProvenanceProbe(record, cancellationToken).ConfigureAwait(false);
         if (provenance.Kind == GatewayEndpointProvenanceKind.ExpectedManagedGateway)
-            return EndpointCredentialAuthorization.AllowedResult;
+            return EndpointCredentialAuthorization.AllowWithProof(
+                EndpointOwnershipProof.ForManagedGateway(provenance));
 
         if (provenance.Kind == GatewayEndpointProvenanceKind.NoListener)
         {
@@ -1852,10 +1945,33 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
     private readonly record struct EndpointCredentialAuthorization(
         bool Allowed,
         GatewayErrorKind FailureKind,
-        string Detail)
+        string Detail,
+        EndpointOwnershipProof? OwnershipProof = null)
     {
         public static EndpointCredentialAuthorization AllowedResult { get; } =
             new(true, GatewayErrorKind.Unknown, string.Empty);
+
+        public static EndpointCredentialAuthorization AllowWithProof(EndpointOwnershipProof ownershipProof) =>
+            new(true, GatewayErrorKind.Unknown, string.Empty, ownershipProof);
+    }
+
+    private sealed record EndpointOwnershipProof(
+        string Kind,
+        long? TunnelGeneration,
+        int? ProcessId,
+        DateTime? ProcessStartTimeUtc,
+        string? ProcessPath)
+    {
+        public static EndpointOwnershipProof ForSshTunnel(long generation) =>
+            new("ssh", generation, null, null, null);
+
+        public static EndpointOwnershipProof ForManagedGateway(GatewayEndpointProvenance provenance) =>
+            new(
+                "managed-local",
+                null,
+                provenance.ProcessId,
+                provenance.ProcessStartTimeUtc,
+                provenance.ProcessPath);
     }
 
     // Node device-token recovery mirrors operator recovery but clears ONLY the node token and
@@ -2833,6 +2949,7 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
             nodeCredential,
             cancellationToken,
             requireSshTunnelOwnership: true).ConfigureAwait(false);
+        var expectedNodeEndpointOwnership = nodeEndpointAuthorization.OwnershipProof;
         if (!nodeEndpointAuthorization.Allowed)
         {
             _diagnostics.Record(
@@ -2890,6 +3007,24 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                     nodeCredential,
                     authorizationCancellationToken,
                     requireSshTunnelOwnership: true).ConfigureAwait(false);
+                if (authorization.Allowed &&
+                    expectedNodeEndpointOwnership is not null &&
+                    authorization.OwnershipProof != expectedNodeEndpointOwnership)
+                {
+                    authorization = new EndpointCredentialAuthorization(
+                        false,
+                        GatewayErrorKind.LocalPortConflict,
+                        "Endpoint ownership changed after preflight, so node credentials were not sent.");
+                }
+                if (!authorization.Allowed)
+                {
+                    await BlockNodeStartAsync(
+                            authorization.Detail,
+                            authorizationCancellationToken,
+                            expectedLifecycleGeneration,
+                            nodeGeneration)
+                        .ConfigureAwait(false);
+                }
                 return new ReconnectAuthorizationResult(
                     authorization.Allowed,
                     authorization.FailureKind,
@@ -3049,7 +3184,11 @@ public sealed class GatewayConnectionManager : IGatewayConnectionManager
                     break;
                 case ConnectionStatus.Error:
                     if (_stateMachine.Current.NodeState != RoleConnectionState.PairingRequired)
-                        _stateMachine.TryTransition(ConnectionTrigger.NodeError, "Node transport error");
+                        _stateMachine.TryTransition(
+                            ConnectionTrigger.NodeError,
+                            string.IsNullOrWhiteSpace(_stateMachine.Current.NodeError)
+                                ? "Node transport error"
+                                : _stateMachine.Current.NodeError);
                     break;
             }
 

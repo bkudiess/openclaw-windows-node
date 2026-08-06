@@ -7,6 +7,7 @@ namespace OpenClaw.Connection;
 public interface ISshTunnelManager : IDisposable
 {
     bool IsActive { get; }
+    long OwnershipGeneration => 0;
     bool IsRestartPending(SshTunnelExit tunnelExit);
     SshTunnelConfig? ActiveConfig { get; }
     Task<bool> IsOwnedListenerReadyAsync(

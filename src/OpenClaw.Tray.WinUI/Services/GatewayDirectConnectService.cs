@@ -15,7 +15,8 @@ internal sealed record GatewayDirectConnectRequest(
     string? SharedToken,
     string? FriendlyName,
     SshTunnelConfig? SshTunnel,
-    string? EditingGatewayId = null);
+    string? EditingGatewayId = null,
+    bool PreserveExistingSharedTokenWhenMissing = false);
 
 internal sealed record GatewayDirectConnectResult(
     GatewayDirectConnectOutcome Outcome,
@@ -69,6 +70,11 @@ internal sealed class GatewayDirectConnectService
             .BeginManualGatewayLifecycleOperationAsync(cancellationToken);
 
         var previousActiveId = _registry.ActiveGatewayId;
+        var previousSnapshot = _connectionManager.CurrentSnapshot;
+        var restorePreviousConnection =
+            previousActiveId is not null &&
+            string.Equals(previousSnapshot.GatewayId, previousActiveId, StringComparison.Ordinal) &&
+            previousSnapshot.OperatorState == RoleConnectionState.Connected;
         var previousSettings = ConnectionSettingsSnapshot.Capture(_settings);
         var existing = request.EditingGatewayId is not null
             ? _registry.GetById(request.EditingGatewayId) ?? _registry.FindByUrl(request.GatewayUrl)
@@ -79,7 +85,12 @@ internal sealed class GatewayDirectConnectService
         var recordId = candidateUsesNewIdentity
             ? Guid.NewGuid().ToString()
             : existing!.Id;
-        var candidate = BuildCandidate(request, existing, recordId);
+        var candidate = BuildCandidate(
+            request,
+            existing,
+            recordId,
+            preserveExistingSharedToken:
+                request.PreserveExistingSharedTokenWhenMissing && !replacesCredentialRealm);
         DeviceTokenClearTransaction? identityRollback = null;
         var registryMutated = false;
         var candidateRegistryCommitted = false;
@@ -165,9 +176,32 @@ internal sealed class GatewayDirectConnectService
                     previousSettings,
                     identityRollback)
                 : new RollbackResult(CandidateRemainsCommitted: false, Error: null);
+            string? connectionRestoreError = null;
+            if (restorePreviousConnection &&
+                !rollback.CandidateRemainsCommitted &&
+                previousActiveId is not null)
+            {
+                try
+                {
+                    var restored = await ConnectAndWaitForTerminalStateAsync(
+                        previousActiveId,
+                        CancellationToken.None);
+                    if (restored.OperatorState == RoleConnectionState.Error)
+                    {
+                        connectionRestoreError =
+                            $"Failed to restore the previous gateway connection: " +
+                            $"{restored.OperatorError ?? "Gateway connection failed."}";
+                    }
+                }
+                catch (Exception restoreException)
+                {
+                    connectionRestoreError =
+                        $"Failed to restore the previous gateway connection: {restoreException.Message}";
+                }
+            }
             var error = string.Join(
                 " ",
-                new[] { ex.Message, cleanupError, rollback.Error }
+                new[] { ex.Message, cleanupError, rollback.Error, connectionRestoreError }
                     .Where(message => !string.IsNullOrWhiteSpace(message)));
 
             return Failed(
@@ -177,10 +211,45 @@ internal sealed class GatewayDirectConnectService
         }
     }
 
+    public void SynchronizeSettingsWithCommittedGateway(GatewayRecord committedGateway)
+    {
+        var active = _registry.GetActive()
+            ?? throw new InvalidOperationException("The committed gateway is no longer active.");
+        if (!string.Equals(active.Id, committedGateway.Id, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The committed gateway was superseded before its settings could be synchronized.");
+        }
+        var previous = ConnectionSettingsSnapshot.Capture(_settings);
+        try
+        {
+            ApplySettings(committedGateway);
+            _reconcileRuntimeTunnel();
+        }
+        catch (Exception ex)
+        {
+            string? rollbackError = null;
+            try
+            {
+                previous.Restore(_settings);
+                _reconcileRuntimeTunnel();
+            }
+            catch (Exception rollbackException)
+            {
+                rollbackError = $" Settings rollback failed: {rollbackException.Message}";
+            }
+
+            throw new InvalidOperationException(
+                $"Failed to synchronize gateway settings: {ex.Message}{rollbackError}",
+                ex);
+        }
+    }
+
     private static GatewayRecord BuildCandidate(
         GatewayDirectConnectRequest request,
         GatewayRecord? existing,
-        string recordId) =>
+        string recordId,
+        bool preserveExistingSharedToken) =>
         new GatewayRecord
         {
             Id = recordId,
@@ -189,7 +258,9 @@ internal sealed class GatewayDirectConnectService
                 ? existing?.FriendlyName
                 : request.FriendlyName,
             SharedGatewayToken = string.IsNullOrWhiteSpace(request.SharedToken)
-                ? null
+                ? preserveExistingSharedToken
+                    ? existing?.SharedGatewayToken
+                    : null
                 : request.SharedToken,
             BootstrapToken = null,
             SshTunnel = request.SshTunnel,
@@ -374,11 +445,7 @@ internal sealed class GatewayDirectConnectService
                 Directory.Delete(identityDirectory, recursive: true);
             return null;
         }
-        catch (IOException ex)
-        {
-            return $"Failed to remove the {context} identity directory: {ex.Message}";
-        }
-        catch (UnauthorizedAccessException ex)
+        catch (Exception ex)
         {
             return $"Failed to remove the {context} identity directory: {ex.Message}";
         }

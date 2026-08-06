@@ -1541,10 +1541,12 @@ public class WindowsNodeClientTests
             client.HandshakeAuthorizationAsync = _ =>
             {
                 authorizationCalls++;
-                return Task.FromResult(new ReconnectAuthorizationResult(
-                    false,
-                    GatewayErrorKind.LocalPortConflict,
-                    "node listener ownership lost; credentials were not sent"));
+                return Task.FromResult(authorizationCalls == 1
+                    ? new ReconnectAuthorizationResult(
+                        false,
+                        GatewayErrorKind.LocalPortConflict,
+                        "node listener ownership lost; credentials were not sent")
+                    : ReconnectAuthorizationResult.AllowedResult);
             };
             client.ConnectionFailure += (_, kind) => failureKind = kind;
             client.StatusChanged += (_, status) => lastStatus = status;
@@ -1566,6 +1568,22 @@ public class WindowsNodeClientTests
             Assert.Empty(client.SentMessages);
             Assert.Equal(GatewayErrorKind.LocalPortConflict, failureKind);
             Assert.Equal(ConnectionStatus.Error, lastStatus);
+
+            await InvokeHandleEventAsync(
+                client,
+                """
+                {
+                  "type": "event",
+                  "event": "connect.challenge",
+                  "payload": {
+                    "nonce": "node-listener-replacement-retry",
+                    "ts": 1785824001000
+                  }
+                }
+                """);
+
+            Assert.Equal(1, authorizationCalls);
+            Assert.Empty(client.SentMessages);
         }
         finally
         {

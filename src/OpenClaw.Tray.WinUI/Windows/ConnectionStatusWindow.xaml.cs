@@ -431,248 +431,43 @@ public sealed partial class ConnectionStatusWindow : WindowEx
                 SshPort: sshPort);
         }
 
-        DirectConnectResult.Text = useSsh ? LocalizationHelper.GetString("ConnectionStatus_StartingSshTunnel") : LocalizationHelper.GetString("ConnectionStatus_Connecting");
-        if (!string.IsNullOrWhiteSpace(token))
-        {
-            var result = await _manager.ConnectWithSharedTokenAsync(url, token, sshConfig);
-            if (result.GatewayCommitted)
-            {
-                try
-                {
-                    await SynchronizeConnectionSettingsWithActiveGatewayAsync();
-                }
-                catch (Exception ex)
-                {
-                    InvalidatePendingStatusMessages();
-                    DirectConnectResult.Text = $"✗ {ex.Message}";
-                    return;
-                }
-            }
+        DirectConnectResult.Text = useSsh
+            ? LocalizationHelper.GetString("ConnectionStatus_StartingSshTunnel")
+            : LocalizationHelper.GetString("ConnectionStatus_Connecting");
 
-            if (result.Outcome != SetupCodeOutcome.Success)
-            {
-                InvalidatePendingStatusMessages();
-                DirectConnectResult.Text = $"✗ {result.ErrorMessage}";
-                return;
-            }
+        var directConnectService =
+            ((App)Microsoft.UI.Xaml.Application.Current).GatewayDirectConnectService;
+        if (directConnectService is null)
+        {
+            DirectConnectResult.Text = "✗ Gateway connection services are unavailable.";
             return;
         }
 
-        IDisposable? gatewayLifecycleLease = null;
-        var registryMutated = false;
-        var candidateRegistryCommitted = false;
-        var settingsMutationAttempted = false;
-        var connectionAttemptStarted = false;
-        string? previousActiveId = null;
-        GatewayRecord? previousRecord = null;
-        GatewayRecord? candidateRecord = null;
-        ConnectionSettingsSnapshot? previousSettings = null;
-        string? recordId = null;
-        var isNewRecord = false;
-        try
+        var result = await directConnectService.ConnectAsync(
+            new GatewayDirectConnectRequest(
+                url,
+                token,
+                FriendlyName: null,
+                sshConfig,
+                PreserveExistingSharedTokenWhenMissing: true));
+        if (result.Outcome == GatewayDirectConnectOutcome.Failed)
         {
-            gatewayLifecycleLease =
-                await _manager.BeginManualGatewayLifecycleOperationAsync();
-            previousActiveId = _registry.ActiveGatewayId;
-            previousSettings = CaptureConnectionSettings();
-            previousRecord = _registry.FindByUrl(url);
-            isNewRecord = previousRecord is null;
-            recordId = previousRecord?.Id ?? Guid.NewGuid().ToString();
-            candidateRecord = new GatewayRecord
-            {
-                Id = recordId,
-                Url = url,
-                SharedGatewayToken = previousRecord?.SharedGatewayToken,
-                BootstrapToken = null,
-                SshTunnel = sshConfig,
-            }.PreserveAdvancedFields(previousRecord);
-
-            await _manager.DisconnectAsync();
-
-            _registry.AddOrUpdate(candidateRecord);
-            _registry.SetActive(recordId);
-            registryMutated = true;
-            _registry.Save();
-            candidateRegistryCommitted = true;
-
-            settingsMutationAttempted = true;
-            SaveConnectionSettings(url, sshConfig);
-
-            // Start the tunnel before connecting. The manager's start is idempotent against this config.
-            if (useSsh && sshConfig != null)
-            {
-                var app = (App)Microsoft.UI.Xaml.Application.Current;
-                app.EnsureSshTunnelStarted();
-            }
-
-            connectionAttemptStarted = true;
-            await _manager.ConnectAsync(recordId);
-        }
-        catch (Exception ex)
-        {
-            string? cleanupError = null;
-            if (connectionAttemptStarted)
-            {
-                try
-                {
-                    await _manager.DisconnectAsync();
-                }
-                catch (Exception cleanupEx)
-                {
-                    cleanupError = $"Failed to stop the rejected connection attempt: {cleanupEx.Message}";
-                }
-            }
-
-            var rollbackError = registryMutated && recordId is not null
-                ? RollbackDirectConnectState(
-                    previousActiveId,
-                    isNewRecord,
-                    recordId,
-                    previousRecord,
-                    candidateRecord,
-                    candidateRegistryCommitted,
-                    settingsMutationAttempted,
-                    previousSettings)
-                : null;
             InvalidatePendingStatusMessages();
-            DirectConnectResult.Text = $"✗ {string.Join(
-                " ",
-                new[] { ex.Message, cleanupError, rollbackError }
-                    .Where(message => !string.IsNullOrWhiteSpace(message)))}";
+            DirectConnectResult.Text = $"✗ {result.Error}";
+            return;
         }
-        finally
-        {
-            gatewayLifecycleLease?.Dispose();
-        }
-    }
 
-    private static void SaveConnectionSettings(string gatewayUrl, SshTunnelConfig? sshConfig)
-    {
-        var app = (App)Microsoft.UI.Xaml.Application.Current;
-        var settings = app.Settings;
-        settings.GatewayUrl = gatewayUrl;
-        settings.UseSshTunnel = sshConfig is not null;
-        if (sshConfig is not null)
-        {
-            settings.SshTunnelUser = sshConfig.User;
-            settings.SshTunnelHost = sshConfig.Host;
-            settings.SshTunnelSshPort = sshConfig.SshPort;
-            settings.SshTunnelRemotePort = sshConfig.RemotePort;
-            settings.SshTunnelLocalPort = sshConfig.LocalPort;
-        }
-        settings.SaveOrThrow();
+        DirectConnectResult.Text = result.Outcome == GatewayDirectConnectOutcome.PairingRequired
+            ? string.Format(
+                LocalizationHelper.GetString("ConnectionPage_PairingApprovalRequired"),
+                GatewayUrlHelper.SanitizeForDisplay(url))
+            : string.Format(
+                LocalizationHelper.GetString("ConnectionPage_ConnectedTo"),
+                GatewayUrlHelper.SanitizeForDisplay(url));
     }
 
     private void InvalidatePendingStatusMessages() =>
         Interlocked.Increment(ref _statusMessageGeneration);
-
-    private static ConnectionSettingsSnapshot CaptureConnectionSettings()
-    {
-        var settings = ((App)Microsoft.UI.Xaml.Application.Current).Settings;
-        return new ConnectionSettingsSnapshot(
-            settings.GatewayUrl,
-            settings.UseSshTunnel,
-            settings.SshTunnelUser,
-            settings.SshTunnelHost,
-            settings.SshTunnelSshPort,
-            settings.SshTunnelRemotePort,
-            settings.SshTunnelLocalPort);
-    }
-
-    private string? RollbackDirectConnectState(
-        string? previousActiveId,
-        bool isNewRecord,
-        string recordId,
-        GatewayRecord? previousRecord,
-        GatewayRecord? candidateRecord,
-        bool candidateRegistryCommitted,
-        bool settingsMutationAttempted,
-        ConnectionSettingsSnapshot? previousSettings)
-    {
-        if (_registry is null)
-            return "Gateway rollback could not run because the registry is unavailable.";
-
-        try
-        {
-            if (isNewRecord)
-                _registry.Remove(recordId);
-            else if (previousRecord is not null)
-                _registry.AddOrUpdate(previousRecord);
-            _registry.SetActive(previousActiveId);
-            _registry.Save();
-        }
-        catch (Exception ex)
-        {
-            if (candidateRegistryCommitted && candidateRecord is not null)
-            {
-                _registry.AddOrUpdate(candidateRecord);
-                _registry.SetActive(recordId);
-                try
-                {
-                    SaveConnectionSettings(candidateRecord.Url, candidateRecord.SshTunnel);
-                    ((App)Microsoft.UI.Xaml.Application.Current).EnsureSshTunnelStarted();
-                }
-                catch (Exception settingsEx)
-                {
-                    return $"Gateway rollback failed; the new gateway remains active: {ex.Message} " +
-                           $"Candidate settings reconciliation failed: {settingsEx.Message}";
-                }
-            }
-
-            return candidateRegistryCommitted
-                ? $"Gateway rollback failed; the new gateway remains active: {ex.Message}"
-                : $"Gateway update was not saved, and rollback persistence also failed: {ex.Message}";
-        }
-
-        if (settingsMutationAttempted && previousSettings is not null)
-        {
-            try
-            {
-                var app = (App)Microsoft.UI.Xaml.Application.Current;
-                previousSettings.Restore(app.Settings);
-                app.EnsureSshTunnelStarted();
-            }
-            catch (Exception ex)
-            {
-                return $"Settings rollback failed: {ex.Message}";
-            }
-        }
-
-        return null;
-    }
-
-    private async Task SynchronizeConnectionSettingsWithActiveGatewayAsync()
-    {
-        if (_manager is null || _registry is null)
-            throw new InvalidOperationException("Gateway connection services are unavailable.");
-
-        using var lifecycleLease = await _manager.BeginManualGatewayLifecycleOperationAsync();
-        var active = _registry.GetActive()
-            ?? throw new InvalidOperationException("The committed gateway is no longer active.");
-        SaveConnectionSettings(active.Url, active.SshTunnel);
-    }
-
-    private sealed record ConnectionSettingsSnapshot(
-        string GatewayUrl,
-        bool UseSshTunnel,
-        string SshUser,
-        string SshHost,
-        int SshPort,
-        int SshRemotePort,
-        int SshLocalPort)
-    {
-        public void Restore(SettingsManager settings)
-        {
-            settings.GatewayUrl = GatewayUrl;
-            settings.UseSshTunnel = UseSshTunnel;
-            settings.SshTunnelUser = SshUser;
-            settings.SshTunnelHost = SshHost;
-            settings.SshTunnelSshPort = SshPort;
-            settings.SshTunnelRemotePort = SshRemotePort;
-            settings.SshTunnelLocalPort = SshLocalPort;
-            settings.SaveOrThrow();
-        }
-    }
 
     // ── Timeline with colors ──
 

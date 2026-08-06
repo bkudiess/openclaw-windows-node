@@ -87,6 +87,29 @@ public sealed class GatewayDirectConnectServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Connect_Failure_RestoresPreviousLiveConnection()
+    {
+        var previous = AddPreviousGateway();
+        _manager.SetCurrentSnapshot(Connected(previous.Id));
+        _manager.NextSnapshot = Failed(previous.Id, "rejected");
+        _manager.RestoreSnapshot = Connected(previous.Id);
+        var service = CreateService();
+
+        var result = await service.ConnectAsync(new GatewayDirectConnectRequest(
+            "wss://replacement.example",
+            SharedToken: "replacement-token",
+            FriendlyName: "Replacement",
+            SshTunnel: null,
+            EditingGatewayId: previous.Id));
+
+        Assert.Equal(GatewayDirectConnectOutcome.Failed, result.Outcome);
+        Assert.Equal(2, _manager.ConnectCount);
+        Assert.Equal(previous.Id, _manager.LastGatewayId);
+        Assert.Equal(previous.Id, _manager.CurrentSnapshot.GatewayId);
+        Assert.Equal(RoleConnectionState.Connected, _manager.CurrentSnapshot.OperatorState);
+    }
+
+    [Fact]
     public async Task Connect_LatePairingWriterWinsOverRollback()
     {
         var previous = AddPreviousGateway();
@@ -159,6 +182,52 @@ public sealed class GatewayDirectConnectServiceTests : IDisposable
         var record = Assert.Single(_registry.GetAll());
         Assert.Equal(previous.Id, record.Id);
         Assert.Equal("Updated", record.FriendlyName);
+    }
+
+    [Fact]
+    public async Task Connect_TokenlessDiagnosticsRequestPreservesSameRealmSharedToken()
+    {
+        var previous = AddPreviousGateway();
+        _registry.AddOrUpdate(previous with { SharedGatewayToken = "existing-token" });
+        _registry.Save();
+        _manager.NextSnapshot = Connected(previous.Id);
+        var service = CreateService();
+
+        var result = await service.ConnectAsync(new GatewayDirectConnectRequest(
+            previous.Url,
+            SharedToken: null,
+            FriendlyName: null,
+            SshTunnel: null,
+            PreserveExistingSharedTokenWhenMissing: true));
+
+        Assert.Equal(GatewayDirectConnectOutcome.Connected, result.Outcome);
+        Assert.Equal("existing-token", _registry.GetActive()?.SharedGatewayToken);
+    }
+
+    [Fact]
+    public async Task Connect_TokenlessDiagnosticsRequestDoesNotCarryTokenAcrossSshRealmChange()
+    {
+        var previousSsh = new SshTunnelConfig("user", "old.example", 18789, 45678);
+        var previous = AddPreviousGateway();
+        _registry.AddOrUpdate(previous with
+        {
+            SharedGatewayToken = "existing-token",
+            SshTunnel = previousSsh,
+        });
+        _registry.Save();
+        _manager.NextSnapshot = Connected(previous.Id);
+        var service = CreateService();
+
+        var result = await service.ConnectAsync(new GatewayDirectConnectRequest(
+            previous.Url,
+            SharedToken: null,
+            FriendlyName: null,
+            SshTunnel: previousSsh with { Host = "replacement.example" },
+            PreserveExistingSharedTokenWhenMissing: true));
+
+        Assert.Equal(GatewayDirectConnectOutcome.Connected, result.Outcome);
+        Assert.Null(_registry.GetActive()?.SharedGatewayToken);
+        Assert.NotEqual(previous.Id, _registry.ActiveGatewayId);
     }
 
     [Fact]
@@ -248,6 +317,26 @@ public sealed class GatewayDirectConnectServiceTests : IDisposable
         Assert.Equal(previous.Id, _registry.ActiveGatewayId);
     }
 
+    [Fact]
+    public void SynchronizeSettingsWithActiveGateway_PersistsCommittedGateway()
+    {
+        var active = AddPreviousGateway() with
+        {
+            Url = "wss://committed.example",
+            SshTunnel = new SshTunnelConfig("user", "host.example", 18789, 45678),
+        };
+        _registry.AddOrUpdate(active);
+        _registry.Save();
+        var service = CreateService();
+
+        service.SynchronizeSettingsWithCommittedGateway(active);
+
+        Assert.Equal(active.Url, _settings.GatewayUrl);
+        Assert.True(_settings.UseSshTunnel);
+        Assert.Equal("host.example", _settings.SshTunnelHost);
+        Assert.Equal(1, _tunnelReconcileCount);
+    }
+
     private GatewayDirectConnectService CreateService() =>
         new(
             _manager,
@@ -316,6 +405,7 @@ public sealed class GatewayDirectConnectServiceTests : IDisposable
         public string? LastGatewayId { get; private set; }
         public GatewayConnectionSnapshot NextSnapshot { get; set; } =
             GatewayConnectionSnapshot.Idle;
+        public GatewayConnectionSnapshot? RestoreSnapshot { get; set; }
         public Action? BeforeSnapshot { get; set; }
 
         public event EventHandler<GatewayConnectionSnapshot>? StateChanged;
@@ -329,13 +419,19 @@ public sealed class GatewayDirectConnectServiceTests : IDisposable
             ConnectCount++;
             LastGatewayId = gatewayId;
             BeforeSnapshot?.Invoke();
-            CurrentSnapshot = NextSnapshot with
+            var snapshot = ConnectCount > 1 && RestoreSnapshot is not null
+                ? RestoreSnapshot
+                : NextSnapshot;
+            CurrentSnapshot = snapshot with
             {
-                GatewayId = gatewayId ?? NextSnapshot.GatewayId
+                GatewayId = gatewayId ?? snapshot.GatewayId
             };
             StateChanged?.Invoke(this, CurrentSnapshot);
             return Task.CompletedTask;
         }
+
+        public void SetCurrentSnapshot(GatewayConnectionSnapshot snapshot) =>
+            CurrentSnapshot = snapshot;
 
         public Task DisconnectAsync()
         {

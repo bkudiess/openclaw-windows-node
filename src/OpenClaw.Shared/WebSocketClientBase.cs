@@ -48,6 +48,9 @@ public abstract class WebSocketClientBase : IDisposable
     /// <summary>Cancellation token tied to this client's lifetime.</summary>
     protected CancellationToken CancellationToken => _cts.Token;
 
+    /// <summary>Identifies the transport attempt currently owned by this client.</summary>
+    protected long CurrentConnectionGeneration => Interlocked.Read(ref _connectionGeneration);
+
     // Events
     public event EventHandler<ConnectionStatus>? StatusChanged;
     public event EventHandler<string>? AuthenticationFailed;
@@ -236,6 +239,25 @@ public abstract class WebSocketClientBase : IDisposable
 
         // slopwatch-ignore: SW003 Cleanup is best-effort for superseded sockets.
         try { ws.Dispose(); } catch { }
+    }
+
+    /// <summary>
+    /// Aborts the current transport while retaining reconnect ownership for its listen loop.
+    /// Use when a socket-specific trust check fails and only a fresh socket may retry.
+    /// </summary>
+    protected bool IsCurrentConnectionGeneration(long expectedGeneration) =>
+        !_disposed && Interlocked.Read(ref _connectionGeneration) == expectedGeneration;
+
+    protected void AbortCurrentWebSocket(long expectedGeneration)
+    {
+        var ws = _webSocket;
+        if (ws is null ||
+            !IsCurrentConnectionGeneration(expectedGeneration) ||
+            !ReferenceEquals(_webSocket, ws))
+            return;
+
+        try { ws.Abort(); }
+        catch (Exception ex) { _logger.Debug($"{ClientRole} WebSocket abort threw: {ex.Message}"); }
     }
 
     // Cap on a single accumulated inbound message. A peer that streams an unbounded multi-frame text

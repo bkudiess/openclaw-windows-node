@@ -1,6 +1,7 @@
 using OpenClaw.Shared;
 using System;
 using System.Diagnostics;
+using System.Net;
 
 namespace OpenClaw.Connection;
 
@@ -41,6 +42,16 @@ public sealed class SshTunnelService : ISshTunnelManager
     }
 
     public bool IsActive => IsRunning;
+    public long OwnershipGeneration
+    {
+        get
+        {
+            lock (_stateLock)
+            {
+                return _lifecycleGeneration;
+            }
+        }
+    }
     public SshTunnelConfig? ActiveConfig
     {
         get
@@ -626,7 +637,7 @@ public sealed class SshTunnelService : ISshTunnelManager
         DateTime processStartTimeUtc,
         CancellationToken cancellationToken)
     {
-        var deadline = Stopwatch.GetTimestamp() + (long)(TimeSpan.FromSeconds(5).TotalSeconds * Stopwatch.Frequency);
+        var deadline = Stopwatch.GetTimestamp() + (long)(TimeSpan.FromSeconds(20).TotalSeconds * Stopwatch.Frequency);
         while (Stopwatch.GetTimestamp() < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -678,7 +689,8 @@ public sealed class SshTunnelService : ISshTunnelManager
         int localPort)
     {
         EnsureCompleteListenerSnapshot(snapshot);
-        if (snapshot.Listeners.Any(listener => listener.Port == localPort))
+        if (snapshot.Listeners.Any(listener =>
+            listener.Port == localPort && CanServeLoopback(listener.Address)))
             throw new InvalidOperationException($"Local port {localPort} is already owned by another process.");
     }
 
@@ -690,7 +702,8 @@ public sealed class SshTunnelService : ISshTunnelManager
     {
         EnsureCompleteListenerSnapshot(snapshot);
         var listeners = snapshot.Listeners
-            .Where(listener => listener.Port == localPort)
+            .Where(listener =>
+                listener.Port == localPort && CanServeLoopback(listener.Address))
             .ToArray();
         if (listeners.Length == 0)
             return false;
@@ -705,6 +718,11 @@ public sealed class SshTunnelService : ISshTunnelManager
 
         return true;
     }
+
+    private static bool CanServeLoopback(IPAddress address) =>
+        IPAddress.IsLoopback(address) ||
+        address.Equals(IPAddress.Any) ||
+        address.Equals(IPAddress.IPv6Any);
 
     private static void EnsureCompleteListenerSnapshot(WindowsTcpListenerSnapshotResult snapshot)
     {
