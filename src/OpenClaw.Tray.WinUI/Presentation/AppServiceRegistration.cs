@@ -38,6 +38,8 @@ internal static class AppServiceRegistration
         // concrete manager. It subscribes to the manager (which App owns) and is not disposed
         // by the container.
         services.AddSingleton<ISettingsStore>(new SettingsStore(context.Settings, context.Dispatcher));
+        services.AddSingleton<IExecApprovalsPolicyStore>(
+            new ExecApprovalsPolicyStore(context.ExecApprovalsStore));
 
         // Container-owned navigation lifetime manager (disposed with the root provider).
         services.AddSingleton<NavigationScopeManager>();

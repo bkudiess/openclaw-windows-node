@@ -129,7 +129,6 @@
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Pages\ConnectionPagePlan.cs" Link="Imported\ConnectionPagePlan.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Pages\ConnectionPageRowState.cs" Link="Imported\ConnectionPageRowState.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Pages\ChatPagePanelStates.cs" Link="Imported\ChatPagePanelStates.cs" />
-    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Pages\ExecPolicyRuleList.cs" Link="Pages\ExecPolicyRuleList.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Pages\WorkspaceFilesModel.cs" Link="Imported\WorkspaceFilesModel.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\ConnectionManagerWindowsNodeConnector.cs" Link="Services\ConnectionManagerWindowsNodeConnector.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Services\SetupWindowArgumentProjection.cs" Link="Services\SetupWindowArgumentProjection.cs" />
@@ -152,6 +151,7 @@
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Presentation\AppNavigationService.cs" Link="Presentation\AppNavigationService.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Presentation\SettingsPageViewModel.cs" Link="Presentation\SettingsPageViewModel.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Presentation\PermissionsPageViewModel.cs" Link="Presentation\PermissionsPageViewModel.cs" />
+    <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Presentation\IExecApprovalsPolicyStore.cs" Link="Presentation\IExecApprovalsPolicyStore.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Presentation\ISettingsStore.cs" Link="Presentation\ISettingsStore.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Presentation\SettingsStore.cs" Link="Presentation\SettingsStore.cs" />
     <Compile Include="..\..\src\OpenClaw.Tray.WinUI\Presentation\SettingsAppInfoProjection.cs" Link="Presentation\SettingsAppInfoProjection.cs" />

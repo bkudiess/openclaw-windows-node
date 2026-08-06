@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Net;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -31,9 +33,12 @@ public sealed class AccessibilityAppFixture : IDisposable
     private readonly string _executablePath;
     private readonly string? _nativeChatProofSignalPath;
     private readonly string? _nativeChatProofVisualDirectory;
+    private readonly int _mcpPort;
     private readonly Process _process;
 
     public IntPtr HubWindowHandle { get; }
+    public int ProcessId => _process.Id;
+    public string DataDirectory => _dataDirectory;
 
     public AccessibilityAppFixture()
         : this(initializeAxe: true)
@@ -65,6 +70,7 @@ public sealed class AccessibilityAppFixture : IDisposable
                 _dataDirectory,
                 "native-chat-visual");
         }
+        _mcpPort = GetFreeTcpPort();
         File.WriteAllText(
             Path.Combine(_dataDirectory, "settings.json"),
             """
@@ -124,8 +130,6 @@ public sealed class AccessibilityAppFixture : IDisposable
             }
             Thread.Sleep(100);
         }
-        if (!foreground)
-            throw new InvalidOperationException("Could not foreground the Hub window for screenshot capture.");
         Thread.Sleep(500);
 
         var bounds = AutomationElement.FromHandle(HubWindowHandle).Current.BoundingRectangle;
@@ -147,13 +151,33 @@ public sealed class AccessibilityAppFixture : IDisposable
         using var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
         using (var graphics = Graphics.FromImage(bitmap))
         {
-            graphics.CopyFromScreen(
-                left,
-                top,
-                0,
-                0,
-                new Size(width, height),
-                CopyPixelOperation.SourceCopy);
+            var deviceContext = graphics.GetHdc();
+            bool rendered;
+            try
+            {
+                rendered = PrintWindow(HubWindowHandle, deviceContext, 2);
+            }
+            finally
+            {
+                graphics.ReleaseHdc(deviceContext);
+            }
+
+            if (!rendered)
+            {
+                if (!foreground)
+                {
+                    throw new InvalidOperationException(
+                        "Could not foreground or render the Hub window for screenshot capture.");
+                }
+
+                graphics.CopyFromScreen(
+                    left,
+                    top,
+                    0,
+                    0,
+                    new Size(width, height),
+                    CopyPixelOperation.SourceCopy);
+            }
         }
 
         var sampledColors = new HashSet<int>();
@@ -268,6 +292,8 @@ public sealed class AccessibilityAppFixture : IDisposable
         };
         startInfo.ArgumentList.Add(deepLink);
         startInfo.Environment["OPENCLAW_TRAY_DATA_DIR"] = _dataDirectory;
+        startInfo.Environment["OPENCLAW_STATE_DIR"] = _dataDirectory;
+        startInfo.Environment["OPENCLAW_MCP_PORT"] = _mcpPort.ToString();
         startInfo.Environment["OPENCLAW_SKIP_UPDATE_CHECK"] = "1";
         startInfo.Environment["OPENCLAW_FORCE_ONBOARDING"] = "0";
         startInfo.Environment["OPENCLAW_LANGUAGE"] = "en-US";
@@ -316,6 +342,13 @@ public sealed class AccessibilityAppFixture : IDisposable
             $"OpenClaw did not expose its Hub window within {StartupTimeout.TotalSeconds:0} seconds.");
     }
 
+    private static int GetFreeTcpPort()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        return ((IPEndPoint)listener.LocalEndpoint).Port;
+    }
+
     private void EnsureTargetIsAlive()
     {
         if (!_process.HasExited)
@@ -354,6 +387,13 @@ public sealed class AccessibilityAppFixture : IDisposable
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool BringWindowToTop(IntPtr windowHandle);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PrintWindow(
+        IntPtr windowHandle,
+        IntPtr deviceContext,
+        uint flags);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();

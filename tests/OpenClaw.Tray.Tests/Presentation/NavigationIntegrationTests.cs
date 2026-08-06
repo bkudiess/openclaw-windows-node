@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using OpenClaw.Shared;
+using OpenClaw.Shared.ExecApprovals;
 using OpenClawTray.Presentation;
 using OpenClawTray.Services;
 
@@ -17,7 +19,10 @@ public sealed class NavigationIntegrationTests
         temp = new TempDir();
         var services = new ServiceCollection();
         services.AddOpenClawTrayCore(new AppServiceContext(
-            new RecordingUiDispatcher(), new FakeAppCommands(), new SettingsManager(temp.Path)));
+            new RecordingUiDispatcher(),
+            new FakeAppCommands(),
+            new SettingsManager(temp.Path),
+            new ExecApprovalsStore(temp.Path, NullLogger.Instance)));
         return services.BuildServiceProvider(new ServiceProviderOptions
         {
             ValidateScopes = true,

@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using OpenClaw.Shared;
+using OpenClaw.Shared.ExecApprovals;
 using OpenClawTray.Presentation;
 using OpenClawTray.Services;
 
@@ -19,7 +21,10 @@ public sealed class UiDispatcherContractTests
 
         var services = new ServiceCollection();
         services.AddOpenClawTrayCore(new AppServiceContext(
-            dispatcher, new FakeAppCommands(), new SettingsManager(temp.Path)));
+            dispatcher,
+            new FakeAppCommands(),
+            new SettingsManager(temp.Path),
+            new ExecApprovalsStore(temp.Path, NullLogger.Instance)));
         using var provider = services.BuildServiceProvider(new ServiceProviderOptions
         {
             ValidateScopes = true,
@@ -31,8 +36,7 @@ public sealed class UiDispatcherContractTests
         var permissionsVm = scope.ServiceProvider.GetRequiredService<PermissionsPageViewModel>();
 
         // Both page view models resolve from the registered core, so their IUiDispatcher
-        // dependency is satisfied from DI (not a concrete dispatcher queue). The placeholder
-        // permissions view model still exposes the injected instance for a strong same-reference check.
+        // dependency is satisfied from DI rather than a concrete dispatcher queue.
         Assert.NotNull(settingsVm);
         Assert.Same(dispatcher, permissionsVm.Dispatcher);
     }

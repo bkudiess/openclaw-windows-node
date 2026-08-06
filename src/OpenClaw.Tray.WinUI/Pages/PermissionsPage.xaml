@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Page x:Class="OpenClawTray.Pages.PermissionsPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Microsoft.UI.Xaml.Controls"
+    xmlns:helpers="using:OpenClawTray.Helpers"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
 
     <Page.Resources>
         <Thickness x:Key="PermSectionHeaderMargin">4,18,4,4</Thickness>
@@ -183,157 +186,191 @@
                 </StackPanel>
             </Border>
 
-            <!-- ═════════ Exec Policy ═════════ -->
-            <TextBlock x:Uid="PermissionsPage_TextBlock_14" Text="Exec policy" Style="{StaticResource BodyStrongTextBlockStyle}"
+            <!-- ═════════ Exec approvals V2 ═════════ -->
+            <TextBlock x:Uid="PermissionsPage_ExecApprovalsHeader" Text="Exec approvals" Style="{StaticResource BodyStrongTextBlockStyle}"
                        Margin="{StaticResource PermSectionHeaderMargin}"/>
-            <TextBlock x:Uid="PermissionsPage_TextBlock_17"
-                       Text="Controls which executables agents can launch on this node. Allowlist entries match resolved executable paths."
+            <TextBlock x:Uid="PermissionsPage_ExecApprovalsDescription"
+                       Text="Control command access, prompting, and executable-path allowlists for defaults or a specific agent."
                        Style="{StaticResource CaptionTextBlockStyle}"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"
                        Margin="4,0,4,4"/>
 
-            <!-- Default action — its own row card (matches the Settings row pattern) -->
-            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="16,14,16,14">
-                <Grid ColumnSpacing="14">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
-                        <TextBlock x:Uid="PermissionsPage_DefaultAction" Text="Default action" Style="{StaticResource BodyTextBlockStyle}"/>
-                        <TextBlock x:Uid="PermissionsPage_WhatHappensWhenA" Text="What happens when a command doesn't match the allowlist below."
-                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                   TextWrapping="Wrap"/>
-                    </StackPanel>
-                    <ComboBox Grid.Column="1" x:Uid="DefaultActionCombo" x:Name="DefaultActionCombo"
-                              MinWidth="140"
-                              SelectionChanged="OnDefaultActionChanged">
-                        <ComboBoxItem x:Uid="PermissionsPage_ComboBoxItem_23" Content="Deny" Tag="deny"/>
-                        <ComboBoxItem x:Uid="PermissionsPage_ComboBoxItem_24" Content="Allow" Tag="allow"/>
-                        <ComboBoxItem x:Uid="PermissionsPage_ComboBoxItem_25" Content="Ask" Tag="prompt"/>
-                    </ComboBox>
-                </Grid>
-            </Border>
+            <controls:InfoBar x:Name="ExecPolicyStatusInfoBar"
+                              IsOpen="False"
+                              IsClosable="True"
+                              Severity="Error"
+                              AutomationProperties.AutomationId="ExecPolicyStatusInfoBar"
+                              Margin="0,0,0,4"/>
 
-            <!-- Rules card -->
-            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1" CornerRadius="8">
-                <StackPanel>
-                    <!-- Card header: title + rule count badge + auto-save hint -->
-                    <Grid Padding="16,12,16,12" ColumnSpacing="8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" Spacing="2">
-                            <TextBlock x:Uid="PermissionsPage_TextBlock_28" Text="Rules" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <TextBlock x:Uid="PermissionsPage_PatternsAreMatchedLeft" Text="Allowlist patterns match resolved executable paths. Use wildcards such as **/git.exe. Changes save automatically."
-                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                       TextWrapping="Wrap"/>
-                        </StackPanel>
-                        <TextBlock x:Uid="PermissionsPage_Saved" Grid.Column="1" x:Name="ExecPolicySavedHint"
-                                   Text="Saved"
-                                   VerticalAlignment="Center"
-                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                   Foreground="{ThemeResource SystemFillColorSuccessBrush}"
-                                   Visibility="Collapsed"
-                                   Margin="0,0,8,0"/>
-                        <Border Grid.Column="2"
-                                Background="{ThemeResource ControlAltFillColorSecondaryBrush}"
-                                CornerRadius="10" Padding="10,2"
-                                VerticalAlignment="Center">
-                            <TextBlock x:Uid="PermissionsPage_0Rules" x:Name="RulesCountBadge" Text="0 rules"
-                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                        </Border>
-                    </Grid>
+            <toolkit:SettingsCard x:Uid="PermissionsPage_ExecPolicyScopeCard"
+                                  Header="Policy scope"
+                                  Description="Defaults apply to every agent. All agents and agent-specific scopes can override them.">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="{x:Bind helpers:FluentIconCatalog.People, Mode=OneTime}"
+                              FontFamily="{ThemeResource SymbolThemeFontFamily}"/>
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox x:Name="ExecPolicyScopeCombo"
+                          MinWidth="220"
+                          DisplayMemberPath="Label"
+                          SelectionChanged="OnExecPolicyScopeChanged"
+                          AutomationProperties.AutomationId="ExecPolicyScopeCombo"/>
+            </toolkit:SettingsCard>
 
-                    <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}"/>
+            <toolkit:SettingsCard x:Uid="PermissionsPage_ExecSecurityCard"
+                                  Header="Command access"
+                                  Description="Deny commands, allow only listed executables, or always allow commands in this scope.">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="{x:Bind helpers:FluentIconCatalog.Lock, Mode=OneTime}"
+                              FontFamily="{ThemeResource SymbolThemeFontFamily}"/>
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox x:Name="ExecSecurityCombo"
+                          MinWidth="220"
+                          DisplayMemberPath="Label"
+                          SelectionChanged="OnExecSecurityChanged"
+                          AutomationProperties.AutomationId="ExecSecurityCombo"/>
+            </toolkit:SettingsCard>
 
-                    <!-- Empty state — visible when there are no rules -->
-                    <TextBlock x:Uid="PermissionsPage_NoRulesYetAdd" x:Name="RulesEmptyState"
-                              Text="No rules yet. Add a pattern below to deny, allow, or ask for specific commands."
+            <toolkit:SettingsCard x:Uid="PermissionsPage_ExecAskCard"
+                                  Header="Prompt behavior"
+                                  Description="Choose when OpenClaw asks before running a command.">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="{x:Bind helpers:FluentIconCatalog.Terminal, Mode=OneTime}"
+                              FontFamily="{ThemeResource SymbolThemeFontFamily}"/>
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox x:Name="ExecAskCombo"
+                          MinWidth="220"
+                          DisplayMemberPath="Label"
+                          SelectionChanged="OnExecAskChanged"
+                          AutomationProperties.AutomationId="ExecAskCombo"/>
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard x:Uid="PermissionsPage_ExecFallbackCard"
+                                  Header="Fallback when prompting is unavailable"
+                                  Description="Applied when the node cannot show an approval prompt. Deny is the safest choice.">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="{x:Bind helpers:FluentIconCatalog.Settings, Mode=OneTime}"
+                              FontFamily="{ThemeResource SymbolThemeFontFamily}"/>
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox x:Name="ExecFallbackCombo"
+                          MinWidth="220"
+                          DisplayMemberPath="Label"
+                          SelectionChanged="OnExecFallbackChanged"
+                          AutomationProperties.AutomationId="ExecFallbackCombo"/>
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard x:Uid="PermissionsPage_ExecAutoAllowSkillsCard"
+                                  Header="Allow trusted skill executables"
+                                  Description="Allow executables declared by trusted skills without adding each path manually.">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="{x:Bind helpers:FluentIconCatalog.Check, Mode=OneTime}"
+                              FontFamily="{ThemeResource SymbolThemeFontFamily}"/>
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox x:Name="ExecAutoAllowSkillsCombo"
+                          MinWidth="220"
+                          DisplayMemberPath="Label"
+                          SelectionChanged="OnExecAutoAllowSkillsChanged"
+                          AutomationProperties.AutomationId="ExecAutoAllowSkillsCombo"/>
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsExpander x:Uid="PermissionsPage_ExecAllowlistExpander"
+                                      x:Name="ExecAllowlistExpander"
+                                      Header="Allowed executables"
+                                      Description="Allowlist patterns match resolved executable paths. Use a path separator and wildcards such as **/git.exe."
+                                      IsExpanded="True">
+                <toolkit:SettingsExpander.HeaderIcon>
+                    <FontIcon Glyph="{x:Bind helpers:FluentIconCatalog.Terminal, Mode=OneTime}"
+                              FontFamily="{ThemeResource SymbolThemeFontFamily}"/>
+                </toolkit:SettingsExpander.HeaderIcon>
+                <toolkit:SettingsExpander.Content>
+                    <TextBlock x:Name="ExecAllowlistCountText"
                                Style="{StaticResource CaptionTextBlockStyle}"
-                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                               HorizontalAlignment="Center"
-                               Margin="16,20,16,20"
-                               Visibility="Collapsed"/>
-
-                    <!-- Rules list -->
-                    <ListView x:Name="PolicyRulesList" SelectionMode="None"
-                              MaxHeight="320"
-                              ItemContainerTransitions="{x:Null}">
-                        <ListView.ItemContainerStyle>
-                            <Style TargetType="ListViewItem">
-                                <Setter Property="Padding" Value="0"/>
-                                <Setter Property="MinHeight" Value="0"/>
-                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                            </Style>
-                        </ListView.ItemContainerStyle>
-                        <ListView.ItemTemplate>
-                            <DataTemplate>
-                                <Grid Padding="16,8,12,8" ColumnSpacing="12">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="{Binding Pattern}"
-                                               FontFamily="Consolas" FontSize="13"
-                                               VerticalAlignment="Center"
-                                               Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                                               TextTrimming="CharacterEllipsis"/>
-                                    <Border Grid.Column="1"
-                                            CornerRadius="10" Padding="10,2"
-                                            MinWidth="56"
-                                            VerticalAlignment="Center"
-                                            Background="{Binding ActionBrush}">
-                                        <TextBlock Text="{Binding Action}"
-                                                   FontSize="11" FontWeight="SemiBold"
-                                                   Foreground="White"
-                                                   HorizontalAlignment="Center"/>
-                                    </Border>
-                                    <Button Grid.Column="2"
-                                            Click="OnRemoveRule" Tag="{Binding Index}"
-                                            Background="Transparent" BorderThickness="0"
-                                            Padding="6" MinWidth="0"
-                                            AutomationProperties.Name="{Binding RemoveRuleAutomationName}"
-                                            AutomationProperties.AutomationId="{Binding RemoveRuleAutomationId}"
-                                            ToolTipService.ToolTip="Remove rule">
-                                        <FontIcon Glyph="&#xE74D;" FontSize="14"
-                                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                    </Button>
-                                </Grid>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
-
-                    <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}"/>
-
-                    <!-- Add rule row -->
-                    <Grid Padding="16,12,16,12" ColumnSpacing="8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBox Grid.Column="0" x:Uid="NewRulePattern" x:Name="NewRulePattern"
-                                 PlaceholderText="Executable path pattern (e.g. **/git.exe)"
-                                 FontFamily="Consolas"/>
-                        <ComboBox Grid.Column="1" x:Uid="PermissionsPage_NewRuleAction" x:Name="NewRuleAction"
-                                  MinWidth="100" SelectedIndex="0">
-                           <ComboBoxItem x:Uid="PermissionsPage_ComboBoxItem_55" Content="Allow" Tag="allow"/>
-                        </ComboBox>
-                        <Button Grid.Column="2" x:Uid="PermissionsPage_Button_57" Content="Add" Click="OnAddRule"/>
-                    </Grid>
-                </StackPanel>
-            </Border>
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                </toolkit:SettingsExpander.Content>
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard x:Uid="PermissionsPage_ExecAllowlistDefaultsInfo"
+                                          x:Name="ExecAllowlistDefaultsInfo"
+                                          Header="Select an agent scope to edit allowlist entries"
+                                          Description="Defaults configure policy behavior. Allowlist entries belong to All agents or a specific agent."/>
+                    <toolkit:SettingsCard x:Uid="PermissionsPage_ExecAllowlistEmpty"
+                                          x:Name="ExecAllowlistEmptyCard"
+                                          Header="No allowed executables"
+                                          Description="Commands that require approval will follow the prompt behavior above."/>
+                    <toolkit:SettingsCard x:Uid="PermissionsPage_ExecAllowlistRulesCard"
+                                          x:Name="ExecAllowlistRulesCard"
+                                          Header="Allowed paths"
+                                          Description="Each entry allows the resolved executable path for this scope.">
+                        <ItemsRepeater x:Name="ExecAllowlistRepeater">
+                            <ItemsRepeater.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Width="240"
+                                          Padding="0,4"
+                                          ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Spacing="2">
+                                            <TextBlock Text="{Binding Pattern}"
+                                                       FontFamily="Consolas"
+                                                       Style="{StaticResource BodyTextBlockStyle}"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="{Binding Details}"
+                                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                        <Button Grid.Column="1"
+                                                Click="OnRemoveExecAllowlistEntry"
+                                                Tag="{Binding}"
+                                                Background="Transparent"
+                                                BorderThickness="0"
+                                                Padding="8"
+                                                AutomationProperties.Name="{Binding RemoveAutomationName}"
+                                                AutomationProperties.AutomationId="{Binding RemoveAutomationId}">
+                                            <FontIcon Glyph="{Binding RemoveGlyph}"
+                                                      Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                        </Button>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsRepeater.ItemTemplate>
+                        </ItemsRepeater>
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard x:Uid="PermissionsPage_ExecAllowlistAddCard"
+                                          x:Name="ExecAllowlistAddCard"
+                                          Header="Add allowed executable"
+                                          Description="Enter an executable path glob. Command-text patterns such as hostname or Get-* are not valid V2 rules.">
+                        <Grid Width="240" RowSpacing="4">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="NewExecAllowlistPattern"
+                                         PlaceholderText="**/git.exe"
+                                         FontFamily="Consolas"
+                                         AutomationProperties.AutomationId="NewExecAllowlistPattern"/>
+                                <Button Grid.Column="1"
+                                        x:Uid="PermissionsPage_AddExecAllowlistButton"
+                                        Content="Add"
+                                        Click="OnAddExecAllowlistEntry"
+                                        AutomationProperties.AutomationId="AddExecAllowlistButton"/>
+                            </Grid>
+                            <TextBlock Grid.Row="1"
+                                       x:Name="ExecAllowlistValidationText"
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                       TextWrapping="Wrap"
+                                       AutomationProperties.AutomationId="ExecAllowlistValidationText"
+                                       AutomationProperties.LiveSetting="Assertive"
+                                       Visibility="Collapsed"/>
+                        </Grid>
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
 
             <!-- ═════════ Node Allowlist (gateway-side, read-only) ═════════ -->
             <TextBlock x:Uid="PermissionsPage_TextBlock_69" Text="Node allowlist" Style="{StaticResource BodyStrongTextBlockStyle}"

@@ -1,4 +1,5 @@
 using OpenClawTray.Services;
+using OpenClaw.Shared.ExecApprovals;
 
 namespace OpenClawTray.Presentation;
 
@@ -10,14 +11,21 @@ namespace OpenClawTray.Presentation;
 /// </summary>
 internal sealed class AppServiceContext
 {
-    public AppServiceContext(IUiDispatcher dispatcher, IAppCommands appCommands, SettingsManager settings)
+    public AppServiceContext(
+        IUiDispatcher dispatcher,
+        IAppCommands appCommands,
+        SettingsManager settings,
+        ExecApprovalsStore execApprovalsStore)
     {
         Dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         AppCommands = appCommands ?? throw new ArgumentNullException(nameof(appCommands));
         Settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        ExecApprovalsStore = execApprovalsStore
+            ?? throw new ArgumentNullException(nameof(execApprovalsStore));
     }
 
     public IUiDispatcher Dispatcher { get; }
     public IAppCommands AppCommands { get; }
     public SettingsManager Settings { get; }
+    public ExecApprovalsStore ExecApprovalsStore { get; }
 }

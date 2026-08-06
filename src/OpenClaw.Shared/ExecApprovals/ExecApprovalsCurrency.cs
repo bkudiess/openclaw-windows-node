@@ -17,18 +17,18 @@ internal sealed class ExecApprovalsCurrency
     private readonly ExecSecurity _security;
     private readonly ExecAsk _ask;
     private readonly ExecSecurity _askFallback;
-    private readonly HashSet<string> _allowlistPatterns;
+    private readonly HashSet<ExecAllowlistRuleKey> _allowlistRules;
 
     private ExecApprovalsCurrency(
         ExecSecurity security,
         ExecAsk ask,
         ExecSecurity askFallback,
-        HashSet<string> allowlistPatterns)
+        HashSet<ExecAllowlistRuleKey> allowlistRules)
     {
         _security = security;
         _ask = ask;
         _askFallback = askFallback;
-        _allowlistPatterns = allowlistPatterns;
+        _allowlistRules = allowlistRules;
     }
 
     public static ExecApprovalsCurrency Capture(ExecApprovalsResolved resolved)
@@ -36,7 +36,7 @@ internal sealed class ExecApprovalsCurrency
             resolved.Defaults.Security,
             resolved.Defaults.Ask,
             resolved.Defaults.AskFallback,
-            CollectPatterns(resolved));
+            CollectRules(resolved));
 
     /// <summary>
     /// True when <paramref name="fresh"/> has not tightened relative to the snapshot.
@@ -58,12 +58,12 @@ internal sealed class ExecApprovalsCurrency
         if (fresh.Defaults.AskFallback < _askFallback)
             return false;
 
-        if (_allowlistPatterns.Count > 0)
+        if (_allowlistRules.Count > 0)
         {
-            var freshPatterns = CollectPatterns(fresh);
-            foreach (var pattern in _allowlistPatterns)
+            var freshRules = CollectRules(fresh);
+            foreach (var rule in _allowlistRules)
             {
-                if (!freshPatterns.Contains(pattern))
+                if (!freshRules.Contains(rule))
                     return false;
             }
         }
@@ -71,14 +71,16 @@ internal sealed class ExecApprovalsCurrency
         return true;
     }
 
-    private static HashSet<string> CollectPatterns(ExecApprovalsResolved resolved)
+    private static HashSet<ExecAllowlistRuleKey> CollectRules(
+        ExecApprovalsResolved resolved)
     {
-        var patterns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var rules = new HashSet<ExecAllowlistRuleKey>(
+            ExecAllowlistRuleIdentity.AuthorityComparer);
         foreach (var entry in resolved.Allowlist)
         {
             if (!string.IsNullOrWhiteSpace(entry.Pattern))
-                patterns.Add(entry.Pattern!);
+                rules.Add(ExecAllowlistRuleIdentity.From(entry));
         }
-        return patterns;
+        return rules;
     }
 }

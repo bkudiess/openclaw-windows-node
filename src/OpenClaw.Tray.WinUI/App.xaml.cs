@@ -75,6 +75,7 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         new Dictionary<Type, Type>
         {
             [typeof(Pages.SettingsPage)] = typeof(SettingsPageViewModel),
+            [typeof(Pages.PermissionsPage)] = typeof(PermissionsPageViewModel),
         };
 
     /// <summary>The root service provider, or null before startup / after shutdown.</summary>
@@ -471,7 +472,11 @@ public partial class App : Application, OpenClawTray.Services.IAppCommands
         }
 
         var dispatcher = new WinUIDispatcher(_dispatcherQueue);
-        var context = new AppServiceContext(dispatcher, this, _settings);
+        var context = new AppServiceContext(
+            dispatcher,
+            this,
+            _settings,
+            ExecApprovalsStore);
 
         var services = new ServiceCollection();
         services.AddOpenClawTrayCore(context);

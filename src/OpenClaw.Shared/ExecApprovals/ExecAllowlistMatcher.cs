@@ -25,16 +25,31 @@ internal static class ExecAllowlistMatcher
         ExecCommandResolution resolution)
     {
         var target = NormalizeSeparators(resolution.ResolvedPath ?? resolution.RawExecutable);
+        ExecAllowlistEntry? pathOnlyMatch = null;
         foreach (var entry in entries)
         {
             var pattern = entry.Pattern;
             if (string.IsNullOrWhiteSpace(pattern)) continue;
             var normalizedPattern = NormalizeSeparators(pattern);
             if (!IsValidNormalizedPattern(normalizedPattern)) continue;
-            if (s_regexCache.GetOrAdd(normalizedPattern, BuildPatternRegex).IsMatch(target))
+            if (!s_regexCache.GetOrAdd(normalizedPattern, BuildPatternRegex).IsMatch(target))
+                continue;
+
+            if (string.IsNullOrEmpty(entry.ArgPattern))
+            {
+                if (string.Equals(
+                        entry.Source,
+                        ExecAllowlistEntry.AllowAlwaysSource,
+                        StringComparison.Ordinal))
+                    continue;
+                pathOnlyMatch ??= entry;
+                continue;
+            }
+
+            if (ExecArgPattern.Matches(entry.ArgPattern, resolution.Argv))
                 return entry;
         }
-        return null;
+        return pathOnlyMatch;
     }
 
     // Returns one matching entry per resolution in input order.

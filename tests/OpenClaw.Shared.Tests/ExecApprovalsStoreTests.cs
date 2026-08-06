@@ -936,6 +936,79 @@ public class ExecApprovalsStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task AddAllowlistEntryAsync_SamePathDifferentArgs_PreservesBothGeneratedRules()
+    {
+        WriteFile(MinimalFile());
+        var store = Store();
+        var statusArgs = ExecArgPattern.BuildHashed(["git.exe", "status"]);
+        var logArgs = ExecArgPattern.BuildHashed(["git.exe", "log"]);
+
+        Assert.True(await store.AddAllowlistEntryAsync(
+            "main",
+            "**/git.exe",
+            statusArgs,
+            ExecAllowlistEntry.AllowAlwaysSource));
+        Assert.True(await store.AddAllowlistEntryAsync(
+            "main",
+            "**/git.exe",
+            logArgs,
+            ExecAllowlistEntry.AllowAlwaysSource));
+
+        var entries = store.ResolveReadOnly("main").Allowlist;
+        Assert.Equal(2, entries.Count);
+        Assert.Contains(entries, entry =>
+            entry.ArgPattern == statusArgs
+            && entry.Source == ExecAllowlistEntry.AllowAlwaysSource);
+        Assert.Contains(entries, entry =>
+            entry.ArgPattern == logArgs
+            && entry.Source == ExecAllowlistEntry.AllowAlwaysSource);
+    }
+
+    [Fact]
+    public async Task AddManualEntry_ConvertsLegacyGeneratedPathOnlyRule()
+    {
+        WriteFile("""
+        {
+          "version": 1,
+          "agents": {
+            "main": {
+              "allowlist": [{
+                "pattern": "**/git.exe",
+                "source": "allow-always"
+              }]
+            }
+          }
+        }
+        """);
+        var store = Store();
+
+        Assert.True(await store.AddAllowlistEntryAsync("main", "**/git.exe"));
+
+        var entry = Assert.Single(store.ResolveReadOnly("main").Allowlist);
+        Assert.Null(entry.Source);
+        Assert.Null(entry.ArgPattern);
+    }
+
+    [Fact]
+    public void NormalizeAllowlistEntries_ManualRuleWinsDuplicateLegacyGeneratedRule()
+    {
+        var result = ExecApprovalsStore.NormalizeAllowlistEntries(
+            [
+                new ExecAllowlistEntry
+                {
+                    Pattern = "**/git.exe",
+                    Source = ExecAllowlistEntry.AllowAlwaysSource,
+                },
+                new ExecAllowlistEntry { Pattern = "**/GIT.EXE" },
+            ],
+            dropInvalid: true);
+
+        var entry = Assert.Single(result);
+        Assert.Null(entry.Source);
+        Assert.Equal("**/GIT.EXE", entry.Pattern);
+    }
+
+    [Fact]
     public async Task AddAllowlistEntryAsync_EmptyOrWhitespacePattern_ReturnsFalse()
     {
         WriteFile(MinimalFile());
@@ -1038,6 +1111,52 @@ public class ExecApprovalsStoreTests : IDisposable
 
         Assert.False(result);
         Assert.Null(store.ResolveReadOnly("main").Allowlist[0].LastUsedAt);
+    }
+
+    [Fact]
+    public async Task RecordAllowlistUseAsync_ExactGeneratedRule_UpdatesOnlyMatchedArgs()
+    {
+        var statusId = Guid.NewGuid();
+        var logId = Guid.NewGuid();
+        var statusArgs = ExecArgPattern.BuildHashed(["git.exe", "status"]);
+        var logArgs = ExecArgPattern.BuildHashed(["git.exe", "log"]);
+        WriteFile($$"""
+        {
+          "version": 1,
+          "agents": {
+            "main": {
+              "allowlist": [
+                {
+                  "id": "{{statusId}}",
+                  "pattern": "**/git.exe",
+                  "source": "allow-always",
+                  "argPattern": "{{statusArgs}}"
+                },
+                {
+                  "id": "{{logId}}",
+                  "pattern": "**/git.exe",
+                  "source": "allow-always",
+                  "argPattern": "{{logArgs}}"
+                }
+              ]
+            }
+          }
+        }
+        """);
+        var store = Store();
+        var matched = store.ResolveReadOnly("main").Allowlist.Single(
+            entry => entry.Id == statusId);
+
+        Assert.True(await store.RecordAllowlistUseAsync(
+            "main",
+            matched,
+            @"C:\Program Files\Git\cmd\git.exe"));
+
+        var entries = store.ResolveReadOnly("main").Allowlist;
+        var status = entries.Single(entry => entry.Id == statusId);
+        var log = entries.Single(entry => entry.Id == logId);
+        Assert.NotNull(status.LastUsedAt);
+        Assert.Null(log.LastUsedAt);
     }
 
     [Fact]

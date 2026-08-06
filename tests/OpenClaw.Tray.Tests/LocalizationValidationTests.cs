@@ -603,6 +603,12 @@ public class LocalizationValidationTests
         || key.StartsWith("ChannelsPage_", StringComparison.Ordinal)
         || key.StartsWith("DiagnosticsPage_", StringComparison.Ordinal)
         || key.StartsWith("SettingsRow_", StringComparison.Ordinal)
+        // Exec-approval V2 stabilization copy is seeded in English across all
+        // locales for the security-sensitive rollout. Keeping every key present
+        // preserves strict resource parity until reviewed translations land.
+        || key.StartsWith("PermissionsPage_Exec", StringComparison.Ordinal)
+        || key.StartsWith("PermissionsPage_AddExecAllowlist", StringComparison.Ordinal)
+        || key.StartsWith("PermissionsPage_RemoveExecAllowlist", StringComparison.Ordinal)
         // Title-bar status pill + notifications bell flyout strings. Seeded
         // English-only across all five .resw files using the deferred-translation
         // pattern; translations land in a follow-up.

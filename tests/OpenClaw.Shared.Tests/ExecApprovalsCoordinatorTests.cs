@@ -775,7 +775,7 @@ public class ExecApprovalsCoordinatorTests : IDisposable
             evaluationRawCommand: null,
             resolution: resolution,
             allowlistResolutions: Array.Empty<ExecCommandResolution>(),
-            allowAlwaysPatterns: Array.Empty<string>(),
+            allowAlwaysPatterns: Array.Empty<ExecAllowAlwaysPattern>(),
             cwd: null, timeoutMs, env: null, agentId: null, sessionKey: null);
 
     [Fact]
@@ -1213,8 +1213,98 @@ public class ExecApprovalsCoordinatorTests : IDisposable
         Assert.True(result.IsAllow);
         var resolved = new ExecApprovalsStore(_dir, NullLogger.Instance).ResolveReadOnly("main");
         Assert.Single(resolved.Allowlist);
-        Assert.NotNull(resolved.Allowlist[0].Pattern);
-        Assert.Contains("where", resolved.Allowlist[0].Pattern, StringComparison.OrdinalIgnoreCase);
+        var entry = resolved.Allowlist[0];
+        Assert.NotNull(entry.Pattern);
+        Assert.Contains("where", entry.Pattern, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(ExecAllowlistEntry.AllowAlwaysSource, entry.Source);
+        Assert.Equal(
+            ExecArgPattern.BuildHashed(["where"]),
+            entry.ArgPattern);
+    }
+
+    [Fact]
+    public async Task GeneratedAllowAlways_ExactArgsReuseButChangedArgsRequireApproval()
+    {
+        var argPattern = ExecArgPattern.BuildHashed(["where", "where.exe"]);
+        WriteStoreFile($$"""
+        {
+          "version": 1,
+          "agents": {
+            "main": {
+              "security": "allowlist",
+              "ask": "on-miss",
+              "askFallback": "deny",
+              "allowlist": [{
+                "pattern": "**/where.exe",
+                "source": "allow-always",
+                "argPattern": "{{argPattern}}"
+              }]
+            }
+          }
+        }
+        """);
+        var coordinator = MakeCoordinator();
+
+        var exact = await coordinator.HandleAsync(
+            Req("""{"command":["where","where.exe"]}"""),
+            "arg-exact");
+        var changed = await coordinator.HandleAsync(
+            Req("""{"command":["where","cmd.exe"]}"""),
+            "arg-changed");
+
+        Assert.True(exact.IsAllow);
+        Assert.Equal(ExecApprovalV2Code.UserDenied, changed.Code);
+    }
+
+    [Fact]
+    public async Task LegacyGeneratedPathOnlyEntry_DoesNotAuthorize()
+    {
+        WriteStoreFile("""
+        {
+          "version": 1,
+          "agents": {
+            "main": {
+              "security": "allowlist",
+              "ask": "on-miss",
+              "askFallback": "deny",
+              "allowlist": [{
+                "pattern": "**/where.exe",
+                "source": "allow-always"
+              }]
+            }
+          }
+        }
+        """);
+
+        var result = await MakeCoordinator().HandleAsync(
+            Req("""{"command":["where","where.exe"]}"""),
+            "arg-legacy");
+
+        Assert.Equal(ExecApprovalV2Code.UserDenied, result.Code);
+    }
+
+    [Fact]
+    public async Task ManualPathOnlyEntry_RemainsBroad()
+    {
+        WriteStoreFile("""
+        {
+          "version": 1,
+          "agents": {
+            "main": {
+              "security": "allowlist",
+              "ask": "on-miss",
+              "askFallback": "deny",
+              "allowlist": [{ "pattern": "**/where.exe" }]
+            }
+          }
+        }
+        """);
+
+        var result = await MakeCoordinator().HandleAsync(
+            Req("""{"command":["where","cmd.exe"]}"""),
+            "arg-manual");
+
+        Assert.True(result.IsAllow);
     }
 
     // B. AllowAlways + security=full → guard fails, no allowlist entry written.

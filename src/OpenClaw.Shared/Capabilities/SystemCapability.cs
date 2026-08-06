@@ -552,21 +552,21 @@ public class SystemCapability : NodeCapabilityBase
 
             ExecApprovalsAgent? currentAgent = null;
             current.Agents?.TryGetValue(agentId, out currentAgent);
-            var currentPatterns = new HashSet<string>(
+            var currentRules = new HashSet<ExecAllowlistRuleKey>(
                 (currentAgent?.Allowlist ?? [])
-                    .Select(entry => entry.Pattern?.Trim())
-                    .Where(pattern => !string.IsNullOrWhiteSpace(pattern))!,
-                StringComparer.OrdinalIgnoreCase);
+                    .Where(entry => !string.IsNullOrWhiteSpace(entry.Pattern))
+                    .Select(ExecAllowlistRuleIdentity.From),
+                ExecAllowlistRuleIdentity.AuthorityComparer);
 
             foreach (var entry in agent.Allowlist ?? [])
             {
                 var pattern = entry.Pattern?.Trim();
                 if (string.IsNullOrWhiteSpace(pattern))
                     return "Empty allowlist patterns are not permitted.";
-                if (!currentPatterns.Contains(pattern))
+                if (!currentRules.Contains(ExecAllowlistRuleIdentity.From(entry)))
                 {
                     return
-                        $"Remote exec approval updates cannot add or change allowlist entries for agent '{agentId}'.";
+                        $"Remote exec approval updates cannot add or change allowlist authority for agent '{agentId}'.";
                 }
             }
         }

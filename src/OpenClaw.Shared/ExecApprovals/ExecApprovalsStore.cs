@@ -116,7 +116,14 @@ public sealed class ExecApprovalsStore
     // Returns true if the entry is present after the call (added or already there),
     // false if the pattern was empty or the write was skipped/failed.
     // Pattern validation is non-empty only — parity with macOS.
-    public async Task<bool> AddAllowlistEntryAsync(string? agentId, string pattern)
+    public Task<bool> AddAllowlistEntryAsync(string? agentId, string pattern) =>
+        AddAllowlistEntryAsync(agentId, pattern, argPattern: null, source: null);
+
+    internal async Task<bool> AddAllowlistEntryAsync(
+        string? agentId,
+        string pattern,
+        string? argPattern,
+        string? source)
     {
         var trimmed = pattern?.Trim();
         if (string.IsNullOrEmpty(trimmed))
@@ -124,6 +131,18 @@ public sealed class ExecApprovalsStore
             _logger.Debug("[EXEC-APPROVALS] AddAllowlistEntry skipped: empty pattern");
             return false;
         }
+        var normalizedArgPattern = string.IsNullOrEmpty(argPattern)
+            ? null
+            : argPattern;
+        var normalizedSource = string.IsNullOrEmpty(source)
+            ? null
+            : source;
+        var candidate = new ExecAllowlistEntry
+        {
+            Pattern = trimmed,
+            ArgPattern = normalizedArgPattern,
+            Source = normalizedSource,
+        };
         var key = NormalizeAgentId(agentId);
         bool alreadyPresent = false;
         var wrote = await UpdateFileAsync(file =>
@@ -135,17 +154,42 @@ public sealed class ExecApprovalsStore
                 agents[key] = agent;
             }
             var allowlist = agent.Allowlist ??= [];
-            // Dedup case-insensitive — consistent with NormalizeAllowlistEntries (OrdinalIgnoreCase HashSet).
-            if (allowlist.Any(e => string.Equals(
-                    e.Pattern?.Trim(), trimmed, StringComparison.OrdinalIgnoreCase)))
+            var existing = allowlist.FirstOrDefault(entry =>
+                ExecAllowlistRuleIdentity.MatchKeyEquals(entry, candidate));
+            if (existing is not null)
             {
-                alreadyPresent = true;
-                return false;
+                if (normalizedSource is null)
+                {
+                    if (string.Equals(
+                            existing.Source,
+                            ExecAllowlistEntry.AllowAlwaysSource,
+                            StringComparison.Ordinal)
+                        && normalizedArgPattern is null)
+                    {
+                        existing.Source = null;
+                        return true;
+                    }
+                    alreadyPresent = true;
+                    return false;
+                }
+                if (string.Equals(
+                        existing.Source,
+                        normalizedSource,
+                        StringComparison.Ordinal))
+                {
+                    alreadyPresent = true;
+                    return false;
+                }
+                existing.ArgPattern = normalizedArgPattern;
+                existing.Source = normalizedSource;
+                return true;
             }
             allowlist.Add(new ExecAllowlistEntry
             {
                 Id = Guid.NewGuid(),  // parity with macOS UUID()
                 Pattern = trimmed,
+                ArgPattern = normalizedArgPattern,
+                Source = normalizedSource,
                 // LastUsedAt intentionally absent: macOS addAllowlistEntry only sets {id, pattern}.
                 // RecordAllowlistUseAsync stamps it on first successful use.
             });
@@ -180,6 +224,40 @@ public sealed class ExecApprovalsStore
                         continue;
                     entry.LastUsedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                     entry.LastResolvedPath = resolvedPath;  // Id and Pattern preserved
+                    changed = true;
+                }
+            }
+            return changed;
+        });
+    }
+
+    internal Task<bool> RecordAllowlistUseAsync(
+        string? agentId,
+        ExecAllowlistEntry matchedEntry,
+        string? resolvedPath)
+    {
+        ArgumentNullException.ThrowIfNull(matchedEntry);
+        var key = NormalizeAgentId(agentId);
+        var buckets = key == "*" ? new[] { "*" } : new[] { key, "*" };
+        return UpdateFileAsync(file =>
+        {
+            var changed = false;
+            foreach (var bucketKey in buckets)
+            {
+                if (!file.Agents!.TryGetValue(bucketKey, out var agent)
+                    || agent?.Allowlist is null)
+                    continue;
+                foreach (var entry in agent.Allowlist)
+                {
+                    var matches = matchedEntry.Id.HasValue
+                        ? entry.Id == matchedEntry.Id
+                        : ExecAllowlistRuleIdentity.AuthorityEquals(
+                            entry,
+                            matchedEntry);
+                    if (!matches)
+                        continue;
+                    entry.LastUsedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                    entry.LastResolvedPath = resolvedPath;
                     changed = true;
                 }
             }
@@ -766,20 +844,45 @@ public sealed class ExecApprovalsStore
     internal static List<ExecAllowlistEntry> NormalizeAllowlistEntries(
         IEnumerable<ExecAllowlistEntry> entries, bool dropInvalid)
     {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seen = new Dictionary<ExecAllowlistRuleKey, int>(
+            ExecAllowlistRuleIdentity.MatchComparer);
         var result = new List<ExecAllowlistEntry>();
         foreach (var entry in entries)
         {
             var pattern = entry.Pattern?.Trim();
             if (string.IsNullOrEmpty(pattern)) continue;
-            if (!seen.Add(pattern)) continue;
-            result.Add(pattern == entry.Pattern ? entry : new ExecAllowlistEntry
+            var normalized = new ExecAllowlistEntry
             {
                 Id = entry.Id,
                 Pattern = pattern,
+                Source = string.IsNullOrEmpty(entry.Source)
+                    ? null
+                    : entry.Source,
+                ArgPattern = string.IsNullOrEmpty(entry.ArgPattern)
+                    ? null
+                    : entry.ArgPattern,
                 LastUsedAt = entry.LastUsedAt,
                 LastResolvedPath = entry.LastResolvedPath,
-            });
+            };
+            var key = ExecAllowlistRuleIdentity.From(normalized);
+            if (seen.TryGetValue(key, out var existingIndex))
+            {
+                var existing = result[existingIndex];
+                if (string.Equals(
+                        existing.Source,
+                        ExecAllowlistEntry.AllowAlwaysSource,
+                        StringComparison.Ordinal)
+                    && !string.Equals(
+                        normalized.Source,
+                        ExecAllowlistEntry.AllowAlwaysSource,
+                        StringComparison.Ordinal))
+                {
+                    result[existingIndex] = normalized;
+                }
+                continue;
+            }
+            seen[key] = result.Count;
+            result.Add(normalized);
         }
         return result;
     }

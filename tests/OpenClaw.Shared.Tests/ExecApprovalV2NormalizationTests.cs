@@ -530,7 +530,10 @@ public class ExecApprovalV2NormalizationTests
         var patterns = ExecCommandResolver.ResolveAllowAlwaysPatterns(
             ["echo", "hello"], cwd: null, env: null);
         Assert.Single(patterns);
-        Assert.Contains("echo", patterns[0], StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("echo", patterns[0].Pattern, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            ExecArgPattern.BuildHashed(["echo", "hello"]),
+            patterns[0].ArgPattern);
     }
 
     [Fact]
@@ -539,8 +542,14 @@ public class ExecApprovalV2NormalizationTests
         // echo deduplicates → 1 pattern.
         var patterns = ExecCommandResolver.ResolveAllowAlwaysPatterns(
             ["bash", "-c", "echo foo && echo bar"], cwd: null, env: null);
-        Assert.Single(patterns);
-        Assert.Contains("echo", patterns[0], StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, patterns.Count);
+        Assert.All(
+            patterns,
+            pattern => Assert.Contains(
+                "echo",
+                pattern.Pattern,
+                StringComparison.OrdinalIgnoreCase));
+        Assert.NotEqual(patterns[0].ArgPattern, patterns[1].ArgPattern);
     }
 
     [Fact]

@@ -477,6 +477,39 @@ would preserve parallel authorization paths and bypass drift.
 migration UI. Revisit this decision only if measured support impact justifies a separate
 compatibility feature.
 
+#### Companion UI contract for V2
+
+The Permissions page edits the same file-backed V2 snapshot used by the evaluator,
+`system.execApprovals.get/set`, local MCP, and the Gateway relay. It exposes:
+
+- defaults, wildcard (`*`), `main`, and existing agent scopes;
+- `security`, `ask`, `askFallback`, and `autoAllowSkills`;
+- executable-path allowlist entries for wildcard and agent scopes;
+- compare-and-swap persistence with conflict reload and retry.
+
+V2 allowlist entries match resolved executable paths. The UI rejects legacy command-text
+patterns such as `hostname` or `Get-*` and explains that a path pattern such as
+`**/hostname.exe` is required. Invalid input and persistence failures must remain visible;
+the page must not optimistically report a rule as saved.
+
+Generated **Always Allow** entries also bind the exact approved argv tail. They persist
+`source: "allow-always"` and an upstream-compatible
+`argPattern: "sha256:argv:<digest>"`; matching requires both the executable path and
+the length-delimited UTF-8 argument hash. A changed argument list misses and follows
+the configured prompt/fallback behavior. Legacy generated path-only entries are ignored
+because they could authorize changed arguments after upgrade. Hand-authored path-only
+entries have no `source` or `argPattern` and intentionally remain broad.
+
+The durable tuple does not bind cwd or file contents across later runs. The approved
+execution still pins the resolved executable and preserves the exact argv for the current
+launch. Canonical cwd filesystem identity and mutable script content revalidation remain
+separate launch-boundary hardening.
+
+V2 does not currently define explicit denylist entries. Restoring deny semantics is a
+separate security design: durable denies must bind resolved executable identity and
+canonical argv, and destructive-operation guarantees require OS-enforced sandbox policy
+rather than command-name matching.
+
 #### Decision: version the low-level `system.run` boundary as canonical argv
 
 The V2 low-level node contract accepts `command` only as `string[]` canonical argv.
