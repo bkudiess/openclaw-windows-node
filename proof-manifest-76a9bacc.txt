@@ -1,0 +1,11 @@
+proof_manifest_version=1
+commit=76a9baccc3d3bec28588a372ce01825ba4734d45
+base=862c99586526de19194676073922a20e5d46349a
+proof_type=source-derived
+real_gateway_capture=false
+disclaimer=Source-derived synthetic parser/provider/reducer/#1092 UIA proof. Not a real Gateway capture.
+test_command=dotnet test .\tests\OpenClaw.Tray.UITests\OpenClaw.Tray.UITests.csproj -c Debug -p:Platform=x64 --no-restore --filter FullyQualifiedName~NativeToolIdentityScreenshotProofTests
+test_result=passed 1/1
+privacy_inspection=passed: nonblank synthetic UI only; no credentials, tokens, secrets, runtime identifiers, raw JSON, or private user data visible
+file=native-tool-identity-76a9bacc.png bytes=81215 sha256=3e1263a5cbef9bbb69cf8d15cc1ead069c5ddc770ac283d003f4923bfec328fc dimensions=1978x1415
+file=native-tool-identity-76a9bacc.txt bytes=788 sha256=f7228624e42894bb6dc290d4f800bdb085f05b67f99c83c093c79f32e755fc94

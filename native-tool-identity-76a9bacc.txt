@@ -1,0 +1,15 @@
+proof_type=source-derived
+real_gateway_capture=false
+disclaimer=Source-derived synthetic parser/provider/reducer/#1092 UIA proof. Not a real Gateway capture.
+commit=76a9baccc3d3bec28588a372ce01825ba4734d45
+base=862c99586526de19194676073922a20e5d46349a
+test=NativeToolIdentityScreenshotProofTests.SyntheticNativeRows_RenderTrustedIdentitySafeInputAndTruthfulFallback
+UIA expanded="Activity: Ran 2 commands, used Apply Patch. 3 tools. Collapsed."
+UIA expanded="Tool call Bash. Done."
+UIA expanded="Tool call Apply Patch. Done."
+UIA expanded="Tool call Tool. Done."
+UIA input="command: powershell -NoProfile -Command Get-ChildItem .\src"
+UIA input="file_path: src\OpenClaw.Chat\ChatTimelineReducer.cs"
+UIA input="command: [redacted]"
+screenshot=native-tool-identity-76a9bacc.png
+result=pass
