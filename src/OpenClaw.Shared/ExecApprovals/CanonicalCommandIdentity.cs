@@ -32,7 +32,7 @@ public sealed class CanonicalCommandIdentity
     public IReadOnlyList<ExecCommandResolution> AllowlistResolutions { get; }
 
     // Suggested allowlist patterns for prompt/UI. Not a security decision.
-    public IReadOnlyList<string> AllowAlwaysPatterns { get; }
+    public IReadOnlyList<ExecAllowAlwaysPattern> AllowAlwaysPatterns { get; }
 
     // ── Request context (carried from ValidatedRunRequest) ────────────────────
 
@@ -48,7 +48,7 @@ public sealed class CanonicalCommandIdentity
         string? evaluationRawCommand,
         ExecCommandResolution? resolution,
         IReadOnlyList<ExecCommandResolution> allowlistResolutions,
-        IReadOnlyList<string> allowAlwaysPatterns,
+        IReadOnlyList<ExecAllowAlwaysPattern> allowAlwaysPatterns,
         string? cwd,
         int timeoutMs,
         IReadOnlyDictionary<string, string>? env,

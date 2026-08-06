@@ -6879,4 +6879,56 @@
   <data name="PermissionsPage_ExecPolicySaveFailed" xml:space="preserve">
     <value>保存失败</value>
   </data>
+  <data name="PermissionsPage_ExecApprovalsHeader.Text" xml:space="preserve"><value>Exec approvals</value></data>
+  <data name="PermissionsPage_ExecApprovalsDescription.Text" xml:space="preserve"><value>Control command access, prompting, and executable-path allowlists for defaults or a specific agent.</value></data>
+  <data name="PermissionsPage_ExecPolicyScopeCard.Header" xml:space="preserve"><value>Policy scope</value></data>
+  <data name="PermissionsPage_ExecPolicyScopeCard.Description" xml:space="preserve"><value>Defaults apply to every agent. All agents and agent-specific scopes can override them.</value></data>
+  <data name="PermissionsPage_ExecSecurityCard.Header" xml:space="preserve"><value>Command access</value></data>
+  <data name="PermissionsPage_ExecSecurityCard.Description" xml:space="preserve"><value>Deny commands, allow only listed executables, or always allow commands in this scope.</value></data>
+  <data name="PermissionsPage_ExecAskCard.Header" xml:space="preserve"><value>Prompt behavior</value></data>
+  <data name="PermissionsPage_ExecAskCard.Description" xml:space="preserve"><value>Choose when OpenClaw asks before running a command.</value></data>
+  <data name="PermissionsPage_ExecFallbackCard.Header" xml:space="preserve"><value>Fallback when prompting is unavailable</value></data>
+  <data name="PermissionsPage_ExecFallbackCard.Description" xml:space="preserve"><value>Applied when the node cannot show an approval prompt. Deny is the safest choice.</value></data>
+  <data name="PermissionsPage_ExecAutoAllowSkillsCard.Header" xml:space="preserve"><value>Allow trusted skill executables</value></data>
+  <data name="PermissionsPage_ExecAutoAllowSkillsCard.Description" xml:space="preserve"><value>Allow executables declared by trusted skills without adding each path manually.</value></data>
+  <data name="PermissionsPage_ExecAllowlistExpander.Header" xml:space="preserve"><value>Allowed executables</value></data>
+  <data name="PermissionsPage_ExecAllowlistExpander.Description" xml:space="preserve"><value>Allowlist patterns match resolved executable paths. Use a path separator and wildcards such as **/git.exe.</value></data>
+  <data name="PermissionsPage_ExecAllowlistDefaultsInfo.Header" xml:space="preserve"><value>Select an agent scope to edit allowlist entries</value></data>
+  <data name="PermissionsPage_ExecAllowlistDefaultsInfo.Description" xml:space="preserve"><value>Defaults configure policy behavior. Allowlist entries belong to All agents or a specific agent.</value></data>
+  <data name="PermissionsPage_ExecAllowlistEmpty.Header" xml:space="preserve"><value>No allowed executables</value></data>
+  <data name="PermissionsPage_ExecAllowlistEmpty.Description" xml:space="preserve"><value>Commands that require approval will follow the prompt behavior above.</value></data>
+  <data name="PermissionsPage_ExecAllowlistRulesCard.Header" xml:space="preserve"><value>Allowed paths</value></data>
+  <data name="PermissionsPage_ExecAllowlistRulesCard.Description" xml:space="preserve"><value>Each entry allows the resolved executable path for this scope.</value></data>
+  <data name="PermissionsPage_ExecAllowlistAddCard.Header" xml:space="preserve"><value>Add allowed executable</value></data>
+  <data name="PermissionsPage_ExecAllowlistAddCard.Description" xml:space="preserve"><value>Enter an executable path glob. Command-text patterns such as hostname or Get-* are not valid V2 rules.</value></data>
+  <data name="PermissionsPage_AddExecAllowlistButton.Content" xml:space="preserve"><value>Add</value></data>
+  <data name="PermissionsPage_ExecAllowlistLastResolvedFormat" xml:space="preserve"><value>Last resolved path: {0}</value></data>
+  <data name="PermissionsPage_ExecAllowlistArgumentsRestricted" xml:space="preserve"><value>Arguments restricted to the approved command.</value></data>
+  <data name="PermissionsPage_RemoveExecAllowlistAutomationNameFormat" xml:space="preserve"><value>Remove allowed executable {0}</value></data>
+  <data name="PermissionsPage_ExecAllowlistPatternRequired" xml:space="preserve"><value>Enter an executable path pattern.</value></data>
+  <data name="PermissionsPage_ExecAllowlistPatternInvalid" xml:space="preserve"><value>Use an executable path pattern with a path separator, such as **/git.exe or C:\Tools\*.exe. Command-text patterns are not supported.</value></data>
+  <data name="PermissionsPage_ExecPolicySavedToFormat" xml:space="preserve"><value>Saved to {0}</value></data>
+  <data name="PermissionsPage_ExecPolicyOperationFailed" xml:space="preserve"><value>Exec approvals could not be updated</value></data>
+  <data name="PermissionsPage_ExecPolicyReadFailed" xml:space="preserve"><value>OpenClaw could not load the active exec approvals policy.</value></data>
+  <data name="PermissionsPage_ExecPolicyConflict" xml:space="preserve"><value>The policy changed while you were editing it. The latest policy was reloaded. Try the change again.</value></data>
+  <data name="PermissionsPage_ExecPolicyRulesUnavailableForDefaults" xml:space="preserve"><value>Allowlist entries belong to All agents or a specific agent, not Defaults.</value></data>
+  <data name="PermissionsPage_ExecPolicySaveFailedDetailed" xml:space="preserve"><value>OpenClaw could not save the policy. The last saved values were restored.</value></data>
+  <data name="PermissionsPage_ExecPolicyErrorWithPathFormat" xml:space="preserve"><value>{0} Policy file: {1}</value></data>
+  <data name="PermissionsPage_ExecPolicy_Inherit" xml:space="preserve"><value>Use inherited value</value></data>
+  <data name="PermissionsPage_ExecSecurity_Deny" xml:space="preserve"><value>Deny</value></data>
+  <data name="PermissionsPage_ExecSecurity_Allowlist" xml:space="preserve"><value>Allow listed executables</value></data>
+  <data name="PermissionsPage_ExecSecurity_Full" xml:space="preserve"><value>Always allow</value></data>
+  <data name="PermissionsPage_ExecAsk_Off" xml:space="preserve"><value>Never ask</value></data>
+  <data name="PermissionsPage_ExecAsk_OnMiss" xml:space="preserve"><value>Ask on allowlist miss</value></data>
+  <data name="PermissionsPage_ExecAsk_Always" xml:space="preserve"><value>Always ask</value></data>
+  <data name="PermissionsPage_ExecAsk_Deny" xml:space="preserve"><value>Deny when approval is required</value></data>
+  <data name="PermissionsPage_ExecFallback_Deny" xml:space="preserve"><value>Deny</value></data>
+  <data name="PermissionsPage_ExecFallback_Allowlist" xml:space="preserve"><value>Allow only allowlist matches</value></data>
+  <data name="PermissionsPage_ExecFallback_Full" xml:space="preserve"><value>Allow</value></data>
+  <data name="PermissionsPage_ExecBoolean_Off" xml:space="preserve"><value>Off</value></data>
+  <data name="PermissionsPage_ExecBoolean_On" xml:space="preserve"><value>On</value></data>
+  <data name="PermissionsPage_ExecScope_Defaults" xml:space="preserve"><value>Defaults</value></data>
+  <data name="PermissionsPage_ExecScope_AllAgents" xml:space="preserve"><value>All agents</value></data>
+  <data name="PermissionsPage_ExecScope_MainAgent" xml:space="preserve"><value>Main agent</value></data>
+  <data name="PermissionsPage_ExecScope_AgentFormat" xml:space="preserve"><value>Agent: {0}</value></data>
 </root>

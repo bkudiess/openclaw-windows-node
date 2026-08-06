@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using OpenClaw.Shared;
+using OpenClaw.Shared.ExecApprovals;
 using OpenClawTray.Presentation;
 using OpenClawTray.Services;
 
@@ -22,9 +24,14 @@ public sealed class AppServiceRegistrationTests
         dispatcher = new RecordingUiDispatcher();
         commands = new FakeAppCommands();
         settings = new SettingsManager(temp.Path);
+        var execApprovalsStore = new ExecApprovalsStore(temp.Path, NullLogger.Instance);
 
         var services = new ServiceCollection();
-        services.AddOpenClawTrayCore(new AppServiceContext(dispatcher, commands, settings));
+        services.AddOpenClawTrayCore(new AppServiceContext(
+            dispatcher,
+            commands,
+            settings,
+            execApprovalsStore));
         return services.BuildServiceProvider(new ServiceProviderOptions
         {
             ValidateScopes = true,
@@ -60,7 +67,7 @@ public sealed class AppServiceRegistrationTests
     }
 
     [Fact]
-    public void PageViewModels_AreTransient_AndReceiveInjectedServices()
+    public void PageViewModels_AreTransient_AndPolicyStoreIsRegistered()
     {
         var provider = BuildProvider(out var dispatcher, out var commands, out var settings, out var temp);
         using (provider)
@@ -72,12 +79,14 @@ public sealed class AppServiceRegistrationTests
 
             Assert.NotSame(first, second);
 
-            // The placeholder permissions view model still exposes its injected services, so use it
-            // to prove the transient page view models receive the registered singleton instances.
-            var permissions = scope.ServiceProvider.GetRequiredService<PermissionsPageViewModel>();
-            Assert.Same(dispatcher, permissions.Dispatcher);
-            Assert.Same(commands, permissions.AppCommands);
-            Assert.Same(settings, permissions.Settings);
+            var permissionsFirst =
+                scope.ServiceProvider.GetRequiredService<PermissionsPageViewModel>();
+            var permissionsSecond =
+                scope.ServiceProvider.GetRequiredService<PermissionsPageViewModel>();
+            Assert.NotSame(permissionsFirst, permissionsSecond);
+            Assert.Same(dispatcher, permissionsFirst.Dispatcher);
+            Assert.IsType<ExecApprovalsPolicyStore>(
+                provider.GetRequiredService<IExecApprovalsPolicyStore>());
         }
     }
 

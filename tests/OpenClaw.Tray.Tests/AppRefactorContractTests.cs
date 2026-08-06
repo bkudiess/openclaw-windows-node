@@ -422,16 +422,16 @@ public sealed class AppRefactorContractTests
     }
 
     [Fact]
-    public void PermissionsPage_ExecApprovals_UsesAppOwnedStoreWithCas()
+    public void PermissionsPage_ExecApprovals_StaysDelegatedToViewModel()
     {
         var root = TestRepositoryPaths.GetRepositoryRoot();
         var source = File.ReadAllText(Path.Combine(root, "src", "OpenClaw.Tray.WinUI", "Pages", "PermissionsPage.xaml.cs"));
 
-        Assert.Contains("CurrentApp.ExecApprovalsStore.GetSnapshotAsync()", source);
-        Assert.Contains("CurrentApp.ExecApprovalsStore.ReplaceAsync(expectedHash, file)", source);
-        Assert.Contains("ExecPolicyMutationKind.AddRule", source);
-        Assert.Contains("ExecPolicyMutationKind.RemoveRule", source);
-        Assert.DoesNotContain("main.Allowlist = _policyRules", source);
+        Assert.Contains("PermissionsPageViewModel", source);
+        Assert.Contains("AddAllowlistEntryAsync(", source);
+        Assert.Contains("RemoveAllowlistEntryAsync(", source);
+        Assert.DoesNotContain("CurrentApp.ExecApprovalsStore", source);
+        Assert.DoesNotContain("ReplaceAsync(", source);
         Assert.DoesNotContain("Path.Combine(CurrentApp.DataDirectoryPath, \"exec-approvals.json\")", source);
         Assert.DoesNotContain("File.WriteAllText(tmpPath", source);
     }
@@ -466,10 +466,22 @@ public sealed class AppRefactorContractTests
         var xaml = File.ReadAllText(Path.Combine(root, "src", "OpenClaw.Tray.WinUI", "Pages", "PermissionsPage.xaml"));
         var codeBehind = File.ReadAllText(Path.Combine(root, "src", "OpenClaw.Tray.WinUI", "Pages", "PermissionsPage.xaml.cs"));
 
-        Assert.Contains("AutomationProperties.Name=\"{Binding RemoveRuleAutomationName}\"", xaml);
-        Assert.Contains("AutomationProperties.AutomationId=\"{Binding RemoveRuleAutomationId}\"", xaml);
-        Assert.Contains("RemoveRuleAutomationName = $\"Remove rule {r.Pattern}\"", codeBehind);
-        Assert.Contains("RemoveRuleAutomationId = $\"RemoveExecPolicyRuleButton_{r.Index}\"", codeBehind);
+        Assert.Contains("AutomationProperties.Name=\"{Binding RemoveAutomationName}\"", xaml);
+        Assert.Contains("AutomationProperties.AutomationId=\"{Binding RemoveAutomationId}\"", xaml);
+        Assert.Contains("PermissionsPage_RemoveExecAllowlistAutomationNameFormat", codeBehind);
+        Assert.Contains("$\"RemoveExecAllowlistEntry_{index}\"", codeBehind);
+    }
+
+    [Fact]
+    public void PermissionsPage_ExecPolicyValidation_IsAccessible()
+    {
+        var root = TestRepositoryPaths.GetRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(root, "src", "OpenClaw.Tray.WinUI", "Pages", "PermissionsPage.xaml"));
+        var codeBehind = File.ReadAllText(Path.Combine(root, "src", "OpenClaw.Tray.WinUI", "Pages", "PermissionsPage.xaml.cs"));
+
+        Assert.Contains("AutomationProperties.LiveSetting=\"Assertive\"", xaml);
+        Assert.Contains("AutomationProperties.SetHelpText(", codeBehind);
+        Assert.Contains("AutomationEvents.LiveRegionChanged", codeBehind);
     }
 
     [Fact]

@@ -81,4 +81,46 @@ public class ExecApprovalsCurrencyTests
         Assert.False(snap.IsStillCurrent(
             Resolved(ExecSecurity.Full, ExecAsk.Always, ExecSecurity.Deny)));
     }
+
+    [Fact]
+    public void GeneratedRuleArgPatternChanged_IsNotCurrent()
+    {
+        var original = ExecArgPattern.BuildHashed(["git.exe", "status"]);
+        var changed = ExecArgPattern.BuildHashed(["git.exe", "push"]);
+        var snapshot = ExecApprovalsCurrency.Capture(ResolvedWithRule(original));
+
+        Assert.False(snapshot.IsStillCurrent(ResolvedWithRule(changed)));
+    }
+
+    [Fact]
+    public void GeneratedRuleSourceRemoved_IsNotCurrent()
+    {
+        var argPattern = ExecArgPattern.BuildHashed(["git.exe", "status"]);
+        var snapshot = ExecApprovalsCurrency.Capture(ResolvedWithRule(argPattern));
+        var manual = ResolvedWithRule(argPattern);
+        manual.Allowlist[0].Source = null;
+
+        Assert.False(snapshot.IsStillCurrent(manual));
+    }
+
+    private static ExecApprovalsResolved ResolvedWithRule(string argPattern) =>
+        new()
+        {
+            AgentId = "agent-1",
+            Defaults = new ExecApprovalsResolvedDefaults
+            {
+                Security = ExecSecurity.Allowlist,
+                Ask = ExecAsk.OnMiss,
+                AskFallback = ExecSecurity.Deny,
+            },
+            Allowlist =
+            [
+                new ExecAllowlistEntry
+                {
+                    Pattern = "**/git.exe",
+                    Source = ExecAllowlistEntry.AllowAlwaysSource,
+                    ArgPattern = argPattern,
+                },
+            ],
+        };
 }

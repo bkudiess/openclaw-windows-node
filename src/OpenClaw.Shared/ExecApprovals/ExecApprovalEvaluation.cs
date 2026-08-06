@@ -21,7 +21,7 @@ public sealed class ExecApprovalEvaluation
     public ExecCommandResolution? Resolution { get; }
 
     public IReadOnlyList<ExecCommandResolution> AllowlistResolutions { get; }
-    public IReadOnlyList<string> AllowAlwaysPatterns { get; }
+    public IReadOnlyList<ExecAllowAlwaysPattern> AllowAlwaysPatterns { get; }
     public IReadOnlyList<ExecAllowlistEntry> AllowlistMatches { get; }
 
     public bool AllAllowlistResolutionsMatched { get; }
@@ -45,7 +45,7 @@ public sealed class ExecApprovalEvaluation
         ExecAsk ask,
         IReadOnlyDictionary<string, string>? env,
         IReadOnlyList<ExecCommandResolution> allowlistResolutions,
-        IReadOnlyList<string> allowAlwaysPatterns,
+        IReadOnlyList<ExecAllowAlwaysPattern> allowAlwaysPatterns,
         IReadOnlyList<ExecAllowlistEntry> allowlistMatches,
         bool skillAllow = false)
     {

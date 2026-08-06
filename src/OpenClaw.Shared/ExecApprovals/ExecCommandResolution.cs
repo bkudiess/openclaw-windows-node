@@ -12,7 +12,12 @@ public readonly record struct ExecCommandResolution(
     string RawExecutable,
     string? ResolvedPath,
     string ExecutableName,
-    string? Cwd);
+    string? Cwd,
+    IReadOnlyList<string>? Argv = null);
+
+public readonly record struct ExecAllowAlwaysPattern(
+    string Pattern,
+    string ArgPattern);
 
 // The three resolution functions required by the pipeline.
 // resolve()               → singular, for state machine
@@ -36,7 +41,11 @@ internal static class ExecCommandResolver
         var effective = ExecEnvInvocationUnwrapper.UnwrapForResolution(command);
         if (effective.Count == 0) return null;
         var raw = effective[0].Trim();
-        return raw.Length == 0 ? null : ResolveExecutable(raw, cwd, env);
+        if (raw.Length == 0) return null;
+        var resolution = ResolveExecutable(raw, cwd, env);
+        return resolution is null
+            ? null
+            : resolution.Value with { Argv = effective.ToArray() };
     }
 
     // Multi-segment resolution for allowlist matching.
@@ -67,13 +76,14 @@ internal static class ExecCommandResolver
             var resolutions = new List<ExecCommandResolution>(segments.Count);
             foreach (var segment in segments)
             {
-                var token = ExecCommandToken.ParseFirstToken(segment);
-                if (token is null) return [];
+                var segmentArgv = TokenizeShellWords(segment);
+                if (segmentArgv.Count == 0) return [];
+                var token = segmentArgv[0];
                 // -EncodedCommand and aliases in segment position: fail-closed.
                 if (SegmentUsesEncodedCommand(segment, token)) return [];
                 var res = ResolveExecutable(token, cwd, env);
                 if (res is null) return [];
-                resolutions.Add(res.Value);
+                resolutions.Add(res.Value with { Argv = segmentArgv });
             }
             return resolutions;
         }
@@ -88,13 +98,13 @@ internal static class ExecCommandResolver
 
     // UX suggestions of allowlist patterns for prompting.
     // Unlike ResolveForAllowlist, this unwraps env with modifiers to surface the real executable.
-    internal static IReadOnlyList<string> ResolveAllowAlwaysPatterns(
+    internal static IReadOnlyList<ExecAllowAlwaysPattern> ResolveAllowAlwaysPatterns(
         IReadOnlyList<string> command,
         string? cwd,
         IReadOnlyDictionary<string, string>? env)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var patterns = new List<string>();
+        var patterns = new List<ExecAllowAlwaysPattern>();
         CollectPatterns(command, cwd, env, seen, patterns, 0);
         return patterns;
     }
@@ -234,7 +244,7 @@ internal static class ExecCommandResolver
         string? cwd,
         IReadOnlyDictionary<string, string>? env,
         HashSet<string> seen,
-        List<string> patterns,
+        List<ExecAllowAlwaysPattern> patterns,
         int depth)
     {
         if (depth >= 3 || command.Count == 0) return;
@@ -261,12 +271,19 @@ internal static class ExecCommandResolver
             }
             foreach (var seg in segments)
             {
-                var token = ExecCommandToken.ParseFirstToken(seg);
-                if (token is null) continue;
+                var segmentArgv = TokenizeShellWords(seg);
+                if (segmentArgv.Count == 0) continue;
+                var token = segmentArgv[0];
                 var res = ResolveExecutable(token, cwd, env);
                 if (res is null) continue;
+                if (ExecCommandToken.IsIndirectCommandHost(
+                        res.Value.ResolvedPath ?? res.Value.RawExecutable))
+                    continue;
                 var pattern = res.Value.ResolvedPath ?? res.Value.RawExecutable;
-                if (seen.Add(pattern)) patterns.Add(pattern);
+                var argPattern = ExecArgPattern.BuildHashed(segmentArgv);
+                var key = $"{pattern}\0{argPattern}";
+                if (seen.Add(key))
+                    patterns.Add(new ExecAllowAlwaysPattern(pattern, argPattern));
             }
             return;
         }
@@ -281,8 +298,75 @@ internal static class ExecCommandResolver
         if (rawToken.Length == 0) return;
         var resolution = ResolveExecutable(rawToken, cwd, env);
         if (resolution is null) return;
+        if (ExecCommandToken.IsIndirectCommandHost(
+                resolution.Value.ResolvedPath ?? resolution.Value.RawExecutable))
+            return;
         var pat = resolution.Value.ResolvedPath ?? resolution.Value.RawExecutable;
-        if (seen.Add(pat)) patterns.Add(pat);
+        var directArgPattern = ExecArgPattern.BuildHashed(effective);
+        var directKey = $"{pat}\0{directArgPattern}";
+        if (seen.Add(directKey))
+            patterns.Add(new ExecAllowAlwaysPattern(pat, directArgPattern));
+    }
+
+    private static IReadOnlyList<string> TokenizeShellWords(string command)
+    {
+        var tokens = new List<string>();
+        var current = new StringBuilder();
+        var inSingle = false;
+        var inDouble = false;
+        var escaped = false;
+        var tokenStarted = false;
+
+        void AppendCurrent()
+        {
+            if (!tokenStarted) return;
+            tokens.Add(current.ToString());
+            current.Clear();
+            tokenStarted = false;
+        }
+
+        foreach (var ch in command.Trim())
+        {
+            if (escaped)
+            {
+                current.Append(ch);
+                tokenStarted = true;
+                escaped = false;
+                continue;
+            }
+            if (ch == '\\' && !inSingle)
+            {
+                tokenStarted = true;
+                escaped = true;
+                continue;
+            }
+            if (ch == '\'' && !inDouble)
+            {
+                tokenStarted = true;
+                inSingle = !inSingle;
+                continue;
+            }
+            if (ch == '"' && !inSingle)
+            {
+                tokenStarted = true;
+                inDouble = !inDouble;
+                continue;
+            }
+            if (char.IsWhiteSpace(ch) && !inSingle && !inDouble)
+            {
+                AppendCurrent();
+                continue;
+            }
+            current.Append(ch);
+            tokenStarted = true;
+        }
+
+        if (escaped)
+            current.Append('\\');
+        if (inSingle || inDouble)
+            return [];
+        AppendCurrent();
+        return tokens;
     }
 
     // ── one-shot payload detection ────────────────────────────────────────────

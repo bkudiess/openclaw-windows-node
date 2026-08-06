@@ -621,6 +621,43 @@ public class SystemCapabilityTests
     }
 
     [Fact]
+    public async Task ExecApprovalsSet_RejectsChangingGeneratedArgumentAuthority()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var store = new ExecApprovalsStore(tempDir, NullLogger.Instance);
+            Assert.True(await store.AddAllowlistEntryAsync(
+                "main",
+                @"C:\Program Files\Git\cmd\git.exe",
+                ExecArgPattern.BuildHashed(["git.exe", "status"]),
+                ExecAllowlistEntry.AllowAlwaysSource));
+            var before = await store.GetSnapshotAsync();
+            before.File.Agents!["main"].Allowlist![0].ArgPattern =
+                ExecArgPattern.BuildHashed(["git.exe", "push", "--force"]);
+            var cap = new SystemCapability(NullLogger.Instance);
+            cap.SetApprovalsStore(store);
+
+            var response = await cap.ExecuteAsync(new NodeInvokeRequest
+            {
+                Id = "set-change-args",
+                Command = "system.execApprovals.set",
+                Args = JsonSerializer.SerializeToElement(
+                    new { baseHash = before.Hash, file = before.File },
+                    ExecApprovalsStore.JsonOptions)
+            });
+
+            Assert.False(response.Ok);
+            Assert.Contains("allowlist authority", response.Error);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
     public async Task ExecApprovalsSet_RemovingExistingGrant_IsAllowed()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));

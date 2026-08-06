@@ -6,6 +6,7 @@ using OpenClaw.Shared;
 using OpenClaw.Shared.Audio;
 using OpenClaw.Shared.ExecApprovals;
 using OpenClawTray.Helpers;
+using OpenClawTray.Presentation;
 using OpenClawTray.Services;
 using OpenClawTray.Windows;
 using System;
@@ -25,15 +26,29 @@ public sealed partial class PermissionsPage : Page
     private static App CurrentApp => (App)Microsoft.UI.Xaml.Application.Current!;
     private bool _suppressMcpToggle;
     private readonly List<ToggleSwitch> _featureToggles = new();
-    private List<ExecPolicyRule> _policyRules = new();
-    private string? _execPolicyBaseHash;
-    private enum ExecPolicyMutationKind { DefaultAction, AddRule, RemoveRule }
-    private sealed record ExecPolicyMutation(ExecPolicyMutationKind Kind, ExecPolicyRule? Rule = null);
+    private PermissionsPageViewModel? _execPolicyViewModel;
+    private bool _execPolicyInitialized;
+    private bool _execPolicyLoadInProgress;
+    private bool _applyingExecPolicyState;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _execPolicySuccessTimer;
     private const int BrowserProxyToggleIndex = 1;
+
+    private sealed record ExecPolicyChoice(string Tag, string Label);
+    private sealed record ExecPolicyScopeChoice(string Id, string Label);
+    private sealed record ExecAllowlistRow(
+        Guid? Id,
+        string Pattern,
+        string? Source,
+        string? ArgPattern,
+        string? Details,
+        string RemoveAutomationName,
+        string RemoveAutomationId,
+        string RemoveGlyph);
 
     public PermissionsPage()
     {
         InitializeComponent();
+        DataContextChanged += OnDataContextChanged;
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
     }
@@ -49,7 +64,8 @@ public sealed partial class PermissionsPage : Page
         UpdateNodeStatus();
         ApplyFeaturesEnabledState();
 
-        LoadExecPolicy();
+        _execPolicyInitialized = true;
+        _ = LoadExecPolicyAsync();
         LoadAllowlist(CurrentApp.AppState?.Config);
     }
 
@@ -71,6 +87,9 @@ public sealed partial class PermissionsPage : Page
         var mgr = CurrentApp.ConnectionManager;
         if (mgr != null)
             mgr.StateChanged -= OnConnectionStateChanged;
+
+        if (_execPolicyViewModel != null)
+            _execPolicyViewModel.StateChanged -= OnExecPolicyStateChanged;
     }
 
     private void OnConnectionStateChanged(object? sender, GatewayConnectionSnapshot snapshot)
@@ -491,322 +510,523 @@ public sealed partial class PermissionsPage : Page
         McpStatusText.Text = LocalizationHelper.GetString("PermissionsPage_McpStatus_UrlCopied");
     }
 
-    // ── Exec approvals ───────────────────────────────────────────────
+    // ── Exec approvals V2 ───────────────────────────────────────────
 
-    private void LoadExecPolicy() => _ = LoadExecPolicyAsync();
+    private void OnDataContextChanged(FrameworkElement sender, DataContextChangedEventArgs args)
+    {
+        if (_execPolicyViewModel != null)
+            _execPolicyViewModel.StateChanged -= OnExecPolicyStateChanged;
+
+        _execPolicyViewModel = args.NewValue as PermissionsPageViewModel;
+        if (_execPolicyViewModel is null)
+            return;
+
+        _execPolicyViewModel.StateChanged += OnExecPolicyStateChanged;
+        RefreshExecPolicyControls();
+        if (_execPolicyInitialized)
+            _ = LoadExecPolicyAsync();
+    }
 
     private async Task LoadExecPolicyAsync()
     {
-        _loadingExecPolicy = true;
+        if (_execPolicyViewModel is null || _execPolicyLoadInProgress)
+            return;
+
+        _execPolicyLoadInProgress = true;
         try
         {
-            var snapshot = await CurrentApp.ExecApprovalsStore.GetSnapshotAsync();
-            _execPolicyBaseHash = snapshot.Hash;
-            var file = snapshot.File;
-            var defaults = file.Defaults;
-            ExecApprovalsAgent? main = null;
-            file.Agents?.TryGetValue("main", out main);
-            var security = main?.Security ?? defaults?.Security ?? ExecSecurity.Deny;
-            var ask = main?.Ask ?? defaults?.Ask ?? ExecAsk.OnMiss;
-            var action = security switch
+            var result = await _execPolicyViewModel.LoadAsync();
+            if (!result.Succeeded)
+                ShowExecPolicyError(result);
+        }
+        finally
+        {
+            _execPolicyLoadInProgress = false;
+        }
+    }
+
+    private void OnExecPolicyStateChanged(object? sender, EventArgs e) =>
+        RefreshExecPolicyControls();
+
+    private void RefreshExecPolicyControls()
+    {
+        var viewModel = _execPolicyViewModel;
+        if (viewModel is null)
+            return;
+
+        _applyingExecPolicyState = true;
+        try
+        {
+            var scopeChoices = viewModel.AvailableScopes
+                .Select(scope => new ExecPolicyScopeChoice(
+                    scope.Id,
+                    GetExecPolicyScopeLabel(scope.Id)))
+                .ToArray();
+            ExecPolicyScopeCombo.ItemsSource = scopeChoices;
+            ExecPolicyScopeCombo.SelectedItem = scopeChoices.FirstOrDefault(scope =>
+                string.Equals(scope.Id, viewModel.SelectedScopeId, StringComparison.Ordinal));
+
+            var includeInherited = !viewModel.IsDefaultsScope;
+            ApplyExecPolicyChoices(
+                ExecSecurityCombo,
+                BuildSecurityChoices(includeInherited),
+                ToTag(viewModel.Security));
+            ApplyExecPolicyChoices(
+                ExecAskCombo,
+                BuildAskChoices(includeInherited),
+                ToTag(viewModel.Ask));
+            ApplyExecPolicyChoices(
+                ExecFallbackCombo,
+                BuildFallbackChoices(includeInherited),
+                ToTag(viewModel.AskFallback));
+            ApplyExecPolicyChoices(
+                ExecAutoAllowSkillsCombo,
+                BuildBooleanChoices(includeInherited),
+                viewModel.AutoAllowSkills switch
+                {
+                    true => "on",
+                    false => "off",
+                    null => "inherit",
+                });
+
+            var isDefaults = viewModel.IsDefaultsScope;
+            var rules = viewModel.Allowlist;
+            ExecAllowlistDefaultsInfo.Visibility = isDefaults
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            ExecAllowlistAddCard.Visibility = isDefaults
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+            ExecAllowlistEmptyCard.Visibility = !isDefaults && rules.Count == 0
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            ExecAllowlistRulesCard.Visibility = !isDefaults && rules.Count > 0
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            ExecAllowlistRepeater.ItemsSource = rules.Select((entry, index) =>
+                new ExecAllowlistRow(
+                    entry.Id,
+                    entry.Pattern ?? "",
+                    entry.Source,
+                    entry.ArgPattern,
+                    GetExecAllowlistDetails(entry),
+                    LocalizationHelper.Format(
+                        "PermissionsPage_RemoveExecAllowlistAutomationNameFormat",
+                        entry.Pattern ?? ""),
+                    $"RemoveExecAllowlistEntry_{index}",
+                    FluentIconCatalog.Clear)).ToArray();
+            ExecAllowlistCountText.Text = rules.Count switch
             {
-                ExecSecurity.Full => "allow",
-                ExecSecurity.Allowlist when ask is ExecAsk.OnMiss or ExecAsk.Always => "prompt",
-                _ => "deny",
+                0 => LocalizationHelper.GetString("PermissionsPage_RulesCount_None"),
+                1 => LocalizationHelper.GetString("PermissionsPage_RulesCount_One"),
+                _ => LocalizationHelper.Format(
+                    "PermissionsPage_RulesCount_ManyFormat",
+                    rules.Count),
             };
-            for (int i = 0; i < DefaultActionCombo.Items.Count; i++)
-            {
-                if (DefaultActionCombo.Items[i] is ComboBoxItem item && item.Tag?.ToString() == action)
-                { DefaultActionCombo.SelectedIndex = i; break; }
-            }
 
-            RefreshPolicyRulesFromFile(file);
+            var enabled = !viewModel.IsBusy;
+            ExecPolicyScopeCombo.IsEnabled = enabled;
+            ExecSecurityCombo.IsEnabled = enabled;
+            ExecAskCombo.IsEnabled = enabled;
+            ExecFallbackCombo.IsEnabled = enabled;
+            ExecAutoAllowSkillsCombo.IsEnabled = enabled;
+            ExecAllowlistAddCard.IsEnabled = enabled;
         }
-        catch (Exception ex)
+        finally
         {
-            Debug.WriteLine($"Failed to load exec approvals: {ex.Message}");
-            DefaultActionCombo.SelectedIndex = 0;
-            RefreshPolicyRulesList();
+            _applyingExecPolicyState = false;
         }
-        finally { _loadingExecPolicy = false; }
     }
 
-    private void RefreshPolicyRulesList()
+    private void OnExecPolicyScopeChanged(object sender, SelectionChangedEventArgs e)
     {
-        for (int i = 0; i < _policyRules.Count; i++) _policyRules[i].Index = i;
-        var allowBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorSuccessBrush"];
-        PolicyRulesList.ItemsSource = null;
-        PolicyRulesList.ItemsSource = _policyRules.Select(r => new
+        if (_applyingExecPolicyState
+            || _execPolicyViewModel is null
+            || ExecPolicyScopeCombo.SelectedItem is not ExecPolicyScopeChoice selected)
         {
-            r.Pattern,
-            Action = DisplayExecPolicyAction(r.Action),
-            r.Index,
-            RemoveRuleAutomationName = $"Remove rule {r.Pattern}",
-            RemoveRuleAutomationId = $"RemoveExecPolicyRuleButton_{r.Index}",
-            ActionBrush = allowBrush
-        }).ToList();
-
-        // Header badge + empty state
-        var count = _policyRules.Count;
-        RulesCountBadge.Text = count switch
-        {
-            0 => LocalizationHelper.GetString("PermissionsPage_RulesCount_None"),
-            1 => LocalizationHelper.GetString("PermissionsPage_RulesCount_One"),
-            _ => LocalizationHelper.Format("PermissionsPage_RulesCount_ManyFormat", count)
-        };
-        RulesEmptyState.Visibility = count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        PolicyRulesList.Visibility = count == 0 ? Visibility.Collapsed : Visibility.Visible;
-    }
-
-    private void OnAddRule(object sender, RoutedEventArgs e)
-    {
-        var pattern = NewRulePattern.Text.Trim();
-        if (string.IsNullOrEmpty(pattern)) return;
-        if (!ExecApprovalsStore.IsValidAllowlistPattern(pattern))
-        {
-            NewRulePattern.Focus(FocusState.Programmatic);
             return;
         }
-        ExecPolicyRuleList.UpsertByPattern(_policyRules, pattern, "allow");
-        var rule = CloneExecPolicyRule(_policyRules.First(r =>
-            string.Equals(r.Pattern, pattern, StringComparison.OrdinalIgnoreCase)));
-        NewRulePattern.Text = "";
-        RefreshPolicyRulesList();
-        SaveExecPolicyToDisk(new ExecPolicyMutation(ExecPolicyMutationKind.AddRule, rule));
+
+        ClearExecAllowlistValidation();
+        _execPolicyViewModel.SelectScope(selected.Id);
     }
 
-    private void OnRemoveRule(object sender, RoutedEventArgs e)
+    private void OnExecSecurityChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (sender is Button btn && btn.Tag is int index && index < _policyRules.Count)
-        {
-            var removed = CloneExecPolicyRule(_policyRules[index]);
-            _policyRules.RemoveAt(index);
-            RefreshPolicyRulesList();
-            SaveExecPolicyToDisk(new ExecPolicyMutation(ExecPolicyMutationKind.RemoveRule, removed));
-        }
+        if (ShouldIgnoreExecPolicyChoice(ExecSecurityCombo))
+            return;
+        AsyncEventHandlerGuard.Run(
+            UpdateExecSecurityAsync,
+            new AppLogger(),
+            nameof(OnExecSecurityChanged));
     }
 
-    private void OnDefaultActionChanged(object sender, SelectionChangedEventArgs e)
+    private async Task UpdateExecSecurityAsync()
     {
-        // Skip the selection-changed events that fire while LoadExecPolicy is populating the combo.
-        if (!_loadingExecPolicy)
-            SaveExecPolicyToDisk(new ExecPolicyMutation(ExecPolicyMutationKind.DefaultAction));
+        var result = await _execPolicyViewModel!.UpdateSecurityAsync(
+            ParseSecurity(GetSelectedExecPolicyTag(ExecSecurityCombo)));
+        ShowExecPolicyOperationResult(result);
     }
 
-    private bool _loadingExecPolicy;
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _execSavedHintTimer;
-
-    private void SaveExecPolicyToDisk(
-        ExecPolicyMutation mutation,
-        bool showSavedHint = true) =>
-        _ = SaveExecPolicyToDiskAsync(mutation, showSavedHint);
-
-    private async Task SaveExecPolicyToDiskAsync(
-        ExecPolicyMutation mutation,
-        bool showSavedHint)
+    private void OnExecAskChanged(object sender, SelectionChangedEventArgs e)
     {
-        try
-        {
-            var defaultAction = mutation.Kind == ExecPolicyMutationKind.DefaultAction
-                ? NormalizeExecPolicyAction(
-                    (DefaultActionCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString())
-                : null;
-            for (var attempt = 0; attempt < 3; attempt++)
+        if (ShouldIgnoreExecPolicyChoice(ExecAskCombo))
+            return;
+        AsyncEventHandlerGuard.Run(
+            UpdateExecAskAsync,
+            new AppLogger(),
+            nameof(OnExecAskChanged));
+    }
+
+    private async Task UpdateExecAskAsync()
+    {
+        var result = await _execPolicyViewModel!.UpdateAskAsync(
+            ParseAsk(GetSelectedExecPolicyTag(ExecAskCombo)));
+        ShowExecPolicyOperationResult(result);
+    }
+
+    private void OnExecFallbackChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ShouldIgnoreExecPolicyChoice(ExecFallbackCombo))
+            return;
+        AsyncEventHandlerGuard.Run(
+            UpdateExecFallbackAsync,
+            new AppLogger(),
+            nameof(OnExecFallbackChanged));
+    }
+
+    private async Task UpdateExecFallbackAsync()
+    {
+        var result = await _execPolicyViewModel!.UpdateAskFallbackAsync(
+            ParseSecurity(GetSelectedExecPolicyTag(ExecFallbackCombo)));
+        ShowExecPolicyOperationResult(result);
+    }
+
+    private void OnExecAutoAllowSkillsChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ShouldIgnoreExecPolicyChoice(ExecAutoAllowSkillsCombo))
+            return;
+        AsyncEventHandlerGuard.Run(
+            UpdateExecAutoAllowSkillsAsync,
+            new AppLogger(),
+            nameof(OnExecAutoAllowSkillsChanged));
+    }
+
+    private async Task UpdateExecAutoAllowSkillsAsync()
+    {
+        var result = await _execPolicyViewModel!.UpdateAutoAllowSkillsAsync(
+            GetSelectedExecPolicyTag(ExecAutoAllowSkillsCombo) switch
             {
-                var current = await CurrentApp.ExecApprovalsStore.GetSnapshotAsync();
-                var expectedHash = attempt == 0 && !string.IsNullOrWhiteSpace(_execPolicyBaseHash)
-                    ? _execPolicyBaseHash
-                    : current.Hash;
-                var file = current.File;
-                file.Version = 1;
-                file.Defaults ??= new ExecApprovalsDefaults();
-                file.Agents ??= new Dictionary<string, ExecApprovalsAgent>(StringComparer.Ordinal);
-                if (!file.Agents.TryGetValue("main", out var main))
-                {
-                    main = new ExecApprovalsAgent();
-                    file.Agents["main"] = main;
-                }
-
-                if (mutation.Kind == ExecPolicyMutationKind.DefaultAction)
-                {
-                    var (security, ask) = defaultAction switch
-                    {
-                        "allow" => (ExecSecurity.Full, ExecAsk.Off),
-                        "prompt" => (ExecSecurity.Allowlist, ExecAsk.OnMiss),
-                        _ => (ExecSecurity.Allowlist, ExecAsk.Off),
-                    };
-                    file.Defaults.Security = security;
-                    file.Defaults.Ask = ask;
-                    file.Defaults.AskFallback = ExecSecurity.Deny;
-                    file.Defaults.AutoAllowSkills ??= false;
-                    main.Security = security;
-                    main.Ask = ask;
-                    main.AskFallback = ExecSecurity.Deny;
-                    main.AutoAllowSkills ??= false;
-                }
-                else if (mutation is { Kind: ExecPolicyMutationKind.AddRule, Rule: { } added })
-                {
-                    var allowlist = main.Allowlist ??= [];
-                    if (!allowlist.Any(entry => string.Equals(
-                            entry.Pattern?.Trim(),
-                            added.Pattern.Trim(),
-                            StringComparison.OrdinalIgnoreCase)))
-                    {
-                        allowlist.Add(new ExecAllowlistEntry
-                        {
-                            Id = added.Id ?? Guid.NewGuid(),
-                            Pattern = added.Pattern,
-                            LastUsedAt = added.LastUsedAt,
-                            LastResolvedPath = added.LastResolvedPath,
-                        });
-                    }
-                }
-                else if (mutation is { Kind: ExecPolicyMutationKind.RemoveRule, Rule: { } removed })
-                {
-                    main.Allowlist?.RemoveAll(entry =>
-                        (removed.Id.HasValue && entry.Id == removed.Id)
-                        || string.Equals(
-                            entry.Pattern?.Trim(),
-                            removed.Pattern.Trim(),
-                            StringComparison.OrdinalIgnoreCase));
-                }
-
-                var updated = await CurrentApp.ExecApprovalsStore.ReplaceAsync(expectedHash, file);
-                if (updated is null)
-                {
-                    _execPolicyBaseHash = current.Hash;
-                    continue;
-                }
-
-                _execPolicyBaseHash = updated.Hash;
-                RefreshPolicyRulesFromFile(updated.File);
-                if (!showSavedHint)
-                    return;
-
-                ShowExecPolicySaveStatus(succeeded: true);
-                return;
-            }
-
-            Debug.WriteLine("Failed to save exec approvals after concurrent updates.");
-            var latest = await CurrentApp.ExecApprovalsStore.GetSnapshotAsync();
-            _execPolicyBaseHash = latest.Hash;
-            RefreshPolicyRulesFromFile(latest.File);
-            ShowExecPolicySaveStatus(succeeded: false);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Failed to save exec approvals: {ex.Message}");
-            ShowExecPolicySaveStatus(succeeded: false);
-        }
+                "on" => true,
+                "off" => false,
+                _ => null,
+            });
+        ShowExecPolicyOperationResult(result);
     }
 
-    private void ShowExecPolicySaveStatus(bool succeeded)
+    private void OnAddExecAllowlistEntry(object sender, RoutedEventArgs e)
     {
-        ExecPolicySavedHint.Text = LocalizationHelper.GetString(
-            succeeded
-                ? "PermissionsPage_ExecPolicySaved"
-                : "PermissionsPage_ExecPolicySaveFailed");
-        ExecPolicySavedHint.Visibility = Visibility.Visible;
-        if (_execSavedHintTimer == null)
+        if (_execPolicyViewModel is null)
+            return;
+        AsyncEventHandlerGuard.Run(
+            AddExecAllowlistEntryAsync,
+            new AppLogger(),
+            nameof(OnAddExecAllowlistEntry));
+    }
+
+    private async Task AddExecAllowlistEntryAsync()
+    {
+        var viewModel = _execPolicyViewModel;
+        if (viewModel is null)
+            return;
+
+        var result = await viewModel.AddAllowlistEntryAsync(
+            NewExecAllowlistPattern.Text);
+        if (result.Status is ExecPolicyOperationStatus.EmptyPattern
+            or ExecPolicyOperationStatus.InvalidPattern)
         {
-            _execSavedHintTimer = DispatcherQueue.CreateTimer();
-            _execSavedHintTimer.Interval = TimeSpan.FromSeconds(1.5);
-            _execSavedHintTimer.Tick += (t, _) =>
+            ShowExecAllowlistValidation(LocalizationHelper.GetString(
+                result.Status == ExecPolicyOperationStatus.EmptyPattern
+                    ? "PermissionsPage_ExecAllowlistPatternRequired"
+                    : "PermissionsPage_ExecAllowlistPatternInvalid"));
+            NewExecAllowlistPattern.Focus(FocusState.Programmatic);
+            return;
+        }
+
+        if (result.Succeeded)
+        {
+            NewExecAllowlistPattern.Text = "";
+            ClearExecAllowlistValidation();
+        }
+        ShowExecPolicyOperationResult(result);
+    }
+
+    private void OnRemoveExecAllowlistEntry(object sender, RoutedEventArgs e)
+    {
+        if (_execPolicyViewModel is null
+            || sender is not Button { Tag: ExecAllowlistRow row })
+        {
+            return;
+        }
+        AsyncEventHandlerGuard.Run(
+            () => RemoveExecAllowlistEntryAsync(row),
+            new AppLogger(),
+            nameof(OnRemoveExecAllowlistEntry));
+    }
+
+    private async Task RemoveExecAllowlistEntryAsync(ExecAllowlistRow row)
+    {
+        var viewModel = _execPolicyViewModel;
+        if (viewModel is null)
+            return;
+
+        var result = await viewModel.RemoveAllowlistEntryAsync(
+            row.Id,
+            row.Pattern,
+            row.ArgPattern,
+            row.Source);
+        ShowExecPolicyOperationResult(result);
+    }
+
+    private bool ShouldIgnoreExecPolicyChoice(ComboBox combo) =>
+        _applyingExecPolicyState
+        || _execPolicyViewModel is null
+        || combo.SelectedItem is not ExecPolicyChoice;
+
+    private void ShowExecPolicyOperationResult(ExecPolicyOperationResult result)
+    {
+        if (result.Succeeded)
+        {
+            ExecPolicyStatusInfoBar.Title =
+                LocalizationHelper.GetString("PermissionsPage_ExecPolicySaved");
+            ExecPolicyStatusInfoBar.Message =
+                LocalizationHelper.Format(
+                    "PermissionsPage_ExecPolicySavedToFormat",
+                    _execPolicyViewModel?.PolicyPath ?? "");
+            ExecPolicyStatusInfoBar.Severity = InfoBarSeverity.Success;
+            ExecPolicyStatusInfoBar.IsOpen = true;
+            StartExecPolicySuccessTimer();
+            return;
+        }
+
+        ShowExecPolicyError(result);
+    }
+
+    private void ShowExecPolicyError(ExecPolicyOperationResult result)
+    {
+        _execPolicySuccessTimer?.Stop();
+        ExecPolicyStatusInfoBar.Title =
+            LocalizationHelper.GetString("PermissionsPage_ExecPolicyOperationFailed");
+        var messageKey = result.Status switch
+        {
+            ExecPolicyOperationStatus.ReadFailed =>
+                "PermissionsPage_ExecPolicyReadFailed",
+            ExecPolicyOperationStatus.Conflict =>
+                "PermissionsPage_ExecPolicyConflict",
+            ExecPolicyOperationStatus.RulesUnavailableForDefaults =>
+                "PermissionsPage_ExecPolicyRulesUnavailableForDefaults",
+            _ => "PermissionsPage_ExecPolicySaveFailedDetailed",
+        };
+        var message = LocalizationHelper.GetString(messageKey);
+        if (!string.IsNullOrWhiteSpace(result.Detail))
+            message = $"{message} {result.Detail}";
+        if (!string.IsNullOrWhiteSpace(_execPolicyViewModel?.PolicyPath))
+        {
+            message = LocalizationHelper.Format(
+                "PermissionsPage_ExecPolicyErrorWithPathFormat",
+                message,
+                _execPolicyViewModel.PolicyPath);
+        }
+
+        ExecPolicyStatusInfoBar.Message = message;
+        ExecPolicyStatusInfoBar.Severity = InfoBarSeverity.Error;
+        ExecPolicyStatusInfoBar.IsOpen = true;
+    }
+
+    private void StartExecPolicySuccessTimer()
+    {
+        if (_execPolicySuccessTimer is null)
+        {
+            _execPolicySuccessTimer = DispatcherQueue.CreateTimer();
+            _execPolicySuccessTimer.Interval = TimeSpan.FromSeconds(1.5);
+            _execPolicySuccessTimer.Tick += (timer, _) =>
             {
-                ExecPolicySavedHint.Visibility = Visibility.Collapsed;
-                t.Stop();
+                ExecPolicyStatusInfoBar.IsOpen = false;
+                timer.Stop();
             };
         }
-        _execSavedHintTimer.Stop();
-        _execSavedHintTimer.Start();
+        _execPolicySuccessTimer.Stop();
+        _execPolicySuccessTimer.Start();
     }
 
-    private void RefreshPolicyRulesFromFile(ExecApprovalsFile file)
+    private void ClearExecAllowlistValidation()
     {
-        ExecApprovalsAgent? main = null;
-        file.Agents?.TryGetValue("main", out main);
-        _policyRules.Clear();
-        if (main?.Allowlist is { } allowlist)
-        {
-            var index = 0;
-            foreach (var entry in allowlist)
-            {
-                _policyRules.Add(new ExecPolicyRule
-                {
-                    Id = entry.Id,
-                    Pattern = entry.Pattern ?? "",
-                    Action = "allow",
-                    LastUsedAt = entry.LastUsedAt,
-                    LastResolvedPath = entry.LastResolvedPath,
-                    Index = index++,
-                });
-            }
-        }
-        RefreshPolicyRulesList();
+        ExecAllowlistValidationText.Text = "";
+        ExecAllowlistValidationText.Visibility = Visibility.Collapsed;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(
+            NewExecAllowlistPattern,
+            "");
     }
 
-    private static ExecPolicyRule CloneExecPolicyRule(ExecPolicyRule rule) =>
-        new()
+    private void ShowExecAllowlistValidation(string message)
+    {
+        ExecAllowlistValidationText.Text = message;
+        ExecAllowlistValidationText.Visibility = Visibility.Visible;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHelpText(
+            NewExecAllowlistPattern,
+            message);
+        var peer =
+            Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer.FromElement(
+                ExecAllowlistValidationText)
+            ?? Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer.CreatePeerForElement(
+                ExecAllowlistValidationText);
+        peer?.RaiseAutomationEvent(
+            Microsoft.UI.Xaml.Automation.Peers.AutomationEvents.LiveRegionChanged);
+    }
+
+    private static void ApplyExecPolicyChoices(
+        ComboBox combo,
+        IReadOnlyList<ExecPolicyChoice> choices,
+        string tag)
+    {
+        combo.ItemsSource = choices;
+        combo.SelectedItem = choices.FirstOrDefault(choice =>
+            string.Equals(choice.Tag, tag, StringComparison.Ordinal));
+    }
+
+    private static string GetSelectedExecPolicyTag(ComboBox combo) =>
+        combo.SelectedItem is ExecPolicyChoice choice ? choice.Tag : "inherit";
+
+    private static IReadOnlyList<ExecPolicyChoice> BuildSecurityChoices(
+        bool includeInherited) =>
+        BuildChoices(
+            includeInherited,
+            [
+                ("deny", "PermissionsPage_ExecSecurity_Deny"),
+                ("allowlist", "PermissionsPage_ExecSecurity_Allowlist"),
+                ("full", "PermissionsPage_ExecSecurity_Full"),
+            ]);
+
+    private static IReadOnlyList<ExecPolicyChoice> BuildAskChoices(
+        bool includeInherited) =>
+        BuildChoices(
+            includeInherited,
+            [
+                ("off", "PermissionsPage_ExecAsk_Off"),
+                ("on-miss", "PermissionsPage_ExecAsk_OnMiss"),
+                ("always", "PermissionsPage_ExecAsk_Always"),
+                ("deny", "PermissionsPage_ExecAsk_Deny"),
+            ]);
+
+    private static IReadOnlyList<ExecPolicyChoice> BuildFallbackChoices(
+        bool includeInherited) =>
+        BuildChoices(
+            includeInherited,
+            [
+                ("deny", "PermissionsPage_ExecFallback_Deny"),
+                ("allowlist", "PermissionsPage_ExecFallback_Allowlist"),
+                ("full", "PermissionsPage_ExecFallback_Full"),
+            ]);
+
+    private static IReadOnlyList<ExecPolicyChoice> BuildBooleanChoices(
+        bool includeInherited) =>
+        BuildChoices(
+            includeInherited,
+            [
+                ("off", "PermissionsPage_ExecBoolean_Off"),
+                ("on", "PermissionsPage_ExecBoolean_On"),
+            ]);
+
+    private static IReadOnlyList<ExecPolicyChoice> BuildChoices(
+        bool includeInherited,
+        IReadOnlyList<(string Tag, string ResourceKey)> values)
+    {
+        var choices = new List<ExecPolicyChoice>();
+        if (includeInherited)
         {
-            Id = rule.Id,
-            Pattern = rule.Pattern,
-            Action = rule.Action,
-            LastUsedAt = rule.LastUsedAt,
-            LastResolvedPath = rule.LastResolvedPath,
-            Index = rule.Index,
+            choices.Add(new ExecPolicyChoice(
+                "inherit",
+                LocalizationHelper.GetString("PermissionsPage_ExecPolicy_Inherit")));
+        }
+        choices.AddRange(values.Select(value =>
+            new ExecPolicyChoice(
+                value.Tag,
+                LocalizationHelper.GetString(value.ResourceKey))));
+        return choices;
+    }
+
+    private static string GetExecPolicyScopeLabel(string scopeId) =>
+        scopeId switch
+        {
+            PermissionsPageViewModel.DefaultsScopeId =>
+                LocalizationHelper.GetString("PermissionsPage_ExecScope_Defaults"),
+            PermissionsPageViewModel.WildcardScopeId =>
+                LocalizationHelper.GetString("PermissionsPage_ExecScope_AllAgents"),
+            PermissionsPageViewModel.MainScopeId =>
+                LocalizationHelper.GetString("PermissionsPage_ExecScope_MainAgent"),
+            _ => LocalizationHelper.Format(
+                "PermissionsPage_ExecScope_AgentFormat",
+                scopeId),
         };
 
-    private static string? TryGetStringCaseInsensitive(JsonElement element, params string[] names)
+    private static string? GetExecAllowlistDetails(ExecAllowlistEntry entry)
     {
-        foreach (var name in names)
+        var details = new List<string>();
+        if (string.Equals(
+                entry.Source,
+                ExecAllowlistEntry.AllowAlwaysSource,
+                StringComparison.Ordinal)
+            && !string.IsNullOrEmpty(entry.ArgPattern))
         {
-            if (element.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.String)
-                return prop.GetString();
+            details.Add(LocalizationHelper.GetString(
+                "PermissionsPage_ExecAllowlistArgumentsRestricted"));
         }
-        return null;
+        if (!string.IsNullOrWhiteSpace(entry.LastResolvedPath))
+        {
+            details.Add(LocalizationHelper.Format(
+                "PermissionsPage_ExecAllowlistLastResolvedFormat",
+                entry.LastResolvedPath));
+        }
+        return details.Count == 0 ? null : string.Join(" ", details);
     }
 
-    internal static string NormalizeExecPolicyAction(string? action) =>
-        ExecPolicyRuleList.NormalizeAction(action);
-
-    private static string NormalizeExecPolicyAction(JsonElement action) =>
-        ExecPolicyRuleList.NormalizeAction(action);
-
-    private static string[]? TryGetStringArrayCaseInsensitive(JsonElement element, params string[] names)
-    {
-        foreach (var name in names)
+    private static ExecSecurity? ParseSecurity(string tag) =>
+        tag switch
         {
-            if (!element.TryGetProperty(name, out var prop) || prop.ValueKind != JsonValueKind.Array)
-                continue;
+            "deny" => ExecSecurity.Deny,
+            "allowlist" => ExecSecurity.Allowlist,
+            "full" => ExecSecurity.Full,
+            _ => null,
+        };
 
-            var values = new List<string>();
-            foreach (var item in prop.EnumerateArray())
-            {
-                if (item.ValueKind == JsonValueKind.String)
-                    values.Add(item.GetString() ?? "");
-            }
-
-            return values.ToArray();
-        }
-
-        return null;
-    }
-
-    private static bool? TryGetBoolCaseInsensitive(JsonElement element, params string[] names)
-    {
-        foreach (var name in names)
+    private static ExecAsk? ParseAsk(string tag) =>
+        tag switch
         {
-            if (!element.TryGetProperty(name, out var prop))
-                continue;
-            if (prop.ValueKind == JsonValueKind.True) return true;
-            if (prop.ValueKind == JsonValueKind.False) return false;
-        }
+            "off" => ExecAsk.Off,
+            "on-miss" => ExecAsk.OnMiss,
+            "always" => ExecAsk.Always,
+            "deny" => ExecAsk.Deny,
+            _ => null,
+        };
 
-        return null;
-    }
+    private static string ToTag(ExecSecurity? value) =>
+        value switch
+        {
+            ExecSecurity.Deny => "deny",
+            ExecSecurity.Allowlist => "allowlist",
+            ExecSecurity.Full => "full",
+            _ => "inherit",
+        };
 
-    private static string DisplayExecPolicyAction(string action) =>
-        string.Equals(action, "prompt", StringComparison.OrdinalIgnoreCase) ? "ask" : action;
+    private static string ToTag(ExecAsk? value) =>
+        value switch
+        {
+            ExecAsk.Off => "off",
+            ExecAsk.OnMiss => "on-miss",
+            ExecAsk.Always => "always",
+            ExecAsk.Deny => "deny",
+            _ => "inherit",
+        };
 
     // ── Node Allowlist ───────────────────────────────────────────────
 

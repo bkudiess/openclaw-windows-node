@@ -420,6 +420,117 @@ public class ExecApprovalV2EvaluatorTests
     }
 
     [Fact]
+    public void HashedArgPattern_MatchesUpstreamLengthDelimitedVectors()
+    {
+        Assert.Equal(
+            "sha256:argv:e4f60d0aa6d7f3d3b6a6494b1c861b99f649c6f9ec51abaf201b20f297327c95",
+            ExecArgPattern.BuildHashed(["tool.exe"]));
+        Assert.Equal(
+            "sha256:argv:e9175dbb57934e40da780e0d51823e1fd16e7db521afb7e3c79bdd87c93ffa32",
+            ExecArgPattern.BuildHashed(["tool.exe", ""]));
+        Assert.Equal(
+            "sha256:argv:f6064bed63bd9c049cb3ef529a53c4670af6cedbb1f25ecc5c2198209734a5d1",
+            ExecArgPattern.BuildHashed(["tool.exe", "", ""]));
+        Assert.Equal(
+            "sha256:argv:5287b906ee992c060f7997b31556afbab7ea58bea5086db52112683e08a373d3",
+            ExecArgPattern.BuildHashed(["git.exe", "status"]));
+    }
+
+    [Fact]
+    public void Matcher_GeneratedAllowAlways_RequiresExactArgvTail()
+    {
+        const string path = @"C:\tools\git.exe";
+        var entry = new ExecAllowlistEntry
+        {
+            Pattern = path,
+            Source = ExecAllowlistEntry.AllowAlwaysSource,
+            ArgPattern = ExecArgPattern.BuildHashed([path, "status"]),
+        };
+
+        Assert.Same(
+            entry,
+            ExecAllowlistMatcher.Match(
+                [entry],
+                new ExecCommandResolution(
+                    "git",
+                    path,
+                    "git.exe",
+                    null,
+                    ["git", "status"])));
+        Assert.Null(
+            ExecAllowlistMatcher.Match(
+                [entry],
+                new ExecCommandResolution(
+                    "git",
+                    path,
+                    "git.exe",
+                    null,
+                    ["git", "push", "--force"])));
+    }
+
+    [Fact]
+    public void Matcher_LegacyGeneratedPathOnlyEntry_IsIgnored()
+    {
+        const string path = @"C:\tools\git.exe";
+        var entry = new ExecAllowlistEntry
+        {
+            Pattern = path,
+            Source = ExecAllowlistEntry.AllowAlwaysSource,
+        };
+
+        Assert.Null(ExecAllowlistMatcher.Match(
+            [entry],
+            new ExecCommandResolution(
+                "git",
+                path,
+                "git.exe",
+                null,
+                ["git", "status"])));
+    }
+
+    [Fact]
+    public void Matcher_ManualPathOnlyEntry_RemainsIntentionallyBroad()
+    {
+        const string path = @"C:\tools\git.exe";
+        var manual = new ExecAllowlistEntry { Pattern = path };
+
+        Assert.Same(
+            manual,
+            ExecAllowlistMatcher.Match(
+                [manual],
+                new ExecCommandResolution(
+                    "git",
+                    path,
+                    "git.exe",
+                    null,
+                    ["git", "push", "--force"])));
+    }
+
+    [Fact]
+    public void Matcher_PrefersExactArgRuleOverManualPathFallback()
+    {
+        const string path = @"C:\tools\git.exe";
+        var manual = new ExecAllowlistEntry { Pattern = path };
+        var exact = new ExecAllowlistEntry
+        {
+            Pattern = path,
+            Source = ExecAllowlistEntry.AllowAlwaysSource,
+            ArgPattern = ExecArgPattern.BuildHashed([path, "status"]),
+        };
+
+        Assert.Same(
+            exact,
+            ExecAllowlistMatcher.Match(
+                [manual, exact],
+                new ExecCommandResolution(
+                    "git",
+                    path,
+                    "git.exe",
+                    null,
+                    ["git", "status"])));
+    }
+
+    [Fact]
     public void MatchAll_AllMatch_ReturnsOrderedList()
     {
         var e1 = Entry(@"C:\tools\rg.exe");

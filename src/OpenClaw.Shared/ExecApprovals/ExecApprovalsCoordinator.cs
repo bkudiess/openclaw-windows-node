@@ -393,11 +393,26 @@ public sealed class ExecApprovalsCoordinator : IExecApprovalV2Handler
     // Caller guarantees Security == Allowlist (guard is in HandleAsync step 8).
     private async Task PersistAllowlistEntriesAsync(ExecApprovalEvaluation context)
     {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var pattern in context.AllowAlwaysPatterns)
+        var seen = new HashSet<ExecAllowlistRuleKey>(
+            ExecAllowlistRuleIdentity.MatchComparer);
+        foreach (var candidate in context.AllowAlwaysPatterns)
         {
-            if (string.IsNullOrWhiteSpace(pattern) || !seen.Add(pattern)) continue;
-            await _store.AddAllowlistEntryAsync(context.AgentId, pattern).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(candidate.Pattern))
+                continue;
+            var entry = new ExecAllowlistEntry
+            {
+                Pattern = candidate.Pattern,
+                ArgPattern = candidate.ArgPattern,
+                Source = ExecAllowlistEntry.AllowAlwaysSource,
+            };
+            if (!seen.Add(ExecAllowlistRuleIdentity.From(entry)))
+                continue;
+            await _store.AddAllowlistEntryAsync(
+                    context.AgentId,
+                    candidate.Pattern,
+                    candidate.ArgPattern,
+                    ExecAllowlistEntry.AllowAlwaysSource)
+                .ConfigureAwait(false);
         }
     }
 
@@ -406,16 +421,21 @@ public sealed class ExecApprovalsCoordinator : IExecApprovalV2Handler
     private async Task RecordAllowlistUsageAsync(ExecApprovalEvaluation context)
     {
         if (context.Security != ExecSecurity.Allowlist || !context.AllowlistSatisfied) return;
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<ExecAllowlistRuleKey>(
+            ExecAllowlistRuleIdentity.AuthorityComparer);
         for (var i = 0; i < context.AllowlistMatches.Count; i++)
         {
-            var pattern = context.AllowlistMatches[i].Pattern;
-            if (string.IsNullOrEmpty(pattern) || !seen.Add(pattern)) continue;
+            var matchedEntry = context.AllowlistMatches[i];
+            if (string.IsNullOrEmpty(matchedEntry.Pattern)
+                || !seen.Add(ExecAllowlistRuleIdentity.From(matchedEntry)))
+                continue;
             var resolvedPath = i < context.AllowlistResolutions.Count
                 ? context.AllowlistResolutions[i].ResolvedPath
                 : null;
             await _store.RecordAllowlistUseAsync(
-                context.AgentId, pattern, resolvedPath)
+                context.AgentId,
+                matchedEntry,
+                resolvedPath)
                 .ConfigureAwait(false);
         }
     }
