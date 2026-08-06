@@ -4673,7 +4673,9 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
         var label = NativeToolProjector.FirstToolDisplayValue(toolArgs);
         if (string.IsNullOrWhiteSpace(label))
             label = NativeToolProjector.SanitizeToolDisplayValue(title);
-        var itemId = NativeToolProjector.GetStringProperty(evt.Data, "itemId", "callId");
+        string? itemId = NativeToolProjector.GetStringProperty(evt.Data, "itemId", "callId");
+        if (string.IsNullOrWhiteSpace(itemId))
+            itemId = null;
 
         return phase.ToLowerInvariant() switch
         {

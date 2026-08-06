@@ -856,7 +856,7 @@ public sealed class ReactorChatTimeline : Component<ReactorChatTimelineProps>
             return string.Empty;
 
         var lines = new List<string>();
-        foreach (var key in new[] { "command", "path", "file_path", "query", "url", "pattern" })
+        foreach (var key in NativeToolProjector.DisplayArgumentKeys)
         {
             if (args[key] is JsonValue value
                 && value.TryGetValue<string>(out var text)

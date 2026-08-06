@@ -6036,6 +6036,50 @@ public class OpenClawChatDataProviderTests
         Assert.Equal("hi\n", entry.ToolOutput);
     }
 
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("empty")]
+    [InlineData("whitespace")]
+    public async Task AgentEvent_ItemWithoutUsableId_UsesLegacyFallbackAndPreservesOutput(string idCase)
+    {
+        var (bridge, provider, snapshots, _) = CreateProvider(new[] { MainSession() });
+        await provider.LoadAsync();
+
+        string ItemPayload(string phase)
+        {
+            var payload = new Dictionary<string, object?>
+            {
+                ["phase"] = phase,
+                ["kind"] = "tool",
+                ["title"] = "Tool"
+            };
+            if (idCase != "missing")
+                payload["itemId"] = idCase == "empty" ? string.Empty : "   ";
+            return JsonSerializer.Serialize(payload);
+        }
+
+        bridge.RaiseAgent(MakeAgentEvent(
+            "lifecycle",
+            """{"phase":"start"}""",
+            runId: "run-1"));
+        bridge.RaiseAgent(MakeAgentEvent("item", ItemPayload("start"), runId: "run-1"));
+        bridge.RaiseAgent(MakeAgentEvent(
+            "command_output",
+            """{"phase":"end","output":"legacy output"}""",
+            runId: "run-1"));
+        bridge.RaiseAgent(MakeAgentEvent("item", ItemPayload("end"), runId: "run-1"));
+        bridge.RaiseAgent(MakeAgentEvent(
+            "lifecycle",
+            """{"phase":"end"}""",
+            runId: "run-1"));
+
+        var timeline = snapshots[^1].Timelines["main"];
+        var entry = Assert.Single(timeline.Entries);
+        Assert.Equal(ChatToolCallStatus.Success, entry.ToolResult);
+        Assert.Equal("legacy output", entry.ToolOutput);
+        Assert.False(timeline.TurnActive);
+    }
+
     [Fact]
     public async Task AgentEvent_GenericParentAndBashChild_RendersSpecificSafeIdentity()
     {

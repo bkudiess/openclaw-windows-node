@@ -148,6 +148,10 @@ public sealed class ChatTimelineRenderIdentityContractTests
         var timeline = Read("src", "OpenClaw.Tray.WinUI", "Chat", "ReactorChatTimeline.cs");
 
         Assert.Contains("FormatToolDisplayArgs(entry.ToolArgs)", timeline);
+        Assert.Contains("foreach (var key in NativeToolProjector.DisplayArgumentKeys)", timeline);
+        Assert.DoesNotContain(
+            "new[] { \"command\", \"path\", \"file_path\", \"query\", \"url\", \"pattern\" }",
+            timeline);
         Assert.Contains("Chat_Tool_InputSection", timeline);
         Assert.Contains("Chat_Status_Running", timeline);
         Assert.Contains("Chat_Status_Done", timeline);

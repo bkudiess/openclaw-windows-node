@@ -373,10 +373,12 @@ public class ChatTimelineReducerTests
         // Output without ToolCallId should use ActiveToolCallId fallback
         state = ChatTimelineReducer.Apply(state,
             new ChatToolOutputEvent("output text"));
+        state = ChatTimelineReducer.Apply(state, new ChatTurnEndEvent());
 
         Assert.Single(state.Entries);
         Assert.Equal(ChatToolCallStatus.Success, state.Entries[0].ToolResult);
         Assert.Equal("output text", state.Entries[0].ToolOutput);
+        Assert.False(state.TurnActive);
     }
 
     [Fact]
