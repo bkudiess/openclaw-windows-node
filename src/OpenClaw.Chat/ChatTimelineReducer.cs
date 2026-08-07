@@ -1462,10 +1462,6 @@ public static class ChatTimelineReducer
         {
             foreach (var key in state.ActiveToolCalls.Keys)
                 terminalCorrelations = terminalCorrelations.Remove(key);
-            foreach (var key in pendingPresentations.Keys)
-                terminalCorrelations = terminalCorrelations.Remove(key);
-            foreach (var key in pendingOutcomes.Keys)
-                terminalCorrelations = terminalCorrelations.Remove(key);
         }
 
         var oldestRetainedTurn = Math.Max(0, state.ToolLegacyTurn - MaxRetainedToolTurns + 1);

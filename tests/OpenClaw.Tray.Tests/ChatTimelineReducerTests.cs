@@ -1036,6 +1036,52 @@ public class ChatTimelineReducerTests
     }
 
     [Fact]
+    public void ToolReplayRetention_AbortPreservesPriorLegacyPendingCorrelation()
+    {
+        var state = ChatTimelineReducer.Apply(
+            ChatTimelineState.Initial(),
+            new ChatToolPresentationEvent(
+                "parent-1",
+                "Bash",
+                ChatToolIdentityStrength.Specific,
+                ChildToolCallId: "child-1",
+                ActivatesTurn: false));
+        state = ChatTimelineReducer.Apply(state, new ChatTurnEndEvent());
+        state = ChatTimelineReducer.Apply(
+            state,
+            new ChatToolStartEvent(
+                "current",
+                "Read",
+                ToolCallId: "current"));
+        state = ChatTimelineReducer.Apply(
+            state,
+            new ChatTurnEndEvent(RetainToolCorrelations: false));
+
+        Assert.Contains(
+            state.PendingToolPresentations!,
+            pair => pair.Key.ToolCallId == "parent-1");
+
+        state = ChatTimelineReducer.Apply(
+            state,
+            new ChatToolStartEvent(
+                "Tool",
+                "Tool",
+                ToolCallId: "parent-1",
+                IdentityStrength: ChatToolIdentityStrength.Fallback));
+        state = ChatTimelineReducer.Apply(
+            state,
+            new ChatToolOutputEvent("late output", "child-1"));
+
+        var parent = Assert.Single(
+            state.Entries,
+            entry => entry.ToolCallId == "parent-1");
+        Assert.Equal("Bash", parent.ToolName);
+        Assert.Equal(ChatToolCallStatus.Interrupted, parent.ToolResult);
+        Assert.Equal("late output", parent.ToolOutput);
+        Assert.False(state.TurnActive);
+    }
+
+    [Fact]
     public void ToolReplayReset_SameRunLateSuccessDoesNotReplaceInterrupted()
     {
         var state = ChatTimelineReducer.Apply(
