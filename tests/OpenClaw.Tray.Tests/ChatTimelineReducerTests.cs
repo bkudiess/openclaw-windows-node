@@ -1015,6 +1015,27 @@ public class ChatTimelineReducerTests
     }
 
     [Fact]
+    public void ToolReplayRetention_AbortedTurnLateSuccessDoesNotReplaceInterrupted()
+    {
+        var state = ChatTimelineReducer.Apply(
+            ChatTimelineState.Initial(),
+            new ChatToolStartEvent(
+                "Tool",
+                "Tool",
+                ToolCallId: "tool-1",
+                RunId: "run-1"));
+        state = ChatTimelineReducer.Apply(
+            state,
+            new ChatTurnEndEvent(RetainToolCorrelations: false));
+
+        state = ChatTimelineReducer.Apply(
+            state,
+            new ChatToolOutputEvent(string.Empty, "tool-1", RunId: "run-1"));
+
+        Assert.Equal(ChatToolCallStatus.Interrupted, Assert.Single(state.Entries).ToolResult);
+    }
+
+    [Fact]
     public void ToolReplayReset_SameRunLateSuccessDoesNotReplaceInterrupted()
     {
         var state = ChatTimelineReducer.Apply(

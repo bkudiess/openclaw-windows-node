@@ -997,7 +997,9 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
         // Always clear local "turn active" state — the gateway will emit a
         // lifecycle.end if the abort succeeds, but we want the UI to reflect
         // the user's intent immediately.
-        ApplyEventAndPublish(threadId, new ChatTurnEndEvent());
+        ApplyEventAndPublish(
+            threadId,
+            new ChatTurnEndEvent(RetainToolCorrelations: false));
     }
 
     /// <summary>

@@ -55,7 +55,7 @@ public static class ChatTimelineReducer
             ChatReasoningEndEvent => state.ActiveReasoningId is null ? state : state with { ActiveReasoningId = null },
             ChatMessageDeltaEvent e => UpsertAssistant(BeginTurn(state), e.Text, replace: false, streaming: true),
             ChatMessageEvent e => UpsertAssistant(BeginTurn(state), e.Text, replace: true, streaming: e.IsStreaming, e.ReconcilePrevious),
-            ChatTurnEndEvent => ApplyTurnEnd(state),
+            ChatTurnEndEvent e => ApplyTurnEnd(state, e.RetainToolCorrelations),
             ChatIntentEvent e => state with { CurrentIntent = e.Intent },
             ChatToolStartEvent e => ApplyToolStart(state, e),
             ChatToolPresentationEvent e => ApplyToolPresentation(state, e),
@@ -1354,7 +1354,9 @@ public static class ChatTimelineReducer
         };
     }
 
-    static ChatTimelineState ApplyTurnEnd(ChatTimelineState state)
+    static ChatTimelineState ApplyTurnEnd(
+        ChatTimelineState state,
+        bool retainToolCorrelations = true)
     {
         var entries = state.Entries;
 
@@ -1436,23 +1438,34 @@ public static class ChatTimelineReducer
 
         var terminalCorrelations = state.TerminalToolCorrelations
             ?? System.Collections.Immutable.ImmutableDictionary<ChatToolCorrelationKey, long>.Empty;
-        foreach (var key in state.ActiveToolCalls.Keys)
-            terminalCorrelations = terminalCorrelations.SetItem(key, state.ToolLegacyTurn);
 
         var pendingPresentations = state.PendingToolPresentations
             ?? System.Collections.Immutable.ImmutableDictionary<ChatToolCorrelationKey, ChatPendingToolPresentation>.Empty;
-        foreach (var pair in pendingPresentations)
-        {
-            if (!terminalCorrelations.ContainsKey(pair.Key))
-                terminalCorrelations = terminalCorrelations.Add(pair.Key, state.ToolLegacyTurn);
-        }
-
         var pendingOutcomes = state.PendingToolOutcomes
             ?? System.Collections.Immutable.ImmutableDictionary<ChatToolCorrelationKey, ChatPendingToolOutcome>.Empty;
-        foreach (var key in pendingOutcomes.Keys)
+        if (retainToolCorrelations)
         {
-            if (!terminalCorrelations.ContainsKey(key))
-                terminalCorrelations = terminalCorrelations.Add(key, state.ToolLegacyTurn);
+            foreach (var key in state.ActiveToolCalls.Keys)
+                terminalCorrelations = terminalCorrelations.SetItem(key, state.ToolLegacyTurn);
+            foreach (var pair in pendingPresentations)
+            {
+                if (!terminalCorrelations.ContainsKey(pair.Key))
+                    terminalCorrelations = terminalCorrelations.Add(pair.Key, state.ToolLegacyTurn);
+            }
+            foreach (var key in pendingOutcomes.Keys)
+            {
+                if (!terminalCorrelations.ContainsKey(key))
+                    terminalCorrelations = terminalCorrelations.Add(key, state.ToolLegacyTurn);
+            }
+        }
+        else
+        {
+            foreach (var key in state.ActiveToolCalls.Keys)
+                terminalCorrelations = terminalCorrelations.Remove(key);
+            foreach (var key in pendingPresentations.Keys)
+                terminalCorrelations = terminalCorrelations.Remove(key);
+            foreach (var key in pendingOutcomes.Keys)
+                terminalCorrelations = terminalCorrelations.Remove(key);
         }
 
         var oldestRetainedTurn = Math.Max(0, state.ToolLegacyTurn - MaxRetainedToolTurns + 1);

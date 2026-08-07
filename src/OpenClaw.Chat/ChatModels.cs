@@ -239,7 +239,7 @@ public record ChatReasoningDeltaEvent(string Text) : ChatEvent;
 public record ChatReasoningEndEvent() : ChatEvent;
 public record ChatMessageEvent(string Text, string? ReasoningText = null, bool ReconcilePrevious = false, bool IsStreaming = false) : ChatEvent;
 public record ChatMessageDeltaEvent(string Text) : ChatEvent;
-public record ChatTurnEndEvent() : ChatEvent;
+public record ChatTurnEndEvent(bool RetainToolCorrelations = true) : ChatEvent;
 public record ChatIntentEvent(string Intent) : ChatEvent;
 public record ChatToolStartEvent(
     string Text,

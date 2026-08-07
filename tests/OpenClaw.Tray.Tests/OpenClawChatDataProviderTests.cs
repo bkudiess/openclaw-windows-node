@@ -6768,6 +6768,77 @@ public class OpenClawChatDataProviderTests
     }
 
     [Fact]
+    public async Task StopResponseAsync_LateToolEndAfterLifecycleRemainsInterrupted()
+    {
+        var (bridge, provider, snapshots, _) = CreateProvider(new[] { MainSession() });
+        await provider.LoadAsync();
+
+        bridge.RaiseAgent(MakeAgentEvent(
+            "lifecycle",
+            """{"phase":"start"}""",
+            runId: "run-1"));
+        bridge.RaiseAgent(MakeAgentEvent(
+            "tool",
+            """{"phase":"start","name":"system.run","toolCallId":"tool-1","args":{"command":"Get-Date"}}""",
+            runId: "run-1"));
+
+        await provider.StopResponseAsync("main");
+        Assert.Equal(
+            ChatToolCallStatus.Interrupted,
+            Assert.Single(
+                snapshots[^1].Timelines["main"].Entries,
+                entry => entry.Kind == ChatTimelineItemKind.ToolCall).ToolResult);
+
+        bridge.RaiseAgent(MakeAgentEvent(
+            "lifecycle",
+            """{"phase":"end"}""",
+            runId: "run-1"));
+        bridge.RaiseAgent(MakeAgentEvent(
+            "item",
+            """{"phase":"end","kind":"tool","name":"system.run","itemId":"tool:tool-1","toolCallId":"tool-1"}""",
+            runId: "run-1"));
+
+        var entry = Assert.Single(
+            snapshots[^1].Timelines["main"].Entries,
+            item => item.Kind == ChatTimelineItemKind.ToolCall);
+        Assert.Equal(ChatToolCallStatus.Interrupted, entry.ToolResult);
+    }
+
+    [Fact]
+    public async Task StopResponseAsync_FailedAbortLateToolEndRepairsInterrupted()
+    {
+        var (bridge, provider, snapshots, _) = CreateProvider(new[] { MainSession() });
+        bridge.AbortBehavior = _ => throw new InvalidOperationException("Abort unavailable");
+        await provider.LoadAsync();
+
+        bridge.RaiseAgent(MakeAgentEvent(
+            "lifecycle",
+            """{"phase":"start"}""",
+            runId: "run-1"));
+        bridge.RaiseAgent(MakeAgentEvent(
+            "tool",
+            """{"phase":"start","name":"system.run","toolCallId":"tool-1","args":{"command":"Get-Date"}}""",
+            runId: "run-1"));
+
+        await provider.StopResponseAsync("main");
+        Assert.Equal(
+            ChatToolCallStatus.Interrupted,
+            Assert.Single(
+                snapshots[^1].Timelines["main"].Entries,
+                entry => entry.Kind == ChatTimelineItemKind.ToolCall).ToolResult);
+
+        bridge.RaiseAgent(MakeAgentEvent(
+            "item",
+            """{"phase":"end","kind":"tool","name":"system.run","itemId":"tool:tool-1","toolCallId":"tool-1"}""",
+            runId: "run-1"));
+
+        var entry = Assert.Single(
+            snapshots[^1].Timelines["main"].Entries,
+            item => item.Kind == ChatTimelineItemKind.ToolCall);
+        Assert.Equal(ChatToolCallStatus.Success, entry.ToolResult);
+    }
+
+    [Fact]
     public async Task AgentEvent_SameToolCallIdAcrossRunsCreatesDistinctRows()
     {
         var (bridge, provider, snapshots, _) = CreateProvider(new[] { MainSession() });
