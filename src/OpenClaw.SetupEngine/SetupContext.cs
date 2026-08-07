@@ -156,7 +156,7 @@ public sealed class GatewayConfig
     public string? InstallUrl { get; set; }
     public string? Version { get; set; }
     public int HealthTimeoutSeconds { get; set; } = 90;
-    public string ReloadMode { get; set; } = "hot";
+    public string ReloadMode { get; set; } = "hybrid";
     public string AuthMode { get; set; } = "token";
     public Dictionary<string, string>? ExtraConfig { get; set; }
 }
@@ -333,8 +333,6 @@ public sealed class TraySettingsConfig
 
 public sealed class PairingConfig
 {
-    // TODO: Wire OperatorScopes/NodeScopes/CliScopes into pairing requests
-    // when the gateway protocol supports scoped token issuance.
     public int TimeoutSeconds { get; set; } = 60;
 }
 

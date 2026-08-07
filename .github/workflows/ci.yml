@@ -116,6 +116,10 @@ jobs:
           throw "GitVersion SemVer '$actual' did not match tag '$expected'."
         }
 
+    - name: Validate documentation
+      shell: pwsh
+      run: ./scripts/validate-docs.ps1
+
     - name: Restore dependencies
       run: dotnet restore
 
@@ -348,7 +352,7 @@ jobs:
         include:
           - name: setup-connect
             timeout_minutes: 45
-            filter: "FullyQualifiedName~OpenClaw.E2ETests.Setup.SetupAndConnectTests|FullyQualifiedName~OpenClaw.E2ETests.Setup.MxcSetupAndConnectTests"
+            filter: "FullyQualifiedName~OpenClaw.E2ETests.Setup.SetupAndConnectTests|FullyQualifiedName~OpenClaw.E2ETests.Setup.MxcSetupAndConnectTests|FullyQualifiedName~OpenClaw.E2ETests.Setup.MirroredWslPortLeaseTests"
           - name: revocation-recovery
             timeout_minutes: 25
             filter: FullyQualifiedName~OpenClaw.E2ETests.Setup.RevocationAndRecoveryTests
@@ -527,7 +531,7 @@ jobs:
 
   build-msix:
     needs: [test, e2etests]
-    if: false # Paused for alpha.4; ship Inno setup and portable ZIP artifacts only.
+    if: false # MSIX distribution is paused; ship Inno setup and portable ZIP artifacts only.
     runs-on: ${{ matrix.rid == 'win-arm64' && 'windows-11-arm' || 'windows-latest' }}
     continue-on-error: true
     strategy:
