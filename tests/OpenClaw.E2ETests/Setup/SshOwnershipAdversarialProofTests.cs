@@ -72,6 +72,7 @@ public sealed class SshOwnershipAdversarialProofTests
                     IdentityFile "{identityFile}"
                     UserKnownHostsFile NUL
                     StrictHostKeyChecking no
+                    ProxyCommand wsl.exe -d {_fixture.DistroName} -- nc 127.0.0.1 {sshPort}
                 """);
             PatchActiveGateway(tunnelPort, proofSshd.HostAddress, sshPort, browserControlPort: null);
             _fixture.SetTrayEnvironmentVariable("HOME", profileDir);
@@ -84,7 +85,12 @@ public sealed class SshOwnershipAdversarialProofTests
             }
             await _fixture.StartTrayAsync();
 
-            var ownedListeners = WindowsTcpListenerSnapshot.Capture().Listeners
+            var ownedSnapshot = await WaitForListenerSnapshotAsync(
+                listeners => listeners.Any(listener =>
+                    listener.Port == tunnelPort &&
+                    string.Equals(listener.ProcessName, "ssh", StringComparison.OrdinalIgnoreCase)),
+                TimeSpan.FromSeconds(30));
+            var ownedListeners = ownedSnapshot.Listeners
                 .Where(listener => listener.Port == tunnelPort)
                 .ToArray();
             var sshListeners = ownedListeners
@@ -96,7 +102,7 @@ public sealed class SshOwnershipAdversarialProofTests
             var sshListener = Assert.Single(
                 sshListeners,
                 listener => listener.Address.Equals(IPAddress.Loopback));
-            using var ready = await ReadStatusAsync();
+            using var ready = await WaitForReadyStatusAsync(TimeSpan.FromSeconds(30));
             AssertReady(ready.RootElement);
             WriteJson("01-valid-ready.json", ready.RootElement);
             WriteObject("02-owned-listener.json", new
@@ -111,7 +117,16 @@ public sealed class SshOwnershipAdversarialProofTests
 
             adversary = new TcpListener(IPAddress.Parse("127.0.0.2"), tunnelPort);
             adversary.Start();
-            var competingListeners = WindowsTcpListenerSnapshot.Capture().Listeners
+            var competingSnapshot = await WaitForListenerSnapshotAsync(
+                listeners =>
+                    listeners.Any(listener =>
+                        listener.Port == tunnelPort &&
+                        listener.ProcessId == Environment.ProcessId) &&
+                    listeners.Any(listener =>
+                        listener.Port == tunnelPort &&
+                        listener.ProcessId == sshListener.ProcessId),
+                TimeSpan.FromSeconds(30));
+            var competingListeners = competingSnapshot.Listeners
                 .Where(listener => listener.Port == tunnelPort)
                 .ToArray();
             Assert.Contains(competingListeners, listener => listener.ProcessId == Environment.ProcessId);
@@ -132,9 +147,13 @@ public sealed class SshOwnershipAdversarialProofTests
             }
             using var degraded = await WaitForStatusAsync(
                 status =>
-                    status.GetProperty("overallState").GetString() == "Degraded" &&
-                    status.GetProperty("nodeState").GetString() == "Error",
+                    status.GetProperty("nodeState").GetString() == "Error" &&
+                    status.GetProperty("nodeError").GetString()?.Contains(
+                        "credentials were not sent",
+                        StringComparison.OrdinalIgnoreCase) == true,
                 TimeSpan.FromSeconds(45));
+            adversary.Stop();
+            adversary = null;
             Assert.Contains(
                 "credentials were not sent",
                 degraded.RootElement.GetProperty("nodeError").GetString(),
@@ -148,9 +167,6 @@ public sealed class SshOwnershipAdversarialProofTests
             if (captureUiProof)
                 await NavigateAndCaptureAsync("connection", screenshotDegraded);
 
-            adversary.Stop();
-            adversary = null;
-
             using (var reconnect = await _fixture.Client!.CallToolExpectSuccessAsync(
                        "app.connection.reconnectNode"))
             {
@@ -158,15 +174,15 @@ public sealed class SshOwnershipAdversarialProofTests
             }
             await _fixture.WaitForConnectionReady(TimeSpan.FromSeconds(90));
             await _fixture.WaitForNodeListReady(TimeSpan.FromSeconds(60));
-            using var recovered = await ReadStatusAsync();
+            using var recovered = await WaitForReadyStatusAsync(TimeSpan.FromSeconds(30));
             AssertReady(recovered.RootElement);
             WriteJson("05-recovered-ready.json", recovered.RootElement);
 
             var afterTokens = ReadRoleTokens();
             Assert.Equal(beforeTokens.Operator, afterTokens.Operator);
             Assert.Equal(beforeTokens.Node, afterTokens.Node);
-            using (var approvals = await _fixture.Client!.CallToolExpectSuccessAsync(
-                       "app.connection.pendingApprovals"))
+            using (var approvals = await WaitForConnectedPendingApprovalsAsync(
+                       TimeSpan.FromSeconds(30)))
             {
                 Assert.True(approvals.RootElement.GetProperty("connected").GetBoolean());
                 Assert.Equal(0, approvals.RootElement.GetProperty("totalPending").GetInt32());
@@ -486,7 +502,10 @@ public sealed class SshOwnershipAdversarialProofTests
         Assert.Equal(0, keygen.ExitCode);
 
         var install = await _fixture.RunInWslAsync(
-            "set -e; export DEBIAN_FRONTEND=noninteractive; command -v sshd >/dev/null || { apt-get update -qq; apt-get install -y -qq --no-install-recommends openssh-server; }; ssh-keygen -A; install -d -m 0755 /run/sshd",
+            "set -e; export DEBIAN_FRONTEND=noninteractive; " +
+            "if ! command -v sshd >/dev/null || ! command -v nc >/dev/null; then " +
+            "apt-get update -qq; apt-get install -y -qq --no-install-recommends openssh-server netcat-openbsd; fi; " +
+            "ssh-keygen -A; install -d -m 0755 /run/sshd",
             TimeSpan.FromMinutes(3),
             user: "root");
         Assert.Equal(0, install.ExitCode);
@@ -546,30 +565,14 @@ public sealed class SshOwnershipAdversarialProofTests
 
         const string hostAddress = "127.0.0.1";
 
-        ProcessResult? keyscan = null;
-        for (var attempt = 0; attempt < 20; attempt++)
-        {
-            keyscan = await RunProcessAsync(
-                "ssh-keyscan.exe",
-                ["-p", sshPort.ToString(), hostAddress],
-                timeout: TimeSpan.FromSeconds(5));
-            if (keyscan.ExitCode == 0 && !string.IsNullOrWhiteSpace(keyscan.Stdout))
-                break;
-            await Task.Delay(250);
-        }
-        Assert.NotNull(keyscan);
-        Assert.True(
-            keyscan.ExitCode == 0 && !string.IsNullOrWhiteSpace(keyscan.Stdout),
-            $"ssh-keyscan failed: {TokenSanitizer.SanitizeLogMessage(keyscan.Stderr)}");
-        await File.WriteAllTextAsync(Path.Combine(sshDir, "known_hosts"), keyscan.Stdout);
-
         var preflight = await RunProcessAsync(
             "ssh.exe",
             [
                 "-o", "BatchMode=yes",
                 "-o", "IdentitiesOnly=yes",
-                "-o", "StrictHostKeyChecking=accept-new",
-                "-o", $"UserKnownHostsFile={Path.Combine(sshDir, "known_hosts")}",
+                "-o", "StrictHostKeyChecking=no",
+                "-o", "UserKnownHostsFile=NUL",
+                "-o", $"ProxyCommand=wsl.exe -d {_fixture.DistroName} -- nc 127.0.0.1 {sshPort}",
                 "-i", Path.Combine(sshDir, "id_ed25519"),
                 "-p", sshPort.ToString(),
                 $"openclaw@{hostAddress}",
@@ -595,6 +598,23 @@ public sealed class SshOwnershipAdversarialProofTests
 
     private async Task<JsonDocument> ReadStatusAsync() =>
         await _fixture.Client!.CallToolExpectSuccessAsync("app.status");
+
+    private async Task<JsonDocument> WaitForConnectedPendingApprovalsAsync(TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow.Add(timeout);
+        string last = "<none>";
+        while (DateTime.UtcNow < deadline)
+        {
+            using var document = await _fixture.Client!.CallToolExpectSuccessAsync(
+                "app.connection.pendingApprovals");
+            last = document.RootElement.GetRawText();
+            if (document.RootElement.GetProperty("connected").GetBoolean())
+                return JsonDocument.Parse(last);
+            await Task.Delay(500);
+        }
+
+        throw new TimeoutException($"Pending approvals never reached connected state. Last: {last}");
+    }
 
     private async Task<JsonDocument> WaitForStatusAsync(
         Func<JsonElement, bool> predicate,
@@ -653,6 +673,34 @@ public sealed class SshOwnershipAdversarialProofTests
         Assert.Equal("Connected", status.GetProperty("operatorState").GetString());
         Assert.Equal("Connected", status.GetProperty("nodeState").GetString());
         Assert.True(status.GetProperty("nodePaired").GetBoolean());
+    }
+
+    private Task<JsonDocument> WaitForReadyStatusAsync(TimeSpan timeout) =>
+        WaitForStatusAsync(
+            status =>
+                status.GetProperty("overallState").GetString() == "Ready" &&
+                status.GetProperty("operatorState").GetString() == "Connected" &&
+                status.GetProperty("nodeState").GetString() == "Connected" &&
+                status.GetProperty("nodePaired").GetBoolean(),
+            timeout);
+
+    private static async Task<WindowsTcpListenerSnapshotResult> WaitForListenerSnapshotAsync(
+        Func<IReadOnlyList<WindowsTcpListenerInfo>, bool> predicate,
+        TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow.Add(timeout);
+        WindowsTcpListenerSnapshotResult? last = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            last = WindowsTcpListenerSnapshot.Capture();
+            if (last.Ipv4Complete && last.Ipv6Complete && predicate(last.Listeners))
+                return last;
+            await Task.Delay(100);
+        }
+
+        throw new TimeoutException(
+            $"Listener predicate was not satisfied. IPv4 complete: {last?.Ipv4Complete}; " +
+            $"IPv6 complete: {last?.Ipv6Complete}; listener count: {last?.Listeners.Count ?? 0}.");
     }
 
     private async Task NavigateAndCaptureAsync(string page, string outputPath)
