@@ -569,9 +569,11 @@ public sealed class SshOwnershipAdversarialProofTests
         ProcessResult? preflight = null;
         var preflightTimeout = TimeSpan.FromSeconds(30);
         var preflightStopwatch = Stopwatch.StartNew();
-        while (preflightStopwatch.Elapsed < preflightTimeout)
+        while (true)
         {
             var remaining = preflightTimeout - preflightStopwatch.Elapsed;
+            if (remaining <= TimeSpan.Zero)
+                break;
             var attemptTimeout = TimeSpan.FromMilliseconds(
                 Math.Min(TimeSpan.FromSeconds(5).TotalMilliseconds, remaining.TotalMilliseconds));
             preflight = await RunProcessAsync(
