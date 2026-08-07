@@ -1062,7 +1062,7 @@ public class OpenClawGatewayClientTests
         };
 
         await client.ConnectAsync();
-        Assert.Equal(1, server.AcceptedCount);
+        await server.WaitForAcceptedCountAsync(1, TimeSpan.FromSeconds(2));
         await server.SendTextAsync(
             """
             {
@@ -1077,7 +1077,7 @@ public class OpenClawGatewayClientTests
         await authorizationStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         await client.ConnectAsync();
-        Assert.Equal(2, server.AcceptedCount);
+        await server.WaitForAcceptedCountAsync(2, TimeSpan.FromSeconds(2));
         releaseAuthorization.TrySetResult();
         await server.SendTextAsync("{}");
         await Task.Delay(100);

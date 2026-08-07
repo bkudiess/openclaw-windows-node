@@ -35,7 +35,8 @@ public sealed class SshOwnershipAdversarialProofTests
         var settingsPath = Path.Combine(_fixture.DataDir, "settings.json");
         var originalGatewayBytes = File.ReadAllBytes(gatewayPath);
         var originalSettingsBytes = File.ReadAllBytes(settingsPath);
-        var sshPort = E2ESetupFixture.AllocateFreePort();
+        using var sshPortLease = MirroredWslPortLease.Acquire();
+        var sshPort = sshPortLease.Port;
         var tunnelPort = AllocateFreeForwardPortPair();
         var screenshotDegraded = Path.Combine(proofDir, "04-connection-degraded.png");
         var captureUiProof = string.Equals(
@@ -543,16 +544,7 @@ public sealed class SshOwnershipAdversarialProofTests
         Assert.Contains("-e", inspectionLines[2], StringComparison.Ordinal);
         Assert.Contains($"-p {sshPort}", inspectionLines[2], StringComparison.Ordinal);
 
-        var address = await _fixture.RunInWslAsync(
-            "hostname -I | cut -d' ' -f1",
-            TimeSpan.FromSeconds(15),
-            inputViaStdin: true,
-            user: "root");
-        Assert.Equal(0, address.ExitCode);
-        var hostAddress = address.Stdout.Trim();
-        Assert.True(
-            IPAddress.TryParse(hostAddress, out _),
-            $"Invalid WSL address: {TokenSanitizer.SanitizeLogMessage(hostAddress)}");
+        const string hostAddress = "127.0.0.1";
 
         ProcessResult? keyscan = null;
         for (var attempt = 0; attempt < 20; attempt++)
@@ -970,6 +962,11 @@ public sealed class SshOwnershipAdversarialProofTests
                 }
                 catch (OperationCanceledException)
                 {
+                    break;
+                }
+                catch (WebSocketException)
+                {
+                    // A denied credential handoff aborts this proof socket without a close frame.
                     break;
                 }
 

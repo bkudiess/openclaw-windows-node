@@ -596,6 +596,22 @@ internal sealed class LoopbackWebSocketServer : IDisposable
         }
     }
 
+    public async Task WaitForAcceptedCountAsync(int expectedCount, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (AcceptedCount < expectedCount)
+        {
+            if (DateTime.UtcNow >= deadline)
+            {
+                throw new TimeoutException(
+                    $"Loopback server accepted {AcceptedCount} connection(s); expected {expectedCount}.");
+            }
+
+            // slopwatch-ignore: SW004 This bounded poll synchronizes the test with the async server accept loop.
+            await Task.Delay(10);
+        }
+    }
+
     public LoopbackWebSocketServer(bool useManagedWebSocket = false)
     {
         var port = GetFreeTcpPort();
