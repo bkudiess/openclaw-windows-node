@@ -4454,7 +4454,7 @@
     <value>當命令不符合下列可執行檔路徑允許清單時會發生什麼。</value>
   </data>
   <data name="PermissionsPage_PatternsAreMatchedLeft.Text" xml:space="preserve">
-    <value>當核准要求提供「一律允許」選項時，可使用此選項核准簡單命令。也可新增解析後的可執行檔路徑模式，例如 **/hostname.exe。「拒絕」和「詢問」仍由「預設動作」控制。變更會自動儲存。</value>
+    <value>「一律允許」會為符合條件的原生 .exe 命令建立參數繫結項目。在此新增的項目只依路徑比對，可能允許相符的可執行檔使用任何引數。「拒絕」和「詢問」仍由「預設動作」控制。變更會自動儲存。</value>
   </data>
   <data name="PermissionsPage_Saved.Text" xml:space="preserve">
     <value>已儲存</value>
@@ -4463,7 +4463,7 @@
     <value>0 個項目</value>
   </data>
   <data name="PermissionsPage_NoRulesYetAdd.Text" xml:space="preserve">
-    <value>沒有可執行檔路徑允許清單項目。當核准要求提供「一律允許」選項時，可使用此選項核准簡單命令，或新增 **/hostname.exe 等路徑模式。</value>
+    <value>沒有可執行檔路徑允許清單項目。使用「一律允許」核准符合條件的原生 .exe 命令，或新增只依路徑比對的模式，例如 **/hostname.exe。</value>
   </data>
   <data name="PermissionsPage_WindowsPrivacy.Text" xml:space="preserve">
     <value>Windows 隱私</value>

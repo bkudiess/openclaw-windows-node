@@ -232,7 +232,7 @@
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" Spacing="2">
                             <TextBlock x:Uid="PermissionsPage_TextBlock_28" Text="Executable-path allowlist" Style="{StaticResource BodyStrongTextBlockStyle}"/>
-                            <TextBlock x:Uid="PermissionsPage_PatternsAreMatchedLeft" Text="When an approval offers Allow Always, use it to approve a simple command. You can also add a resolved executable-path pattern such as **/hostname.exe. Deny and Ask remain controlled by Default action. Changes save automatically."
+                            <TextBlock x:Uid="PermissionsPage_PatternsAreMatchedLeft" Text="Allow Always creates an argument-bound entry for an eligible native .exe command. Entries added here are path-only and can allow matching executables with any arguments. Deny and Ask remain controlled by Default action. Changes save automatically."
                                        Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                        TextWrapping="Wrap"/>
@@ -258,7 +258,7 @@
 
                     <!-- Empty state — visible when there are no allowlist entries -->
                     <TextBlock x:Uid="PermissionsPage_NoRulesYetAdd" x:Name="RulesEmptyState"
-                              Text="No executable-path allowlist entries. When an approval offers Allow Always, use it to approve a simple command, or add a pattern such as **/hostname.exe."
+                              Text="No executable-path allowlist entries. Approve an eligible native .exe command with Allow Always, or add a path-only pattern such as **/hostname.exe."
                                Style="{StaticResource CaptionTextBlockStyle}"
                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                TextWrapping="Wrap"

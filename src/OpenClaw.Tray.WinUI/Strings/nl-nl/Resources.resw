@@ -4455,7 +4455,7 @@ Opdrachten worden geblokkeerd zolang sandboxing niet beschikbaar is, omdat strik
     <value>Wat gebeurt er als een opdracht niet overeenkomt met de allowlist voor paden van uitvoerbare bestanden hieronder.</value>
   </data>
   <data name="PermissionsPage_PatternsAreMatchedLeft.Text" xml:space="preserve">
-    <value>Wanneer bij een goedkeuring Altijd toestaan wordt aangeboden, gebruikt u dit om een eenvoudige opdracht goed te keuren. U kunt ook een opgelost padpatroon voor uitvoerbare bestanden toevoegen, zoals **/hostname.exe. Weigeren en Vragen blijven onder Standaardactie vallen. Wijzigingen worden automatisch opgeslagen.</value>
+    <value>Altijd toestaan maakt een aan argumenten gebonden vermelding voor een geschikte systeemeigen .exe-opdracht. Vermeldingen die u hier toevoegt, zijn alleen op het pad gebaseerd en kunnen overeenkomende uitvoerbare bestanden met alle argumenten toestaan. Weigeren en Vragen blijven onder Standaardactie vallen. Wijzigingen worden automatisch opgeslagen.</value>
   </data>
   <data name="PermissionsPage_Saved.Text" xml:space="preserve">
     <value>Opgeslagen</value>
@@ -4464,7 +4464,7 @@ Opdrachten worden geblokkeerd zolang sandboxing niet beschikbaar is, omdat strik
     <value>0 vermeldingen</value>
   </data>
   <data name="PermissionsPage_NoRulesYetAdd.Text" xml:space="preserve">
-    <value>Geen vermeldingen in de allowlist voor paden van uitvoerbare bestanden. Wanneer bij een goedkeuring Altijd toestaan wordt aangeboden, gebruikt u dit om een eenvoudige opdracht goed te keuren of voegt u een patroon toe, zoals **/hostname.exe.</value>
+    <value>Geen vermeldingen in de allowlist voor paden van uitvoerbare bestanden. Keur een geschikte systeemeigen .exe-opdracht goed met Altijd toestaan of voeg een patroon toe dat alleen op het pad is gebaseerd, zoals **/hostname.exe.</value>
   </data>
   <data name="PermissionsPage_WindowsPrivacy.Text" xml:space="preserve">
     <value>Windows-privacy</value>

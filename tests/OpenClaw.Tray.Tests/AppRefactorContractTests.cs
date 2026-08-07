@@ -465,10 +465,10 @@ public sealed class AppRefactorContractTests
             "<value>Controls which executables the agent can launch on this node. The executable-path allowlist starts empty.</value>",
             resources);
         Assert.Contains(
-            "<value>When an approval offers Allow Always, use it to approve a simple command. You can also add a resolved executable-path pattern such as **/hostname.exe. Deny and Ask remain controlled by Default action. Changes save automatically.</value>",
+            "<value>Allow Always creates an argument-bound entry for an eligible native .exe command. Entries added here are path-only and can allow matching executables with any arguments. Deny and Ask remain controlled by Default action. Changes save automatically.</value>",
             resources);
         Assert.Contains(
-            "<value>No executable-path allowlist entries. When an approval offers Allow Always, use it to approve a simple command, or add a pattern such as **/hostname.exe.</value>",
+            "<value>No executable-path allowlist entries. Approve an eligible native .exe command with Allow Always, or add a path-only pattern such as **/hostname.exe.</value>",
             resources);
         Assert.Contains(
             "<value>Enter an executable-path pattern such as **/hostname.exe. Basename or command-text patterns such as hostname are invalid.</value>",
@@ -490,10 +490,10 @@ public sealed class AppRefactorContractTests
         };
         var hostnameExampleKeys = new[]
         {
-            "PermissionsPage_PatternsAreMatchedLeft.Text",
             "PermissionsPage_NoRulesYetAdd.Text",
             "PermissionsPage_ExecAllowlistPatternValidation.Text",
         };
+        const string runtimeContractKey = "PermissionsPage_PatternsAreMatchedLeft.Text";
 
         foreach (var locale in new[] { "fr-fr", "nl-nl", "zh-cn", "zh-tw" })
         {
@@ -513,6 +513,11 @@ public sealed class AppRefactorContractTests
                 Assert.DoesNotContain("git.exe", value, StringComparison.OrdinalIgnoreCase);
                 Assert.NotEqual(enUs[key], value);
             }
+
+            var runtimeContract = Assert.Contains(runtimeContractKey, localized);
+            Assert.NotEmpty(runtimeContract);
+            Assert.Contains(".exe", runtimeContract, StringComparison.OrdinalIgnoreCase);
+            Assert.NotEqual(enUs[runtimeContractKey], runtimeContract);
         }
     }
 

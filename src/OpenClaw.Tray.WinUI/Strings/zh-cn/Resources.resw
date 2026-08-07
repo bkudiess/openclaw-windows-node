@@ -4454,7 +4454,7 @@
     <value>当命令与下列可执行文件路径允许列表不匹配时发生什么。</value>
   </data>
   <data name="PermissionsPage_PatternsAreMatchedLeft.Text" xml:space="preserve">
-    <value>当审批提供“始终允许”选项时，可使用它来批准简单命令。也可添加解析后的可执行文件路径模式，例如 **/hostname.exe。“拒绝”和“询问”仍由“默认操作”控制。更改将自动保存。</value>
+    <value>“始终允许”会为符合条件的原生 .exe 命令创建参数绑定条目。在此添加的条目仅按路径匹配，可能允许匹配的可执行文件使用任意参数。“拒绝”和“询问”仍由“默认操作”控制。更改将自动保存。</value>
   </data>
   <data name="PermissionsPage_Saved.Text" xml:space="preserve">
     <value>已保存</value>
@@ -4463,7 +4463,7 @@
     <value>0 个条目</value>
   </data>
   <data name="PermissionsPage_NoRulesYetAdd.Text" xml:space="preserve">
-    <value>没有可执行文件路径允许列表条目。当审批提供“始终允许”选项时，可使用它来批准简单命令，或添加 **/hostname.exe 等路径模式。</value>
+    <value>没有可执行文件路径允许列表条目。使用“始终允许”批准符合条件的原生 .exe 命令，或添加仅按路径匹配的模式，例如 **/hostname.exe。</value>
   </data>
   <data name="PermissionsPage_WindowsPrivacy.Text" xml:space="preserve">
     <value>Windows 隐私</value>
