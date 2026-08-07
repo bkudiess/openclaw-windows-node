@@ -567,8 +567,12 @@ public sealed class SshOwnershipAdversarialProofTests
         const string hostAddress = "127.0.0.1";
 
         ProcessResult? preflight = null;
-        for (var attempt = 0; attempt < 20; attempt++)
+        var preflightDeadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < preflightDeadline)
         {
+            var remaining = preflightDeadline - DateTime.UtcNow;
+            var attemptTimeout = TimeSpan.FromMilliseconds(
+                Math.Min(TimeSpan.FromSeconds(5).TotalMilliseconds, remaining.TotalMilliseconds));
             preflight = await RunProcessAsync(
                 "ssh.exe",
                 [
@@ -587,7 +591,7 @@ public sealed class SshOwnershipAdversarialProofTests
                     ["HOME"] = profileDir,
                     ["USERPROFILE"] = profileDir,
                 },
-                TimeSpan.FromSeconds(30));
+                attemptTimeout);
             if (preflight.ExitCode == 0)
                 break;
             await Task.Delay(250);
