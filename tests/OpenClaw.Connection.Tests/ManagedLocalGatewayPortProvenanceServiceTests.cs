@@ -86,6 +86,24 @@ public class ManagedLocalGatewayPortProvenanceServiceTests
     }
 
     [Fact]
+    public void CreateExpectedWslMirroredGatewayProbe_RequiresModeAndDualStackOwnership()
+    {
+        var probe = WindowsManagedLocalGatewayPortPlatform.CreateExpectedWslMirroredGatewayProbe(
+            "OpenClawE2E-test",
+            "localhost",
+            18789);
+
+        Assert.True(probe.StartInfo.RedirectStandardInput);
+        Assert.Equal(
+            ["-d", "OpenClawE2E-test", "--", "bash", "-s"],
+            probe.StartInfo.ArgumentList);
+        Assert.Contains("wslinfo --networking-mode", probe.StandardInput, StringComparison.Ordinal);
+        Assert.Contains("systemctl --user show openclaw-gateway", probe.StandardInput, StringComparison.Ordinal);
+        Assert.Contains("127\\.0\\.0\\.1:18789", probe.StandardInput, StringComparison.Ordinal);
+        Assert.Contains("\\[::1\\]:18789", probe.StandardInput, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Inspect_WslRelayOnTargetAddress_IsExpectedManagedGateway()
     {
         var platform = new FakePlatform();
@@ -214,6 +232,55 @@ public class ManagedLocalGatewayPortProvenanceServiceTests
     }
 
     [Fact]
+    public void Inspect_MirroredDualStackGatewayWithoutWindowsListener_IsExpected()
+    {
+        var platform = new FakePlatform
+        {
+            ExpectedMirroredDistroListening = true,
+            LoopbackPortReserved = true,
+        };
+        var service = new ManagedLocalGatewayPortProvenanceService(platform, NullLogger.Instance);
+
+        var result = service.Inspect(ManagedRecord());
+
+        Assert.Equal(GatewayEndpointProvenanceKind.ExpectedManagedGateway, result.Kind);
+        Assert.True(result.IsMirroredWslProjection);
+        Assert.Null(result.ProcessId);
+        Assert.Equal(1, platform.ExpectedMirroredDistroChecks);
+    }
+
+    [Fact]
+    public void Inspect_MirroredGatewayWithoutWindowsReservation_FailsClosed()
+    {
+        var platform = new FakePlatform
+        {
+            ExpectedMirroredDistroListening = true,
+            LoopbackPortReserved = false,
+        };
+        var service = new ManagedLocalGatewayPortProvenanceService(platform, NullLogger.Instance);
+
+        Assert.Equal(
+            GatewayEndpointProvenanceKind.NoListener,
+            service.Inspect(ManagedRecord()).Kind);
+    }
+
+    [Fact]
+    public void Inspect_WindowsOwnerAppearsDuringMirroredProbe_FailsClosed()
+    {
+        var platform = new FakePlatform
+        {
+            ExpectedMirroredDistroListening = true,
+            LoopbackPortReserved = true,
+            AddOwnerOnSecondCapture = true,
+        };
+        var service = new ManagedLocalGatewayPortProvenanceService(platform, NullLogger.Instance);
+
+        Assert.Equal(
+            GatewayEndpointProvenanceKind.UnknownListener,
+            service.Inspect(ManagedRecord()).Kind);
+    }
+
+    [Fact]
     public void Inspect_OwnerChangesDuringSlowVerification_FailsClosed()
     {
         var platform = new FakePlatform { ReplaceOwnerOnSecondCapture = true };
@@ -304,6 +371,32 @@ public class ManagedLocalGatewayPortProvenanceServiceTests
         platform.ExpectedDistroListening = false;
 
         Assert.False(service.IsStrongCredentialAllowed(gateway, credential));
+    }
+
+    [Fact]
+    public void InteractiveCredentialGate_MirroredOwnershipIsRecheckedBeforeHandoff()
+    {
+        var platform = new FakePlatform
+        {
+            ExpectedMirroredDistroListening = true,
+            LoopbackPortReserved = true,
+        };
+        var service = new ManagedLocalGatewayPortProvenanceService(platform, NullLogger.Instance);
+        var gateway = ManagedRecord();
+        var credential = new GatewayCredential(
+            "shared-token",
+            false,
+            CredentialResolver.SourceSharedGatewayToken);
+
+        Assert.Equal(
+            GatewayEndpointProvenanceKind.ExpectedManagedGateway,
+            service.Inspect(gateway).Kind);
+        Assert.True(service.IsStrongCredentialAllowed(gateway, credential));
+
+        platform.ExpectedMirroredDistroListening = false;
+
+        Assert.False(service.IsStrongCredentialAllowed(gateway, credential));
+        Assert.Equal(3, platform.ExpectedMirroredDistroChecks);
     }
 
     [Fact]
@@ -422,13 +515,17 @@ public class ManagedLocalGatewayPortProvenanceServiceTests
         public List<string> Actions { get; } = [];
         public bool TrustedWslRelay { get; set; } = true;
         public bool ExpectedDistroListening { get; set; } = true;
+        public bool ExpectedMirroredDistroListening { get; set; }
+        public bool LoopbackPortReserved { get; set; } = true;
         public bool EndRemovesListener { get; set; }
         public bool ReplaceProcessIdentityOnEnd { get; set; }
         public bool ReplaceOwnerOnSecondCapture { get; set; }
+        public bool AddOwnerOnSecondCapture { get; set; }
         public bool Ipv4Complete { get; set; } = true;
         public bool Ipv6Complete { get; set; } = true;
         public int TrustedWslRelayChecks { get; private set; }
         public int ExpectedDistroChecks { get; private set; }
+        public int ExpectedMirroredDistroChecks { get; private set; }
         private int _captureCount;
 
         public static FakePlatform WithProvenNativeGateway(string? userProfilePath = null)
@@ -471,6 +568,21 @@ public class ManagedLocalGatewayPortProvenanceServiceTests
         public WindowsTcpListenerSnapshotResult CaptureListeners()
         {
             _captureCount++;
+            if (AddOwnerOnSecondCapture && _captureCount == 2)
+            {
+                return new(
+                [
+                    new WindowsTcpListenerInfo(
+                        IPAddress.Loopback,
+                        18789,
+                        999,
+                        "unknown",
+                        @"C:\unknown.exe",
+                        new DateTime(2026, 7, 24, 1, 0, 1, DateTimeKind.Utc))
+                ],
+                Ipv4Complete,
+                Ipv6Complete);
+            }
             if (ReplaceOwnerOnSecondCapture && _captureCount == 2 && Listeners.Count > 0)
             {
                 return new(
@@ -503,6 +615,14 @@ public class ManagedLocalGatewayPortProvenanceServiceTests
         {
             ExpectedDistroChecks++;
             return ExpectedDistroListening;
+        }
+        public bool IsExpectedWslMirroredGatewayListening(
+            string distroName,
+            string host,
+            int port)
+        {
+            ExpectedMirroredDistroChecks++;
+            return ExpectedMirroredDistroListening && LoopbackPortReserved;
         }
         public string? ReadScheduledTaskXml(string taskName) => TaskXml;
         public string? ReadFile(string path) => Files.GetValueOrDefault(path);

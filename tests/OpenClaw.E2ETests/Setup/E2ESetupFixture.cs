@@ -94,7 +94,7 @@ public sealed class E2ESetupFixture : IAsyncLifetime
         ArtifactDir = Path.Combine(repoRoot, "TestResults", "E2E", runId);
         Directory.CreateDirectory(ArtifactDir);
 
-        GatewayPort = FindFreePort();
+        GatewayPort = FindFreeWslGatewayPort();
 
         // Write isolated config JSON
         _configPath = Path.Combine(DataDir, "e2e-config.json");
@@ -951,6 +951,40 @@ public sealed class E2ESetupFixture : IAsyncLifetime
         listener.Start();
         try { return ((IPEndPoint)listener.LocalEndpoint).Port; }
         finally { listener.Stop(); }
+    }
+
+    private static int FindFreeWslGatewayPort()
+    {
+        const int startPort = 20_000;
+        const int endPortExclusive = 49_152;
+        var portCount = endPortExclusive - startPort;
+        var firstOffset = Random.Shared.Next(portCount);
+
+        for (var index = 0; index < portCount; index++)
+        {
+            var candidate = startPort + ((firstOffset + index) % portCount);
+            var ipv4Listener = new TcpListener(IPAddress.Loopback, candidate);
+            var ipv6Listener = new TcpListener(IPAddress.IPv6Loopback, candidate);
+            try
+            {
+                ipv4Listener.Server.ExclusiveAddressUse = true;
+                ipv6Listener.Server.ExclusiveAddressUse = true;
+                ipv4Listener.Start();
+                ipv6Listener.Start();
+                return candidate;
+            }
+            catch (SocketException)
+            {
+                // Try the next non-ephemeral port.
+            }
+            finally
+            {
+                ipv6Listener.Stop();
+                ipv4Listener.Stop();
+            }
+        }
+
+        throw new InvalidOperationException("Could not allocate a non-ephemeral port for the WSL gateway.");
     }
 
     private void Log(string message)

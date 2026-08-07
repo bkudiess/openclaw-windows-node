@@ -9,7 +9,10 @@ public enum GatewayEndpointProvenanceKind
     /// <summary>No listener currently owns the endpoint.</summary>
     NoListener,
 
-    /// <summary>The listener is the expected OS-owned WSL relay for this managed gateway.</summary>
+    /// <summary>
+    /// The endpoint is owned by the expected managed WSL gateway, either through the
+    /// OS-owned WSL relay or a verified mirrored-networking projection.
+    /// </summary>
     ExpectedManagedGateway,
 
     /// <summary>A fully proven, obsolete native OpenClaw gateway owns the WSL gateway endpoint.</summary>
@@ -31,4 +34,5 @@ public sealed record GatewayEndpointProvenance(
     DateTime? ProcessStartTimeUtc = null,
     string? ProcessPath = null,
     string? ScheduledTaskName = null,
-    string? Detail = null);
+    string? Detail = null,
+    bool IsMirroredWslProjection = false);

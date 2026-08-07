@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
@@ -30,6 +31,7 @@ internal interface IManagedLocalGatewayPortPlatform
     string? GetProcessCommandLine(int processId);
     WslRelayTrustResult InspectWslRelayBinary(string processPath);
     bool IsExpectedWslGatewayListening(string distroName, int port);
+    bool IsExpectedWslMirroredGatewayListening(string distroName, string host, int port);
     string? ReadScheduledTaskXml(string taskName);
     string? ReadFile(string path);
     Task<bool> DisableScheduledTaskAsync(string taskName, CancellationToken cancellationToken);
@@ -98,18 +100,25 @@ internal sealed class WindowsManagedLocalGatewayPortPlatform : IManagedLocalGate
     {
         try
         {
-            var probe = CreateExpectedWslGatewayProbe(distroName, port);
-            using var process = Process.Start(probe.StartInfo);
-            if (process is null)
-                return false;
-            process.StandardInput.Write(probe.StandardInput);
-            process.StandardInput.Close();
-            if (!process.WaitForExit(5_000))
-            {
-                try { process.Kill(entireProcessTree: true); } catch { }
-                return false;
-            }
-            return process.ExitCode == 0;
+            return RunExpectedWslGatewayProbe(
+                CreateExpectedWslGatewayProbe(distroName, port));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public bool IsExpectedWslMirroredGatewayListening(
+        string distroName,
+        string host,
+        int port)
+    {
+        try
+        {
+            return RunExpectedWslGatewayProbe(
+                    CreateExpectedWslMirroredGatewayProbe(distroName, host, port)) &&
+                IsLoopbackPortReserved(host, port);
         }
         catch
         {
@@ -120,6 +129,106 @@ internal sealed class WindowsManagedLocalGatewayPortPlatform : IManagedLocalGate
     internal static (ProcessStartInfo StartInfo, string StandardInput) CreateExpectedWslGatewayProbe(
         string distroName,
         int port)
+    {
+        // WSL relay can project one distro socket onto both Windows loopback
+        // families. Verify the service-owned port inside the expected distro
+        // without assuming family parity across that relay boundary.
+        var script =
+            "pid=$(systemctl --user show openclaw-gateway -p MainPID --value 2>/dev/null); " +
+            "test \"${pid:-0}\" -gt 0 && " +
+            $"ss -ltnp 2>/dev/null | grep -E ':{port}([^0-9]|$)' | " +
+            "grep -F \"pid=$pid,\" >/dev/null";
+        return CreateWslProbe(distroName, script);
+    }
+
+    internal static (ProcessStartInfo StartInfo, string StandardInput)
+        CreateExpectedWslMirroredGatewayProbe(
+            string distroName,
+            string host,
+            int port)
+    {
+        var ipv4Check =
+            $"printf '%s\\n' \"$owned\" | grep -E '127\\.0\\.0\\.1:{port}([^0-9]|$)' >/dev/null";
+        var ipv6Check =
+            $"printf '%s\\n' \"$owned\" | grep -E '\\[::1\\]:{port}([^0-9]|$)' >/dev/null";
+        var addressCheck = host.Trim().TrimStart('[').TrimEnd(']') switch
+        {
+            var value when value.Equals("localhost", StringComparison.OrdinalIgnoreCase) =>
+                $"{ipv4Check} && {ipv6Check}",
+            "127.0.0.1" => ipv4Check,
+            "::1" => ipv6Check,
+            _ => throw new ArgumentException(
+                "Mirrored WSL gateway proof requires a standard loopback host.",
+                nameof(host)),
+        };
+
+        var script =
+            "mode=$(wslinfo --networking-mode 2>/dev/null); " +
+            "pid=$(systemctl --user show openclaw-gateway -p MainPID --value 2>/dev/null); " +
+            "test \"$mode\" = mirrored && test \"${pid:-0}\" -gt 0 && " +
+            "owned=$(ss -ltnp 2>/dev/null | grep -F \"pid=$pid,\") && " +
+            addressCheck;
+        return CreateWslProbe(distroName, script);
+    }
+
+    private static bool RunExpectedWslGatewayProbe(
+        (ProcessStartInfo StartInfo, string StandardInput) probe)
+    {
+        using var process = Process.Start(probe.StartInfo);
+        if (process is null)
+            return false;
+        process.StandardInput.Write(probe.StandardInput);
+        process.StandardInput.Close();
+        if (!process.WaitForExit(5_000))
+        {
+            try { process.Kill(entireProcessTree: true); } catch { }
+            return false;
+        }
+        return process.ExitCode == 0;
+    }
+
+    private static bool IsLoopbackPortReserved(string host, int port)
+    {
+        var normalizedHost = host.Trim().TrimStart('[').TrimEnd(']');
+        if (normalizedHost.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            return IsAddressReserved(IPAddress.Loopback, port) &&
+                IsAddressReserved(IPAddress.IPv6Loopback, port);
+        }
+        if (normalizedHost == "127.0.0.1")
+            return IsAddressReserved(IPAddress.Loopback, port);
+        if (normalizedHost == "::1")
+            return IsAddressReserved(IPAddress.IPv6Loopback, port);
+        return false;
+    }
+
+    private static bool IsAddressReserved(IPAddress address, int port)
+    {
+        TcpListener? listener = null;
+        try
+        {
+            listener = new TcpListener(address, port);
+            listener.Server.ExclusiveAddressUse = true;
+            listener.Start();
+            return false;
+        }
+        catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+        {
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            try { listener?.Stop(); } catch { }
+        }
+    }
+
+    private static (ProcessStartInfo StartInfo, string StandardInput) CreateWslProbe(
+        string distroName,
+        string script)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -133,15 +242,6 @@ internal sealed class WindowsManagedLocalGatewayPortPlatform : IManagedLocalGate
         startInfo.ArgumentList.Add("--");
         startInfo.ArgumentList.Add("bash");
         startInfo.ArgumentList.Add("-s");
-
-        // WSL relay can project one distro socket onto both Windows loopback
-        // families. Verify the service-owned port inside the expected distro
-        // without assuming family parity across that relay boundary.
-        var script =
-            "pid=$(systemctl --user show openclaw-gateway -p MainPID --value 2>/dev/null); " +
-            "test \"${pid:-0}\" -gt 0 && " +
-            $"ss -ltnp 2>/dev/null | grep -E ':{port}([^0-9]|$)' | " +
-            "grep -F \"pid=$pid,\" >/dev/null";
         return (startInfo, script);
     }
 
@@ -308,11 +408,22 @@ public sealed class ManagedLocalGatewayPortProvenanceService
                 new ProvenanceCacheKey(record.Id, record.Url),
                 out var cached) ||
             cached.Kind != GatewayEndpointProvenanceKind.ExpectedManagedGateway ||
-            cached.ProcessId is not int expectedPid ||
-            cached.ProcessStartTimeUtc is not DateTime expectedStart ||
-            string.IsNullOrWhiteSpace(cached.ProcessPath) ||
             !Uri.TryCreate(record.Url, UriKind.Absolute, out var uri) ||
             GatewayRecordEditing.ResolveManagedDistroName(record) is not { } managedDistroName)
+        {
+            return false;
+        }
+
+        if (cached.IsMirroredWslProjection)
+        {
+            var mirroredCurrent = InspectCore(record);
+            return mirroredCurrent.Kind == GatewayEndpointProvenanceKind.ExpectedManagedGateway &&
+                mirroredCurrent.IsMirroredWslProjection;
+        }
+
+        if (cached.ProcessId is not int expectedPid ||
+            cached.ProcessStartTimeUtc is not DateTime expectedStart ||
+            string.IsNullOrWhiteSpace(cached.ProcessPath))
         {
             return false;
         }
@@ -362,7 +473,27 @@ public sealed class ManagedLocalGatewayPortProvenanceService
             .Where(listener => listener.Port == uri.Port && AcceptsHost(listener.Address, uri.Host))
             .ToArray();
         if (listeners.Length == 0)
+        {
+            if (_platform.IsExpectedWslMirroredGatewayListening(
+                    managedDistroName,
+                    uri.Host,
+                    uri.Port))
+            {
+                if (!ListenerSnapshotStillCurrent(listeners, uri))
+                {
+                    return new GatewayEndpointProvenance(
+                        GatewayEndpointProvenanceKind.UnknownListener,
+                        uri.Port,
+                        Detail: "Loopback listener ownership changed during mirrored WSL provenance verification.");
+                }
+                return new GatewayEndpointProvenance(
+                    GatewayEndpointProvenanceKind.ExpectedManagedGateway,
+                    uri.Port,
+                    Detail: $"Expected mirrored WSL gateway owns loopback port {uri.Port}.",
+                    IsMirroredWslProjection: true);
+            }
             return new GatewayEndpointProvenance(GatewayEndpointProvenanceKind.NoListener, uri.Port);
+        }
 
         var relayTrustByPath = listeners
             .Where(listener =>
