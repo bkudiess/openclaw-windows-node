@@ -75,6 +75,63 @@ public class SetupStepsTests : IDisposable
     }
 
     [Fact]
+    public async Task PairingEndpointTrust_TerminalRestartWait_RetriesOnlyNoListener()
+    {
+        var context = CreateContext(new SetupConfig
+        {
+            DistroName = "OpenClawGateway",
+            GatewayUrl = "ws://localhost:18789"
+        });
+        var attempts = 0;
+        context.EndpointProvenanceProbe = (_, _) => Task.FromResult(
+            ++attempts < 3
+                ? new GatewayEndpointProvenance(
+                    GatewayEndpointProvenanceKind.NoListener,
+                    18789)
+                : new GatewayEndpointProvenance(
+                    GatewayEndpointProvenanceKind.ExpectedManagedGateway,
+                    18789));
+
+        var result = await PairOperatorStep.EnsurePairingEndpointTrustedAsync(
+            context,
+            CancellationToken.None,
+            noListenerRetryCount: 2,
+            noListenerRetryDelay: TimeSpan.Zero);
+
+        Assert.Null(result);
+        Assert.Equal(3, attempts);
+    }
+
+    [Fact]
+    public async Task PairingEndpointTrust_TerminalRestartWait_RejectsUnknownOwnerImmediately()
+    {
+        var context = CreateContext(new SetupConfig
+        {
+            DistroName = "OpenClawGateway",
+            GatewayUrl = "ws://localhost:18789"
+        });
+        var attempts = 0;
+        context.EndpointProvenanceProbe = (_, _) =>
+        {
+            attempts++;
+            return Task.FromResult(new GatewayEndpointProvenance(
+                GatewayEndpointProvenanceKind.UnknownListener,
+                18789,
+                Detail: "unknown owner"));
+        };
+
+        var result = await PairOperatorStep.EnsurePairingEndpointTrustedAsync(
+            context,
+            CancellationToken.None,
+            noListenerRetryCount: 30,
+            noListenerRetryDelay: TimeSpan.Zero);
+
+        Assert.NotNull(result);
+        Assert.Equal(StepOutcome.FailedTerminal, result!.Outcome);
+        Assert.Equal(1, attempts);
+    }
+
+    [Fact]
     public void PairingAuthorization_GatesInitialAndReconnectHandshakesForOperatorAndNode()
     {
         var context = CreateContext(new SetupConfig
@@ -1060,6 +1117,123 @@ public class SetupStepsTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateWslInstance_RetriesTransientFreshDistroRootProbeTimeout()
+    {
+        var installed = false;
+        var probeAttempts = 0;
+        var commands = new FakeCommandRunner(args =>
+        {
+            if (args.SequenceEqual(["--list", "--quiet"]))
+                return Ok(installed ? "OpenClawGateway\n" : "");
+            if (args.Contains("--install"))
+            {
+                installed = true;
+                return Ok("Installing Ubuntu-24.04\n");
+            }
+            if (args.SequenceEqual(["--list", "--verbose"]))
+                return Ok("  NAME              STATE           VERSION\n* OpenClawGateway   Stopped         2\n");
+            if (args.SequenceEqual(["-d", "OpenClawGateway", "-u", "root", "--", "sh", "-lc", "id -u && test -d / && echo OPENCLAW_FRESH_WSL_READY"]))
+            {
+                probeAttempts++;
+                return probeAttempts == 1
+                    ? new CommandResult(-1, "", "", TimeSpan.FromSeconds(30), TimedOut: true)
+                    : Ok("0\nOPENCLAW_FRESH_WSL_READY\n");
+            }
+
+            return Fail($"unexpected args: {string.Join(' ', args)}");
+        });
+        var ctx = CreateContext(commands: commands);
+
+        var result = await new CreateWslInstanceStep().ExecuteAsync(ctx, CancellationToken.None);
+
+        Assert.True(result.IsSuccess, result.Message);
+        Assert.Equal(2, probeAttempts);
+        Assert.DoesNotContain(commands.Calls, call => call.Arguments.Contains("--unregister"));
+    }
+
+    [Fact]
+    public async Task CreateWslInstance_BoundsPersistentFreshDistroRootProbeTimeouts()
+    {
+        var installed = false;
+        var probeAttempts = 0;
+        var commands = new FakeCommandRunner(args =>
+        {
+            if (args.SequenceEqual(["--list", "--quiet"]))
+                return Ok(installed ? "OpenClawGateway\n" : "");
+            if (args.Contains("--install"))
+            {
+                installed = true;
+                return Ok("Installing Ubuntu-24.04\n");
+            }
+            if (args.SequenceEqual(["--list", "--verbose"]))
+                return Ok("  NAME              STATE           VERSION\n* OpenClawGateway   Stopped         2\n");
+            if (args.SequenceEqual(["-d", "OpenClawGateway", "-u", "root", "--", "sh", "-lc", "id -u && test -d / && echo OPENCLAW_FRESH_WSL_READY"]))
+            {
+                probeAttempts++;
+                return new CommandResult(-1, "", "", TimeSpan.FromSeconds(30), TimedOut: true);
+            }
+            if (args.SequenceEqual(["--terminate", "OpenClawGateway"]))
+                return Ok();
+            if (args.SequenceEqual(["--unregister", "OpenClawGateway"]))
+            {
+                installed = false;
+                return Ok();
+            }
+
+            return Fail($"unexpected args: {string.Join(' ', args)}");
+        });
+        var ctx = CreateContext(commands: commands);
+
+        var result = await new CreateWslInstanceStep().ExecuteAsync(ctx, CancellationToken.None);
+
+        Assert.Equal(StepOutcome.Failed, result.Outcome);
+        Assert.Equal(3, probeAttempts);
+        Assert.Contains("could not run a root verification command", result.Message);
+        Assert.Equal(
+            [
+                TimeSpan.FromSeconds(30),
+                TimeSpan.FromSeconds(60),
+                TimeSpan.FromSeconds(90),
+            ],
+            commands.TimedCalls
+                .Where(call => call.Arguments.SequenceEqual(
+                    ["-d", "OpenClawGateway", "-u", "root", "--", "sh", "-lc", "id -u && test -d / && echo OPENCLAW_FRESH_WSL_READY"]))
+                .Select(call => call.Timeout)
+                .ToArray());
+    }
+
+    [Fact]
+    public async Task CreateWslInstance_AllowsWslServiceToSettleBeforeVersionVerification()
+    {
+        var installed = false;
+        var commands = new FakeCommandRunner(args =>
+        {
+            if (args.SequenceEqual(["--list", "--quiet"]))
+                return Ok(installed ? "OpenClawGateway\n" : "");
+            if (args.Contains("--install"))
+            {
+                installed = true;
+                return Ok("Installing Ubuntu-24.04\n");
+            }
+            if (args.SequenceEqual(["--list", "--verbose"]))
+                return Ok("  NAME              STATE           VERSION\n* OpenClawGateway   Stopped         2\n");
+            if (args.SequenceEqual(["-d", "OpenClawGateway", "-u", "root", "--", "sh", "-lc", "id -u && test -d / && echo OPENCLAW_FRESH_WSL_READY"]))
+                return Ok("0\nOPENCLAW_FRESH_WSL_READY\n");
+
+            return Fail($"unexpected args: {string.Join(' ', args)}");
+        });
+        var ctx = CreateContext(commands: commands);
+
+        var result = await new CreateWslInstanceStep().ExecuteAsync(ctx, CancellationToken.None);
+
+        Assert.True(result.IsSuccess, result.Message);
+        var verboseCall = Assert.Single(
+            commands.TimedCalls,
+            call => call.Arguments.SequenceEqual(["--list", "--verbose"]));
+        Assert.Equal(TimeSpan.FromMinutes(1), verboseCall.Timeout);
+    }
+
+    [Fact]
     public async Task CreateWslInstance_PartialCleanupAvoidsGlobalShutdownWhenUnregisterSucceeds()
     {
         var listCalls = 0;
@@ -1615,6 +1789,17 @@ public class SetupStepsTests : IDisposable
     public void ConfigureGateway_RejectsUnsafeExtraConfigKeys(string key)
     {
         Assert.False(ConfigureGatewayStep.IsSafeExtraConfigKey(key));
+    }
+
+    [Fact]
+    public void ConfigureGateway_DefaultsReloadModeToHybrid()
+    {
+        var commands = ConfigureGatewayStep.BuildConfigCommands(
+            new GatewayConfig(),
+            18789,
+            "'[]'");
+
+        Assert.Contains("openclaw config set gateway.reload.mode hybrid", commands);
     }
 
     [Fact]
@@ -3605,6 +3790,7 @@ public class SetupStepsTests : IDisposable
         Func<string, string, TimeSpan, CommandResult>? runInWsl = null) : ICommandRunner
     {
         public List<(string Executable, string[] Arguments)> Calls { get; } = [];
+        public List<(string Executable, string[] Arguments, TimeSpan Timeout)> TimedCalls { get; } = [];
         public List<(string Executable, string[] Arguments, string? StdinInput)> DetailedCalls { get; } = [];
         public List<(string DistroName, string Command, TimeSpan Timeout, string? User, bool InputViaStdin)> WslCalls { get; } = [];
         public List<IReadOnlyDictionary<string, string>?> WslEnvironments { get; } = [];
@@ -3619,6 +3805,7 @@ public class SetupStepsTests : IDisposable
             CancellationToken ct = default)
         {
             Calls.Add((executable, arguments));
+            TimedCalls.Add((executable, arguments, timeout));
             DetailedCalls.Add((executable, arguments, stdinInput));
             return Task.FromResult(run(arguments));
         }
