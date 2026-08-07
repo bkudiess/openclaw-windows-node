@@ -567,10 +567,11 @@ public sealed class SshOwnershipAdversarialProofTests
         const string hostAddress = "127.0.0.1";
 
         ProcessResult? preflight = null;
-        var preflightDeadline = DateTime.UtcNow.AddSeconds(30);
-        while (DateTime.UtcNow < preflightDeadline)
+        var preflightTimeout = TimeSpan.FromSeconds(30);
+        var preflightStopwatch = Stopwatch.StartNew();
+        while (preflightStopwatch.Elapsed < preflightTimeout)
         {
-            var remaining = preflightDeadline - DateTime.UtcNow;
+            var remaining = preflightTimeout - preflightStopwatch.Elapsed;
             var attemptTimeout = TimeSpan.FromMilliseconds(
                 Math.Min(TimeSpan.FromSeconds(5).TotalMilliseconds, remaining.TotalMilliseconds));
             preflight = await RunProcessAsync(
@@ -594,7 +595,11 @@ public sealed class SshOwnershipAdversarialProofTests
                 attemptTimeout);
             if (preflight.ExitCode == 0)
                 break;
-            await Task.Delay(250);
+            remaining = preflightTimeout - preflightStopwatch.Elapsed;
+            if (remaining <= TimeSpan.Zero)
+                break;
+            await Task.Delay(TimeSpan.FromMilliseconds(
+                Math.Min(TimeSpan.FromMilliseconds(250).TotalMilliseconds, remaining.TotalMilliseconds)));
         }
         Assert.NotNull(preflight);
         Assert.True(
