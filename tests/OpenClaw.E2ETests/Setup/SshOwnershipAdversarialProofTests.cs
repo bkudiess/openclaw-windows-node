@@ -147,6 +147,7 @@ public sealed class SshOwnershipAdversarialProofTests
             }
             using var degraded = await WaitForStatusAsync(
                 status =>
+                    status.GetProperty("overallState").GetString() == "Degraded" &&
                     status.GetProperty("nodeState").GetString() == "Error" &&
                     status.GetProperty("nodeError").GetString()?.Contains(
                         "credentials were not sent",
@@ -565,25 +566,33 @@ public sealed class SshOwnershipAdversarialProofTests
 
         const string hostAddress = "127.0.0.1";
 
-        var preflight = await RunProcessAsync(
-            "ssh.exe",
-            [
-                "-o", "BatchMode=yes",
-                "-o", "IdentitiesOnly=yes",
-                "-o", "StrictHostKeyChecking=no",
-                "-o", "UserKnownHostsFile=NUL",
-                "-o", $"ProxyCommand=wsl.exe -d {_fixture.DistroName} -- nc 127.0.0.1 {sshPort}",
-                "-i", Path.Combine(sshDir, "id_ed25519"),
-                "-p", sshPort.ToString(),
-                $"openclaw@{hostAddress}",
-                "true"
-            ],
-            new Dictionary<string, string>
-            {
-                ["HOME"] = profileDir,
-                ["USERPROFILE"] = profileDir,
-            },
-            TimeSpan.FromSeconds(30));
+        ProcessResult? preflight = null;
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            preflight = await RunProcessAsync(
+                "ssh.exe",
+                [
+                    "-o", "BatchMode=yes",
+                    "-o", "IdentitiesOnly=yes",
+                    "-o", "StrictHostKeyChecking=no",
+                    "-o", "UserKnownHostsFile=NUL",
+                    "-o", $"ProxyCommand=wsl.exe -d {_fixture.DistroName} -- nc 127.0.0.1 {sshPort}",
+                    "-i", Path.Combine(sshDir, "id_ed25519"),
+                    "-p", sshPort.ToString(),
+                    $"openclaw@{hostAddress}",
+                    "true"
+                ],
+                new Dictionary<string, string>
+                {
+                    ["HOME"] = profileDir,
+                    ["USERPROFILE"] = profileDir,
+                },
+                TimeSpan.FromSeconds(30));
+            if (preflight.ExitCode == 0)
+                break;
+            await Task.Delay(250);
+        }
+        Assert.NotNull(preflight);
         Assert.True(
             preflight.ExitCode == 0,
             $"SSH preflight failed ({preflight.ExitCode}): " +
