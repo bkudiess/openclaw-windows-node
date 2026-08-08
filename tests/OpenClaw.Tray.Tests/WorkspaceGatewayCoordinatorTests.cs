@@ -690,6 +690,21 @@ public sealed class WorkspaceGatewayCoordinatorTests
         }
 
         [Fact]
+        public void Resolve_CustomAgentUsesServerReturnedMainShapedRowAfterGlobalNormalization()
+        {
+            var sessions = new[]
+            {
+                Session("agent:main:main", "main", isMain: true),
+                Session("agent:research-agent:child", "research-agent", isMain: false),
+                Session("agent:research-agent:main", "research-agent", isMain: false)
+            };
+
+            Assert.Equal(
+                "agent:research-agent:main",
+                WorkspaceSessionResolver.Resolve("research-agent", sessions, "agent:main:main"));
+        }
+
+        [Fact]
         public void Resolve_MultipleAuthoritativeSessionsUsesOrdinalKeyOrder()
         {
             var sessions = new[]

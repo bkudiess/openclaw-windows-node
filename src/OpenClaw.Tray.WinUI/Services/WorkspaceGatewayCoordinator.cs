@@ -1,4 +1,5 @@
 using OpenClaw.Shared;
+using OpenClaw.Shared.Sessions;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -103,7 +104,8 @@ internal static class WorkspaceSessionResolver
                     session.AgentId,
                     agentId,
                     StringComparison.Ordinal) &&
-                session.IsMain)
+                (session.IsMain ||
+                 SessionActionPlanner.IsMainSessionKeyShape(session.Key)))
             .OrderBy(session => session.Key, StringComparer.Ordinal)
             .Select(session => session.Key)
             .FirstOrDefault();
