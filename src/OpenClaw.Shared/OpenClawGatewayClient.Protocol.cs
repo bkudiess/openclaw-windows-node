@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace OpenClaw.Shared;
@@ -12,6 +13,7 @@ namespace OpenClaw.Shared;
 // Typed client methods for the richer gateway protocol, matching the canonical
 // openclaw/openclaw schemas exactly:
 //   • commands.list             — command catalog
+//   • agents.workspace.list/get — agent workspace browser and file content
 //   • sessions.create           — distinct session creation
 //   • sessions.patch            — extended per-session field set
 //   • sessions.files.list/get   — workspace file rail + browser (param: sessionKey)
@@ -473,6 +475,203 @@ public partial class OpenClawGatewayClient
         return TrySendTrackedRequestAsync("sessions.patch", patch.ToPayload(key));
     }
 
+    // ── agents.workspace.list / agents.workspace.get ──
+
+    public async Task<AgentWorkspaceListResult> ListAgentWorkspaceAsync(
+        AgentWorkspaceListRequest request,
+        int timeoutMs = 15000)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_agentWorkspaceListUnsupported)
+        {
+            return new AgentWorkspaceListResult
+            {
+                AgentId = request.AgentId,
+                Path = request.Path ?? "",
+                IsSupported = false
+            };
+        }
+
+        try
+        {
+            var payload = await SendWizardRequestAsync(
+                "agents.workspace.list",
+                request.ToListPayload(),
+                timeoutMs).ConfigureAwait(false);
+            return ParseAgentWorkspaceListResult(payload);
+        }
+        catch (GatewayRequestException ex) when (
+            IsExactUnknownMethodError(ex, "agents.workspace.list"))
+        {
+            _agentWorkspaceListUnsupported = true;
+            _logger.Warn("agents.workspace.list unsupported on gateway");
+            return new AgentWorkspaceListResult
+            {
+                AgentId = request.AgentId,
+                Path = request.Path ?? "",
+                IsSupported = false
+            };
+        }
+    }
+
+    public async Task<AgentWorkspaceGetResult> GetAgentWorkspaceFileAsync(
+        AgentWorkspaceGetRequest request,
+        int timeoutMs = 15000)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_agentWorkspaceGetUnsupported)
+        {
+            return new AgentWorkspaceGetResult
+            {
+                AgentId = request.AgentId,
+                IsSupported = false
+            };
+        }
+
+        try
+        {
+            var payload = await SendWizardRequestAsync(
+                "agents.workspace.get",
+                request.ToGetPayload(),
+                timeoutMs).ConfigureAwait(false);
+            return ParseAgentWorkspaceGetResult(payload);
+        }
+        catch (GatewayRequestException ex) when (
+            IsExactUnknownMethodError(ex, "agents.workspace.get"))
+        {
+            _agentWorkspaceGetUnsupported = true;
+            _logger.Warn("agents.workspace.get unsupported on gateway");
+            return new AgentWorkspaceGetResult
+            {
+                AgentId = request.AgentId,
+                IsSupported = false
+            };
+        }
+    }
+
+    public async Task<LegacyAgentFilesResponse> ListLegacyAgentFilesAsync(
+        string agentId,
+        int timeoutMs = 15000,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(agentId))
+            throw new ArgumentException("Agent id is required", nameof(agentId));
+        if (_agentFilesListUnsupported)
+            return new LegacyAgentFilesResponse { IsSupported = false };
+
+        try
+        {
+            var payload = await SendResponseRequestAsync(
+                "agents.files.list",
+                new { agentId },
+                timeoutMs,
+                cancellationToken).ConfigureAwait(false);
+            return new LegacyAgentFilesResponse { Payload = payload };
+        }
+        catch (GatewayRequestException ex) when (
+            IsExactUnknownMethodError(ex, "agents.files.list"))
+        {
+            _agentFilesListUnsupported = true;
+            _logger.Warn("agents.files.list unsupported on gateway");
+            return new LegacyAgentFilesResponse { IsSupported = false };
+        }
+    }
+
+    public async Task<LegacyAgentFilesResponse> GetLegacyAgentFileAsync(
+        string agentId,
+        string name,
+        int timeoutMs = 15000,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(agentId))
+            throw new ArgumentException("Agent id is required", nameof(agentId));
+        if (string.IsNullOrEmpty(name))
+            throw new ArgumentException("File name is required", nameof(name));
+        if (_agentFileGetUnsupported)
+            return new LegacyAgentFilesResponse { IsSupported = false };
+
+        try
+        {
+            var payload = await SendResponseRequestAsync(
+                "agents.files.get",
+                new { agentId, name },
+                timeoutMs,
+                cancellationToken).ConfigureAwait(false);
+            return new LegacyAgentFilesResponse { Payload = payload };
+        }
+        catch (GatewayRequestException ex) when (
+            IsExactUnknownMethodError(ex, "agents.files.get"))
+        {
+            _agentFileGetUnsupported = true;
+            _logger.Warn("agents.files.get unsupported on gateway");
+            return new LegacyAgentFilesResponse { IsSupported = false };
+        }
+    }
+
+    internal static AgentWorkspaceListResult ParseAgentWorkspaceListResult(JsonElement payload)
+    {
+        var entries = new List<AgentWorkspaceEntry>();
+        if (payload.ValueKind == JsonValueKind.Object &&
+            payload.TryGetProperty("entries", out var entriesElement) &&
+            entriesElement.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in entriesElement.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object) continue;
+                entries.Add(new AgentWorkspaceEntry
+                {
+                    Path = GetString(item, "path") ?? "",
+                    Name = GetString(item, "name") ?? "",
+                    Kind = string.Equals(GetString(item, "kind"), "directory", StringComparison.Ordinal)
+                        ? AgentWorkspaceEntryKind.Directory
+                        : AgentWorkspaceEntryKind.File,
+                    Size = GetNonNegativeLongOrNull(item, "size"),
+                    UpdatedAtMs = GetNonNegativeLongOrNull(item, "updatedAtMs")
+                });
+            }
+        }
+
+        return new AgentWorkspaceListResult
+        {
+            AgentId = GetStringSafe(payload, "agentId") ?? "",
+            Path = GetStringSafe(payload, "path") ?? "",
+            ParentPath = GetStringSafe(payload, "parentPath"),
+            Entries = entries,
+            TotalEntries = GetNonNegativeLongOrNull(payload, "totalEntries") ?? 0,
+            Offset = GetNonNegativeLongOrNull(payload, "offset") ?? 0,
+            IsSupported = true
+        };
+    }
+
+    internal static AgentWorkspaceGetResult ParseAgentWorkspaceGetResult(JsonElement payload)
+    {
+        AgentWorkspaceFile? workspaceFile = null;
+        if (payload.ValueKind == JsonValueKind.Object &&
+            payload.TryGetProperty("file", out var file) &&
+            file.ValueKind == JsonValueKind.Object)
+        {
+            workspaceFile = new AgentWorkspaceFile
+            {
+                Path = GetString(file, "path") ?? "",
+                Name = GetString(file, "name") ?? "",
+                Size = GetNonNegativeLongOrNull(file, "size") ?? 0,
+                UpdatedAtMs = GetNonNegativeLongOrNull(file, "updatedAtMs") ?? 0,
+                MimeType = GetString(file, "mimeType") ?? "",
+                Encoding = string.Equals(GetString(file, "encoding"), "base64", StringComparison.Ordinal)
+                    ? AgentWorkspaceFileEncoding.Base64
+                    : AgentWorkspaceFileEncoding.Utf8,
+                Content = GetString(file, "content") ?? ""
+            };
+        }
+
+        return new AgentWorkspaceGetResult
+        {
+            AgentId = GetStringSafe(payload, "agentId") ?? "",
+            File = workspaceFile,
+            IsSupported = true
+        };
+    }
+
     // ── sessions.files.list / sessions.files.get ──
 
     /// <summary>
@@ -815,12 +1014,26 @@ public partial class OpenClawGatewayClient
         {
             return await SendWizardRequestAsync(method, parameters, timeoutMs).ConfigureAwait(false);
         }
-        catch (InvalidOperationException ex) when (IsUnknownMethodError(ex.Message))
+        catch (GatewayRequestException ex) when (IsExactUnknownMethodError(ex, method))
+        {
+            _logger.Warn($"{method} unsupported on gateway");
+            return null;
+        }
+        catch (InvalidOperationException ex) when (
+            ex is not GatewayRequestException &&
+            IsExactUnknownMethodError(ex.Message, method))
         {
             _logger.Warn($"{method} unsupported on gateway");
             return null;
         }
     }
+
+    internal static bool IsExactUnknownMethodError(string? message, string method) =>
+        string.Equals(message, $"unknown method: {method}", StringComparison.Ordinal);
+
+    internal static bool IsExactUnknownMethodError(GatewayRequestException exception, string method) =>
+        string.Equals(exception.Code, "INVALID_REQUEST", StringComparison.Ordinal) &&
+        IsExactUnknownMethodError(exception.Message, method);
 
     private static JsonElement? TryGetArray(JsonElement parent, string property)
     {
@@ -847,6 +1060,12 @@ public partial class OpenClawGatewayClient
         if (value.TryGetInt64(out var l)) return l;
         if (value.TryGetDouble(out var d)) return (long)d;
         return null;
+    }
+
+    private static long? GetNonNegativeLongOrNull(JsonElement parent, string property)
+    {
+        var value = GetLongOrNull(parent, property);
+        return value is >= 0 ? value : null;
     }
 
     private static List<string> GetStringArrayList(JsonElement parent, string property)

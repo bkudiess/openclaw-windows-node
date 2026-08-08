@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Threading;
 
 namespace OpenClaw.Shared;
 
@@ -123,6 +124,17 @@ public interface IOperatorGatewayClient
     Task RequestAgentsListAsync();
     Task RequestAgentFilesListAsync(string agentId = "main");
     Task RequestAgentFileGetAsync(string agentId, string name);
+    Task<LegacyAgentFilesResponse> ListLegacyAgentFilesAsync(
+        string agentId,
+        int timeoutMs = 15000,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new LegacyAgentFilesResponse { IsSupported = false });
+    Task<LegacyAgentFilesResponse> GetLegacyAgentFileAsync(
+        string agentId,
+        string name,
+        int timeoutMs = 15000,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new LegacyAgentFilesResponse { IsSupported = false });
     Task RequestModelsListAsync();
     Task RequestNodePairListAsync();
     Task<bool> NodePairApproveAsync(string requestId);
@@ -157,6 +169,21 @@ public interface IOperatorGatewayClient
     /// <summary>Apply an extended <see cref="SessionPatch"/> (rich field set) to a session.</summary>
     Task<bool> PatchSessionAsync(string key, SessionPatch patch)
         => Task.FromResult(false);
+    /// <summary>List immediate children in an agent workspace (<c>agents.workspace.list</c>).</summary>
+    Task<AgentWorkspaceListResult> ListAgentWorkspaceAsync(AgentWorkspaceListRequest request, int timeoutMs = 15000)
+        => Task.FromResult(new AgentWorkspaceListResult
+        {
+            AgentId = request?.AgentId ?? "",
+            Path = request?.Path ?? "",
+            IsSupported = false
+        });
+    /// <summary>Read one file in an agent workspace (<c>agents.workspace.get</c>).</summary>
+    Task<AgentWorkspaceGetResult> GetAgentWorkspaceFileAsync(AgentWorkspaceGetRequest request, int timeoutMs = 15000)
+        => Task.FromResult(new AgentWorkspaceGetResult
+        {
+            AgentId = request?.AgentId ?? "",
+            IsSupported = false
+        });
     /// <summary>List session files, optionally scoped to a sub-path/search (<c>sessions.files.list</c>).</summary>
     Task<SessionFileList> ListSessionFilesAsync(string key, string? path = null, string? search = null, int timeoutMs = 15000)
         => Task.FromResult(new SessionFileList { Key = key, IsSupported = false });
