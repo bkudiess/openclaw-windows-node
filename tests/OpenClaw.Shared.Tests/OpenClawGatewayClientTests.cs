@@ -545,6 +545,7 @@ public class OpenClawGatewayClientTests
         var responseTask = client.SendWizardRequestAsync("wizard.start", timeoutMs: 10_000);
         var request = await server.ReceiveTextAsync().WaitAsync(TimeSpan.FromSeconds(2));
         var requestId = ReadRequestId(request);
+        Assert.Equal((1, 0), helper.GetPendingRequestCounts());
 
         await server.SendTextAsync(
             JsonSerializer.Serialize(new
@@ -561,6 +562,72 @@ public class OpenClawGatewayClientTests
         Assert.Equal((0, 0), helper.GetPendingRequestCounts());
 
         client.Dispose();
+        Assert.Equal((0, 0), helper.GetPendingRequestCounts());
+    }
+
+    [Fact]
+    public async Task SessionsList_LateTypedResponseAfterTimeout_DoesNotPublish_AndCurrentRequestReturnsPage()
+    {
+        using var server = new LoopbackWebSocketServer();
+        using var identity = new TempDirectory("sessions-list-late-");
+        await server.StartAsync();
+        var helper = new GatewayClientTestHelper(
+            gatewayUrl: server.WebSocketUrl,
+            identityPath: identity.Path);
+        using var client = helper.Client;
+        await client.ConnectAsync();
+        var updateCount = 0;
+        client.SessionsUpdated += (_, _) => updateCount++;
+
+        var staleTask = client.ListSessionsPageAsync(
+            new SessionListRequest { Limit = 100, Offset = 0 },
+            timeoutMs: 250);
+        var staleRequest = await server.ReceiveTextAsync().WaitAsync(TimeSpan.FromSeconds(2));
+        var staleRequestId = ReadRequestId(staleRequest);
+        await Assert.ThrowsAsync<TimeoutException>(async () => await staleTask);
+        Assert.Equal((0, 0), helper.GetPendingRequestCounts());
+
+        await server.SendTextAsync(JsonSerializer.Serialize(new
+        {
+            type = "res",
+            id = staleRequestId,
+            ok = true,
+            payload = new
+            {
+                sessions = new[] { new { key = "agent:main:stale", label = "Stale" } },
+                count = 1,
+                totalCount = 1,
+                limitApplied = 100,
+                offset = 0,
+                hasMore = false,
+            },
+        }));
+
+        var currentTask = client.ListSessionsPageAsync(
+            new SessionListRequest { Limit = 100, Offset = 0 },
+            timeoutMs: 10_000);
+        var currentRequest = await server.ReceiveTextAsync().WaitAsync(TimeSpan.FromSeconds(2));
+        var currentRequestId = ReadRequestId(currentRequest);
+        await server.SendTextAsync(JsonSerializer.Serialize(new
+        {
+            type = "res",
+            id = currentRequestId,
+            ok = true,
+            payload = new
+            {
+                sessions = new[] { new { key = "agent:main:current", label = "Current" } },
+                count = 1,
+                totalCount = 1,
+                limitApplied = 100,
+                offset = 0,
+                hasMore = false,
+            },
+        }));
+
+        var current = await currentTask.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal("agent:main:current", Assert.Single(current.Sessions).Key);
+        Assert.Equal(0, updateCount);
+        Assert.Empty(client.GetSessionList());
         Assert.Equal((0, 0), helper.GetPendingRequestCounts());
     }
 
@@ -696,6 +763,7 @@ public class OpenClawGatewayClientTests
             identityPath: identity.Path);
         using var client = helper.Client;
         await client.ConnectAsync();
+        helper.TrackPendingRequest("req-hello-restart", "connect");
         helper.ProcessRawMessage("""
         {
             "type": "res",
@@ -894,6 +962,7 @@ public class OpenClawGatewayClientTests
             identityPath: CreateTempIdentityPath());
         helper.SetDeviceTokenForTest(null);
 
+        helper.TrackPendingRequest("req-hello-node", "connect");
         helper.ProcessRawMessage("""
         {
           "type": "res",
@@ -922,6 +991,7 @@ public class OpenClawGatewayClientTests
             identityPath: CreateTempIdentityPath());
         helper.SetDeviceTokenForTest(null);
 
+        helper.TrackPendingRequest("req-hello-node", "connect");
         helper.ProcessRawMessage("""
         {
           "type": "res",
@@ -1100,6 +1170,7 @@ public class OpenClawGatewayClientTests
             identityPath: CreateTempIdentityPath());
         helper.SetDeviceTokenForTest(null);
 
+        helper.TrackPendingRequest("req-hello-operator", "connect");
         helper.ProcessRawMessage("""
         {
           "type": "res",
@@ -1144,6 +1215,7 @@ public class OpenClawGatewayClientTests
             FileAccess.Read,
             FileShare.Read))
         {
+            helper.TrackPendingRequest("req-hello-operator", "connect");
             helper.ProcessRawMessage("""
             {
               "type": "res",
@@ -2422,6 +2494,32 @@ public class OpenClawGatewayClientTests
     }
 
     [Fact]
+    public void ParseSessions_CompatibilitySnapshotIsBoundedToOneHundredUniqueRows()
+    {
+        var helper = new GatewayClientTestHelper();
+        var rows = Enumerable.Range(0, 150)
+            .Select(index => new
+            {
+                key = $"agent:main:{index}",
+                label = $"Session {index}",
+                updatedAt = index,
+            });
+        SessionInfo[]? publication = null;
+        helper.Client.SessionsUpdated += (_, sessions) => publication = sessions;
+
+        helper.ParseSessionsPayload(JsonSerializer.Serialize(rows));
+
+        Assert.NotNull(publication);
+        Assert.Equal(SessionPublicationCoordinator.MaximumPublishedSessions, publication.Length);
+        Assert.Equal(
+            publication.Length,
+            publication.Select(session => session.Key).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(
+            SessionPublicationCoordinator.MaximumPublishedSessions,
+            helper.GetSessionList().Length);
+    }
+
+    [Fact]
     public void ParseSessions_UsesHandshakeMainSessionKeyInsteadOfKeyShapeGuessing()
     {
         var helper = new GatewayClientTestHelper();
@@ -2642,6 +2740,79 @@ public class OpenClawGatewayClientTests
         Assert.Equal("failed", session.Status);
         Assert.Equal(false, session.HasActiveRun);
         Assert.Equal("Current task", session.DisplayName);
+    }
+
+    [Fact]
+    public void SessionsList_DuplicateLateResponse_DoesNotReplaceCurrentSnapshot()
+    {
+        var helper = new GatewayClientTestHelper();
+        helper.TrackPendingRequest("session-page", "sessions.list");
+        helper.ProcessRawMessage("""
+            {
+              "type": "res",
+              "id": "session-page",
+              "ok": true,
+              "payload": { "sessions": [{ "key": "agent:main:current", "label": "Current" }] }
+            }
+            """);
+        helper.ProcessRawMessage("""
+            {
+              "type": "res",
+              "id": "session-page",
+              "ok": true,
+              "payload": { "sessions": [{ "key": "agent:main:stale", "label": "Stale" }] }
+            }
+            """);
+
+        var session = Assert.Single(helper.GetSessionList());
+        Assert.Equal("agent:main:current", session.Key);
+    }
+
+    [Fact]
+    public void SessionsList_UnknownResponseId_DoesNotPublishOrMutateSessions()
+    {
+        var helper = new GatewayClientTestHelper();
+        var updateCount = 0;
+        helper.Client.SessionsUpdated += (_, _) => updateCount++;
+
+        helper.ProcessRawMessage("""
+            {
+              "type": "res",
+              "id": "never-owned",
+              "ok": true,
+              "payload": { "sessions": [{ "key": "agent:main:stale", "label": "Stale" }] }
+            }
+            """);
+
+        Assert.Empty(helper.GetSessionList());
+        Assert.Equal(0, updateCount);
+    }
+
+    [Fact]
+    public void Health_UnknownResponseId_DoesNotPublishHealth()
+    {
+        var helper = new GatewayClientTestHelper();
+        var channelUpdateCount = 0;
+        var selfUpdateCount = 0;
+        helper.Client.ChannelHealthUpdated += (_, _) => channelUpdateCount++;
+        helper.Client.GatewaySelfUpdated += (_, _) => selfUpdateCount++;
+
+        helper.ProcessRawMessage("""
+            {
+              "type": "res",
+              "id": "never-owned-health",
+              "ok": true,
+              "payload": {
+                "uptimeMs": 1234,
+                "channels": {
+                  "telegram": { "status": "ready", "configured": true }
+                }
+              }
+            }
+            """);
+
+        Assert.Equal(0, channelUpdateCount);
+        Assert.Equal(0, selfUpdateCount);
     }
 
     [Fact]
@@ -4400,6 +4571,7 @@ public class OpenClawGatewayClientTests
         Assert.True(helper.GetAuthFailedFlag());
 
         // Now receive hello-ok — flag must be cleared
+        helper.TrackPendingRequest("req-hello-1", "connect");
         helper.ProcessRawMessage("""
         {
             "type": "res",

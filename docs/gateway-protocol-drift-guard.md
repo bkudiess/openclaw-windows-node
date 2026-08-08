@@ -218,12 +218,11 @@ up one level.
 Mitigations:
 
 - The snapshot records `upstreamVerified` (date + the exact `sessions.ts`/`commands.ts`
-  blob SHAs the pin was checked against) so each verification is auditable and
-  reproducible. **Last verified 2026-06-23** against `openclaw/openclaw` main:
-  all enforced request fields / response envelopes / the `sessions.patch` tri-state
-  nullable contract matched exactly; the snapshot is a deliberate subset (see the
-  `upstreamVerified.result` note for the upstream-only `sessions.patch` fields the
-  Windows client does not yet implement).
+  blob SHAs) for the historical full-surface verification from **2026-06-23**.
+  `sessionsListVerified` separately records the released `sessions.list` evolution
+  verified on **2026-08-08**: v2026.5.20 supports `limit`, `search`, and
+  `configuredAgentsOnly`; v2026.5.22 adds `offset`; commit `6df0fb8` adds
+  `archived:boolean`. Each entry links the exact Core commit and source path.
 - Treat a gateway-protocol bump in upstream as a trigger to re-verify and refresh,
   the same way `docs/gateway-node-integration.md` is refreshed.
 - Re-verify by fetching `packages/gateway-protocol/src/schema/{sessions,commands}.ts`

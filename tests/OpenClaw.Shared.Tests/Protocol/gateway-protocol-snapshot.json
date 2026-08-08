@@ -51,20 +51,33 @@
     "date": "2026-06-23",
     "sessionsTsBlobSha": "d938f80f68cb285719e20801e83f74893aa04332",
     "commandsTsBlobSha": "a24972162dfbe4f95e05bf19211097707d30f9bb",
-    "result": "All enforced request fields, response envelopes, and the sessions.patch tri-state nullable (Union([value, Null])) contract match upstream main exactly. The snapshot is a deliberate SUBSET: the Windows client does not yet implement these upstream sessions.patch fields — label, agentId, spawnedBy, spawnedWorkspaceDir, spawnedCwd, spawnDepth, subagentRole, subagentControlScope, inheritedToolAllow, inheritedToolDeny (spawn/subagent orchestration); nor the compaction checkpoint preCompaction/postCompaction references. These are upstream fields the client does not implement yet, not drift."
+    "result": "Historical full-surface verification for request fields, response envelopes, and the sessions.patch tri-state nullable contract. sessions.list evolution after this date is verified separately in sessionsListVerified. The snapshot is a deliberate SUBSET: the Windows client does not yet implement upstream sessions.patch spawn/subagent orchestration fields or compaction checkpoint preCompaction/postCompaction references."
+  },
+  "sessionsListVerified": {
+    "date": "2026-08-08",
+    "v2026.5.20": "https://github.com/openclaw/openclaw/blob/e510042870cf248c0e0461b6f8d427326266141d/src/gateway/protocol/schema/sessions.ts",
+    "v2026.5.22": "https://github.com/openclaw/openclaw/blob/a374c3a5bfd5225ce319bce3865aab6216309c4f/src/gateway/protocol/schema/sessions.ts",
+    "archivedBoolean": "https://github.com/openclaw/openclaw/blob/6df0fb818d67032c71eb885ac36febd540fbd10f/packages/gateway-protocol/src/schema/sessions.ts",
+    "result": "v2026.5.20 supports limit, search, and configuredAgentsOnly but rejects offset and archived. v2026.5.22 adds offset. Commit 6df0fb8 adds archived:boolean. Windows negotiates these optional fields independently."
   },
   "clientFoundationCommit": "2cae69ba",
   "_clientFoundationCommitNote": "The commit on main that introduced the typed gateway protocol client (OpenClawGatewayClient.Protocol.cs + GatewayProtocolModels.cs) this guard cross-checks.",
-  "snapshotUpdated": "2026-07-13",
+  "snapshotUpdated": "2026-08-08",
   "scopePrefixes": ["sessions.", "agents.files.", "commands."],
   "methods": [
     {
       "method": "sessions.list",
       "kind": "request",
       "windowsUsage": "used",
-      "requestFields": ["agentId"],
+      "protocolVersion": "v2026.5.20 plus negotiated additions",
+      "protocolProvenance": "limit/search/configuredAgentsOnly: openclaw/openclaw v2026.5.20 commit e510042870cf248c0e0461b6f8d427326266141d src/gateway/protocol/schema/sessions.ts; offset: v2026.5.22 commit a374c3a5bfd5225ce319bce3865aab6216309c4f at the same path; archived:boolean: commit 6df0fb818d67032c71eb885ac36febd540fbd10f packages/gateway-protocol/src/schema/sessions.ts",
+      "requestFields": ["agentId", "limit", "offset", "search", "configuredAgentsOnly", "archived"],
+      "requestFieldsSource": "internal Dictionary<string, object?> ToParameters(",
       "responseEnvelope": ["sessions"],
       "responseEnvelopeSource": "TryGetSessionsPayload(JsonElement payload",
+      "responseMetadataFields": [
+        "sessions", "count", "totalCount", "limitApplied", "offset", "nextOffset", "hasMore"
+      ],
       "responseFields": [
         "key", "isMain", "status", "hasActiveRun", "model", "label", "channel", "displayName",
         "derivedTitle", "modelProvider", "provider", "subject", "groupChannel", "room",

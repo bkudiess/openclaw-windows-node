@@ -13,6 +13,10 @@ public interface IOperatorGatewayClient
     event EventHandler<OpenClawNotification>? NotificationReceived;
     event EventHandler<AgentActivity>? ActivityChanged;
     event EventHandler<ChannelHealth[]>? ChannelHealthUpdated;
+    /// <summary>
+    /// Eager compatibility snapshot for existing consumers, bounded to the first
+    /// 100 sessions. Use <see cref="QuerySessionsAsync"/> for deep paging/search.
+    /// </summary>
     event EventHandler<SessionInfo[]>? SessionsUpdated;
     event EventHandler<GatewayUsageInfo>? UsageUpdated;
     event EventHandler<GatewayUsageStatusInfo>? UsageStatusUpdated;
@@ -70,6 +74,18 @@ public interface IOperatorGatewayClient
         => Task.FromException<ChatHistoryInfo>(new NotSupportedException("chat.history is not supported by this gateway client."));
     Task CheckHealthAsync();
     Task RequestSessionsAsync(string? agentId = null);
+    /// <summary>
+    /// Returns a coherent session discovery snapshot, paging up to the query
+    /// safety limit without publishing those deep rows through SessionsUpdated.
+    /// The default keeps external implementers source-compatible.
+    /// </summary>
+    Task<SessionQuerySnapshot> QuerySessionsAsync(
+        SessionQuery query,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(new SessionQuerySnapshot());
+    /// <summary>Clears server search and restores the coherent recent snapshot.</summary>
+    SessionQuerySnapshot ClearSessionSearch(SessionQuery? query = null)
+        => new();
     Task RequestUsageAsync();
     Task RequestNodesAsync();
     Task RequestUsageStatusAsync();

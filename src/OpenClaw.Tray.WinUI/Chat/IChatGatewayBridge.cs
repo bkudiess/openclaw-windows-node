@@ -70,6 +70,20 @@ public interface IChatGatewayBridge : IDisposable
             Error = "Response-aware sessions.compact is not supported by this chat bridge."
         });
     Task RequestSessionsAsync() => Task.CompletedTask;
+    /// <summary>
+    /// Typed deep session discovery API for picker consumers. Results do not fan
+    /// out through the eager, first-page <see cref="SessionsUpdated"/> event.
+    /// </summary>
+    Task<SessionQuerySnapshot> QuerySessionsAsync(
+        SessionQuery query,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new SessionQuerySnapshot
+        {
+            Sessions = GetSessionList(),
+        });
+    /// <summary>Restores the last coherent recent snapshot without another RPC.</summary>
+    SessionQuerySnapshot ClearSessionSearch(SessionQuery? query = null) =>
+        new() { Sessions = GetSessionList() };
     Task PatchSessionModelAsync(string sessionKey, string model);
     /// <summary>
     /// Clears the session's model override (tri-state <c>sessions.patch</c> with
@@ -84,6 +98,7 @@ public interface IChatGatewayBridge : IDisposable
     Task ResolveExecApprovalAsync(string approvalId, string decision);
 
     event EventHandler<ConnectionStatus>? StatusChanged;
+    /// <summary>Compatibility event bounded to the first 100 sessions.</summary>
     event EventHandler<SessionInfo[]>? SessionsUpdated;
     event EventHandler<SessionCommandResult>? SessionCommandCompleted;
     event EventHandler<ChatMessageInfo>? ChatMessageReceived;
@@ -234,6 +249,14 @@ public sealed class GatewayClientChatBridge : IChatGatewayBridge
 
     public Task RequestSessionsAsync() =>
         _client.RequestSessionsAsync();
+
+    public Task<SessionQuerySnapshot> QuerySessionsAsync(
+        SessionQuery query,
+        CancellationToken cancellationToken = default) =>
+        _client.QuerySessionsAsync(query, cancellationToken);
+
+    public SessionQuerySnapshot ClearSessionSearch(SessionQuery? query = null) =>
+        _client.ClearSessionSearch(query);
 
     public Task<ChatHistoryInfo> RequestChatHistoryAsync(string? sessionKey) =>
         _client.RequestChatHistoryAsync(sessionKey);

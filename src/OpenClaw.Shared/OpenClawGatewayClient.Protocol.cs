@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace OpenClaw.Shared;
@@ -30,6 +31,182 @@ namespace OpenClaw.Shared;
 // ─────────────────────────────────────────────────────────────────────────────
 public partial class OpenClawGatewayClient
 {
+    // ── sessions.list ──
+
+    /// <summary>
+    /// Fetches one typed sessions.list page. Optional fields are negotiated
+    /// progressively per connection from exact INVALID_REQUEST diagnostics.
+    /// </summary>
+    public async Task<SessionListResult> ListSessionsPageAsync(
+        SessionListRequest request,
+        int timeoutMs = 15000,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        await _sessionListCapabilityGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var (connectionGeneration, unsupportedFields) = CaptureSessionListCapability();
+            while (true)
+            {
+                EnsureCurrentSessionListGeneration(connectionGeneration, cancellationToken);
+                try
+                {
+                    var payload = await SendWizardRequestAsync(
+                        "sessions.list",
+                        request.ToParameters(unsupportedFields),
+                        timeoutMs,
+                        cancellationToken).ConfigureAwait(false);
+                    EnsureCurrentSessionListGeneration(connectionGeneration, cancellationToken);
+                    return ParseSessionListResult(
+                        payload,
+                        unsupportedFields & request.RequestedOptionalFields);
+                }
+                catch (GatewayRequestException ex) when (
+                    TryGetRejectedSessionListField(
+                        ex,
+                        request,
+                        unsupportedFields,
+                        out var rejectedField))
+                {
+                    unsupportedFields = RememberUnsupportedSessionListField(
+                        connectionGeneration,
+                        rejectedField,
+                        cancellationToken);
+                    _logger.Warn(
+                        $"sessions.list field '{GetSessionListFieldName(rejectedField)}' unsupported; retrying without it");
+                }
+            }
+        }
+        finally
+        {
+            _sessionListCapabilityGate.Release();
+        }
+    }
+
+    internal static bool TryGetRejectedSessionListField(
+        GatewayRequestException exception,
+        SessionListRequest request,
+        SessionListRequestFields alreadyUnsupported,
+        out SessionListRequestFields rejectedField)
+    {
+        rejectedField = SessionListRequestFields.None;
+        if (!string.Equals(exception.Code, "INVALID_REQUEST", StringComparison.Ordinal))
+            return false;
+
+        var match = Regex.Match(
+            exception.Message,
+            @"\b(?:unexpected\s+property|unknown\s+parameter)\b\s*(?::|=)?\s*[""'`]?(?<field>[A-Za-z][A-Za-z0-9]*)[""'`]?",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!match.Success)
+            return false;
+
+        rejectedField = match.Groups["field"].Value.ToLowerInvariant() switch
+        {
+            "limit" => SessionListRequestFields.Limit,
+            "offset" => SessionListRequestFields.Offset,
+            "search" => SessionListRequestFields.Search,
+            "configuredagentsonly" => SessionListRequestFields.ConfiguredAgentsOnly,
+            "archived" => SessionListRequestFields.Archived,
+            _ => SessionListRequestFields.None,
+        };
+        return rejectedField != SessionListRequestFields.None &&
+               request.RequestedOptionalFields.HasFlag(rejectedField) &&
+               !alreadyUnsupported.HasFlag(rejectedField);
+    }
+
+    private void EnsureCurrentSessionListGeneration(
+        int connectionGeneration,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sessionListCapabilityLock)
+        {
+            if (_sessionListConnectionGeneration != connectionGeneration)
+                throw new OperationCanceledException("sessions.list response belongs to a stale connection generation.");
+        }
+    }
+
+    private (int Generation, SessionListRequestFields UnsupportedFields) CaptureSessionListCapability()
+    {
+        lock (_sessionListCapabilityLock)
+            return (_sessionListConnectionGeneration, _unsupportedSessionListRequestFields);
+    }
+
+    private SessionListRequestFields RememberUnsupportedSessionListField(
+        int connectionGeneration,
+        SessionListRequestFields rejectedField,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sessionListCapabilityLock)
+        {
+            if (_sessionListConnectionGeneration != connectionGeneration)
+                throw new OperationCanceledException("sessions.list response belongs to a stale connection generation.");
+            _unsupportedSessionListRequestFields |= rejectedField;
+            return _unsupportedSessionListRequestFields;
+        }
+    }
+
+    private static string GetSessionListFieldName(SessionListRequestFields field) => field switch
+    {
+        SessionListRequestFields.Limit => "limit",
+        SessionListRequestFields.Offset => "offset",
+        SessionListRequestFields.Search => "search",
+        SessionListRequestFields.ConfiguredAgentsOnly => "configuredAgentsOnly",
+        SessionListRequestFields.Archived => "archived",
+        _ => throw new ArgumentOutOfRangeException(nameof(field), field, null),
+    };
+
+    private void ResetSessionListCapability()
+    {
+        lock (_sessionListCapabilityLock)
+        {
+            _sessionListConnectionGeneration++;
+            _unsupportedSessionListRequestFields = SessionListRequestFields.None;
+            _operatorReadScopeUnavailable = false;
+        }
+    }
+
+    internal SessionListResult ParseSessionListResult(
+        JsonElement payload,
+        SessionListRequestFields unsupportedRequestFields = SessionListRequestFields.None)
+    {
+        IReadOnlyList<SessionInfo> sessions = TryGetSessionsPayload(payload, out var sessionsPayload)
+            ? ParseSessionPageRows(
+                sessionsPayload,
+                SessionQueryCoordinator.MaximumMaterializedSessions)
+            : Array.Empty<SessionInfo>();
+        return new SessionListResult
+        {
+            Sessions = sessions,
+            Count = GetInt32OrNull(payload, "count"),
+            TotalCount = GetInt32OrNull(payload, "totalCount"),
+            LimitApplied = GetInt32OrNull(payload, "limitApplied"),
+            Offset = GetInt32OrNull(payload, "offset"),
+            NextOffset = GetInt32OrNull(payload, "nextOffset"),
+            HasMore = payload.ValueKind == JsonValueKind.Object
+                ? GetOptionalBool(payload, "hasMore")
+                : null,
+            UnsupportedRequestFields = unsupportedRequestFields,
+        };
+    }
+
+    private static int? GetInt32OrNull(JsonElement parent, string property)
+    {
+        if (parent.ValueKind != JsonValueKind.Object ||
+            !parent.TryGetProperty(property, out var value) ||
+            value.ValueKind != JsonValueKind.Number)
+        {
+            return null;
+        }
+        if (value.TryGetInt32(out var integer))
+            return integer;
+        if (value.TryGetInt64(out var wide) && wide is >= int.MinValue and <= int.MaxValue)
+            return (int)wide;
+        return null;
+    }
+
     // ── sessions.reset ──
 
     public async Task<SessionResetResult> ResetSessionDetailedAsync(
