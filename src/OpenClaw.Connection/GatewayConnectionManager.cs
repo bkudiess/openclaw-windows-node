@@ -74,6 +74,7 @@ public sealed class GatewayConnectionManager :
     private readonly object _disposeLock = new();
     private readonly object _telemetryLock = new();
     private readonly object _operatorFailureLock = new();
+    private readonly object _operatorProtocolCompatibilityLock = new();
     private readonly object _connectionIntentLock = new();
     private readonly HashSet<string> _userDisconnectedGatewayIds = new(StringComparer.Ordinal);
     // Shared exclusive lease serializing destructive gateway lifecycle operations (manual WSL
@@ -98,6 +99,9 @@ public sealed class GatewayConnectionManager :
     private GatewayConnectionSnapshot _lastTelemetrySnapshot = GatewayConnectionSnapshot.Idle;
     private long _pendingOperatorFailureGeneration;
     private GatewayErrorKind? _pendingOperatorFailureKind;
+    private long _pendingOperatorProtocolGeneration;
+    private GatewayProtocolCompatibility _pendingOperatorProtocolCompatibility =
+        GatewayProtocolCompatibility.Unknown;
     private long _manualSshRestartGeneration;
     private CancellationTokenSource? _manualSshRestartCts;
 
@@ -192,6 +196,7 @@ public sealed class GatewayConnectionManager :
             {
                 telemetryEvents.TransportConnected += OnNodeTransportConnected;
                 telemetryEvents.ConnectionFailure += OnNodeConnectionFailure;
+                telemetryEvents.ProtocolCompatibilityChanged += OnNodeProtocolCompatibilityChanged;
             }
         }
     }
@@ -603,6 +608,11 @@ public sealed class GatewayConnectionManager :
             {
                 if (!IsCurrentGatewayAttempt(gen, subscribedGatewayId)) return;
                 RecordOperatorFailureKind(gen, kind);
+            };
+            lifecycle.DataClient.ProtocolCompatibilityChanged += (s, compatibility) =>
+            {
+                if (!IsCurrentGatewayAttempt(gen, subscribedGatewayId)) return;
+                RecordOperatorProtocolCompatibility(gen, compatibility);
             };
             lifecycle.DataClient.TransportConnected += (s, e) =>
             {
@@ -2036,14 +2046,18 @@ public sealed class GatewayConnectionManager :
                     _diagnostics.RecordWebSocketEvent("WebSocket error");
                     if (_stateMachine.Current.OperatorState != RoleConnectionState.PairingRequired)
                     {
+                        _stateMachine.SetOperatorProtocolCompatibility(
+                            ReadOperatorProtocolCompatibility(gen));
                         // AuthenticationFailed and Status=Error are raised back-to-back and handled
                         // asynchronously. If the auth handler already promoted the failure to a more
                         // specific terminal kind (for example LocalPortConflict), never let the later
                         // generic status handler overwrite it with the original token/transport kind.
-                        if (_stateMachine.Current.OperatorState != RoleConnectionState.Error ||
+                        var failureKind = ReadOperatorFailureKind(gen);
+                        if (failureKind == GatewayErrorKind.ProtocolMismatch ||
+                            _stateMachine.Current.OperatorState != RoleConnectionState.Error ||
                             _stateMachine.Current.OperatorErrorKind is null)
                         {
-                            _stateMachine.SetOperatorErrorKind(ReadOperatorFailureKind(gen));
+                            _stateMachine.SetOperatorErrorKind(failureKind);
                             _stateMachine.TryTransition(
                                 ConnectionTrigger.WebSocketError,
                                 "Transport error");
@@ -2052,7 +2066,7 @@ public sealed class GatewayConnectionManager :
                     CompleteOperatorTelemetryAttempt(
                         gen,
                         "failure",
-                        ConnectionErrorCategory.NetworkUnreachable);
+                        MapConnectionErrorCategory(ReadOperatorFailureKind(gen)));
                     break;
                 case ConnectionStatus.Connecting:
                     _diagnostics.RecordWebSocketEvent("WebSocket connecting");
@@ -2129,12 +2143,14 @@ public sealed class GatewayConnectionManager :
                 return;
 
             _diagnostics.Record("error", "Authentication failed", message);
+            _stateMachine.SetOperatorProtocolCompatibility(
+                ReadOperatorProtocolCompatibility(gen));
             _stateMachine.SetOperatorErrorKind(failureKind);
             _stateMachine.TryTransition(ConnectionTrigger.AuthenticationFailed, message);
             CompleteOperatorTelemetryAttempt(
                 gen,
                 "failure",
-                ConnectionErrorCategory.AuthFailure);
+                MapConnectionErrorCategory(failureKind));
             EmitStateChanged();
         }
         finally
@@ -2171,6 +2187,55 @@ public sealed class GatewayConnectionManager :
             _pendingOperatorFailureKind = null;
         }
     }
+
+    private void RecordOperatorProtocolCompatibility(
+        long generation,
+        GatewayProtocolCompatibility compatibility)
+    {
+        lock (_operatorProtocolCompatibilityLock)
+        {
+            _pendingOperatorProtocolGeneration = generation;
+            _pendingOperatorProtocolCompatibility = compatibility;
+        }
+
+        lock (_telemetryLock)
+        {
+            if (_operatorTelemetryAttempt?.Generation == generation)
+                _operatorTelemetryAttempt.ProtocolCompatibility = compatibility;
+        }
+    }
+
+    private GatewayProtocolCompatibility ReadOperatorProtocolCompatibility(long generation)
+    {
+        lock (_operatorProtocolCompatibilityLock)
+        {
+            return _pendingOperatorProtocolGeneration == generation
+                ? _pendingOperatorProtocolCompatibility
+                : GatewayProtocolCompatibility.Unknown;
+        }
+    }
+
+    private static ConnectionErrorCategory MapConnectionErrorCategory(
+        GatewayErrorKind? errorKind) =>
+        errorKind switch
+        {
+            GatewayErrorKind.Auth or
+            GatewayErrorKind.TokenDrift or
+            GatewayErrorKind.DeviceTokenMismatch or
+            GatewayErrorKind.ScopeMismatch => ConnectionErrorCategory.AuthFailure,
+            GatewayErrorKind.PairingRequired => ConnectionErrorCategory.PairingPending,
+            GatewayErrorKind.PairingRejected => ConnectionErrorCategory.PairingRejected,
+            GatewayErrorKind.RateLimited => ConnectionErrorCategory.RateLimited,
+            GatewayErrorKind.Tunnel => ConnectionErrorCategory.SshTunnelFailure,
+            GatewayErrorKind.Network or
+            GatewayErrorKind.Tls => ConnectionErrorCategory.NetworkUnreachable,
+            GatewayErrorKind.Server => ConnectionErrorCategory.ServerClose,
+            GatewayErrorKind.ProtocolMismatch => ConnectionErrorCategory.ProtocolMismatch,
+            GatewayErrorKind.LocalPortConflict => ConnectionErrorCategory.InternalError,
+            GatewayErrorKind.Unknown => ConnectionErrorCategory.InternalError,
+            null => ConnectionErrorCategory.NetworkUnreachable,
+            _ => ConnectionErrorCategory.InternalError
+        };
 
     // Auto credential recovery clears a device token and falls back to a stronger shared/bootstrap
     // credential. Restrict that to trusted endpoints (mirrors the Mac app, which only retries
@@ -2415,6 +2480,8 @@ public sealed class GatewayConnectionManager :
 
             var prev = _stateMachine.Current.OverallState;
             _diagnostics.Record("state", "Handshake succeeded (hello-ok)");
+            _stateMachine.SetOperatorProtocolCompatibility(
+                ReadOperatorProtocolCompatibility(gen));
             _stateMachine.TryTransition(ConnectionTrigger.HandshakeSucceeded);
             CompleteOperatorTelemetryAttempt(gen, "success");
             var nodeModeIntended = SyncNodeIntentFromSettings();
@@ -2744,6 +2811,13 @@ public sealed class GatewayConnectionManager :
         _nodeConnectionCoordinator.HandleConnectionFailure(errorKind);
     }
 
+    private void OnNodeProtocolCompatibilityChanged(
+        object? sender,
+        GatewayProtocolCompatibility compatibility)
+    {
+        _nodeConnectionCoordinator.HandleProtocolCompatibilityChanged(compatibility);
+    }
+
     private void OnNodeDeviceTokenReceived(object? sender, DeviceTokenReceivedEventArgs e)
     {
         _nodeConnectionCoordinator.HandleDeviceTokenReceived(e);
@@ -2902,6 +2976,8 @@ public sealed class GatewayConnectionManager :
             switch (status)
             {
                 case ConnectionStatus.Connected:
+                    _stateMachine.SetNodeProtocolCompatibility(
+                        connector.ProtocolCompatibility);
                     _stateMachine.TryTransition(ConnectionTrigger.NodeConnected);
                     break;
                 case ConnectionStatus.Connecting:
@@ -2913,11 +2989,16 @@ public sealed class GatewayConnectionManager :
                     break;
                 case ConnectionStatus.Error:
                     if (_stateMachine.Current.NodeState != RoleConnectionState.PairingRequired)
+                    {
+                        _stateMachine.SetNodeProtocolCompatibility(
+                            connector.ProtocolCompatibility);
+                        _stateMachine.SetNodeErrorKind(connector.FailureKind);
                         _stateMachine.TryTransition(
                             ConnectionTrigger.NodeError,
                             string.IsNullOrWhiteSpace(_stateMachine.Current.NodeError)
                                 ? "Node transport error"
                                 : _stateMachine.Current.NodeError);
+                    }
                     break;
             }
 
@@ -2959,9 +3040,13 @@ public sealed class GatewayConnectionManager :
             if (!_nodeConnectionCoordinator.IsCurrentNodeAttempt(attempt))
                 return false;
 
+            _stateMachine.SetNodeProtocolCompatibility(
+                connector.ProtocolCompatibility);
             switch (pairing.Status)
             {
                 case PairingStatus.Paired:
+                    _stateMachine.SetNodeProtocolCompatibility(
+                        connector.ProtocolCompatibility);
                     _stateMachine.TryTransition(ConnectionTrigger.NodePaired);
                     break;
                 case PairingStatus.Pending:
@@ -3250,6 +3335,22 @@ public sealed class GatewayConnectionManager :
             OpenClawTelemetryTag.String(OperationTag, attempt.Operation),
             OpenClawTelemetryTag.String(OpenClawTelemetryTagKey.Outcome, outcome)
         };
+        var compatibility = attempt.ProtocolCompatibility;
+        tags.Add(OpenClawTelemetryTag.Number(
+            OpenClawTelemetryTagKey.ClientProtocol,
+            GatewayProtocolContract.CurrentVersion));
+        tags.Add(OpenClawTelemetryTag.String(
+            OpenClawTelemetryTagKey.GatewayProtocol,
+            compatibility.GatewayProtocol switch
+            {
+                < GatewayProtocolContract.MinimumSupportedVersion => "older",
+                > GatewayProtocolContract.MaximumSupportedVersion => "newer",
+                not null => "current",
+                _ => "unknown"
+            }));
+        tags.Add(OpenClawTelemetryTag.String(
+            OpenClawTelemetryTagKey.ProtocolCompatibility,
+            compatibility.NormalizedState));
         if (errorCategory.HasValue)
         {
             tags.Add(OpenClawTelemetryTag.String(
@@ -3410,6 +3511,7 @@ public sealed class GatewayConnectionManager :
             {
                 telemetryEvents.TransportConnected -= OnNodeTransportConnected;
                 telemetryEvents.ConnectionFailure -= OnNodeConnectionFailure;
+                telemetryEvents.ProtocolCompatibilityChanged -= OnNodeProtocolCompatibilityChanged;
             }
         }
         await _devicePairApprovalCoordinator.StopAsync().ConfigureAwait(false);
@@ -3468,6 +3570,8 @@ public sealed class GatewayConnectionManager :
         public Activity? PhaseActivity { get; set; }
         public string? PhaseName { get; set; }
         public long PhaseGeneration { get; set; }
+        public GatewayProtocolCompatibility ProtocolCompatibility { get; set; } =
+            GatewayProtocolCompatibility.Unknown;
     }
 
     private void ObserveBackgroundFault(Task task, string message)
