@@ -156,22 +156,26 @@ internal interface IWorkspaceGatewayApi
 {
     Task<AgentWorkspaceListResult> ListAgentWorkspaceAsync(
         AgentWorkspaceListRequest request,
-        int timeoutMs = 15000);
+        int timeoutMs = 15000,
+        CancellationToken cancellationToken = default);
 
     Task<AgentWorkspaceGetResult> GetAgentWorkspaceFileAsync(
         AgentWorkspaceGetRequest request,
-        int timeoutMs = 15000);
+        int timeoutMs = 15000,
+        CancellationToken cancellationToken = default);
 
     Task<SessionFileList> ListSessionFilesAsync(
         string key,
         string? path = null,
         string? search = null,
-        int timeoutMs = 15000);
+        int timeoutMs = 15000,
+        CancellationToken cancellationToken = default);
 
     Task<SessionFileContent> GetSessionFileAsync(
         string key,
         string path,
-        int timeoutMs = 15000);
+        int timeoutMs = 15000,
+        CancellationToken cancellationToken = default);
 
     Task<LegacyAgentFilesResponse> ListLegacyAgentFilesAsync(
         string agentId,
@@ -196,26 +200,30 @@ internal sealed class WorkspaceGatewayApi : IWorkspaceGatewayApi
 
     public Task<AgentWorkspaceListResult> ListAgentWorkspaceAsync(
         AgentWorkspaceListRequest request,
-        int timeoutMs = 15000) =>
-        _client.ListAgentWorkspaceAsync(request, timeoutMs);
+        int timeoutMs = 15000,
+        CancellationToken cancellationToken = default) =>
+        _client.ListAgentWorkspaceAsync(request, timeoutMs, cancellationToken);
 
     public Task<AgentWorkspaceGetResult> GetAgentWorkspaceFileAsync(
         AgentWorkspaceGetRequest request,
-        int timeoutMs = 15000) =>
-        _client.GetAgentWorkspaceFileAsync(request, timeoutMs);
+        int timeoutMs = 15000,
+        CancellationToken cancellationToken = default) =>
+        _client.GetAgentWorkspaceFileAsync(request, timeoutMs, cancellationToken);
 
     public Task<SessionFileList> ListSessionFilesAsync(
         string key,
         string? path = null,
         string? search = null,
-        int timeoutMs = 15000) =>
-        _client.ListSessionFilesAsync(key, path, search, timeoutMs);
+        int timeoutMs = 15000,
+        CancellationToken cancellationToken = default) =>
+        _client.ListSessionFilesAsync(key, path, search, timeoutMs, cancellationToken);
 
     public Task<SessionFileContent> GetSessionFileAsync(
         string key,
         string path,
-        int timeoutMs = 15000) =>
-        _client.GetSessionFileAsync(key, path, timeoutMs);
+        int timeoutMs = 15000,
+        CancellationToken cancellationToken = default) =>
+        _client.GetSessionFileAsync(key, path, timeoutMs, cancellationToken);
 
     public Task<LegacyAgentFilesResponse> ListLegacyAgentFilesAsync(
         string agentId,
@@ -272,8 +280,8 @@ internal sealed class WorkspaceGatewayCoordinator
                 sessionKey,
                 path,
                 string.IsNullOrWhiteSpace(search) ? null : search,
-                timeoutMs).ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
+                timeoutMs,
+                cancellationToken).ConfigureAwait(false);
             if (session.IsSupported)
             {
                 return new WorkspaceListGatewayResult(
@@ -310,8 +318,8 @@ internal sealed class WorkspaceGatewayCoordinator
 
         var primary = await _gateway.GetAgentWorkspaceFileAsync(
             new AgentWorkspaceGetRequest { AgentId = agentId, Path = path },
-            timeoutMs).ConfigureAwait(false);
-        cancellationToken.ThrowIfCancellationRequested();
+            timeoutMs,
+            cancellationToken).ConfigureAwait(false);
         if (primary.IsSupported)
         {
             return new WorkspaceFileGatewayResult(
@@ -325,8 +333,8 @@ internal sealed class WorkspaceGatewayCoordinator
             var session = await _gateway.GetSessionFileAsync(
                 sessionKey,
                 path,
-                timeoutMs).ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
+                timeoutMs,
+                cancellationToken).ConfigureAwait(false);
             if (session.IsSupported)
             {
                 return new WorkspaceFileGatewayResult(
@@ -360,6 +368,7 @@ internal sealed class WorkspaceGatewayCoordinator
 
         while (true)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var page = await _gateway.ListAgentWorkspaceAsync(
                 new AgentWorkspaceListRequest
                 {
@@ -368,8 +377,8 @@ internal sealed class WorkspaceGatewayCoordinator
                     Offset = requestedOffset,
                     Limit = PageLimit
                 },
-                timeoutMs).ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
+                timeoutMs,
+                cancellationToken).ConfigureAwait(false);
 
             if (!page.IsSupported)
                 return page;

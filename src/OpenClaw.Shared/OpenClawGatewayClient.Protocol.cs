@@ -480,8 +480,18 @@ public partial class OpenClawGatewayClient
     public async Task<AgentWorkspaceListResult> ListAgentWorkspaceAsync(
         AgentWorkspaceListRequest request,
         int timeoutMs = 15000)
+        => await ListAgentWorkspaceAsync(
+            request,
+            timeoutMs,
+            CancellationToken.None).ConfigureAwait(false);
+
+    public async Task<AgentWorkspaceListResult> ListAgentWorkspaceAsync(
+        AgentWorkspaceListRequest request,
+        int timeoutMs,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
         if (_agentWorkspaceListUnsupported)
         {
             return new AgentWorkspaceListResult
@@ -494,10 +504,11 @@ public partial class OpenClawGatewayClient
 
         try
         {
-            var payload = await SendWizardRequestAsync(
+            var payload = await SendResponseRequestAsync(
                 "agents.workspace.list",
                 request.ToListPayload(),
-                timeoutMs).ConfigureAwait(false);
+                timeoutMs,
+                cancellationToken).ConfigureAwait(false);
             return ParseAgentWorkspaceListResult(payload);
         }
         catch (GatewayRequestException ex) when (
@@ -517,8 +528,18 @@ public partial class OpenClawGatewayClient
     public async Task<AgentWorkspaceGetResult> GetAgentWorkspaceFileAsync(
         AgentWorkspaceGetRequest request,
         int timeoutMs = 15000)
+        => await GetAgentWorkspaceFileAsync(
+            request,
+            timeoutMs,
+            CancellationToken.None).ConfigureAwait(false);
+
+    public async Task<AgentWorkspaceGetResult> GetAgentWorkspaceFileAsync(
+        AgentWorkspaceGetRequest request,
+        int timeoutMs,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
         if (_agentWorkspaceGetUnsupported)
         {
             return new AgentWorkspaceGetResult
@@ -530,10 +551,11 @@ public partial class OpenClawGatewayClient
 
         try
         {
-            var payload = await SendWizardRequestAsync(
+            var payload = await SendResponseRequestAsync(
                 "agents.workspace.get",
                 request.ToGetPayload(),
-                timeoutMs).ConfigureAwait(false);
+                timeoutMs,
+                cancellationToken).ConfigureAwait(false);
             return ParseAgentWorkspaceGetResult(payload);
         }
         catch (GatewayRequestException ex) when (
@@ -680,8 +702,26 @@ public partial class OpenClawGatewayClient
     /// with <see cref="SessionFileList.IsSupported"/> = false when the gateway
     /// does not implement the method. Throws if the connection is not open.
     /// </summary>
-    public async Task<SessionFileList> ListSessionFilesAsync(string key, string? path = null, string? search = null, int timeoutMs = 15000)
+    public async Task<SessionFileList> ListSessionFilesAsync(
+        string key,
+        string? path = null,
+        string? search = null,
+        int timeoutMs = 15000)
+        => await ListSessionFilesAsync(
+            key,
+            path,
+            search,
+            timeoutMs,
+            CancellationToken.None).ConfigureAwait(false);
+
+    public async Task<SessionFileList> ListSessionFilesAsync(
+        string key,
+        string? path,
+        string? search,
+        int timeoutMs,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(key))
             return new SessionFileList { Key = key ?? "" };
 
@@ -689,7 +729,11 @@ public partial class OpenClawGatewayClient
         if (!string.IsNullOrEmpty(path)) @params["path"] = path;
         if (!string.IsNullOrEmpty(search)) @params["search"] = search;
 
-        var payload = await TryRequestPayloadAsync("sessions.files.list", @params, timeoutMs).ConfigureAwait(false);
+        var payload = await TryRequestPayloadAsync(
+            "sessions.files.list",
+            @params,
+            timeoutMs,
+            cancellationToken).ConfigureAwait(false);
         if (payload is null)
             return new SessionFileList { Key = key, IsSupported = false };
 
@@ -702,15 +746,33 @@ public partial class OpenClawGatewayClient
     /// does not implement the method. The gateway returns an error for a missing
     /// or too-large file, which propagates as <see cref="InvalidOperationException"/>.
     /// </summary>
-    public async Task<SessionFileContent> GetSessionFileAsync(string key, string path, int timeoutMs = 15000)
+    public async Task<SessionFileContent> GetSessionFileAsync(
+        string key,
+        string path,
+        int timeoutMs = 15000)
+        => await GetSessionFileAsync(
+            key,
+            path,
+            timeoutMs,
+            CancellationToken.None).ConfigureAwait(false);
+
+    public async Task<SessionFileContent> GetSessionFileAsync(
+        string key,
+        string path,
+        int timeoutMs,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(key))
             throw new ArgumentException("Session key is required", nameof(key));
         if (string.IsNullOrWhiteSpace(path))
             throw new ArgumentException("File path is required", nameof(path));
 
         var payload = await TryRequestPayloadAsync(
-            "sessions.files.get", new { sessionKey = key, path }, timeoutMs).ConfigureAwait(false);
+            "sessions.files.get",
+            new { sessionKey = key, path },
+            timeoutMs,
+            cancellationToken).ConfigureAwait(false);
         if (payload is null)
             return new SessionFileContent { Key = key, Path = path, IsSupported = false };
 
@@ -1008,11 +1070,25 @@ public partial class OpenClawGatewayClient
     /// the gateway reports the method is unknown (older gateway). All other
     /// failures (connection not open, gateway error, timeout) propagate.
     /// </summary>
-    private async Task<JsonElement?> TryRequestPayloadAsync(string method, object? parameters, int timeoutMs)
+    private Task<JsonElement?> TryRequestPayloadAsync(
+        string method,
+        object? parameters,
+        int timeoutMs) =>
+        TryRequestPayloadAsync(method, parameters, timeoutMs, CancellationToken.None);
+
+    private async Task<JsonElement?> TryRequestPayloadAsync(
+        string method,
+        object? parameters,
+        int timeoutMs,
+        CancellationToken cancellationToken)
     {
         try
         {
-            return await SendWizardRequestAsync(method, parameters, timeoutMs).ConfigureAwait(false);
+            return await SendResponseRequestAsync(
+                method,
+                parameters,
+                timeoutMs,
+                cancellationToken).ConfigureAwait(false);
         }
         catch (GatewayRequestException ex) when (IsExactUnknownMethodError(ex, method))
         {

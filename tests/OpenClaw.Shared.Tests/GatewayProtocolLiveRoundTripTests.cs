@@ -524,6 +524,61 @@ public sealed class GatewayProtocolLiveRoundTripTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData("agents.workspace.list")]
+    [InlineData("agents.workspace.get")]
+    [InlineData("sessions.files.list")]
+    [InlineData("sessions.files.get")]
+    public async Task WorkspaceReads_CallerCancellationStopsPendingResponse(string method)
+    {
+        using var server = new LoopbackGatewayServer();
+        server.OnMethod(method, _ => LoopbackResponse.Drop());
+
+        var client = new OpenClawGatewayClient(
+            server.WebSocketUrl,
+            "test-token",
+            new TestLogger(),
+            tokenIsBootstrapToken: false,
+            bootstrapPairAsNode: false,
+            identityPath: _identityDir);
+
+        try
+        {
+            await ConnectAndWaitAsync(client, server);
+            using var cancellation = new CancellationTokenSource(50);
+
+            Task request = method switch
+            {
+                "agents.workspace.list" => client.ListAgentWorkspaceAsync(
+                    new AgentWorkspaceListRequest { AgentId = "a" },
+                    20000,
+                    cancellation.Token),
+                "agents.workspace.get" => client.GetAgentWorkspaceFileAsync(
+                    new AgentWorkspaceGetRequest { AgentId = "a", Path = "stale.md" },
+                    20000,
+                    cancellation.Token),
+                "sessions.files.list" => client.ListSessionFilesAsync(
+                    "agent:a:main",
+                    null,
+                    null,
+                    20000,
+                    cancellation.Token),
+                _ => client.GetSessionFileAsync(
+                    "agent:a:main",
+                    "stale.md",
+                    20000,
+                    cancellation.Token)
+            };
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
+            Assert.NotNull(await server.WaitFrameAsync(method, occurrence: 0, timeoutMs: 20000));
+        }
+        finally
+        {
+            await client.DisconnectAsync();
+        }
+    }
+
     [Fact]
     public async Task LegacyList_DisconnectCancelsPendingResponse()
     {

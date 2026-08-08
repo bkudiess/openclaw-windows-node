@@ -528,6 +528,31 @@ public sealed class WorkspaceGatewayCoordinatorTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
     }
 
+    [Fact]
+    public async Task PrimaryListCancellation_StopsTheInFlightGatewayWait()
+    {
+        var api = new FakeWorkspaceGatewayApi
+        {
+            ListAgentWithCancellation = async (_, cancellationToken) =>
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                throw new InvalidOperationException("unreachable");
+            }
+        };
+        using var cancellation = new CancellationTokenSource();
+
+        var request = new WorkspaceGatewayCoordinator(api).ListAsync(
+            "a",
+            "",
+            null,
+            () => null,
+            cancellationToken: cancellation.Token);
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
+        Assert.Equal(new[] { "primary-list:0" }, api.Calls);
+    }
+
     private static LegacyAgentFilesResponse SupportedLegacy(string json) =>
         new()
         {
@@ -571,6 +596,9 @@ public sealed class WorkspaceGatewayCoordinatorTests
                 Path = request.Path ?? ""
             });
 
+        public Func<AgentWorkspaceListRequest, CancellationToken, Task<AgentWorkspaceListResult>>?
+            ListAgentWithCancellation { get; set; }
+
         public Func<AgentWorkspaceGetRequest, Task<AgentWorkspaceGetResult>> GetAgent { get; set; } =
             request => Task.FromResult(new AgentWorkspaceGetResult { AgentId = request.AgentId });
 
@@ -588,15 +616,17 @@ public sealed class WorkspaceGatewayCoordinatorTests
 
         public Task<AgentWorkspaceListResult> ListAgentWorkspaceAsync(
             AgentWorkspaceListRequest request,
-            int timeoutMs = 15000)
+            int timeoutMs = 15000,
+            CancellationToken cancellationToken = default)
         {
             Calls.Add($"primary-list:{request.Offset}");
-            return ListAgent(request);
+            return ListAgentWithCancellation?.Invoke(request, cancellationToken) ?? ListAgent(request);
         }
 
         public Task<AgentWorkspaceGetResult> GetAgentWorkspaceFileAsync(
             AgentWorkspaceGetRequest request,
-            int timeoutMs = 15000)
+            int timeoutMs = 15000,
+            CancellationToken cancellationToken = default)
         {
             Calls.Add($"primary-get:{request.Path}");
             return GetAgent(request);
@@ -606,7 +636,8 @@ public sealed class WorkspaceGatewayCoordinatorTests
             string key,
             string? path = null,
             string? search = null,
-            int timeoutMs = 15000)
+            int timeoutMs = 15000,
+            CancellationToken cancellationToken = default)
         {
             Calls.Add($"session-list:{key}:{path}:{search}");
             return ListSession(key, path, search);
@@ -615,7 +646,8 @@ public sealed class WorkspaceGatewayCoordinatorTests
         public Task<SessionFileContent> GetSessionFileAsync(
             string key,
             string path,
-            int timeoutMs = 15000)
+            int timeoutMs = 15000,
+            CancellationToken cancellationToken = default)
         {
             Calls.Add($"session-get:{key}:{path}");
             return GetSession(key, path);
