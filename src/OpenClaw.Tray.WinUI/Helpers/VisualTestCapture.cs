@@ -1,5 +1,8 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using OpenClawTray.Services;
@@ -50,21 +53,38 @@ internal static class VisualTestCapture
             if (!File.Exists(signalPath))
                 continue;
 
-            await CaptureAsync(root, surfaceName);
+            var rootDir = GetVisualTestDirectory();
+            if (rootDir is null)
+                return;
+            await CaptureToDirectoryAsync(
+                root,
+                Path.Combine(rootDir, SanitizePathSegment(surfaceName)),
+                Environment.GetEnvironmentVariable(
+                    "OPENCLAW_VISUAL_TEST_ELEMENT_AUTOMATION_ID_PREFIX"),
+                Environment.GetEnvironmentVariable(
+                    "OPENCLAW_VISUAL_TEST_TEXT"));
             return;
         }
 
         Logger.Warn($"[VisualTest] Timed out waiting for capture signal for {surfaceName}.");
     }
 
-    private static async Task CaptureToDirectoryAsync(FrameworkElement root, string surfaceDir)
+    private static async Task CaptureToDirectoryAsync(
+        FrameworkElement root,
+        string surfaceDir,
+        string? automationIdPrefix = null,
+        string? exactText = null)
     {
         try
         {
             Directory.CreateDirectory(surfaceDir);
             if (root.DispatcherQueue.HasThreadAccess)
             {
-                await CaptureOnUiThreadAsync(root, surfaceDir);
+                foreach (var captureRoot in ResolveCaptureRoots(
+                             root,
+                             automationIdPrefix,
+                             exactText))
+                    await CaptureOnUiThreadAsync(captureRoot, surfaceDir);
                 return;
             }
 
@@ -73,7 +93,11 @@ internal static class VisualTestCapture
             {
                 try
                 {
-                    await CaptureOnUiThreadAsync(root, surfaceDir);
+                    foreach (var captureRoot in ResolveCaptureRoots(
+                                 root,
+                                 automationIdPrefix,
+                                 exactText))
+                        await CaptureOnUiThreadAsync(captureRoot, surfaceDir);
                     tcs.SetResult();
                 }
                 catch (Exception ex)
@@ -92,6 +116,96 @@ internal static class VisualTestCapture
             Logger.Warn($"[VisualTest] Capture failed for {surfaceDir}: {ex.Message}");
         }
     }
+
+    private static IReadOnlyList<FrameworkElement> ResolveCaptureRoots(
+        FrameworkElement root,
+        string? automationIdPrefix,
+        string? exactText)
+    {
+        if (string.IsNullOrWhiteSpace(automationIdPrefix)
+            && string.IsNullOrWhiteSpace(exactText))
+            return [root];
+
+        var matches = new List<FrameworkElement>();
+        FindDescendants(root, automationIdPrefix, exactText, matches);
+        if (matches.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "Could not find the requested visual elements for capture.");
+        }
+
+        return matches;
+    }
+
+    private static void FindDescendants(
+        FrameworkElement root,
+        string? automationIdPrefix,
+        string? exactText,
+        ICollection<FrameworkElement> matches)
+    {
+        if (!string.IsNullOrWhiteSpace(automationIdPrefix)
+            && AutomationProperties.GetAutomationId(root).StartsWith(
+                automationIdPrefix,
+                StringComparison.Ordinal))
+        {
+            matches.Add(root);
+        }
+        if (!string.IsNullOrWhiteSpace(exactText)
+            && MatchesText(root, exactText))
+        {
+            matches.Add(FindScrollViewer(root) ?? root);
+        }
+
+        var childCount = VisualTreeHelper.GetChildrenCount(root);
+        for (var index = 0; index < childCount; index++)
+        {
+            if (VisualTreeHelper.GetChild(root, index) is FrameworkElement child)
+                FindDescendants(child, automationIdPrefix, exactText, matches);
+        }
+    }
+
+    private static FrameworkElement? FindScrollViewer(FrameworkElement element)
+    {
+        var current = VisualTreeHelper.GetParent(element);
+        for (var depth = 0; current is not null && depth < 16; depth++)
+        {
+            if (current is ScrollViewer scrollViewer)
+                return scrollViewer;
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return null;
+    }
+
+    private static bool MatchesText(FrameworkElement element, string exactText)
+    {
+        var text = ReadText(element)?.TrimEnd('\r', '\n');
+        if (string.Equals(text, exactText, StringComparison.Ordinal))
+            return true;
+
+        var peer = FrameworkElementAutomationPeer.FromElement(element)
+            ?? FrameworkElementAutomationPeer.CreatePeerForElement(element);
+        return string.Equals(peer?.GetName(), exactText, StringComparison.Ordinal);
+    }
+
+    private static string? ReadText(FrameworkElement element) => element switch
+    {
+        TextBlock textBlock => textBlock.Text,
+        RichTextBlock richTextBlock => string.Concat(
+            richTextBlock.Blocks
+                .OfType<Paragraph>()
+                .SelectMany(paragraph => paragraph.Inlines)
+                .Select(ReadInline)),
+        _ => null,
+    };
+
+    private static string ReadInline(Inline inline) => inline switch
+    {
+        Run run => run.Text,
+        Span span => string.Concat(span.Inlines.Select(ReadInline)),
+        LineBreak => Environment.NewLine,
+        _ => string.Empty,
+    };
 
     private static async Task CaptureOnUiThreadAsync(FrameworkElement root, string surfaceDir)
     {

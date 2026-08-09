@@ -1,0 +1,13 @@
+head=683517894bd13dfeeb9996d3934bdac5b4b4863b
+dirty=sha256:F10E5599298252AA5BA0941ABB4B159A6B9545C3BF0D546D05409914429A1BEC; files=4; base=4712e227d110746400e93107c60616544d68f7b4
+product-version=0.6.13-bkudiess-finalize-history-cache-correlation.1+159.Branch.bkudiess-finalize-history-cache-correlation.Sha.683517894bd13dfeeb9996d3934bdac5b4b4863b.683517894bd13dfeeb9996d3934bdac5b4b4863b
+proof-scope=production reducer, activity projection, and Reactor renderer; allocator=focused provider regression
+visual=two production tool cards plus the synthetic output text, composed without coordinate cropping
+UIA expanded="Activity: Ran 2 commands. 2 tools. Collapsed."
+UIA expanded="Tool call Exec. Interrupted."
+UIA expanded="Tool call Bash. Done."
+UIA tool-row-count=2
+UIA structured="automationId=ChatToolCall_e3; state=Interrupted; output=absent"
+UIA synthetic="automationId=ChatToolCall_e4; state=Done; output=flattened output owned by history-tool-1"
+screenshot=history-collision.png bytes=43204
+result=pass

@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -29,19 +30,38 @@ public sealed class AccessibilityAppFixture : IDisposable
 
     private readonly string _dataDirectory;
     private readonly string _executablePath;
+    private readonly string? _chatFixture;
+    private readonly string? _nativeChatProofElementPrefix;
+    private readonly string? _nativeChatProofText;
+    private readonly int _nativeChatProofCaptureCount;
     private readonly string? _nativeChatProofSignalPath;
+    private readonly string _nativeChatProofSurface;
     private readonly string? _nativeChatProofVisualDirectory;
     private readonly Process _process;
 
     public IntPtr HubWindowHandle { get; }
+
+    public string ProductionProductVersion =>
+        FileVersionInfo.GetVersionInfo(_executablePath).ProductVersion ?? string.Empty;
 
     public AccessibilityAppFixture()
         : this(initializeAxe: true)
     {
     }
 
-    internal AccessibilityAppFixture(bool initializeAxe)
+    internal AccessibilityAppFixture(
+        bool initializeAxe,
+        string? chatFixture = null,
+        string nativeChatProofSurface = "NativeToolIdentity",
+        string? nativeChatProofElementPrefix = null,
+        string? nativeChatProofText = null,
+        int nativeChatProofCaptureCount = 1)
     {
+        _chatFixture = chatFixture;
+        _nativeChatProofElementPrefix = nativeChatProofElementPrefix;
+        _nativeChatProofText = nativeChatProofText;
+        _nativeChatProofCaptureCount = nativeChatProofCaptureCount;
+        _nativeChatProofSurface = nativeChatProofSurface;
         _executablePath = Path.Combine(AppContext.BaseDirectory, "OpenClaw.Tray.WinUI.exe");
         if (!File.Exists(_executablePath))
         {
@@ -186,29 +206,42 @@ public sealed class AccessibilityAppFixture : IDisposable
         }
 
         EnsureTargetIsAlive();
-        var capturedPath = Path.Combine(
-            _nativeChatProofVisualDirectory,
-            "NativeToolIdentity",
-            "capture-00.png");
+        var capturedPaths = Enumerable.Range(0, _nativeChatProofCaptureCount)
+            .Select(index => Path.Combine(
+                _nativeChatProofVisualDirectory,
+                _nativeChatProofSurface,
+                $"capture-{index:D2}.png"))
+            .ToArray();
         File.WriteAllText(_nativeChatProofSignalPath, "capture");
 
+        var previousLengths = new long[capturedPaths.Length];
         var stopwatch = Stopwatch.StartNew();
         while (stopwatch.Elapsed < TimeSpan.FromSeconds(30))
         {
             EnsureTargetIsAlive();
-            if (File.Exists(capturedPath) && new FileInfo(capturedPath).Length > 0)
+            if (CapturedVisualsAreStableAndDecodable(capturedPaths, previousLengths))
                 break;
             Thread.Sleep(100);
         }
-        if (!File.Exists(capturedPath) || new FileInfo(capturedPath).Length == 0)
+        if (!CapturedVisualsAreStableAndDecodable(capturedPaths, previousLengths))
         {
+            var produced = Directory.Exists(Path.GetDirectoryName(capturedPaths[0]))
+                ? string.Join(
+                    ", ",
+                    Directory.GetFiles(Path.GetDirectoryName(capturedPaths[0])!, "capture-*.png")
+                        .Select(Path.GetFileName)
+                        .Order(StringComparer.Ordinal))
+                : "none";
             throw new TimeoutException(
-                "The isolated app did not produce the native chat visual proof.");
+                $"The isolated app did not produce all native chat visuals. Produced: {produced}.");
         }
 
         var path = Path.GetFullPath(configuredPath, Environment.CurrentDirectory);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.Copy(capturedPath, path, overwrite: true);
+        if (capturedPaths.Length == 1)
+            File.Copy(capturedPaths[0], path, overwrite: true);
+        else
+            CombineCapturedVisuals(capturedPaths, path);
 
         using (var bitmap = new Bitmap(path))
         {
@@ -235,6 +268,74 @@ public sealed class AccessibilityAppFixture : IDisposable
             }
         }
         return path;
+    }
+
+    private static bool CapturedVisualsAreStableAndDecodable(
+        IReadOnlyList<string> capturedPaths,
+        long[] previousLengths)
+    {
+        var stable = true;
+        for (var index = 0; index < capturedPaths.Count; index++)
+        {
+            var path = capturedPaths[index];
+            var length = File.Exists(path) ? new FileInfo(path).Length : 0;
+            stable &= length > 0 && length == previousLengths[index];
+            previousLengths[index] = length;
+        }
+        if (!stable)
+            return false;
+
+        try
+        {
+            foreach (var path in capturedPaths)
+            {
+                using var bitmap = new Bitmap(path);
+                if (bitmap.Width <= 0 || bitmap.Height <= 0)
+                    return false;
+            }
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+    }
+
+    private static void CombineCapturedVisuals(
+        IReadOnlyList<string> capturedPaths,
+        string outputPath)
+    {
+        var captures = capturedPaths.Select(path => new Bitmap(path)).ToArray();
+        try
+        {
+            const int gap = 12;
+            var width = captures.Max(capture => capture.Width);
+            var height = captures.Sum(capture => capture.Height)
+                + (captures.Length + 1) * gap;
+            using var combined = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+            using (var graphics = Graphics.FromImage(combined))
+            {
+                graphics.Clear(Color.White);
+                var top = gap;
+                foreach (var capture in captures)
+                {
+                    graphics.DrawImageUnscaled(capture, 0, top);
+                    top += capture.Height + gap;
+                }
+            }
+            if (File.Exists(outputPath))
+                File.Delete(outputPath);
+            combined.Save(outputPath, ImageFormat.Png);
+        }
+        finally
+        {
+            foreach (var capture in captures)
+                capture.Dispose();
+        }
     }
 
     private async Task WaitForPageMarkerAsync(string pageTag, string automationId)
@@ -273,6 +374,8 @@ public sealed class AccessibilityAppFixture : IDisposable
         startInfo.Environment["OPENCLAW_LANGUAGE"] = "en-US";
         startInfo.Environment["OPENCLAW_ACCESSIBILITY_TEST_CHAT"] = "1";
         startInfo.Environment["OPENCLAW_ACCESSIBILITY_TEST_SESSIONS"] = "1";
+        if (!string.IsNullOrWhiteSpace(_chatFixture))
+            startInfo.Environment["OPENCLAW_ACCESSIBILITY_TEST_CHAT_FIXTURE"] = _chatFixture;
         if (_nativeChatProofSignalPath is not null
             && _nativeChatProofVisualDirectory is not null)
         {
@@ -282,7 +385,18 @@ public sealed class AccessibilityAppFixture : IDisposable
             startInfo.Environment["OPENCLAW_VISUAL_TEST_DIR"] =
                 _nativeChatProofVisualDirectory;
             startInfo.Environment["OPENCLAW_VISUAL_TEST_SURFACE"] =
-                "NativeToolIdentity";
+                _nativeChatProofSurface;
+            if (!string.IsNullOrWhiteSpace(_nativeChatProofElementPrefix))
+            {
+                startInfo.Environment[
+                    "OPENCLAW_VISUAL_TEST_ELEMENT_AUTOMATION_ID_PREFIX"] =
+                    _nativeChatProofElementPrefix;
+            }
+            if (!string.IsNullOrWhiteSpace(_nativeChatProofText))
+            {
+                startInfo.Environment["OPENCLAW_VISUAL_TEST_TEXT"] =
+                    _nativeChatProofText;
+            }
         }
 
         return Process.Start(startInfo)

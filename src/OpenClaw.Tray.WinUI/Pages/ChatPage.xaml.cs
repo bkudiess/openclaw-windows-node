@@ -425,6 +425,41 @@ public sealed partial class ChatPage : Page
                 if (!string.Equals(id, DefaultThreadId, StringComparison.Ordinal))
                     return timeline;
 
+                if (string.Equals(
+                        Environment.GetEnvironmentVariable("OPENCLAW_ACCESSIBILITY_TEST_CHAT_FIXTURE"),
+                        "history-collision",
+                        StringComparison.Ordinal))
+                {
+                    timeline = ChatTimelineReducer.Apply(
+                        timeline,
+                        new ChatToolStartEvent(
+                            "Verified structured history call",
+                            "Exec",
+                            new JsonObject
+                            {
+                                ["command"] = "verified structured id: history-tool-0",
+                            },
+                            ToolCallId: "history-tool-0",
+                            IdentityStrength: ChatToolIdentityStrength.Specific));
+                    timeline = ChatTimelineReducer.Apply(
+                        timeline,
+                        new ChatToolStartEvent(
+                            "Flattened history output",
+                            "Bash",
+                            new JsonObject
+                            {
+                                ["command"] = "synthetic flattened id: history-tool-1",
+                            },
+                            ToolCallId: "history-tool-1",
+                            IdentityStrength: ChatToolIdentityStrength.Specific));
+                    timeline = ChatTimelineReducer.Apply(
+                        timeline,
+                        new ChatToolOutputEvent(
+                            "flattened output owned by history-tool-1",
+                            "history-tool-1"));
+                    return ChatTimelineReducer.Apply(timeline, new ChatTurnEndEvent());
+                }
+
                 timeline = ChatTimelineReducer.Apply(
                     timeline,
                     new ChatToolStartEvent(
