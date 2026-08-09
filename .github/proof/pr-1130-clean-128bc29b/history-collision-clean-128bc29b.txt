@@ -1,0 +1,13 @@
+head=128bc29b3adc7263d0ad60d3ef9af285c49078d9
+dirty=clean:tree=f3d497f17f7a3762bf65d5ec2342b87b92f30523
+product-version=0.6.13--no-branch-.1+160.Branch.-no-branch-.Sha.128bc29b3adc7263d0ad60d3ef9af285c49078d9.128bc29b3adc7263d0ad60d3ef9af285c49078d9
+proof-scope=production reducer, activity projection, and Reactor renderer; allocator=focused provider regression
+visual=two production tool cards plus the synthetic output text, composed without coordinate cropping
+UIA expanded="Activity: Ran 2 commands. 2 tools. Collapsed."
+UIA expanded="Tool call Exec. Interrupted."
+UIA expanded="Tool call Bash. Done."
+UIA tool-row-count=2
+UIA structured="automationId=ChatToolCall_e3; state=Interrupted; output=absent"
+UIA synthetic="automationId=ChatToolCall_e4; state=Done; output=flattened output owned by history-tool-1"
+screenshot=history-collision-clean-128bc29b.png bytes=43204
+result=pass

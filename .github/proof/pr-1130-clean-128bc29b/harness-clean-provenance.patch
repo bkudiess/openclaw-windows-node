@@ -1,0 +1,13 @@
+diff --git a/tests/OpenClaw.Tray.UITests/NativeToolIdentityScreenshotProofTests.cs b/tests/OpenClaw.Tray.UITests/NativeToolIdentityScreenshotProofTests.cs
+index 3823cabfcf7f3c72a756a84f1f5c4d7d7fb625f8..12b85ad364425c97cd5b50607ad0253b473b5881 100644
+--- a/tests/OpenClaw.Tray.UITests/NativeToolIdentityScreenshotProofTests.cs
++++ b/tests/OpenClaw.Tray.UITests/NativeToolIdentityScreenshotProofTests.cs
+@@ -291,7 +291,7 @@ public sealed class HistoryCollisionScreenshotProofTests
+         {
+             Assert.Matches("^[0-9a-f]{40}$", head ?? string.Empty);
+             Assert.Matches(
+-                "^sha256:[0-9A-Fa-f]{64}; files=4; base=[0-9a-f]{40}$",
++                "^(?:sha256:[0-9A-Fa-f]{64}; files=4; base=[0-9a-f]{40}|clean:tree=[0-9a-f]{40})$",
+                 dirty ?? string.Empty);
+             Assert.Contains(
+                 $".Sha.{head}.{head}",
