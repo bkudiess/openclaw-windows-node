@@ -7290,6 +7290,99 @@ public class OpenClawChatDataProviderTests
     }
 
     [Fact]
+    public async Task LoadHistoryAsync_FlattenedToolIdSkipsActiveStructuredCollision()
+    {
+        var (bridge, provider, snapshots, _) = CreateProvider([MainSession()]);
+        bridge.HistoryBehavior = _ => Task.FromResult(new ChatHistoryInfo
+        {
+            SessionKey = "main",
+            Messages =
+            [
+                new ChatMessageInfo
+                {
+                    Role = "assistant",
+                    Ts = 100,
+                    ToolContent =
+                    [
+                        new ChatToolContentInfo
+                        {
+                            Kind = ChatToolContentKind.Call,
+                            CallId = "history-tool-0",
+                            ToolName = "exec"
+                        }
+                    ]
+                },
+                new ChatMessageInfo
+                {
+                    Role = "toolresult",
+                    Text = "flattened output",
+                    Ts = 200
+                }
+            ]
+        });
+
+        await provider.LoadHistoryAsync("main");
+
+        Assert.Collection(
+            snapshots[^1].Timelines["main"].Entries,
+            structured =>
+            {
+                Assert.Equal("history-tool-0", structured.ToolCallId);
+                Assert.Equal(ChatToolCallStatus.Interrupted, structured.ToolResult);
+                Assert.Null(structured.ToolOutput);
+            },
+            flattened =>
+            {
+                Assert.Equal("history-tool-1", flattened.ToolCallId);
+                Assert.Equal(ChatToolCallStatus.Success, flattened.ToolResult);
+                Assert.Equal("flattened output", flattened.ToolOutput);
+            });
+    }
+
+    [Fact]
+    public async Task LoadHistoryAsync_SyntheticToolIdsSkipMultipleReservedStructuredIdsInOrder()
+    {
+        var (bridge, provider, snapshots, _) = CreateProvider([MainSession()]);
+        bridge.HistoryBehavior = _ => Task.FromResult(new ChatHistoryInfo
+        {
+            SessionKey = "main",
+            Messages =
+            [
+                new ChatMessageInfo
+                {
+                    Role = "assistant",
+                    Ts = 100,
+                    ToolContent =
+                    [
+                        new ChatToolContentInfo
+                        {
+                            Kind = ChatToolContentKind.Call,
+                            CallId = "history-tool-0",
+                            ToolName = "exec"
+                        },
+                        new ChatToolContentInfo
+                        {
+                            Kind = ChatToolContentKind.Call,
+                            CallId = "history-tool-2",
+                            ToolName = "read"
+                        }
+                    ]
+                },
+                new ChatMessageInfo { Role = "toolresult", Text = "first flattened", Ts = 200 },
+                new ChatMessageInfo { Role = "toolresult", Text = "second flattened", Ts = 300 }
+            ]
+        });
+
+        await provider.LoadHistoryAsync("main");
+
+        var flattened = snapshots[^1].Timelines["main"].Entries
+            .Where(entry => entry.ToolOutput is not null)
+            .ToArray();
+        Assert.Equal(["history-tool-1", "history-tool-3"], flattened.Select(entry => entry.ToolCallId));
+        Assert.Equal(["first flattened", "second flattened"], flattened.Select(entry => entry.ToolOutput));
+    }
+
+    [Fact]
     public async Task AgentEvent_ToolResultIsError_ExtractsCoreErrorDetails()
     {
         var (bridge, provider, snapshots, _) = CreateProvider(new[] { MainSession() });

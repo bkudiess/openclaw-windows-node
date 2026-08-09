@@ -1168,10 +1168,26 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                 bool nextAssistantIsAborted = false;
                 var attachmentMatcher = CreateAttachmentMetaMatcher(history.SessionId, threadId);
                 var pendingUnkeyedToolCalls = new Queue<string>();
+                var replayParts = ChatHistoryReplayProjection.Project(ordered).ToList();
+                var reservedToolCallIds = replayParts
+                    .SelectMany(static part => part.ToolContent)
+                    .Select(static tool => tool.CallId)
+                    .Where(static callId => !string.IsNullOrWhiteSpace(callId))
+                    .ToHashSet(StringComparer.Ordinal);
                 var syntheticToolCallSequence = 0;
                 ChatMessageInfo? suppressedAbortedAssistant = null;
 
-                foreach (var replayPart in ChatHistoryReplayProjection.Project(ordered))
+                string AllocateSyntheticToolCallId()
+                {
+                    while (true)
+                    {
+                        var candidate = $"history-tool-{syntheticToolCallSequence++}";
+                        if (reservedToolCallIds.Add(candidate))
+                            return candidate;
+                    }
+                }
+
+                foreach (var replayPart in replayParts)
                 {
                     var msg = replayPart.Message;
                     if (suppressedAbortedAssistant is not null)
@@ -1317,7 +1333,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                                 var cached = TryMatchCachedTool(cachedTools, msg.Ts);
                                 var kind = cached?.ToolName ?? NativeToolProjector.ClassifyFlattenedToolOutput(text);
                                 var label = cached?.Label ?? NativeToolProjector.ExtractFlattenedToolSummary(text);
-                                var historyToolCallId = $"history-tool-{syntheticToolCallSequence++}";
+                                var historyToolCallId = AllocateSyntheticToolCallId();
                                 Logger.Debug($"[ChatHistory]   → routed: TOOL chip kind='{kind}' cached={cached is not null}");
                                 rebuilt = ApplyAndCaptureMeta(
                                     rebuilt,
@@ -1375,7 +1391,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                                 var cached = TryMatchCachedTool(cachedTools, msg.Ts);
                                 var kind = cached?.ToolName ?? NativeToolProjector.ClassifyFlattenedToolOutput(text);
                                 var label = cached?.Label ?? NativeToolProjector.ExtractFlattenedToolSummary(text);
-                                var historyToolCallId = $"history-tool-{syntheticToolCallSequence++}";
+                                var historyToolCallId = AllocateSyntheticToolCallId();
                                 Logger.Debug($"[ChatHistory]   → routed: TOOL chip (role=toolresult, kind='{kind}' cached={cached is not null})");
                                 rebuilt = ApplyAndCaptureMeta(
                                     rebuilt,
@@ -1427,7 +1443,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                             var callId = toolBlock.CallId;
                             if (string.IsNullOrWhiteSpace(callId))
                             {
-                                callId = $"history-tool-{syntheticToolCallSequence++}";
+                                callId = AllocateSyntheticToolCallId();
                                 pendingUnkeyedToolCalls.Enqueue(callId);
                             }
                             rebuilt = ApplyAndCaptureMeta(
@@ -1446,7 +1462,7 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                             {
                                 callId = pendingUnkeyedToolCalls.Count > 0
                                     ? pendingUnkeyedToolCalls.Dequeue()
-                                    : $"history-tool-{syntheticToolCallSequence++}";
+                                    : AllocateSyntheticToolCallId();
                             }
 
                             var correlationKey = new ChatToolCorrelationKey(
