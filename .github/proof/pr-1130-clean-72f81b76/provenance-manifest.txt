@@ -1,0 +1,24 @@
+proof_head=72f81b76211828cba447148e69b35b98e83afd20
+proof_tree=60079b82a853ab063407189c2d062372ac5f06c4
+proof_worktree_status=clean
+harness_delta=none
+build_command=.\build.ps1
+proof_command=dotnet test .\tests\OpenClaw.Tray.UITests\OpenClaw.Tray.UITests.csproj -r win-x64 --filter FullyQualifiedName~HistoryCollisionScreenshotProofTests
+proof_result=1 passed; 0 failed; 0 skipped
+proof_tool_row_count=2
+proof_structured=history-tool-0; state=Interrupted; output=absent
+proof_synthetic=history-tool-1; state=Done; output=flattened output owned by history-tool-1
+screenshot_path=history-collision-provider-clean-72f81b76.png
+screenshot_dimensions=1722x330
+screenshot_capture_bytes=43186
+screenshot_capture_sha256=8D01DC46D02B2DFD3521FA442AB338C4DCDD90012E9B47B057138144B16F84C6
+screenshot_metadata_items=5
+diagnostics_path=history-collision-provider-clean-72f81b76.txt
+diagnostics_capture_bytes=923
+diagnostics_capture_sha256=9924C70954191E651B73B124DC4064027F27823A0CDE91124969CF49034FB834
+product_exe_path=src\OpenClaw.Tray.WinUI\bin\Debug\net10.0-windows10.0.22621.0\win-x64\OpenClaw.Tray.WinUI.exe
+product_exe_bytes=382976
+product_exe_sha256=A9041AACFA915B16A0E0CA30C8D6806C633B59F06EA9E178163D19AB1884C45B
+product_dll_path=src\OpenClaw.Tray.WinUI\bin\Debug\net10.0-windows10.0.22621.0\win-x64\OpenClaw.Tray.WinUI.dll
+product_dll_bytes=3355136
+product_dll_sha256=D98CB1DA8CC157931AEC424915E86DB180135F0CB86A0C2E2459380DCAF91440
