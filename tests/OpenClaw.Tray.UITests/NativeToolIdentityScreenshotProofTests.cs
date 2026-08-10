@@ -291,7 +291,7 @@ public sealed class HistoryCollisionScreenshotProofTests
         {
             Assert.Matches("^[0-9a-f]{40}$", head ?? string.Empty);
             Assert.Matches(
-                "^sha256:[0-9A-Fa-f]{64}; files=4; base=[0-9a-f]{40}$",
+                "^(?:sha256:[0-9A-Fa-f]{64}; files=[1-9][0-9]*; base=[0-9a-f]{40}|clean:tree=[0-9a-f]{40})$",
                 dirty ?? string.Empty);
             Assert.Contains(
                 $".Sha.{head}.{head}",
@@ -304,7 +304,7 @@ public sealed class HistoryCollisionScreenshotProofTests
             $"head={head ?? "local"}",
             $"dirty={dirty ?? "unknown"}",
             $"product-version={_app.ProductionProductVersion}",
-            "proof-scope=production reducer, activity projection, and Reactor renderer; allocator=focused provider regression",
+            "proof-scope=provider LoadHistoryAsync, metadata cache, allocator, production reducer, activity projection, and Reactor renderer",
             "visual=two production tool cards plus the synthetic output text, composed without coordinate cropping",
         };
 

@@ -1,6 +1,7 @@
 using OpenClaw.Chat;
 using OpenClaw.Shared;
 using OpenClaw.Shared.Telemetry;
+using OpenClaw.TestSupport;
 using OpenClawTray.Chat;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -7337,6 +7338,80 @@ public class OpenClawChatDataProviderTests
                 Assert.Equal(ChatToolCallStatus.Success, flattened.ToolResult);
                 Assert.Equal("flattened output", flattened.ToolOutput);
             });
+    }
+
+    [Fact]
+    public async Task AccessibilityHistoryCollisionFixture_LoadsThroughProviderAndCacheAllocator()
+    {
+        using var tempDir = new TempDirectory();
+        using var environment = new EnvironmentScope()
+            .Set("OPENCLAW_ACCESSIBILITY_TEST_CHAT", "1")
+            .Set(
+                "OPENCLAW_ACCESSIBILITY_TEST_CHAT_FIXTURE",
+                AccessibilityHistoryCollisionFixture.FixtureName)
+            .Set("OPENCLAW_TRAY_DATA_DIR", tempDir.DirectoryPath);
+        var (provider, bridge) =
+            AccessibilityHistoryCollisionFixture.CreateWithBridge(tempDir.DirectoryPath);
+        await using var providerScope = provider;
+
+        await provider.LoadAsync();
+        await provider.LoadHistoryAsync(AccessibilityHistoryCollisionFixture.ThreadId);
+        var snapshot = await provider.LoadAsync();
+
+        Assert.Equal(1, bridge.HistoryRequestCount);
+        Assert.Equal(
+            [AccessibilityHistoryCollisionFixture.ThreadId],
+            bridge.RequestedHistoryKeys);
+        Assert.Collection(
+            snapshot.Timelines[AccessibilityHistoryCollisionFixture.ThreadId].Entries,
+            structured =>
+            {
+                Assert.Equal("history-tool-0", structured.ToolCallId);
+                Assert.Equal("Exec", structured.ToolName);
+                Assert.Equal(
+                    "verified structured id: history-tool-0",
+                    structured.ToolArgs?["command"]?.GetValue<string>());
+                Assert.Equal(ChatToolCallStatus.Interrupted, structured.ToolResult);
+                Assert.Null(structured.ToolOutput);
+            },
+            flattened =>
+            {
+                Assert.Equal("history-tool-1", flattened.ToolCallId);
+                Assert.NotEqual("unverified-cached-flat-id", flattened.ToolCallId);
+                Assert.Null(flattened.ToolRunId);
+                Assert.Equal("Bash", flattened.ToolName);
+                Assert.Equal(
+                    "synthetic flattened id: history-tool-1",
+                    flattened.ToolArgs?["command"]?.GetValue<string>());
+                Assert.Equal(ChatToolCallStatus.Success, flattened.ToolResult);
+                Assert.Equal(
+                    "flattened output owned by history-tool-1",
+                    flattened.ToolOutput);
+            });
+    }
+
+    [Theory]
+    [InlineData(null, AccessibilityHistoryCollisionFixture.FixtureName, true)]
+    [InlineData("0", AccessibilityHistoryCollisionFixture.FixtureName, true)]
+    [InlineData("1", null, true)]
+    [InlineData("1", "different-fixture", true)]
+    [InlineData("1", AccessibilityHistoryCollisionFixture.FixtureName, false)]
+    public void AccessibilityHistoryCollisionFixture_RejectsIncompleteIsolationGate(
+        string? enabled,
+        string? fixture,
+        bool useConfiguredDataDirectory)
+    {
+        using var tempDir = new TempDirectory();
+        var configuredDataDirectory = useConfiguredDataDirectory
+            ? tempDir.DirectoryPath
+            : Path.Combine(tempDir.DirectoryPath, "different");
+        using var environment = new EnvironmentScope()
+            .Set("OPENCLAW_ACCESSIBILITY_TEST_CHAT", enabled)
+            .Set("OPENCLAW_ACCESSIBILITY_TEST_CHAT_FIXTURE", fixture)
+            .Set("OPENCLAW_TRAY_DATA_DIR", configuredDataDirectory);
+
+        Assert.Throws<InvalidOperationException>(
+            () => AccessibilityHistoryCollisionFixture.Create(tempDir.DirectoryPath));
     }
 
     [Fact]
