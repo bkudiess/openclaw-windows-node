@@ -1438,13 +1438,17 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                     {
                         if (toolBlock.Kind == ChatToolContentKind.Call)
                         {
-                            _ = TryMatchCachedTool(cachedTools, msg.Ts);
                             var args = ConvertToolArgs(toolBlock.Args);
                             var callId = toolBlock.CallId;
                             if (string.IsNullOrWhiteSpace(callId))
                             {
+                                _ = TryMatchCachedTool(cachedTools, msg.Ts);
                                 callId = AllocateSyntheticToolCallId();
                                 pendingUnkeyedToolCalls.Enqueue(callId);
+                            }
+                            else
+                            {
+                                _ = TryMatchCachedToolByCallId(cachedTools, callId);
                             }
                             rebuilt = ApplyAndCaptureMeta(
                                 rebuilt,
@@ -1458,27 +1462,31 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                         else
                         {
                             var callId = toolBlock.CallId;
-                            if (string.IsNullOrWhiteSpace(callId))
+                            var hasVerifiedCallId = !string.IsNullOrWhiteSpace(callId);
+                            if (!hasVerifiedCallId)
                             {
                                 callId = pendingUnkeyedToolCalls.Count > 0
                                     ? pendingUnkeyedToolCalls.Dequeue()
                                     : AllocateSyntheticToolCallId();
                             }
+                            var resolvedCallId = callId!;
 
                             var correlationKey = new ChatToolCorrelationKey(
                                 RunId: null,
                                 LegacyTurn: rebuilt.ToolLegacyTurn,
-                                ToolCallId: callId);
+                                ToolCallId: resolvedCallId);
                             if (!rebuilt.ActiveToolCalls.ContainsKey(correlationKey))
                             {
-                                var cached = TryMatchCachedTool(cachedTools, msg.Ts);
+                                var cached = hasVerifiedCallId
+                                    ? TryMatchCachedToolByCallId(cachedTools, resolvedCallId)
+                                    : TryMatchCachedTool(cachedTools, msg.Ts);
                                 var toolName = cached?.ToolName ?? toolBlock.ToolName;
                                 rebuilt = ApplyAndCaptureMeta(
                                     rebuilt,
                                     new ChatToolStartEvent(
                                         cached?.Label ?? toolName,
                                         toolName,
-                                        ToolCallId: callId),
+                                        ToolCallId: resolvedCallId),
                                     msgMeta);
                             }
 
@@ -1486,8 +1494,8 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
                             rebuilt = ApplyAndCaptureMeta(
                                 rebuilt,
                                 toolBlock.IsError
-                                    ? new ChatToolErrorEvent(output, callId)
-                                    : new ChatToolOutputEvent(output, callId),
+                                    ? new ChatToolErrorEvent(output, resolvedCallId)
+                                    : new ChatToolOutputEvent(output, resolvedCallId),
                                 msgMeta);
                         }
                     }
@@ -7332,16 +7340,37 @@ public sealed class OpenClawChatDataProvider : IChatDataProvider
         if (historyTsMs > 0 && candidate.Ts > 0 && candidate.Ts > historyTsMs + 300_000)
             return null; // cached entry is >5 min after this history entry — not a match
 
-        var match = cache.Dequeue();
-        var identity = NativeToolProjector.CanonicalizeToolIdentity(
-            NormalizeCachedDisplayText(match.ToolName),
-            match.IdentityStrength);
-        match.ToolName = identity.Name;
-        match.IdentityStrength = identity.Strength;
-        match.Label = NativeToolProjector.SanitizeToolDisplayValue(
-            NormalizeCachedDisplayText(match.Label));
-        match.ToolArgs = NormalizeCachedToolArgs(match.ToolArgs);
-        return match;
+        return CloneCachedToolMeta(cache.Dequeue());
+    }
+
+    /// <summary>
+    /// Consume the earliest cached entry with the exact structured call ID while
+    /// preserving the relative order of every unmatched entry.
+    /// </summary>
+    internal static CachedToolMeta? TryMatchCachedToolByCallId(
+        Queue<CachedToolMeta>? cache,
+        string? toolCallId)
+    {
+        if (cache is null || cache.Count == 0 || string.IsNullOrWhiteSpace(toolCallId))
+            return null;
+
+        CachedToolMeta? match = null;
+        var entryCount = cache.Count;
+        for (var index = 0; index < entryCount; index++)
+        {
+            var candidate = cache.Dequeue();
+            if (match is null
+                && !string.IsNullOrWhiteSpace(candidate.ToolCallId)
+                && string.Equals(candidate.ToolCallId, toolCallId, StringComparison.Ordinal))
+            {
+                match = candidate;
+                continue;
+            }
+
+            cache.Enqueue(candidate);
+        }
+
+        return match is null ? null : CloneCachedToolMeta(match);
     }
 
     private static JsonObject? NormalizeCachedToolArgs(JsonObject? args)

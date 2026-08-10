@@ -131,6 +131,81 @@ public class ToolMetaCacheTests
         Assert.Equal("second bash", r2!.Label);
     }
 
+    [Fact]
+    public void TryMatchByCallId_MiddleMatchPreservesUnmatchedOrder()
+    {
+        var cache = new Queue<OpenClawChatDataProvider.CachedToolMeta>(
+        [
+            new() { Ts = 100, ToolName = "read", Label = "first", ToolCallId = "call-a" },
+            new() { Ts = 200, ToolName = "bash", Label = "middle", ToolCallId = "call-b" },
+            new() { Ts = 300, ToolName = "write", Label = "last", ToolCallId = "call-c" }
+        ]);
+
+        var match = OpenClawChatDataProvider.TryMatchCachedToolByCallId(cache, "call-b");
+
+        Assert.Equal("Bash", match!.ToolName);
+        Assert.Equal("middle", match.Label);
+        Assert.Equal(["call-a", "call-c"], cache.Select(entry => entry.ToolCallId));
+    }
+
+    [Fact]
+    public void TryMatchByCallId_AbsentMatchPreservesEntireQueueOrder()
+    {
+        var cache = new Queue<OpenClawChatDataProvider.CachedToolMeta>(
+        [
+            new() { Ts = 100, ToolCallId = "call-a" },
+            new() { Ts = 200, ToolCallId = "call-b" },
+            new() { Ts = 300, ToolCallId = "call-c" }
+        ]);
+
+        var match = OpenClawChatDataProvider.TryMatchCachedToolByCallId(cache, "missing");
+
+        Assert.Null(match);
+        Assert.Equal(["call-a", "call-b", "call-c"], cache.Select(entry => entry.ToolCallId));
+    }
+
+    [Fact]
+    public void TryMatchByCallId_ReusedIdConsumesEarliestOccurrence()
+    {
+        var cache = new Queue<OpenClawChatDataProvider.CachedToolMeta>(
+        [
+            new() { Ts = 100, ToolName = "read", Label = "first match", ToolCallId = "shared" },
+            new() { Ts = 200, ToolName = "bash", Label = "unmatched", ToolCallId = "other" },
+            new() { Ts = 300, ToolName = "write", Label = "second match", ToolCallId = "shared" }
+        ]);
+
+        var match = OpenClawChatDataProvider.TryMatchCachedToolByCallId(cache, "shared");
+
+        Assert.Equal("first match", match!.Label);
+        Assert.Equal(["other", "shared"], cache.Select(entry => entry.ToolCallId));
+        Assert.Equal(["unmatched", "second match"], cache.Select(entry => entry.Label));
+    }
+
+    [Fact]
+    public void TryMatchByCallId_NormalizesReturnedCloneWithoutMutatingSource()
+    {
+        var rawName = "bash\u202Ehidden";
+        var rawLabel = "line1\r\nline2\u202E";
+        var source = new OpenClawChatDataProvider.CachedToolMeta
+        {
+            Ts = 100,
+            ToolName = rawName,
+            Label = rawLabel,
+            ToolCallId = "call-a"
+        };
+        var cache = new Queue<OpenClawChatDataProvider.CachedToolMeta>([source]);
+
+        var match = OpenClawChatDataProvider.TryMatchCachedToolByCallId(cache, "call-a");
+
+        Assert.NotSame(source, match);
+        Assert.Equal(rawName, source.ToolName);
+        Assert.Equal(rawLabel, source.Label);
+        Assert.Equal("Tool", match!.ToolName);
+        Assert.DoesNotContain('\u202E', match.Label);
+        Assert.DoesNotContain('\r', match.Label);
+        Assert.DoesNotContain('\n', match.Label);
+    }
+
     // ── Constants ──
 
     [Fact]

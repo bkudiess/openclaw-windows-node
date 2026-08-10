@@ -7341,17 +7341,222 @@ public class OpenClawChatDataProviderTests
     }
 
     [Fact]
+    public async Task LoadHistoryAsync_KeyedStructuredCallDoesNotConsumeFlattenedCacheEntry()
+    {
+        using var tempDir = new TempDirectory();
+        var cachePath = Path.Combine(tempDir.DirectoryPath, "tool-metadata.json");
+        File.WriteAllText(
+            cachePath,
+            JsonSerializer.Serialize(new Dictionary<string, List<OpenClawChatDataProvider.CachedToolMeta>>
+            {
+                ["session-1"] =
+                [
+                    new()
+                    {
+                        Ts = 200,
+                        ToolName = "Bash",
+                        Label = "cached B",
+                        ToolCallId = "call-b",
+                        ToolArgs = new JsonObject { ["command"] = "echo B" },
+                        IdentityStrength = ChatToolIdentityStrength.Specific
+                    }
+                ]
+            }));
+        var (bridge, provider, snapshots, _) = CreateProvider(
+            [MainSession()],
+            toolMetaCachePath: cachePath);
+        bridge.HistoryBehavior = _ => Task.FromResult(new ChatHistoryInfo
+        {
+            SessionKey = "main",
+            SessionId = "session-1",
+            Messages =
+            [
+                new ChatMessageInfo
+                {
+                    Role = "assistant",
+                    Ts = 100,
+                    ToolContent =
+                    [
+                        new ChatToolContentInfo
+                        {
+                            Kind = ChatToolContentKind.Call,
+                            CallId = "call-a",
+                            ToolName = "read"
+                        }
+                    ]
+                },
+                new ChatMessageInfo { Role = "toolresult", Text = "output B", Ts = 200 }
+            ]
+        });
+
+        await provider.LoadHistoryAsync("main");
+
+        Assert.Collection(
+            snapshots[^1].Timelines["main"].Entries,
+            structured =>
+            {
+                Assert.Equal("call-a", structured.ToolCallId);
+                Assert.Equal("read", structured.ToolName);
+                Assert.Equal(ChatToolCallStatus.Interrupted, structured.ToolResult);
+                Assert.Null(structured.ToolOutput);
+            },
+            flattened =>
+            {
+                Assert.StartsWith("history-tool-", flattened.ToolCallId);
+                Assert.Equal("Bash", flattened.ToolName);
+                Assert.Equal("cached B", flattened.Text);
+                Assert.Equal("echo B", flattened.ToolArgs?["command"]?.GetValue<string>());
+                Assert.Equal("output B", flattened.ToolOutput);
+            });
+    }
+
+    [Fact]
+    public async Task LoadHistoryAsync_KeyedResultOnlyDoesNotConsumeFlattenedCacheEntry()
+    {
+        using var tempDir = new TempDirectory();
+        var cachePath = Path.Combine(tempDir.DirectoryPath, "tool-metadata.json");
+        File.WriteAllText(
+            cachePath,
+            JsonSerializer.Serialize(new Dictionary<string, List<OpenClawChatDataProvider.CachedToolMeta>>
+            {
+                ["session-1"] =
+                [
+                    new()
+                    {
+                        Ts = 200,
+                        ToolName = "Bash",
+                        Label = "cached B",
+                        ToolCallId = "call-b",
+                        ToolArgs = new JsonObject { ["command"] = "echo B" },
+                        IdentityStrength = ChatToolIdentityStrength.Specific
+                    }
+                ]
+            }));
+        var (bridge, provider, snapshots, _) = CreateProvider(
+            [MainSession()],
+            toolMetaCachePath: cachePath);
+        bridge.HistoryBehavior = _ => Task.FromResult(new ChatHistoryInfo
+        {
+            SessionKey = "main",
+            SessionId = "session-1",
+            Messages =
+            [
+                new ChatMessageInfo
+                {
+                    Role = "toolresult",
+                    Ts = 100,
+                    ToolContent =
+                    [
+                        new ChatToolContentInfo
+                        {
+                            Kind = ChatToolContentKind.Result,
+                            CallId = "call-a",
+                            ToolName = "read",
+                            Text = "output A"
+                        }
+                    ]
+                },
+                new ChatMessageInfo { Role = "toolresult", Text = "output B", Ts = 200 }
+            ]
+        });
+
+        await provider.LoadHistoryAsync("main");
+
+        Assert.Collection(
+            snapshots[^1].Timelines["main"].Entries,
+            structured =>
+            {
+                Assert.Equal("call-a", structured.ToolCallId);
+                Assert.Equal("read", structured.ToolName);
+                Assert.Equal("output A", structured.ToolOutput);
+            },
+            flattened =>
+            {
+                Assert.StartsWith("history-tool-", flattened.ToolCallId);
+                Assert.Equal("Bash", flattened.ToolName);
+                Assert.Equal("cached B", flattened.Text);
+                Assert.Equal("echo B", flattened.ToolArgs?["command"]?.GetValue<string>());
+                Assert.Equal("output B", flattened.ToolOutput);
+            });
+    }
+
+    [Fact]
+    public async Task LoadHistoryAsync_ExactKeyedCacheMatchIsConsumedOnce()
+    {
+        using var tempDir = new TempDirectory();
+        var cachePath = Path.Combine(tempDir.DirectoryPath, "tool-metadata.json");
+        File.WriteAllText(
+            cachePath,
+            JsonSerializer.Serialize(new Dictionary<string, List<OpenClawChatDataProvider.CachedToolMeta>>
+            {
+                ["session-1"] =
+                [
+                    new()
+                    {
+                        Ts = 100,
+                        ToolName = "Apply Patch",
+                        Label = "cached A",
+                        ToolCallId = "call-a",
+                        IdentityStrength = ChatToolIdentityStrength.Specific
+                    }
+                ]
+            }));
+        var (bridge, provider, snapshots, _) = CreateProvider(
+            [MainSession()],
+            toolMetaCachePath: cachePath);
+        bridge.HistoryBehavior = _ => Task.FromResult(new ChatHistoryInfo
+        {
+            SessionKey = "main",
+            SessionId = "session-1",
+            Messages =
+            [
+                new ChatMessageInfo
+                {
+                    Role = "assistant",
+                    Ts = 100,
+                    ToolContent =
+                    [
+                        new ChatToolContentInfo
+                        {
+                            Kind = ChatToolContentKind.Call,
+                            CallId = "call-a",
+                            ToolName = "read"
+                        }
+                    ]
+                },
+                new ChatMessageInfo { Role = "toolresult", Text = "flattened output", Ts = 200 }
+            ]
+        });
+
+        await provider.LoadHistoryAsync("main");
+
+        Assert.Collection(
+            snapshots[^1].Timelines["main"].Entries,
+            structured => Assert.Equal("call-a", structured.ToolCallId),
+            flattened =>
+            {
+                Assert.StartsWith("history-tool-", flattened.ToolCallId);
+                Assert.NotEqual("Apply Patch", flattened.ToolName);
+                Assert.Null(flattened.ToolArgs);
+                Assert.Equal("flattened output", flattened.ToolOutput);
+            });
+    }
+
+    [Fact]
     public async Task AccessibilityHistoryCollisionFixture_LoadsThroughProviderAndCacheAllocator()
     {
         using var tempDir = new TempDirectory();
-        using var environment = new EnvironmentScope()
-            .Set("OPENCLAW_ACCESSIBILITY_TEST_CHAT", "1")
-            .Set(
-                "OPENCLAW_ACCESSIBILITY_TEST_CHAT_FIXTURE",
-                AccessibilityHistoryCollisionFixture.FixtureName)
-            .Set("OPENCLAW_TRAY_DATA_DIR", tempDir.DirectoryPath);
         var (provider, bridge) =
-            AccessibilityHistoryCollisionFixture.CreateWithBridge(tempDir.DirectoryPath);
+            AccessibilityHistoryCollisionFixture.CreateWithBridgeForTesting(
+                tempDir.DirectoryPath,
+                name => name switch
+                {
+                    "OPENCLAW_ACCESSIBILITY_TEST_CHAT" => "1",
+                    "OPENCLAW_ACCESSIBILITY_TEST_CHAT_FIXTURE" =>
+                        AccessibilityHistoryCollisionFixture.FixtureName,
+                    "OPENCLAW_TRAY_DATA_DIR" => tempDir.DirectoryPath,
+                    _ => null
+                });
         await using var providerScope = provider;
 
         await provider.LoadAsync();
@@ -7405,13 +7610,17 @@ public class OpenClawChatDataProviderTests
         var configuredDataDirectory = useConfiguredDataDirectory
             ? tempDir.DirectoryPath
             : Path.Combine(tempDir.DirectoryPath, "different");
-        using var environment = new EnvironmentScope()
-            .Set("OPENCLAW_ACCESSIBILITY_TEST_CHAT", enabled)
-            .Set("OPENCLAW_ACCESSIBILITY_TEST_CHAT_FIXTURE", fixture)
-            .Set("OPENCLAW_TRAY_DATA_DIR", configuredDataDirectory);
 
         Assert.Throws<InvalidOperationException>(
-            () => AccessibilityHistoryCollisionFixture.Create(tempDir.DirectoryPath));
+            () => AccessibilityHistoryCollisionFixture.CreateForTesting(
+                tempDir.DirectoryPath,
+                name => name switch
+                {
+                    "OPENCLAW_ACCESSIBILITY_TEST_CHAT" => enabled,
+                    "OPENCLAW_ACCESSIBILITY_TEST_CHAT_FIXTURE" => fixture,
+                    "OPENCLAW_TRAY_DATA_DIR" => configuredDataDirectory,
+                    _ => null
+                }));
     }
 
     [Fact]

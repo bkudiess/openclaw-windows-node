@@ -27,6 +27,22 @@ internal static class AccessibilityHistoryCollisionFixture
         return CreateCore(isolatedDataDirectory, post);
     }
 
+    internal static OpenClawChatDataProvider CreateForTesting(
+        string isolatedDataDirectory,
+        Func<string, string?> environmentLookup)
+    {
+        ValidateIsolationGate(isolatedDataDirectory, environmentLookup);
+        return CreateCore(isolatedDataDirectory, post: null).Provider;
+    }
+
+    internal static (OpenClawChatDataProvider Provider, Bridge GatewayBridge) CreateWithBridgeForTesting(
+        string isolatedDataDirectory,
+        Func<string, string?> environmentLookup)
+    {
+        ValidateIsolationGate(isolatedDataDirectory, environmentLookup);
+        return CreateCore(isolatedDataDirectory, post: null);
+    }
+
     private static (OpenClawChatDataProvider Provider, Bridge GatewayBridge) CreateCore(
         string isolatedDataDirectory,
         Action<Action>? post)
@@ -75,15 +91,22 @@ internal static class AccessibilityHistoryCollisionFixture
     }
 
     private static void ValidateIsolationGate(string isolatedDataDirectory)
+        => ValidateIsolationGate(
+            isolatedDataDirectory,
+            Environment.GetEnvironmentVariable);
+
+    private static void ValidateIsolationGate(
+        string isolatedDataDirectory,
+        Func<string, string?> environmentLookup)
     {
         var configuredDataDirectory =
-            Environment.GetEnvironmentVariable("OPENCLAW_TRAY_DATA_DIR");
+            environmentLookup("OPENCLAW_TRAY_DATA_DIR");
         if (!string.Equals(
-                Environment.GetEnvironmentVariable("OPENCLAW_ACCESSIBILITY_TEST_CHAT"),
+                environmentLookup("OPENCLAW_ACCESSIBILITY_TEST_CHAT"),
                 "1",
                 StringComparison.Ordinal)
             || !string.Equals(
-                Environment.GetEnvironmentVariable("OPENCLAW_ACCESSIBILITY_TEST_CHAT_FIXTURE"),
+                environmentLookup("OPENCLAW_ACCESSIBILITY_TEST_CHAT_FIXTURE"),
                 FixtureName,
                 StringComparison.Ordinal)
             || string.IsNullOrWhiteSpace(configuredDataDirectory)
