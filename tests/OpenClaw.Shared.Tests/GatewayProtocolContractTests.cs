@@ -20,6 +20,15 @@ public class GatewayProtocolContractTests
             SentMessages.Enqueue(message);
             return Task.CompletedTask;
         }
+
+        protected override Task<bool> SendRawAsync(
+            string message,
+            long expectedConnectionGeneration,
+            CancellationToken cancellationToken)
+        {
+            SentMessages.Enqueue(message);
+            return Task.FromResult(true);
+        }
     }
 
     [Fact]
@@ -36,18 +45,16 @@ public class GatewayProtocolContractTests
     {
         var repositoryRoot = ProductionSourceFiles.FindRepoRoot();
 
-        foreach (var relativePath in new[]
-                 {
-                     Path.Combine("src", "OpenClaw.Shared", "OpenClawGatewayClient.cs"),
-                     Path.Combine("src", "OpenClaw.Shared", "WindowsNodeClient.cs")
-                 })
-        {
-            var source = File.ReadAllText(Path.Combine(repositoryRoot, relativePath));
-            Assert.Contains("GatewayProtocolContract.MinimumSupportedVersion", source, StringComparison.Ordinal);
-            Assert.Contains("GatewayProtocolContract.MaximumSupportedVersion", source, StringComparison.Ordinal);
-            Assert.DoesNotMatch(@"minProtocol\s*=\s*\d", source);
-            Assert.DoesNotMatch(@"maxProtocol\s*=\s*\d", source);
-        }
+        var source = File.ReadAllText(
+            Path.Combine(
+                repositoryRoot,
+                "src",
+                "OpenClaw.Shared",
+                "ConnectEnvelopeBuilder.cs"));
+        Assert.Contains("GatewayProtocolContract.MinimumSupportedVersion", source, StringComparison.Ordinal);
+        Assert.Contains("GatewayProtocolContract.MaximumSupportedVersion", source, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"minProtocol\s*=\s*\d", source);
+        Assert.DoesNotMatch(@"maxProtocol\s*=\s*\d", source);
     }
 
     [Fact]
@@ -59,7 +66,9 @@ public class GatewayProtocolContractTests
             "SendConnectMessageAsync",
             BindingFlags.NonPublic | BindingFlags.Instance);
         Assert.NotNull(sendConnect);
-        await (Task)sendConnect!.Invoke(operatorClient, [null])!;
+        await (Task)sendConnect!.Invoke(
+            operatorClient,
+            [null, 0L, CancellationToken.None])!;
         Assert.True(operatorClient.SentMessages.TryDequeue(out var operatorMessage));
 
         using var nodeIdentity = new TempDirectory("gateway-protocol-node-");

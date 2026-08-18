@@ -188,6 +188,26 @@ public class ConnectionStateMachineTests
     }
 
     [Fact]
+    public void OperatorDisconnected_AfterProtocolMismatch_PreservesTerminalRecoveryState()
+    {
+        _sm.TryTransition(ConnectionTrigger.ConnectRequested);
+        _sm.SetOperatorErrorKind(OpenClaw.Shared.GatewayErrorKind.ProtocolMismatch);
+        _sm.SetOperatorProtocolCompatibility(
+            OpenClaw.Shared.GatewayProtocolCompatibility.FromGatewayExpectation(2, 2));
+        Assert.True(_sm.TryTransition(ConnectionTrigger.WebSocketError, "Transport error"));
+
+        Assert.False(_sm.TryTransition(ConnectionTrigger.WebSocketDisconnected));
+
+        Assert.Equal(RoleConnectionState.Error, _sm.Current.OperatorState);
+        Assert.Equal(
+            OpenClaw.Shared.GatewayErrorKind.ProtocolMismatch,
+            _sm.Current.OperatorErrorKind);
+        Assert.Equal(
+            OpenClaw.Shared.GatewayProtocolCompatibilityState.GatewayTooOld,
+            _sm.Current.ProtocolCompatibility.State);
+    }
+
+    [Fact]
     public void Connecting_RateLimited_TransitionsToError()
     {
         _sm.TryTransition(ConnectionTrigger.ConnectRequested);

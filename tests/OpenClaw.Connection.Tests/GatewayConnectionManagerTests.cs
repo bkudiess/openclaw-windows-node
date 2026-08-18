@@ -241,6 +241,14 @@ public class GatewayConnectionManagerTests : IDisposable
         Assert.Equal(2, latchedSnapshot.OperatorProtocolCompatibility.GatewayExpectedProtocol);
         Assert.False(latchedSnapshot.OperatorProtocolCompatibility.Retryable);
 
+        lifecycle.SimulateStatusChanged(ConnectionStatus.Disconnected);
+        await Task.Delay(50);
+
+        Assert.Equal(RoleConnectionState.Error, _manager.CurrentSnapshot.OperatorState);
+        Assert.Equal(
+            GatewayErrorKind.ProtocolMismatch,
+            _manager.CurrentSnapshot.OperatorErrorKind);
+
         await _manager.ReconnectAsync();
 
         Assert.Equal(2, _factory.CreatedClients.Count);
@@ -256,7 +264,7 @@ public class GatewayConnectionManagerTests : IDisposable
     {
         var flags = System.Reflection.BindingFlags.NonPublic |
             System.Reflection.BindingFlags.Static;
-        var nodeMap = typeof(GatewayConnectionManager).GetMethod(
+        var nodeMap = typeof(NodeConnectionCoordinator).GetMethod(
             "MapNodeConnectionErrorCategory",
             flags);
         var operatorMap = typeof(GatewayConnectionManager).GetMethod(
