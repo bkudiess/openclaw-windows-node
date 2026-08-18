@@ -3045,8 +3045,6 @@ public sealed class GatewayConnectionManager :
             switch (pairing.Status)
             {
                 case PairingStatus.Paired:
-                    _stateMachine.SetNodeProtocolCompatibility(
-                        connector.ProtocolCompatibility);
                     _stateMachine.TryTransition(ConnectionTrigger.NodePaired);
                     break;
                 case PairingStatus.Pending:

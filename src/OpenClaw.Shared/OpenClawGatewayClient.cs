@@ -2551,7 +2551,7 @@ public partial class OpenClawGatewayClient : WebSocketClientBase, IOperatorGatew
     {
         _protocolMismatch = true;
         AbortCurrentWebSocket(CurrentConnectionGeneration);
-        _logger.Warn($"[HANDSHAKE] Gateway protocol mismatch: {detail}");
+        _logger.Warn($"[HANDSHAKE] Gateway protocol mismatch: {TokenSanitizer.Sanitize(detail)}");
         ProtocolCompatibilityChanged?.Invoke(
             this,
             compatibility ?? GatewayProtocolCompatibility.FromGatewayExpectation(expectedProtocol: null));
