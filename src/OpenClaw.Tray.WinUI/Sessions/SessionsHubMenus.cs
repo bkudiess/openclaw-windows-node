@@ -148,7 +148,7 @@ internal static class SessionsHubMenus
         var current = SessionAppearance.NormalizeIcon(row.Icon);
         var items = new List<MenuFlyoutItemBase>
         {
-            Radio(SessionsHubPresentation.T("IconDefault"), "session-icon", current is null,
+            Radio(SessionsHubPresentation.T("IconDefault"), "session-icon", string.IsNullOrWhiteSpace(row.Icon),
                 () => _ = controller.PatchAsync(row, new SessionPatch { Icon = SessionPatch.Clear }), enabled),
         };
         foreach (var id in SessionAppearance.IconIds)
@@ -180,7 +180,7 @@ internal static class SessionsHubMenus
         if (items.Count > 0)
             items.Add(MenuSeparator());
         items.Add(SessionsHubView.Item(T("NewGroupEllipsis"), FluentIconCatalog.Add,
-            () => _ = controller.NewGroupAsync(row), enabled && context.State.GroupsSupported));
+            () => _ = controller.NewGroupAsync(row), enabled && context.State.Permissions.CanCreateGroup));
         if (row.Category is not null)
             items.Add(SessionsHubView.Item(T("RemoveFromGroup"), null, () => _ = controller.MoveToGroupAsync(row, null), enabled));
         return items.ToArray();

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -19,7 +20,7 @@ public sealed partial class GatewayScenario
 
     private static readonly string[] HubMethods =
     [
-        "sessions.search", "sessions.groups.list", "sessions.groups.put", "sessions.groups.rename",
+        "sessions.search", "sessions.groups.list", "sessions.groups.put", "sessions.groups.create", "sessions.groups.rename",
         "sessions.groups.delete", "sessions.assignOwner", "sessions.reclaim", "sessions.patch", "sessions.delete",
         "sessions.create", "sessions.reset", "sessions.compact", "users.list", "worktrees.list", "worktrees.branches",
         "worktrees.create", "worktrees.remove", "worktrees.restore", "worktrees.gc",
@@ -213,6 +214,7 @@ public sealed partial class GatewayScenario
                     "sessions.search" => Search(p),
                     "sessions.groups.list" => Groups(),
                     "sessions.groups.put" => PutGroups(p),
+                    "sessions.groups.create" => CreateGroup(p),
                     "sessions.groups.rename" => RenameGroup(p),
                     "sessions.groups.delete" => DeleteGroup(p),
                     "sessions.patch" => Patch(p),
@@ -340,6 +342,20 @@ public sealed partial class GatewayScenario
             _groups.AddRange(names.EnumerateArray().Select(name => name.GetString()?.Trim()).OfType<string>()
                 .Where(name => name.Length > 0).Distinct(StringComparer.Ordinal));
             return Changed(new { ok = true, groups = _groups.Select((name, position) => new { name, position }).ToArray() }, null);
+        }
+
+        private object CreateGroup(JsonElement p)
+        {
+            ValidateProperties(p, "name");
+            var name = RequiredString(p, "name").Trim();
+            var characters = 0;
+            foreach (var rune in name.EnumerateRunes())
+                characters++;
+            if (characters is 0 or > 512)
+                throw new FixtureRequestException("INVALID_PARAMS", "Group names must contain 1 to 512 characters.");
+            if (!_groups.Contains(name, StringComparer.Ordinal))
+                _groups.Add(name);
+            return Changed(new { ok = true, groups = _groups.Select((n, position) => new { name = n, position }).ToArray() }, null);
         }
 
         private object RenameGroup(JsonElement p)

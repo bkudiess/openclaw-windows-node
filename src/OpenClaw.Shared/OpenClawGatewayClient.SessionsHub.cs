@@ -194,6 +194,13 @@ public partial class OpenClawGatewayClient
         return ParseSessionGroupCatalog(await MutateAsync("sessions.groups.put", parameters, timeoutMs).ConfigureAwait(false));
     }
 
+    public async Task<SessionGroupCatalog> CreateSessionGroupAsync(string name, int timeoutMs = 15000)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var payload = await MutateAsync("sessions.groups.create", new { name = name.Trim() }, timeoutMs).ConfigureAwait(false);
+        return ParseSessionGroupCatalog(payload);
+    }
+
     public async Task<SessionGroupCatalog> RenameSessionGroupAsync(string name, string to, int timeoutMs = 15000)
     {
         var payload = await MutateAsync("sessions.groups.rename", new { name, to }, timeoutMs).ConfigureAwait(false);

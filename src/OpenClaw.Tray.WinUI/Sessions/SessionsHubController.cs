@@ -48,6 +48,7 @@ internal sealed class SessionsHubController
     private int _changeGeneration;
     private int _transcriptGeneration;
     private int _worktreeGeneration;
+    private int _branchGeneration;
     // The client and authenticated connection the page currently shows; null while disconnected.
     // Actions capture it before any prompt, and every later step runs only while it is still
     // current, so nothing confirmed on one connection runs on another.
@@ -92,12 +93,12 @@ internal sealed class SessionsHubController
         Update(s => s with
         {
             Agents = ReadAgents(_host.AgentsList),
-            Filters = s.Filters with
-            {
-                AgentId = routeAgentId ?? s.Filters.AgentId,
-                ShowCompleted = _host.ShowCompletedSessions,
-            },
         });
+        SetFilters(_state.Filters with
+        {
+            AgentId = routeAgentId ?? _state.Filters.AgentId,
+            ShowCompleted = _host.ShowCompletedSessions,
+        }, reload: false);
         RefreshConnection();
     }
 
@@ -190,6 +191,7 @@ internal sealed class SessionsHubController
             NextOffset = null,
             TotalCount = null,
             DetailsKey = null,
+            LabelDraft = (null, "", null),
             IsBusy = false,
             IsReloading = false,
             GroupCatalog = Array.Empty<string>(),
@@ -350,6 +352,10 @@ internal sealed class SessionsHubController
             var rows = append
                 ? s.Rows.Concat(page.Sessions.Where(row => s.Rows.All(existing => existing.Key != row.Key))).ToArray()
                 : page.Sessions;
+            var draft = s.LabelDraft;
+            if (draft.Key is { } key && rows.FirstOrDefault(row => row.Key == key) is { } current
+                && (string.IsNullOrWhiteSpace(draft.SessionId) || draft.SessionId != current.SessionId))
+                draft = (null, "", null);
             return s with
             {
                 Load = SessionsHubLoad.Loaded,
@@ -357,6 +363,7 @@ internal sealed class SessionsHubController
                 HasMore = page.HasMore,
                 NextOffset = page.NextOffset,
                 TotalCount = page.TotalCount,
+                LabelDraft = draft,
                 Selection = s.Selection.Reconcile(rows.Select(row => row.Key)),
             };
         });
@@ -416,20 +423,50 @@ internal sealed class SessionsHubController
         Update(s => s with { Filters = filters, PageIndex = 0 });
         if (filters.ShowCompleted != previous.ShowCompleted)
             _host.ShowCompletedSessions = filters.ShowCompleted;
+        if (!previous.ToQuery().ToSearchScope().SequenceEqual(filters.ToQuery().ToSearchScope()))
+            InvalidateTranscriptSearch();
+        var queryChanged = !SameServerQuery(previous, filters);
+        if (queryChanged)
+            ResetRosterForQueryChange();
         // Client-only filters hide rows without a reload; never keep hidden rows selected.
         Update(s => s with { Selection = s.Selection.Reconcile(filters.ApplyClientFilters(s.Rows).Select(row => row.Key)) });
-        if (!reload || SameServerQuery(previous, filters))
+        if (!reload || !queryChanged)
             return;
-        // The selected rows belong to the old query; never let a pending reload leave them deletable.
-        Update(s => s with { Selection = SessionsHubSelection.Empty });
         _ = ReloadAsync();
     }
 
     public void SetSearch(string text)
     {
+        if (text == _state.Filters.Search) return;
+        if (text.Trim() == _state.Filters.Search.Trim())
+        {
+            Update(s => s with { Filters = s.Filters with { Search = text } });
+            return;
+        }
         Update(s => s with { Filters = s.Filters with { Search = text }, PageIndex = 0 });
+        InvalidateTranscriptSearch();
+        ResetRosterForQueryChange();
         var generation = ++_searchGeneration;
         _ = DebounceAsync(SearchDebounceMs, () => generation == _searchGeneration, () => ReloadAsync());
+    }
+
+    private void ResetRosterForQueryChange()
+    {
+        // Invalidate an old response immediately, including during the search debounce.
+        _loadGeneration++;
+        _searchGeneration++;
+        Update(s => s with
+        {
+            Load = SessionsHubLoad.Idle,
+            LoadError = null,
+            IsReloading = false,
+            Rows = Array.Empty<SessionInfo>(),
+            HasMore = false,
+            NextOffset = null,
+            TotalCount = null,
+            // Keep the draft while its row is filtered out. ApplyPage checks identity before reuse.
+            Selection = SessionsHubSelection.Empty,
+        });
     }
 
     private static bool SameServerQuery(SessionsHubFilters a, SessionsHubFilters b) => a.ToQuery() == b.ToQuery();
@@ -440,10 +477,23 @@ internal sealed class SessionsHubController
     public void SetPageSize(int size) => Update(s => s with { PageSize = size, PageIndex = 0 });
     public void SetPage(int index) => Update(s => s with { PageIndex = Math.Max(0, index) });
     /// <summary>Row click: toggles the details pane for <paramref name="key"/>.</summary>
-    public void ShowDetails(string? key) => Update(s => s with { DetailsKey = s.DetailsKey == key ? null : key });
+    public void ShowDetails(string? key) => Update(s => s with
+    {
+        DetailsKey = s.DetailsKey == key ? null : key,
+        LabelDraft = (null, "", null),
+    });
     /// <summary>Always shows <paramref name="key"/>; used where a toggle would surprise (search results).</summary>
-    public void OpenDetails(string key) => Update(s => s with { DetailsKey = key });
-    public void CloseDetails() => Update(s => s with { DetailsKey = null });
+    public void OpenDetails(string key) => Update(s => s with
+    {
+        DetailsKey = key,
+        LabelDraft = s.DetailsKey == key ? s.LabelDraft : (null, "", null),
+    });
+    public void CloseDetails() => Update(s => s with { DetailsKey = null, LabelDraft = (null, "", null) });
+    public void SetLabelDraft(string key, string text)
+    {
+        if (_state.DetailsKey == key)
+            Update(s => s with { LabelDraft = (key, text, s.DetailsRow?.SessionId) });
+    }
     public void DismissNotice() => Update(s => s with { Notice = null });
 
     public void SetSelectionMode(bool enabled) => Update(s => s with
@@ -578,12 +628,28 @@ internal sealed class SessionsHubController
             await ReloadAsync(preserveCount: true);
         }, binding);
 
-    public Task SaveLabelAsync(SessionInfo row, string text)
+    public async Task SaveLabelAsync(SessionInfo row, string text)
     {
         var trimmed = text.Trim();
         if (trimmed == (row.Label ?? "").Trim())
-            return Task.CompletedTask;
-        return PatchAsync(row, WorkspaceSessionMenu.RenamePatch(trimmed));
+            return;
+        if (!await GuardedAsync(T("UpdateFailed"), operation =>
+                operation.PatchAsync(row.Key, WorkspaceSessionMenu.RenamePatch(trimmed))))
+            return;
+        Update(s => s with
+        {
+            // The acknowledgement owns only the submitted draft, not text typed afterward.
+            LabelDraft = s.LabelDraft.Key == row.Key && s.LabelDraft.Text == text && s.LabelDraft.SessionId == row.SessionId
+                ? (null, "", null) : s.LabelDraft,
+            Rows = s.Rows.Select(existing =>
+            {
+                if (existing.Key != row.Key || existing.SessionId != row.SessionId) return existing;
+                var accepted = existing.Clone();
+                accepted.Label = trimmed.Length == 0 ? null : trimmed;
+                return accepted;
+            }).ToArray(),
+        });
+        await ReloadAsync(preserveCount: true);
     }
 
     public async Task ArchiveAsync(SessionInfo row, string title)
@@ -638,12 +704,19 @@ internal sealed class SessionsHubController
             return;
         }
         if (PromptBinding() is not { } binding) return;
+        var rowsBefore = _state.Rows;
         var prompt = SessionActionPlanner.BuildPrompt(SessionActionKind.Delete, row.Key, title, false);
         if (prompt is not null)
         {
             var localized = SessionActionPromptLocalizer.Localize(prompt);
             if (!await ConfirmAsync(localized.Title, localized.Body, localized.ConfirmLabel, destructive: true))
                 return;
+        }
+        if (string.IsNullOrWhiteSpace(row.SessionId)
+            && (!ReferenceEquals(rowsBefore, _state.Rows) || _state.IsReloading))
+        {
+            ShowNotice("", T("DeleteSelectionChanged"), InfoBarSeverity.Informational);
+            return;
         }
         await DeleteRowsAsync([row], T("DeleteFailed"), binding);
     }
@@ -831,31 +904,33 @@ internal sealed class SessionsHubController
 
     public async Task MoveToGroupAsync(SessionInfo row, string? group, WorkspaceSessionOperation? binding = null)
     {
-        // Both steps run on the connection the move started on.
-        binding ??= _binding;
-        if (group is not null && _state.GroupsSupported && !_state.GroupCatalog.Contains(group, StringComparer.Ordinal))
-        {
-            if (!await PutGroupsAsync([.. _state.GroupCatalog, group], binding)) return;
-        }
+        // The Gateway registers a category when patching membership. Do not replace the catalog.
         await PatchAsync(row, new SessionPatch { Category = group is null ? SessionPatch.Clear : group }, binding);
     }
 
     public async Task NewGroupAsync(SessionInfo? moveRow = null)
     {
         if (PromptBinding() is not { } binding) return;
+        if (!_state.Permissions.CanCreateGroup)
+        {
+            ShowNotice("", T(_state.Permissions.SupportsGroupCreation ? "NeedsWrite" : "Unsupported"),
+                InfoBarSeverity.Informational);
+            return;
+        }
         var name = await PromptAsync(T("NewGroupTitle"), T("NewGroupBody"), T("Create"),
             placeholder: T("NewGroupPlaceholder"));
         if (name is null) return;
+        if (!await CreateGroupAsync(name, binding)) return;
         if (moveRow is not null)
             await MoveToGroupAsync(moveRow, name, binding);
-        else if (await PutGroupsAsync([.. _state.GroupCatalog.Where(existing => existing != name), name], binding))
+        else
             await ReloadAsync(preserveCount: true);
     }
 
-    private Task<bool> PutGroupsAsync(IReadOnlyList<string> names, WorkspaceSessionOperation? binding) =>
+    private Task<bool> CreateGroupAsync(string name, WorkspaceSessionOperation binding) =>
         GuardedAsync(T("GroupFailed"), async operation =>
         {
-            var catalog = await operation.Client.PutSessionGroupsAsync(names);
+            var catalog = await operation.Client.CreateSessionGroupAsync(name);
             RequireBound(operation);
             Update(s => s with { GroupCatalog = catalog.Names });
         }, binding);
@@ -891,10 +966,22 @@ internal sealed class SessionsHubController
     // ── Transcript search ──
 
     public void SetTranscriptOpen(bool open) => Update(s => s with { Transcript = s.Transcript with { IsOpen = open } });
-    public void SetTranscriptQuery(string query) => Update(s => s with { Transcript = s.Transcript with { Query = query } });
+    public void SetTranscriptQuery(string query)
+    {
+        if (query.Trim() != _state.Transcript.Query.Trim())
+            InvalidateTranscriptSearch();
+        Update(s => s with { Transcript = s.Transcript with { Query = query } });
+    }
+
+    private void InvalidateTranscriptSearch()
+    {
+        _transcriptGeneration++;
+        Update(s => s with { Transcript = s.Transcript with { IsSearching = false, Result = null, Error = null } });
+    }
 
     public async Task RunTranscriptSearchAsync()
     {
+        var generation = ++_transcriptGeneration;
         var query = _state.Transcript.Query.Trim();
         if (query.Length == 0)
         {
@@ -906,8 +993,7 @@ internal sealed class SessionsHubController
             Update(s => s with { Transcript = s.Transcript with { Error = T("TranscriptNeedsConnection") } });
             return;
         }
-        var generation = ++_transcriptGeneration;
-        Update(s => s with { Transcript = s.Transcript with { IsSearching = true, Error = null } });
+        Update(s => s with { Transcript = s.Transcript with { IsSearching = true, Result = null, Error = null } });
         try
         {
             var result = await client.SearchSessionTranscriptsAsync(query, _state.Filters.ToQuery());
@@ -1153,16 +1239,19 @@ internal sealed class SessionsHubController
     {
         var dialog = _state.Dialog;
         var repo = dialog?.Repo.Trim() ?? "";
+        var binding = _binding;
         if (dialog is not { Kind: SessionsHubDialogKind.NewWorktree } || repo.Length == 0
-            || _host.Client is not { IsConnectedToGateway: true } client)
+            || !IsCurrent(binding))
             return;
+        var generation = ++_branchGeneration;
         UpdateDialog(d => d with { Status = T("NewWorktreeBranchesLoading") });
         WorktreeBranchList? result = null;
-        try { result = await client.ListWorktreeBranchesAsync(repo); }
+        try { result = await binding!.Client.ListWorktreeBranchesAsync(repo); }
         catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or NotSupportedException) { }
+        if (generation != _branchGeneration || !IsCurrent(binding)) return;
         UpdateDialog(d =>
         {
-            if (d.Repo.Trim() != repo) return d;
+            if (!ReferenceEquals(d.Completion, dialog.Completion) || d.Repo.Trim() != repo) return d;
             if (result is null || result.BranchesUnavailable || result.Branches.Count == 0)
                 return d with
                 {

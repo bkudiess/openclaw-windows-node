@@ -121,6 +121,34 @@ public sealed partial class GatewayFixtureProtocolTests
     }
 
     [Fact]
+    public async Task SessionsHub_AdditiveCreationPreservesOtherClientsGroupsAndIsIdempotent()
+    {
+        var token = CreateToken();
+        await using var server = await FixtureGatewayServer.StartAsync(GatewayScenario.CreateSessionsHub(), token);
+        await using var first = await ConnectedClient.OpenAsync(server, token, expectedSessionCount: HubActiveSessionCount);
+        await using var second = await ConnectedClient.OpenAsync(server, token, expectedSessionCount: HubActiveSessionCount);
+        var before = await first.Client.ListSessionGroupsAsync();
+
+        await second.Client.CreateSessionGroupAsync("Other client's group");
+        await Task.WhenAll(
+            first.Client.CreateSessionGroupAsync("Mine"),
+            second.Client.CreateSessionGroupAsync("Theirs"),
+            first.Client.CreateSessionGroupAsync("Mine"));
+        var after = await first.Client.ListSessionGroupsAsync();
+
+        Assert.Equal(before.Names, after.Names.Take(before.Names.Count));
+        Assert.Contains("Other client's group", after.Names);
+        Assert.Contains("Mine", after.Names);
+        Assert.Contains("Theirs", after.Names);
+        Assert.Equal(before.Names.Count + 3, after.Names.Count);
+
+        var unicodeName = string.Concat(Enumerable.Repeat("\U0001F680", 512));
+        Assert.Contains(unicodeName, (await first.Client.CreateSessionGroupAsync(unicodeName)).Names);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => first.Client.CreateSessionGroupAsync(unicodeName + "\U0001F680"));
+        Assert.Empty(server.UnexpectedRequests);
+    }
+
+    [Fact]
     public async Task SessionsHub_WorktreesCreateRemoveForceRestoreAndClean()
     {
         var token = CreateToken();

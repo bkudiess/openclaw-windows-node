@@ -9111,6 +9111,18 @@ Ga na inschrijving terug naar Instellingen &gt; Windows Update en controleer op 
   <data name="SessionsHub_ScopeNameContains" xml:space="preserve">
     <value>naam bevat &quot;{0}&quot;</value>
   </data>
+  <data name="SessionsHub_ScopeGlobalIncluded" xml:space="preserve">
+    <value>globale sessies inbegrepen</value>
+  </data>
+  <data name="SessionsHub_ScopeGlobalExcluded" xml:space="preserve">
+    <value>globale sessies uitgesloten</value>
+  </data>
+  <data name="SessionsHub_ScopeUnknownIncluded" xml:space="preserve">
+    <value>sessies zonder routeringsgegevens inbegrepen</value>
+  </data>
+  <data name="SessionsHub_ScopeUnknownExcluded" xml:space="preserve">
+    <value>sessies zonder routeringsgegevens uitgesloten</value>
+  </data>
   <data name="Chat_Composer_Sandbox_Title" xml:space="preserve">
     <value>Node-sandbox</value>
   </data>

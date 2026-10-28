@@ -80,7 +80,7 @@ internal static class SessionsHubWorktreesView
             case SessionsHubLoad.Unsupported:
                 return SessionsHubView.EmptyState(FluentIconCatalog.StatusWarn, T("WorktreesUnsupportedTitle"), T("WorktreesUnsupported"),
                     automationId: "SessionsHubWorktreesUnsupported");
-            case SessionsHubLoad.Failed when worktrees.Rows is null:
+            case SessionsHubLoad.Failed when worktrees.Rows is not { Count: > 0 }:
                 return SessionsHubView.EmptyState(FluentIconCatalog.StatusErr, T("WorktreesFailed"), worktrees.Error ?? "",
                     Button(T("Retry"), () => _ = controller.LoadWorktreesAsync()).AutomationName(T("Retry")).AutomationId("SessionsHubWorktreesRetry"),
                     "SessionsHubWorktreesFailed");

@@ -34,7 +34,7 @@ internal sealed record SessionsHubFilters(
     public SessionListQuery ToQuery(int offset = 0, int? limitOverride = null) => new()
     {
         AgentId = AgentId,
-        Search = Search,
+        Search = Search.Trim(),
         Archive = Status,
         ActiveMinutes = SessionListQuery.ParsePositiveInteger(ActiveMinutes),
         IncludeGlobal = IncludeGlobal,
@@ -106,6 +106,7 @@ internal sealed record SessionsHubState
     public bool GroupsSupported { get; init; }
 
     public string? DetailsKey { get; init; }
+    public (string? Key, string Text, string? SessionId) LabelDraft { get; init; } = (null, "", null);
     public bool SelectionMode { get; init; }
     public SessionsHubSelection Selection { get; init; } = SessionsHubSelection.Empty;
     public bool IsBusy { get; init; }

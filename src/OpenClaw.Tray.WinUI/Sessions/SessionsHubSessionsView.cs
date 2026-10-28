@@ -136,8 +136,9 @@ internal static class SessionsHubSessionsView
         var trailing = new List<Element> { transcript, select };
         if (state.GroupBy == SessionsGroupBy.Category)
             trailing.Add(SessionsHubView.CommandButton(FluentIconCatalog.Add, T("NewGroup"), () => _ = controller.NewGroupAsync(),
-                enabled && state.Permissions.CanWrite && state.GroupsSupported && !state.IsBusy, "SessionsHubNewGroup",
-                tooltip: state.Permissions.CanWrite ? T("NewGroup") : T("NeedsWrite")));
+                enabled && state.Permissions.CanCreateGroup && !state.IsBusy, "SessionsHubNewGroup",
+                tooltip: !state.Permissions.SupportsGroupCreation ? T("Unsupported")
+                    : state.Permissions.CanCreateGroup ? T("NewGroup") : T("NeedsWrite")));
         if (filters.Status == SessionArchiveFilter.Archived)
             trailing.Add(SessionsHubView.CommandButton(FluentIconCatalog.Delete, T("DeleteAllArchived"),
                 () => _ = controller.DeleteAllArchivedAsync(),

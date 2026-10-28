@@ -112,12 +112,12 @@ internal static class SessionsHubDetailsView
     private static Element Overrides(SessionsHubViewContext context, SessionInfo row, string title, bool canWrite)
     {
         var controller = context.Controller;
-        var draft = context.LabelDraft.Key == row.Key ? context.LabelDraft.Text : row.Label ?? "";
+        var draft = context.State.LabelDraft.Key == row.Key ? context.State.LabelDraft.Text : row.Label ?? "";
         var dirty = draft.Trim() != (row.Label ?? "").Trim();
         var thinkingValues = ThinkingValues(row);
         return Section(T("Overrides"),
             Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
-                TextBox(draft, text => context.SetLabelDraft((row.Key, text)), T("LabelPlaceholder"), T("Label"))
+                TextBox(draft, text => controller.SetLabelDraft(row.Key, text), T("LabelPlaceholder"), T("Label"))
                     .MaxLength(120)
                     .AutomationName(T("Label"))
                     .IsEnabled(canWrite)
@@ -232,7 +232,7 @@ internal static class SessionsHubDetailsView
         }
         var icons = new List<Element>
         {
-            IconChoice(null, colorId, iconId is null, canWrite,
+            IconChoice(null, colorId, string.IsNullOrWhiteSpace(row.Icon), canWrite,
                 () => _ = controller.PatchAsync(row, new SessionPatch { Icon = SessionPatch.Clear })),
         };
         foreach (var id in SessionAppearance.IconIds)

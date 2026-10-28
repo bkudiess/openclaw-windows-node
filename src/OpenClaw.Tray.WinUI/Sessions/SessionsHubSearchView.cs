@@ -105,6 +105,8 @@ internal static class SessionsHubSearchView
             parts.Add(F("ScopeActiveWithin", minutes));
         if (state.Filters.Search.Trim() is { Length: > 0 } name)
             parts.Add(F("ScopeNameContains", name));
+        parts.Add(T(state.Filters.IncludeGlobal ? "ScopeGlobalIncluded" : "ScopeGlobalExcluded"));
+        parts.Add(T(state.Filters.IncludeUnknown ? "ScopeUnknownIncluded" : "ScopeUnknownExcluded"));
         return string.Join(" · ", parts);
     }
 

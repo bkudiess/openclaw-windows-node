@@ -216,6 +216,8 @@ public interface IOperatorGatewayClient
         => Task.FromResult(new OpenClaw.Shared.Sessions.SessionSearchResult { IsSupported = false });
     Task<OpenClaw.Shared.Sessions.SessionGroupCatalog> ListSessionGroupsAsync(int timeoutMs = 15000)
         => Task.FromResult(new OpenClaw.Shared.Sessions.SessionGroupCatalog { IsSupported = false });
+    Task<OpenClaw.Shared.Sessions.SessionGroupCatalog> CreateSessionGroupAsync(string name, int timeoutMs = 15000)
+        => Task.FromException<OpenClaw.Shared.Sessions.SessionGroupCatalog>(new NotSupportedException("sessions.groups.create is not supported."));
     Task<OpenClaw.Shared.Sessions.SessionGroupCatalog> PutSessionGroupsAsync(
         IReadOnlyList<string> names, int timeoutMs = 15000)
         => Task.FromException<OpenClaw.Shared.Sessions.SessionGroupCatalog>(new NotSupportedException("sessions.groups.put is not supported."));

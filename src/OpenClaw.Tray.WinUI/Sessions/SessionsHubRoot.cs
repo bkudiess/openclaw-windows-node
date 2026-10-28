@@ -28,7 +28,6 @@ internal sealed class SessionsHubRoot : Component<SessionsHubRootProps>
         var controller = Props.Controller;
         var (state, setState) = UseState(controller.State, threadSafe: true);
         var (width, setWidth) = UseState(1200d);
-        var (labelDraft, setLabelDraft) = UseState<(string? Key, string Text)>((null, ""));
         var (collapsed, setCollapsed) = UseState(NoCollapsedGroups);
 
         UseEffect((Func<Action>)(() =>
@@ -40,7 +39,7 @@ internal sealed class SessionsHubRoot : Component<SessionsHubRootProps>
         }), controller);
 
         var context = new SessionsHubViewContext(
-            controller, state, width, DateTime.UtcNow, labelDraft, setLabelDraft, collapsed, setCollapsed);
+            controller, state, width, DateTime.UtcNow, collapsed, setCollapsed);
 
         var body = state.Tab == SessionsHubTab.Worktrees
             ? SessionsHubWorktreesView.Render(context)
@@ -173,6 +172,29 @@ internal sealed class SessionsHubRoot : Component<SessionsHubRootProps>
                 .AutomationId("SessionsHubReadOnly")
                 .WithKey("readonly"));
         }
+        if (state.Tab == SessionsHubTab.Sessions && state.Load == SessionsHubLoad.Failed && state.Rows.Count > 0)
+        {
+            children.Add((InfoBar(SessionsHubPresentation.T("LoadFailedTitle"), state.LoadError) with
+                {
+                    IsOpen = true,
+                    ActionButtonContent = SessionsHubPresentation.T("Retry"),
+                    OnActionButtonClick = () => _ = controller.ReloadAsync(preserveCount: true),
+                })
+                .Severity(InfoBarSeverity.Error).IsClosable(false).LiveRegion()
+                .AutomationId("SessionsHubReloadFailed").WithKey("reload-failed"));
+        }
+        if (state.Tab == SessionsHubTab.Worktrees && state.Worktrees.Load == SessionsHubLoad.Failed
+            && state.Worktrees.Rows is { Count: > 0 })
+        {
+            children.Add((InfoBar(SessionsHubPresentation.T("WorktreesFailed"), state.Worktrees.Error) with
+                {
+                    IsOpen = true,
+                    ActionButtonContent = SessionsHubPresentation.T("Retry"),
+                    OnActionButtonClick = () => _ = controller.LoadWorktreesAsync(),
+                })
+                .Severity(InfoBarSeverity.Error).IsClosable(false).LiveRegion()
+                .AutomationId("SessionsHubWorktreesReloadFailed").WithKey("worktrees-reload-failed"));
+        }
         if (state.Notice is { } notice)
         {
             var bar = InfoBar(notice.Title.Length > 0 ? notice.Title : null, notice.Message) with
@@ -199,8 +221,6 @@ internal sealed record SessionsHubViewContext(
     SessionsHubState State,
     double Width,
     DateTime NowUtc,
-    (string? Key, string Text) LabelDraft,
-    Action<(string? Key, string Text)> SetLabelDraft,
     IReadOnlySet<string> CollapsedGroups,
     Action<IReadOnlySet<string>> SetCollapsedGroups)
 {

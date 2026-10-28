@@ -175,6 +175,13 @@
       "requestFields": ["names"]
     },
     {
+      "method": "sessions.groups.create",
+      "kind": "request",
+      "windowsUsage": "used",
+      "requestFields": ["name"],
+      "_note": "Additive catalog creation requires an explicit Gateway advertisement. Newer contract implemented in the separate local Gateway change; never fall back to replacing a cached catalog."
+    },
+    {
       "method": "sessions.groups.rename",
       "kind": "request",
       "windowsUsage": "used",

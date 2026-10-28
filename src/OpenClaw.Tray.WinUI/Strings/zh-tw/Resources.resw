@@ -9110,6 +9110,18 @@
   <data name="SessionsHub_ScopeNameContains" xml:space="preserve">
     <value>名稱包含「{0}」</value>
   </data>
+  <data name="SessionsHub_ScopeGlobalIncluded" xml:space="preserve">
+    <value>包含全域工作階段</value>
+  </data>
+  <data name="SessionsHub_ScopeGlobalExcluded" xml:space="preserve">
+    <value>排除全域工作階段</value>
+  </data>
+  <data name="SessionsHub_ScopeUnknownIncluded" xml:space="preserve">
+    <value>包含沒有路由資訊的工作階段</value>
+  </data>
+  <data name="SessionsHub_ScopeUnknownExcluded" xml:space="preserve">
+    <value>排除沒有路由資訊的工作階段</value>
+  </data>
   <data name="Chat_Composer_Sandbox_Title" xml:space="preserve">
     <value>節點沙箱</value>
   </data>

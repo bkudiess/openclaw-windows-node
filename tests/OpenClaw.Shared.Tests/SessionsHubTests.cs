@@ -360,6 +360,21 @@ public sealed class SessionsHubTests
         Assert.All(plan.Requests, request => Assert.True(request.ArchivedOnly));
     }
 
+    [Theory]
+    [InlineData(true, "operator.write", true, true)]
+    [InlineData(true, "operator.admin", true, true)]
+    [InlineData(true, "operator.sessions.write", true, false)]
+    [InlineData(true, "operator.read", true, false)]
+    [InlineData(true, "operator.admin", false, false)]
+    [InlineData(false, "operator.admin", true, false)]
+    public void GroupCreation_RequiresCatalogWriteAndAnExplicitAtomicMethod(
+        bool connected, string scope, bool advertised, bool expected)
+    {
+        var permissions = new SessionsHubPermissions(connected, [scope],
+            advertised ? ["sessions.groups.create"] : []);
+        Assert.Equal(expected, permissions.CanCreateGroup);
+    }
+
     [Fact]
     public void UndoArchivePatch_RestoresPinOnlyWhenPinned()
     {

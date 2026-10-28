@@ -76,6 +76,23 @@ assignment, `sessions.reclaim`, `users.list`, and the `worktrees.*` methods.
 `source`/`excludeDock` list params like Gateways before 2026.10.5 do. Run either
 interactively with `-Scenario sessions-hub` or `-Scenario sessions-hub-readonly`.
 
+New empty groups use the additive `sessions.groups.create {name}` contract, not
+a cached whole-catalog `sessions.groups.put`. The native action requires this
+method to be explicitly advertised and grants from `operator.write` or
+`operator.admin`; older Gateways keep creation unavailable rather than risking
+another client's empty groups. Moving sessions to existing categories still
+uses `sessions.patch`. The fixture implements this contract for client testing;
+it does not establish that the separate Gateway change has shipped.
+
+Sessions regression tests also exercise failed-query row replacement, visible
+refresh errors, transcript query/scope invalidation, acknowledged label drafts
+and clearing custom icons through mounted native controls. They use the actual
+controller and small external-client proxies, without another app process.
+They also cover preserving identity-bound rename drafts across filters,
+wire-equivalent search edits, superseded or reopened Worktree branch lookups,
+single-delete confirmation during roster replacement, and mounted transcript
+scope text for global and unrouted sessions.
+
 The host is `tests\OpenClaw.GatewayFixtureHost`, a plain .NET console app, not a
 test container. The request-driven server and scenario live in
 `tests\OpenClaw.TestSupport\Gateway`. Repeated reads and different request
