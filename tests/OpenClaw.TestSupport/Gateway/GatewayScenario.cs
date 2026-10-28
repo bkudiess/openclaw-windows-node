@@ -270,6 +270,7 @@ public sealed partial class GatewayScenario
             }),
             ["node.pair.list"] = JsonSerializer.SerializeToElement(new { pending = Array.Empty<object>(), paired = Array.Empty<object>() }),
             ["device.pair.list"] = JsonSerializer.SerializeToElement(new { pending = Array.Empty<object>(), paired = Array.Empty<object>() }),
+            ["question.list"] = JsonSerializer.SerializeToElement(new { questions = Array.Empty<object>() }),
             ["usage.status"] = JsonSerializer.SerializeToElement(new
             {
                 updatedAt = Epoch.ToUnixTimeMilliseconds(), providers = Array.Empty<object>()

@@ -353,7 +353,8 @@ public sealed class WorkspaceWindowProofTests
     [Fact]
     public async Task ConfiguredFixtureChat_SettingsSections_GlobalBackForward_RetainSameWindowComposerDraftAndFocus()
     {
-        // Synthetic provider is a read-only fixture, not a real Gateway.
+        // This provider has no Gateway connection, so use local Settings sections.
+        // Gateway-owned sections such as Usage are correctly pruned from disconnected history.
         using var app = new AccessibilityAppFixture(initializeAxe: false, syntheticData: true, initialRoute: null);
         await app.NavigateAsync("chat", "ChatPage", "ChatComposerInput");
         var workspaceHandle = app.HubWindowHandle;
@@ -363,10 +364,12 @@ public sealed class WorkspaceWindowProofTests
         const string draft = "Draft kept across Settings sections and global Back/Forward";
         ((ValuePattern)composer.GetCurrentPattern(ValuePattern.Pattern)).SetValue(draft);
         await FocusForKeyboardAsync(app, root, "ChatComposerInput");
+        Capture(app, "System", "retention-01-chat-draft");
 
         await app.NavigateAsync("settings", "SettingsPage", "SettingsPageMarker");
-        await app.NavigateAsync("usage", "UsagePage", "UsagePageMarker");
+        await app.NavigateAsync("permissions", "PermissionsPage", "PermissionsPageMarker");
         Assert.Equal(workspaceHandle, app.HubWindowHandle);
+        Capture(app, "System", "retention-02-settings-permissions");
 
         Invoke(Find(root, "SettingsBack"));
         await WaitUntilAsync(() => IsVisible(root, "SettingsPageMarker"));
@@ -374,17 +377,21 @@ public sealed class WorkspaceWindowProofTests
         await WaitUntilAsync(() => IsVisible(root, "ChatComposerInput"));
         AssertComposerRetained();
         await WaitUntilAsync(() => FindOrNull(root, "ChatComposerInput")?.Current.HasKeyboardFocus == true);
+        Capture(app, "System", "retention-03-back-restores-draft-focus");
 
         Invoke(Find(root, "WorkspaceForward"));
         await WaitUntilAsync(() => IsVisible(root, "SettingsPageMarker"));
+        Assert.True(Find(root, "SettingsForward").Current.IsEnabled);
         Invoke(Find(root, "SettingsForward"));
-        await WaitUntilAsync(() => IsVisible(root, "UsagePageMarker"));
+        await WaitUntilAsync(() => IsVisible(root, "PermissionsPageMarker"));
+        Capture(app, "System", "retention-04-forward-restores-permissions");
         Invoke(Find(root, "SettingsBack"));
         await WaitUntilAsync(() => IsVisible(root, "SettingsPageMarker"));
         Invoke(Find(root, "SettingsBack"));
         await WaitUntilAsync(() => IsVisible(root, "ChatComposerInput"));
         AssertComposerRetained();
         Assert.Equal(workspaceHandle, app.HubWindowHandle);
+        Capture(app, "System", "retention-05-back-restores-same-composer");
 
         void AssertComposerRetained()
         {

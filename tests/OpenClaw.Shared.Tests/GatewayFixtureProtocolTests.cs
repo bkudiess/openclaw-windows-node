@@ -17,6 +17,28 @@ public sealed partial class GatewayFixtureProtocolTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task ReadOnlyScenarios_ListEmptyQuestionsThroughRealClient(bool nativeSetup)
+    {
+        var scenario = nativeSetup
+            ? GatewayScenario.CreateNativeSetup((method, _) =>
+                throw new InvalidOperationException($"Unexpected setup operation: {method}"))
+            : GatewayScenario.CreateBrowse();
+        var token = CreateToken();
+        await using var server = await FixtureGatewayServer.StartAsync(scenario, token);
+        await using var connected = await ConnectedClient.OpenAsync(server, token);
+        var result = await connected.Client.ListQuestionsAsync().WaitAsync(Deadline);
+        Assert.True(result.IsSupported);
+        Assert.Empty(result.Questions);
+        Assert.DoesNotContain("question.resolve", scenario.ReadMethods);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            connected.Client.SendWizardRequestAsync("question.list", new { unexpected = true }));
+        Assert.Contains("Unsupported fixture request parameter", error.Message);
+        Assert.Empty(server.UnexpectedRequests);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task SessionCreation_IsOptInResponseBoundAndPreservesParent(bool allow)
     {
         var token = CreateToken();
