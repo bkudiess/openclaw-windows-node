@@ -738,7 +738,7 @@ x-colophon:
       usagePalette1:
         resource: UsagePalette1Brush
         themes: { dark: "#99ebff", highContrast: "#1aebff" }
-        usage: Usage page categorical slot 1. Follows the user's accent (SystemAccentColorDark1 light, Light2 dark). Each palette slot has a matching UsagePaletteNTintBrush at 16% for badges, avatars and hero tiles; high-contrast tints use SystemColorWindowColor.
+        usage: Usage page categorical slot 1 and data/selection accent. Follows the user's accent (SystemAccentColorDark1 light, Light2 dark); SystemColorHighlightColor keeps charts and selection marks visible in high contrast, where native button accent fills can match the plot background. Each palette slot has a matching UsagePaletteNTintBrush at 16% for badges, avatars and statistics; high-contrast tints use SystemColorWindowColor.
       usagePalette2:
         resource: UsagePalette2Brush
         themes: { dark: "#4fc3c7", highContrast: "#8080ff" }

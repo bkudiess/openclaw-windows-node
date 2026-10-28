@@ -24,7 +24,8 @@ internal static class UsageUi
     public static readonly ThemeRef SecondaryText = Theme.Ref("TextFillColorSecondaryBrush");
     public static readonly ThemeRef TertiaryText = Theme.Ref("TextFillColorTertiaryBrush");
     public static readonly ThemeRef Track = Theme.Ref("SubtleFillColorSecondaryBrush");
-    public static readonly ThemeRef Accent = Theme.Ref("AccentFillColorDefaultBrush");
+    // Data marks need the palette's HC highlight; a native button fill can match the plot background.
+    public static readonly ThemeRef Accent = Theme.Ref("UsagePalette1Brush");
     public static readonly ThemeRef AccentText = Theme.Ref("AccentTextFillColorPrimaryBrush");
     public static readonly ThemeRef Success = Theme.Ref("SystemFillColorSuccessBrush");
     public static readonly ThemeRef Caution = Theme.Ref("SystemFillColorCautionBrush");
