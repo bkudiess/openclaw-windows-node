@@ -42,11 +42,9 @@ internal static class UsageSessionsSection
             ?? state.Report?.Overview?.SelectedRows.FirstOrDefault(s => s.Key == detail.Key);
         // Day and hour filters narrow the overview row's totals, but the detail read covers the whole range. A
         // filtered view keeps the overview totals so they match the heading, with context from the detail read.
-        var row = filtered && overviewRow is not null
-            ? overviewRow with { ContextWeight = detail.Row.Value?.ContextWeight ?? overviewRow.ContextWeight }
-            : detail.Row.Value ?? overviewRow;
+        var row = UsageSessionDetailProjection.SummaryRow(overviewRow, detail.Row.Value, filtered);
         var view = row is null ? null : UsageDashboardProjection.Row(row, true);
-        var title = view?.Title ?? detail.Key;
+        var title = view?.Title ?? detail.Row.Value?.Label ?? detail.Key;
 
         var header = Grid([GridSize.Auto, GridSize.Star(), GridSize.Auto], [GridSize.Auto],
             (row?.EffectiveProvider is { } headerProvider
@@ -74,6 +72,8 @@ internal static class UsageSessionsSection
             sections.Add(Summary(row, state.Metric).WithKey("summary"));
             sections.Add(ModelMix(row, state.Metric).WithKey("models"));
         }
+        else if (filtered)
+            sections.Add(EmptyText(S("Usage_Details_NoMatchingUsage"), "UsageDetailNoMatchingUsage").WithKey("no-matching-usage"));
         sections.Add(Timeline(detail, state.Metric, controller).WithKey("timeline"));
         if (row is not null)
             sections.Add(Context(row, detail.Row.IsLoading).WithKey("context"));
@@ -135,11 +135,13 @@ internal static class UsageSessionsSection
         var rows = mix.Select((m, i) => VStack(4,
                 Grid([GridSize.Star(), GridSize.Auto], [GridSize.Auto],
                     TextBlock(m.Model ?? S("Usage_Unknown")).FontSize(13).TextTrimming(TextTrimming.CharacterEllipsis).Grid(column: 0),
-                    TextBlock(Metric(metric, m.Tokens, m.Cost)).FontSize(13).FontWeight(FontWeights.SemiBold).Grid(column: 1)),
-                ShareBar(m.Share, Palette(PaletteIndex(m.Provider ?? m.Model)), 6),
-                TextBlock(string.Join(" · ", new[] { m.Provider, FN("Usage_Overview_MessagesCountFormat", m.Count), UsageFormat.Percent(m.Share, Culture, 0) }
+                    TextBlock(Metric(metric, m.Tokens, m.Cost, m.LowerBound)).FontSize(13).FontWeight(FontWeights.SemiBold).Grid(column: 1)),
+                m.Share is { } share ? ShareBar(share, Palette(PaletteIndex(m.Provider ?? m.Model)), 6) : null,
+                TextBlock(string.Join(" · ", new[] { m.Provider, FN("Usage_Overview_MessagesCountFormat", m.Count),
+                        m.Share is { } percent ? UsageFormat.Percent(percent, Culture, 0) : null }
                     .Where(p => !string.IsNullOrEmpty(p)))).FontSize(11).Foreground(TertiaryText))
-            .AutomationName($"{m.Model}: {Metric(metric, m.Tokens, m.Cost)}, {UsageFormat.Percent(m.Share, Culture, 0)}")
+            .AutomationName(string.Join(", ", new[] { $"{m.Model}: {Metric(metric, m.Tokens, m.Cost, m.LowerBound)}",
+                m.Share is { } accessibleShare ? UsageFormat.Percent(accessibleShare, Culture, 0) : null }.Where(p => p is not null)))
             .WithKey($"{m.Provider}/{m.Model}")).ToArray();
         return VStack(10,
             SubHeading(S("Usage_Details_ModelMix")),

@@ -8354,6 +8354,7 @@ Ga na inschrijving terug naar Instellingen &gt; Windows Update en controleer op 
   <data name="Usage_Details_SearchPlaceholder" xml:space="preserve"><value>Berichten zoeken</value></data>
   <data name="Usage_Details_NoMessages" xml:space="preserve"><value>Geen berichten</value></data>
   <data name="Usage_Details_NoMessagesMatch" xml:space="preserve"><value>Geen berichten komen overeen met de filters.</value></data>
+  <data name="Usage_Details_NoMatchingUsage" xml:space="preserve"><value>Geen gebruik van deze sessie komt overeen met de huidige filters.</value></data>
   <data name="Usage_Creators_SessionsFormatOne" xml:space="preserve"><value>{0} sessie</value></data>
   <data name="Usage_SelectedSessionsFormatOne" xml:space="preserve"><value>{0} sessie geselecteerd</value></data>
   <data name="Usage_Overview_ToolsUsedFormatOne" xml:space="preserve"><value>{0} hulpmiddel gebruikt</value></data>

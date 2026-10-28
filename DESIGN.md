@@ -739,6 +739,10 @@ x-colophon:
         resource: UsagePalette1Brush
         themes: { dark: "#99ebff", highContrast: "#1aebff" }
         usage: Usage page categorical slot 1 and data/selection accent. Follows the user's accent (SystemAccentColorDark1 light, Light2 dark); SystemColorHighlightColor keeps charts and selection marks visible in high contrast, where native button accent fills can match the plot background. Each palette slot has a matching UsagePaletteNTintBrush at 16% for badges, avatars and statistics; high-contrast tints use SystemColorWindowColor.
+      usageActivityText:
+        resource: UsageActivityTextBrush
+        themes: { dark: "#000000", highContrast: "#000000" }
+        usage: Text on filled weekday tiles. Uses native TextOnAccentFillColorPrimary normally and SystemColorHighlightTextColor in high contrast. UsageActivityMinimumOpacity keeps the normal 0.18 intensity floor but uses 1 in high contrast, preserving an opaque Highlight/HighlightText pair and full-opacity labels.
       usagePalette2:
         resource: UsagePalette2Brush
         themes: { dark: "#4fc3c7", highContrast: "#8080ff" }

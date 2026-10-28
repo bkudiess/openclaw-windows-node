@@ -8353,6 +8353,7 @@
   <data name="Usage_Details_SearchPlaceholder" xml:space="preserve"><value>搜尋訊息</value></data>
   <data name="Usage_Details_NoMessages" xml:space="preserve"><value>沒有訊息</value></data>
   <data name="Usage_Details_NoMessagesMatch" xml:space="preserve"><value>沒有符合篩選條件的訊息。</value></data>
+  <data name="Usage_Details_NoMatchingUsage" xml:space="preserve"><value>此工作階段沒有符合目前篩選條件的用量。</value></data>
   <data name="Usage_Creators_SessionsFormatOne" xml:space="preserve"><value>{0} 個工作階段</value></data>
   <data name="Usage_SelectedSessionsFormatOne" xml:space="preserve"><value>已選取 {0} 個工作階段</value></data>
   <data name="Usage_Overview_ToolsUsedFormatOne" xml:space="preserve"><value>使用了 {0} 個工具</value></data>

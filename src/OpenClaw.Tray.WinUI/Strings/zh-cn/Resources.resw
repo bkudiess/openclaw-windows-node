@@ -8353,6 +8353,7 @@
   <data name="Usage_Details_SearchPlaceholder" xml:space="preserve"><value>搜索消息</value></data>
   <data name="Usage_Details_NoMessages" xml:space="preserve"><value>没有消息</value></data>
   <data name="Usage_Details_NoMessagesMatch" xml:space="preserve"><value>没有符合筛选条件的消息。</value></data>
+  <data name="Usage_Details_NoMatchingUsage" xml:space="preserve"><value>此会话没有符合当前筛选条件的用量。</value></data>
   <data name="Usage_Creators_SessionsFormatOne" xml:space="preserve"><value>{0} 个会话</value></data>
   <data name="Usage_SelectedSessionsFormatOne" xml:space="preserve"><value>已选择 {0} 个会话</value></data>
   <data name="Usage_Overview_ToolsUsedFormatOne" xml:space="preserve"><value>使用了 {0} 个工具</value></data>

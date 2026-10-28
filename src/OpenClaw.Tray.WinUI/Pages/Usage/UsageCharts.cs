@@ -170,20 +170,21 @@ internal static class UsageCharts
         UsageActivityCell cell, string label, bool anySelected, Action<int, bool>? onActivate, string automationId, bool valuesInside)
     {
         var text = F("Usage_Activity_CellFormat", label, UsageUi.Tokens(cell.Tokens));
+        var minimumOpacity = valuesInside ? ThemeResource.Double("UsageActivityMinimumOpacity") : 0.18;
         Element swatch = Border(null)
             .Background(cell.Tokens > 0 ? Accent : Track)
-            .Opacity(cell.Tokens > 0 ? 0.18 + 0.82 * cell.Intensity : 1)
+            .Opacity(cell.Tokens > 0 ? minimumOpacity + (1 - minimumOpacity) * cell.Intensity : 1)
             .CornerRadius(4)
             .Margin(1.5);
         if (valuesInside)
         {
             // Like the web page's day-of-week tiles: the day and its total sit on the tile. Strong tiles use on-accent text.
-            var strong = cell.Tokens > 0 && cell.Intensity > 0.55;
-            var ink = strong ? Theme.Ref("TextOnAccentFillColorPrimaryBrush") : Theme.Ref("TextFillColorPrimaryBrush");
+            var strong = cell.Tokens > 0 && (minimumOpacity == 1 || cell.Intensity > 0.55);
+            var ink = strong ? Theme.Ref("UsageActivityTextBrush") : Theme.Ref("TextFillColorPrimaryBrush");
             swatch = Grid([GridSize.Star()], [GridSize.Star()],
                 swatch,
                 VStack(0,
-                        TextBlock(label).FontSize(12).Foreground(ink).Opacity(0.85),
+                        TextBlock(label).FontSize(12).Foreground(ink).Opacity(minimumOpacity == 1 ? 1 : 0.85),
                         TextBlock(UsageUi.Tokens(cell.Tokens)).FontSize(15).FontWeight(FontWeights.SemiBold).Foreground(ink))
                     .AccessibilityView(AccessibilityView.Raw)
                     .Margin(10, 6, 6, 6)

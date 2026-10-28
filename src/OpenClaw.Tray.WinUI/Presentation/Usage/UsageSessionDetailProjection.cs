@@ -28,7 +28,7 @@ internal sealed record UsageTimelineBar(DateTimeOffset Timestamp, double Total, 
 
 internal sealed record UsageTimeline(IReadOnlyList<UsageTimelineBar> Bars, double Ceiling, bool LowerBound);
 
-internal sealed record UsageModelMixRow(string? Provider, string? Model, int Count, long Tokens, double Cost, double Share);
+internal sealed record UsageModelMixRow(string? Provider, string? Model, int Count, long Tokens, double Cost, double? Share, bool LowerBound);
 
 /// <summary>A conversation entry with tool markers removed and counted, as the web page does.</summary>
 internal sealed record UsageLogView(
@@ -46,15 +46,22 @@ internal static partial class UsageSessionDetailProjection
 
     public static long CharsToTokens(long chars) => (long)Math.Round(chars / (double)CharsPerToken, MidpointRounding.AwayFromZero);
 
+    public static SessionUsageRow? SummaryRow(SessionUsageRow? overview, SessionUsageRow? detail, bool filtered) =>
+        filtered
+            ? overview is null ? null : overview with { ContextWeight = detail?.ContextWeight ?? overview.ContextWeight }
+            : detail ?? overview;
+
     public static IReadOnlyList<UsageModelMixRow> ModelMix(SessionUsageRow row)
     {
         var models = row.Usage?.ModelUsage ?? Array.Empty<UsageModelBreakdown>();
         var totalCost = models.Sum(m => m.Totals.TotalCost);
         var totalTokens = models.Sum(m => (double)m.Totals.TotalTokens);
+        var incomplete = row.Usage?.Totals.IsLowerBound == true || models.Any(m => m.Totals.IsLowerBound);
         return models
             .OrderByDescending(m => m.Totals.TotalCost).ThenByDescending(m => m.Totals.TotalTokens)
             .Select(m => new UsageModelMixRow(m.Provider, m.Model, m.Count, m.Totals.TotalTokens, m.Totals.TotalCost,
-                totalCost > 0 ? m.Totals.TotalCost / totalCost : totalTokens > 0 ? m.Totals.TotalTokens / totalTokens : 0))
+                incomplete ? null : totalCost > 0 ? m.Totals.TotalCost / totalCost : totalTokens > 0 ? m.Totals.TotalTokens / totalTokens : 0,
+                m.Totals.IsLowerBound))
             .ToList();
     }
 

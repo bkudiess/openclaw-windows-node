@@ -98,7 +98,51 @@ public sealed class UsageSessionDetailAndExportTests
         var mix = UsageSessionDetailProjection.ModelMix(row);
 
         Assert.Equal(["large", "small"], mix.Select(m => m.Model));
-        Assert.Equal([0.75, 0.25], mix.Select(m => m.Share));
+        Assert.Equal(new double?[] { 0.75, 0.25 }, mix.Select(m => m.Share));
+    }
+
+    [Fact]
+    public void FilteredSummary_DoesNotSubstituteWholeRangeUsageWhenTheSessionIsAbsent()
+    {
+        var detail = new SessionUsageRow
+        {
+            Key = "k",
+            Usage = new SessionUsageSummary { Totals = new UsageTotals { TotalTokens = 900 } },
+            ContextWeight = new UsageContextWeight { SystemPromptChars = 400 },
+        };
+        var overview = detail with { Usage = new SessionUsageSummary { Totals = new UsageTotals { TotalTokens = 50 } }, ContextWeight = null };
+
+        Assert.Null(UsageSessionDetailProjection.SummaryRow(null, detail, filtered: true));
+        var filtered = UsageSessionDetailProjection.SummaryRow(overview, detail, filtered: true)!;
+        Assert.Equal(50, filtered.Usage!.Totals.TotalTokens);
+        Assert.Equal(400, filtered.ContextWeight!.SystemPromptChars);
+        Assert.Same(detail, UsageSessionDetailProjection.SummaryRow(overview, detail, filtered: false));
+    }
+
+    [Fact]
+    public void ModelMix_PreservesLowerBoundsAndWithholdsSharesWhenAnySubtotalIsIncomplete()
+    {
+        var row = new SessionUsageRow
+        {
+            Key = "k",
+            Usage = new SessionUsageSummary
+            {
+                ModelUsage =
+                [
+                    new UsageModelBreakdown("openai", "partial", 1,
+                        new UsageTotals { TotalTokens = 100, TotalCost = 3, Report = UsageReportState.Unavailable }),
+                    new UsageModelBreakdown("anthropic", "complete", 2,
+                        new UsageTotals { TotalTokens = 300, TotalCost = 1, Report = UsageReportState.Available }),
+                ],
+            },
+        };
+
+        var mix = UsageSessionDetailProjection.ModelMix(row);
+
+        Assert.All(mix, m => Assert.Null(m.Share));
+        Assert.True(Assert.Single(mix, m => m.Model == "partial").LowerBound);
+        Assert.False(Assert.Single(mix, m => m.Model == "complete").LowerBound);
+        Assert.Equal(100, Assert.Single(mix, m => m.Model == "partial").Tokens);
     }
 
     [Fact]

@@ -120,7 +120,7 @@ internal sealed class ReactorUsagePage : Component<UsagePageProps>
             yield return Banner(S("Usage_Legacy_Title"), S("Usage_Legacy_Message"), info, "UsageLegacyBanner").WithKey("legacy");
         if (state.BasicGateway)
             yield return Banner(S("Usage_Basic_Title"), S("Usage_Basic_Message"), info, "UsageBasicBanner").WithKey("basic");
-        if (state.Phase == UsageLoadPhase.Failed && state.Availability == UsageAvailability.Connected)
+        if (state.ShowLoadError)
         {
             var message = state.Error is { Length: > 0 } detail ? F("Usage_Error_MessageFormat", detail) : S("Usage_Error_Message");
             yield return Banner(S("Usage_Error_Title"), message, error, "UsageErrorBanner", S("Usage_Retry"), controller.Refresh).WithKey("error");

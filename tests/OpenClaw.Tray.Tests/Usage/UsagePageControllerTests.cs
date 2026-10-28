@@ -54,7 +54,14 @@ public sealed class UsagePageControllerTests
     private sealed class ManualDispatcher
     {
         private readonly ConcurrentQueue<Action> _queue = new();
-        public void Post(Action action) => _queue.Enqueue(action);
+        private int _posted;
+        public int Posted => Volatile.Read(ref _posted);
+
+        public void Post(Action action)
+        {
+            _queue.Enqueue(action);
+            Interlocked.Increment(ref _posted);
+        }
 
         public async Task PumpUntilAsync(Func<bool> condition)
         {
@@ -354,6 +361,57 @@ public sealed class UsagePageControllerTests
         controller.ToggleDay("2026-10-21", append: false);
         Assert.Equal("", controller.State.Filters.Query);
         Assert.Empty(controller.State.Filters.SelectedDays);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LegacyFallback_ClosesSelectionAndRejectsLateDetailReplies(bool costUnsupported)
+    {
+        var (controller, gateway, dispatcher) = Create();
+        controller.Activate();
+        await dispatcher.PumpUntilAsync(() => controller.State.Phase == UsageLoadPhase.Loaded);
+        var pending = new TaskCompletionSource<UsageReadResult<SessionsUsageReport>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        gateway.Usage = q => q.Key is not null ? pending.Task
+            : Task.FromResult(UsageReadResult<SessionsUsageReport>.Unsupported());
+        if (costUnsupported)
+            gateway.Cost = () => Task.FromResult(UsageReadResult<SessionsUsageReport>.Unsupported());
+
+        controller.SelectSession("agent:main:a", "main", append: false);
+        controller.Refresh();
+        await dispatcher.PumpUntilAsync(() => controller.State is { Phase: UsageLoadPhase.Loaded, Availability: UsageAvailability.Legacy });
+
+        Assert.Empty(controller.State.Filters.SelectedSessions);
+        Assert.Null(controller.State.Detail);
+        dispatcher.Drain();
+        var postedBeforeReply = dispatcher.Posted;
+        var pendingReads = gateway.Queries.Count(query => query.Key is not null);
+        Assert.True(pendingReads > 0);
+        pending.SetResult(UsageReadResult<SessionsUsageReport>.Ok(Report("agent:main:a")));
+        await dispatcher.PumpUntilAsync(() => dispatcher.Posted >= postedBeforeReply + pendingReads);
+        dispatcher.Drain();
+        Assert.Null(controller.State.Detail);
+        controller.SelectSession("agent:main:a", "main", append: false);
+        Assert.Empty(controller.State.Filters.SelectedSessions);
+    }
+
+    [Fact]
+    public async Task LegacyReloadFailure_ShowsTheErrorWhileRetainingTheLastSuccessfulReport()
+    {
+        var (controller, gateway, dispatcher) = Create();
+        gateway.Usage = _ => Task.FromResult(UsageReadResult<SessionsUsageReport>.Unsupported());
+        controller.Activate();
+        await dispatcher.PumpUntilAsync(() => controller.State is { Phase: UsageLoadPhase.Loaded, Availability: UsageAvailability.Legacy });
+        var previous = controller.State.Report;
+        gateway.Cost = () => Task.FromResult(UsageReadResult<SessionsUsageReport>.Failed("Usage read failed"));
+
+        controller.Refresh();
+        await dispatcher.PumpUntilAsync(() => controller.State.Phase == UsageLoadPhase.Failed);
+
+        Assert.Equal(UsageAvailability.Legacy, controller.State.Availability);
+        Assert.Same(previous, controller.State.Report);
+        Assert.Equal("Usage read failed", controller.State.Error);
+        Assert.True(controller.State.ShowLoadError);
     }
 
     [Fact]

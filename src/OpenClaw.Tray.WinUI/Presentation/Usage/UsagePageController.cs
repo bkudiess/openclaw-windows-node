@@ -70,6 +70,9 @@ internal sealed record UsagePageState
     /// legacy <c>usage.cost</c> Gateways cannot apply any filter, so the page neither sends nor shows them.
     /// </summary>
     public bool ServerFiltersUnavailable => BasicGateway || Availability == UsageAvailability.Legacy;
+
+    public bool ShowLoadError => Phase == UsageLoadPhase.Failed
+        && Availability is UsageAvailability.Connected or UsageAvailability.Legacy;
 }
 
 /// <summary>Timing for re-checking incomplete usage. Override with OPENCLAW_USAGE_RECHECK_INTERVAL_MS.</summary>
@@ -284,6 +287,7 @@ internal sealed class UsagePageController : IDisposable
     /// <summary>Plain click selects one session and opens its details; append toggles a multi-selection.</summary>
     public void SelectSession(string key, string? agentId, bool append)
     {
+        if (State.Availability == UsageAvailability.Legacy) return;
         var selected = UsageFilters.Toggle(State.Filters.SelectedSessions, key, append);
         var recent = new[] { key }.Concat(State.RecentKeys.Where(k => k != key)).Take(SessionsUsageQuery.MaxRecentKeys).ToArray();
         Update(s => s with { RecentKeys = recent });
@@ -426,7 +430,7 @@ internal sealed class UsagePageController : IDisposable
 
     // Keeps only the filters the answering Gateway applied. Legacy usage.cost applies none beyond the date range.
     private static UsageFilters Supported(UsageFilters filters, bool legacy, SessionsUsageReport report) =>
-        legacy ? filters.WithoutServerFilters() with { CreatorKey = null }
+        legacy ? filters.WithoutServerFilters() with { CreatorKey = null, SelectedSessions = [] }
         : report.Overview is null ? filters.WithoutServerFilters()
         : filters;
 
@@ -436,6 +440,7 @@ internal sealed class UsagePageController : IDisposable
         {
             case UsageReadStatus.Ok:
                 var report = result.Value!;
+                if (legacy) CancelDetail();
                 // Projected with the current filters: basic Gateways change the session selection locally, without a
                 // reload, so the filters captured when this read started can be older. Other filter changes start a
                 // new read, which discards this reply by generation.
@@ -447,6 +452,7 @@ internal sealed class UsagePageController : IDisposable
                         Availability = legacy ? UsageAvailability.Legacy : UsageAvailability.Connected,
                         Phase = UsageLoadPhase.Loaded,
                         Filters = filters,
+                        Detail = legacy ? null : s.Detail,
                         Report = report,
                         Dashboard = UsageDashboardProjection.Project(report, filters, s.Metric, s.ChartMode, Today(filters.TimeZone)),
                         LoadedAt = DateTimeOffset.Now,
@@ -463,6 +469,7 @@ internal sealed class UsagePageController : IDisposable
                 break;
             case UsageReadStatus.Unsupported:
                 // Neither sessions.usage nor usage.cost: an empty legacy page, not an error.
+                CancelDetail();
                 Update(s =>
                 {
                     var empty = new SessionsUsageReport();
@@ -472,6 +479,7 @@ internal sealed class UsagePageController : IDisposable
                         Availability = UsageAvailability.Legacy,
                         Phase = UsageLoadPhase.Loaded,
                         Filters = filters,
+                        Detail = null,
                         Report = empty,
                         Dashboard = UsageDashboardProjection.Project(empty, filters, s.Metric, s.ChartMode, Today(filters.TimeZone)),
                         LoadedAt = DateTimeOffset.Now,

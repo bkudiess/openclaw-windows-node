@@ -8405,6 +8405,7 @@ Após a inscrição, volte para Configurações &gt; Windows Update e verifique 
   <data name="Usage_Details_SearchPlaceholder" xml:space="preserve"><value>Pesquisar mensagens</value></data>
   <data name="Usage_Details_NoMessages" xml:space="preserve"><value>Nenhuma mensagem</value></data>
   <data name="Usage_Details_NoMessagesMatch" xml:space="preserve"><value>Nenhuma mensagem corresponde aos filtros.</value></data>
+  <data name="Usage_Details_NoMatchingUsage" xml:space="preserve"><value>Nenhum uso desta sessão corresponde aos filtros atuais.</value></data>
   <data name="Usage_Creators_SessionsFormatOne" xml:space="preserve"><value>{0} sessão</value></data>
   <data name="Usage_SelectedSessionsFormatOne" xml:space="preserve"><value>{0} sessão selecionada</value></data>
   <data name="Usage_Overview_ToolsUsedFormatOne" xml:space="preserve"><value>{0} ferramenta usada</value></data>
