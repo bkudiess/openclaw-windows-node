@@ -428,6 +428,19 @@ public sealed class WorkspaceNavigationTests
     }
 
     [Fact]
+    public void ChatCaptureProgress_UsesPerInvocationCallbacksAndKeepsLifetimeFence()
+    {
+        var chat = File.ReadAllText(Source("Pages", "ChatPage.xaml.cs"));
+        var capture = chat[chat.IndexOf("private async Task<string?> VoiceTranscribeAsync", StringComparison.Ordinal)..
+            chat.IndexOf("private async Task ReadChatTextAloudAsync", StringComparison.Ordinal)];
+        Assert.DoesNotContain("voiceService.TranscriptionReceived", capture);
+        Assert.DoesNotContain("voiceService.AudioLevelChanged", capture);
+        Assert.Contains("ListenOnceAsync(args, cancellationToken, OnTranscription, OnAudioLevel)", capture);
+        Assert.Contains("!cancellationToken.IsCancellationRequested && _pageActive", capture);
+        Assert.Contains("generation == _surfaceGeneration && ReferenceEquals(host, _reactorHost)", capture);
+    }
+
+    [Fact]
     public void SettingsTransition_SuspendsCaptureBeforeHidingRetainedChat_AndSearchKeepsLocalAliases()
     {
         var workspace = File.ReadAllText(Source("Windows", "WorkspaceWindow.xaml.cs"));

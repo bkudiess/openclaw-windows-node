@@ -1238,8 +1238,6 @@ public sealed partial class ChatPage : Page
             if (IsCurrentCapture()) host?.SetVoiceAudioLevel(level);
         });
 
-        voiceService.TranscriptionReceived += OnTranscription;
-        voiceService.AudioLevelChanged += OnAudioLevel;
         onRecordingStarted?.Invoke();
         try
         {
@@ -1248,13 +1246,11 @@ public sealed partial class ChatPage : Page
                 TimeoutMs = 120_000,
                 Language = ""
             };
-            var result = await voiceService.ListenOnceAsync(args, cancellationToken);
+            var result = await voiceService.ListenOnceAsync(args, cancellationToken, OnTranscription, OnAudioLevel);
             return result?.Text;
         }
         finally
         {
-            voiceService.TranscriptionReceived -= OnTranscription;
-            voiceService.AudioLevelChanged -= OnAudioLevel;
             if (_pageActive && generation == _surfaceGeneration && ReferenceEquals(host, _reactorHost))
             {
                 host?.SetVoiceTranscript(null);
