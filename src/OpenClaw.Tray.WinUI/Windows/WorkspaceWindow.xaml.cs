@@ -112,7 +112,10 @@ public sealed partial class WorkspaceWindow : WindowEx
         _state.PropertyChanged += OnStateChanged;
         _notifications.Changed += OnNotificationsChanged;
         UpdateNotificationsBadge();
-        _chat.Loaded += (_, _) => _chat.Initialize(this);
+        _chat.Loaded += (_, _) =>
+        {
+            if (Destination.Page == WorkspacePageId.Home) _chat.Initialize(this);
+        };
         _chat.SessionSelected += OnChatSessionSelected;
         Closed += OnClosed;
         Root.Loaded += OnLoaded;
@@ -209,26 +212,24 @@ public sealed partial class WorkspaceWindow : WindowEx
 
     internal void NavigateNativeSetup(SetupNativeNavigationRequest request)
     {
+        _pendingSettingsRequest.Clear();
+        var destination = request.WorkspaceDestination
+            ?? WorkspaceDestination.Settings(NormalizeNativeSetupTag(request.PageTag));
+        // A one-shot request never binds or initializes a surface underneath any shared-root dialog.
+        // Only ordinary destination intent may survive until the dialog closes.
+        if (OpenModalDialog() is not null)
+        {
+            if (destination != Destination) Navigate(destination);
+            return;
+        }
         if (request.WorkspaceDestination is null)
         {
-            var settingsDestination = WorkspaceDestination.Settings(NormalizeNativeSetupTag(request.PageTag));
-            _pendingSettingsRequest.Clear();
-            // Under an open dialog no one-shot request is accepted, even for the current Settings
-            // destination: it would replace the page beneath the dialog. A changed destination is
-            // deferred by Navigate; the request is dropped and never binds after the dialog closes.
-            if (IsSettingsVisible && OpenModalDialog() is not null)
-            {
-                if (settingsDestination != Destination) Navigate(settingsDestination);
-                return;
-            }
             _pendingSettingsRequest.Set(request);
-            Navigate(settingsDestination);
-            if (Destination != settingsDestination)
+            Navigate(destination);
+            if (Destination != destination)
                 _pendingSettingsRequest.Clear();
             return;
         }
-        _pendingSettingsRequest.Clear();
-        var destination = request.WorkspaceDestination;
         _chat.BindNativeSetupRequest(request);
         Navigate(destination, preserveConversation: false);
         // An already selected session does not render again; apply the new verified binding too.
@@ -369,6 +370,7 @@ public sealed partial class WorkspaceWindow : WindowEx
             _chatFocus = Root.XamlRoot is { } root
                 ? Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(root) as Microsoft.UI.Xaml.Controls.Control
                 : null;
+            _chat.SuspendSurface();
             NavigationSection.Visibility = Visibility.Collapsed;
             SettingsSection.Visibility = Visibility.Visible;
             SettingsHistoryBar.Visibility = Visibility.Visible;
@@ -428,7 +430,7 @@ public sealed partial class WorkspaceWindow : WindowEx
         if (!changed || fallbackTag is null || Root.XamlRoot is null)
             return;
         // The required render is retained apart from any replaceable intent and waits for every open dialog.
-        var modal = IsSettingsVisible ? OpenModalDialog() : null;
+        var modal = OpenModalDialog();
         if (modal is not null || _deferred.HasPending)
         {
             _deferred.DeferRender();
@@ -963,14 +965,14 @@ public sealed partial class WorkspaceWindow : WindowEx
             : null;
 
     /// <summary>
-    /// Policy: while Settings is visible and a ContentDialog is open, destination changes wait for
+    /// Policy: while a ContentDialog is open on the shared root, destination changes wait for
     /// that dialog to close, then the latest deferred change runs once. Dialogs are never cancelled
     /// by navigation, so app-wide update, failure and approval dialogs keep their own outcome, and no
     /// dialog can be left over a page that did not open it.
     /// </summary>
     private bool DeferWhileModalOpen(Action navigate)
     {
-        if (!IsSettingsVisible || OpenModalDialog() is not { } dialog)
+        if (OpenModalDialog() is not { } dialog)
             return false;
         _deferred.Defer(navigate);
         ArmDeferredDrain(dialog);
@@ -994,9 +996,10 @@ public sealed partial class WorkspaceWindow : WindowEx
             .HasFlag(global::Windows.UI.Core.CoreVirtualKeyStates.Down);
         var alt = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(global::Windows.System.VirtualKey.Menu)
             .HasFlag(global::Windows.UI.Core.CoreVirtualKeyStates.Down);
-        // Ctrl+E is the Settings search shortcut shown in its placeholder; it is inert in chat.
+        // Settings keeps its E/F search aliases; Chat only shares the app-wide Ctrl+K shortcut.
         if (ctrl && (e.Key == global::Windows.System.VirtualKey.K ||
-                     (IsSettingsVisible && e.Key == global::Windows.System.VirtualKey.E)))
+                     (IsSettingsVisible && (e.Key == global::Windows.System.VirtualKey.E ||
+                                            e.Key == global::Windows.System.VirtualKey.F))))
         {
             e.Handled = true;
             OpenCommandCenter();

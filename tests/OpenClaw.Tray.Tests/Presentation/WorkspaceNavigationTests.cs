@@ -409,7 +409,44 @@ public sealed class WorkspaceNavigationTests
         var workspace = File.ReadAllText(Source("Windows", "WorkspaceWindow.xaml.cs"));
         Assert.Contains("_deferred.ShouldDefer(destination != Destination) && DeferWhileModalOpen(", workspace);
         Assert.Contains("ArmDeferredDrain(next)", workspace);
-        Assert.Contains("if (IsSettingsVisible && OpenModalDialog() is not null)", workspace);
+        var admission = workspace[workspace.IndexOf("internal void NavigateNativeSetup", StringComparison.Ordinal)..
+            workspace.IndexOf("private string NormalizeNativeSetupTag", StringComparison.Ordinal)];
+        Assert.Contains("if (OpenModalDialog() is not null)", admission);
+        Assert.DoesNotContain("IsSettingsVisible", admission);
+        Assert.True(admission.IndexOf("_pendingSettingsRequest.Clear()", StringComparison.Ordinal) <
+            admission.IndexOf("if (OpenModalDialog()", StringComparison.Ordinal));
+        var modalAdmission = admission.IndexOf("if (OpenModalDialog()", StringComparison.Ordinal);
+        Assert.True(modalAdmission < admission.IndexOf("if (request.WorkspaceDestination is null)", StringComparison.Ordinal));
+        Assert.True(modalAdmission < admission.IndexOf("_pendingSettingsRequest.Set(request)", StringComparison.Ordinal));
+        Assert.True(modalAdmission < admission.IndexOf("_chat.BindNativeSetupRequest(request)", StringComparison.Ordinal));
+        Assert.True(modalAdmission < admission.IndexOf("_chat.Initialize(this)", StringComparison.Ordinal));
+        Assert.Contains("if (destination != Destination) Navigate(destination);\n            return;",
+            admission.Replace("\r\n", "\n", StringComparison.Ordinal));
+        var defer = workspace[workspace.IndexOf("private bool DeferWhileModalOpen", StringComparison.Ordinal)..
+            workspace.IndexOf("private void ArmDeferredDrain", StringComparison.Ordinal)];
+        Assert.DoesNotContain("IsSettingsVisible", defer);
+    }
+
+    [Fact]
+    public void SettingsTransition_SuspendsCaptureBeforeHidingRetainedChat_AndSearchKeepsLocalAliases()
+    {
+        var workspace = File.ReadAllText(Source("Windows", "WorkspaceWindow.xaml.cs"));
+        var render = workspace[workspace.IndexOf("private void RenderSettings()", StringComparison.Ordinal)..
+            workspace.IndexOf("private void LeaveSettings()", StringComparison.Ordinal)];
+        Assert.True(render.IndexOf("_chat.SuspendSurface()", StringComparison.Ordinal) >= 0);
+        Assert.True(render.IndexOf("_chat.SuspendSurface()", StringComparison.Ordinal) <
+            render.IndexOf("NavigationSection.Visibility = Visibility.Collapsed", StringComparison.Ordinal));
+        var chat = File.ReadAllText(Source("Pages", "ChatPage.xaml.cs"));
+        var suspension = chat[chat.IndexOf("internal void SuspendSurface()", StringComparison.Ordinal)..
+            chat.IndexOf("public void TriggerAutoStartVoice()", StringComparison.Ordinal)];
+        Assert.Contains("_pendingVoice.Cancel()", suspension);
+        Assert.Contains("_reactorHost?.SetHostVisible(false)", suspension);
+        Assert.DoesNotContain("DisposeReactorHost();", suspension);
+        Assert.Contains("_reactorHost?.SetHostVisible(true)", chat);
+        Assert.Contains("if (IsCurrentCapture()) host?.SetVoiceTranscript(text)", chat);
+        Assert.Contains("if (IsCurrentCapture()) host?.SetVoiceAudioLevel(level)", chat);
+        Assert.Contains("(IsSettingsVisible && (e.Key == global::Windows.System.VirtualKey.E ||", workspace);
+        Assert.Contains("e.Key == global::Windows.System.VirtualKey.F)", workspace);
     }
 
     [Fact]
@@ -469,7 +506,7 @@ public sealed class WorkspaceNavigationTests
         var manager = File.ReadAllText(Source("Services", "WindowManager.cs"));
         Assert.Contains("ArmDeferredDrain(modal)", workspace);
         Assert.Contains("_deferred.DeferRender()", workspace);
-        Assert.Contains("if (Destination != settingsDestination)", workspace);
+        Assert.Contains("if (Destination != destination)", workspace);
         Assert.Contains("popup.Child is ContentDialog", manager);
     }
 

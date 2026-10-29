@@ -242,6 +242,11 @@ public sealed class WorkspaceWindowProofTests
             new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit)).Current.HasKeyboardFocus);
         System.Windows.Forms.SendKeys.SendWait("{ESC}");
         await WaitUntilAsync(() => SearchBox() is null);
+        Find(root, "SettingsTogglePane").SetFocus();
+        System.Windows.Forms.SendKeys.SendWait("^f");
+        await WaitUntilAsync(() => SearchBox() is not null);
+        System.Windows.Forms.SendKeys.SendWait("{ESC}");
+        await WaitUntilAsync(() => SearchBox() is null);
         Invoke(Find(root, "SettingsTogglePane"));
         await WaitUntilAsync(() => IsVisible(root, "SettingsSearch"));
         await VerifySettingsFooterAsync(root, compact: false);
