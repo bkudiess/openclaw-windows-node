@@ -417,11 +417,12 @@ internal sealed class SessionsHubController
             _ = LoadWorktreesAsync();
     }
 
-    public void SetFilters(SessionsHubFilters filters, bool reload = true)
+    /// <param name="persist">False for a temporary reveal (transcript Show details) that must not change the saved preference.</param>
+    public void SetFilters(SessionsHubFilters filters, bool reload = true, bool persist = true)
     {
         var previous = _state.Filters;
         Update(s => s with { Filters = filters, PageIndex = 0 });
-        if (filters.ShowCompleted != previous.ShowCompleted)
+        if (persist && filters.ShowCompleted != previous.ShowCompleted)
             _host.ShowCompletedSessions = filters.ShowCompleted;
         if (!previous.ToQuery().ToSearchScope().SequenceEqual(filters.ToQuery().ToSearchScope()))
             InvalidateTranscriptSearch();

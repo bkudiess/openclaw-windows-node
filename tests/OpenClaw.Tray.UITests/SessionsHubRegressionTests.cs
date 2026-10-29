@@ -55,11 +55,14 @@ public sealed class SessionsHubRegressionTests(UIThreadFixture ui)
         await ui.RunOnUIAsync(async () =>
         {
             Assert.Null(harness.Controller.State.DetailsKey);
-            Assert.DoesNotContain(TestSupport.FindDescendants<FrameworkElement>(harness.Root!),
-                element => AutomationProperties.GetAutomationId(element) == "SessionsHubDetails");
             var row = harness.Find<Expander>("SessionsHubRow:" + Harness.Key);
             Assert.False(row.IsExpanded);
             await WaitForExpansionAsync(row, expanded: false);
+            // The collapsing row keeps its body so the native collapse animation has real content,
+            // but once collapsed that body is hidden from layout and UI Automation.
+            var retained = Assert.Single(TestSupport.FindDescendants<FrameworkElement>(row),
+                element => AutomationProperties.GetAutomationId(element) == "SessionsHubDetails");
+            Assert.False(IsShown(retained, row));
             Invoke(harness.Find<Button>("SessionsHubOpen:" + Harness.Key));
             Assert.Equal(Harness.Key, Assert.Single(harness.OpenedSessions));
             Assert.False(row.IsExpanded);
@@ -151,18 +154,81 @@ public sealed class SessionsHubRegressionTests(UIThreadFixture ui)
                 .GetPattern(PatternInterface.ExpandCollapse)).Expand();
         });
         await harness.RenderAsync();
-        await ui.RunOnUIAsync(() =>
+        await ui.RunOnUIAsync(async () =>
         {
+            // The previous row keeps its body while its native collapse animation runs.
+            await WaitForExpansionAsync(harness.Find<Expander>("SessionsHubRow:" + Harness.Key), expanded: false);
             Assert.Equal(otherKey, harness.Controller.State.DetailsKey);
-            Assert.Equal("Other session", harness.Find<TextBox>("SessionsHubLabel").Text);
+            Assert.Equal("Other session", harness.FindShown<TextBox>("SessionsHubLabel").Text);
             Assert.True(harness.Find<Expander>("SessionsHubRow:" + otherKey).IsExpanded);
             Assert.False(harness.Find<Expander>("SessionsHubRow:" + Harness.Key).IsExpanded);
-            harness.Find<TextBox>("SessionsHubLabel").Text = "Edited other";
+            harness.FindShown<TextBox>("SessionsHubLabel").Text = "Edited other";
         });
         await harness.RenderAsync();
-        await ui.RunOnUIAsync(() => Invoke(harness.Find<Button>("SessionsHubLabelSave")));
+        await ui.RunOnUIAsync(() => Invoke(harness.FindShown<Button>("SessionsHubLabelSave")));
         await harness.RenderAsync();
         await ui.RunOnUIAsync(() => Assert.Equal(otherKey, Assert.Single(harness.Gateway.PatchKeys)));
+    }
+
+    [Fact]
+    public async Task ArchivedRowInAllFilter_DimsOnlyItsHeaderWhenExpanded()
+    {
+        await using var harness = await Harness.CreateAsync(ui, mount: true);
+        await ui.RunOnUIAsync(() =>
+        {
+            harness.Gateway.Page.Sessions.Single().Archived = true;
+            harness.Controller.SetFilters(harness.Controller.State.Filters with { Status = SessionArchiveFilter.All });
+        });
+        await harness.RenderAsync();
+        await ui.RunOnUIAsync(() => harness.Controller.OpenDetails(Harness.Key));
+        await harness.RenderAsync();
+        await ui.RunOnUIAsync(async () =>
+        {
+            var row = harness.Find<Expander>("SessionsHubRow:" + Harness.Key);
+            await WaitForExpansionAsync(row, expanded: true);
+            var header = Assert.IsAssignableFrom<UIElement>(row.Header);
+            Assert.Equal(0.75, header.Opacity, 3);
+            // Opacity multiplies down the tree: every ancestor of the editable body must be opaque.
+            var details = harness.FindShown<FrameworkElement>("SessionsHubDetails");
+            for (DependencyObject? node = details; node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
+            {
+                if (node is UIElement element)
+                    Assert.True(element.Opacity == 1, $"{element.GetType().Name} dims the archived row's details.");
+                if (ReferenceEquals(node, row)) break;
+            }
+        });
+    }
+
+    [Fact]
+    public async Task TranscriptReveal_ShowsACompletedSessionWithoutSavingTheShowCompletedPreference()
+    {
+        await using var harness = await Harness.CreateAsync(ui, mount: true);
+        await ui.RunOnUIAsync(async () =>
+        {
+            harness.Gateway.Page.Sessions.Single().Status = "done";
+            harness.Controller.CloseDetails();
+            harness.ShowCompletedSessions = false;
+            harness.Controller.Activate(null);
+            await harness.Controller.ReloadAsync();
+            harness.ShowCompletedWrites = 0;
+            Assert.False(harness.Controller.State.Filters.ShowCompleted);
+            harness.Gateway.Search = Task.FromResult(new SessionSearchResult
+            {
+                Hits = [new SessionSearchHit(Harness.Key, "match", "assistant", 0, "Transcript match")],
+            });
+            harness.Controller.SetTranscriptQuery("match");
+            harness.Controller.SetTranscriptOpen(true);
+            await harness.Controller.RunTranscriptSearchAsync();
+        });
+        await harness.RenderAsync();
+        await ui.RunOnUIAsync(() => Invoke(harness.Find<Button>("SessionsHubTranscriptDetails:0")));
+        await harness.RenderAsync();
+        await ui.RunOnUIAsync(() =>
+        {
+            Assert.True(harness.Find<Expander>("SessionsHubRow:" + Harness.Key).IsExpanded);
+            Assert.Equal(0, harness.ShowCompletedWrites);
+            Assert.False(harness.ShowCompletedSessions);
+        });
     }
 
     [Fact]
@@ -610,6 +676,18 @@ public sealed class SessionsHubRegressionTests(UIThreadFixture ui)
     private static void Invoke(Button button) =>
         ((IInvokeProvider)new ButtonAutomationPeer(button).GetPattern(PatternInterface.Invoke)).Invoke();
 
+    private static bool IsShown(DependencyObject element, DependencyObject root)
+    {
+        for (var node = element; node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
+        {
+            if (node is UIElement { Visibility: Visibility.Collapsed })
+                return false;
+            if (ReferenceEquals(node, root))
+                return true;
+        }
+        return true;
+    }
+
     private static Task WaitForExpansionAsync(Expander row, bool expanded) =>
         TestSupport.WaitForRenderedConditionAsync(
             () => TestSupport.FindDescendants<FrameworkElement>(row)
@@ -632,7 +710,13 @@ public sealed class SessionsHubRegressionTests(UIThreadFixture ui)
         public IntPtr WindowHandle => IntPtr.Zero;
         public IReadOnlyList<SessionInfo> TrackedSessions => Gateway.Page.Sessions;
         public JsonElement? AgentsList => null;
-        public bool ShowCompletedSessions { get; set; } = true;
+        public bool ShowCompletedSessions
+        {
+            get => _showCompleted;
+            set { _showCompleted = value; ShowCompletedWrites++; }
+        }
+        private bool _showCompleted = true;
+        public int ShowCompletedWrites;
         public List<string> OpenedSessions { get; } = [];
         public void OpenChat(string sessionKey) => OpenedSessions.Add(sessionKey);
         public void OpenConnection() { }
@@ -670,6 +754,11 @@ public sealed class SessionsHubRegressionTests(UIThreadFixture ui)
 
         public T Find<T>(string id) where T : FrameworkElement =>
             Assert.Single(TestSupport.FindDescendants<T>(Root!), element => AutomationProperties.GetAutomationId(element) == id);
+
+        /// <summary>The one matching element currently laid out (a collapsing row may retain a hidden copy).</summary>
+        public T FindShown<T>(string id) where T : FrameworkElement =>
+            Assert.Single(TestSupport.FindDescendants<T>(Root!),
+                element => AutomationProperties.GetAutomationId(element) == id && IsShown(element, Root!));
 
         public async Task RenderAsync()
         {

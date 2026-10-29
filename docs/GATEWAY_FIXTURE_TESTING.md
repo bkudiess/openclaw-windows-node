@@ -96,7 +96,8 @@ Session details expand inside their native roster row at every window width.
 The list owns scrolling; wide rows use two detail columns, and narrower rows
 stack the same fields. Transcript **Show details** reveals the matching page
 and expands its group and row. It enables the completed/background display
-toggle when needed to show that explicitly requested result.
+toggle when needed to show that explicitly requested result, for this visit only;
+the saved **Show completed** preference is unchanged.
 
 The host is `tests\OpenClaw.GatewayFixtureHost`, a plain .NET console app, not a
 test container. The request-driven server and scenario live in

@@ -50,7 +50,7 @@ internal static class SessionsHubSessionsView
             ShowCompleted = state.Filters.ShowCompleted
                 || (state.Filters.Status == SessionArchiveFilter.Active && SessionRunState.IsCompleted(row)),
             ShowBackground = state.Filters.ShowBackground || SessionDisplayResolver.IsBackground(row),
-        });
+        }, persist: false);
         controller.OpenDetails(key);
         var current = context with { State = controller.State };
         var ordered = Ordered(current);
@@ -339,6 +339,18 @@ internal static class SessionsHubSessionsView
         public override Element Render()
         {
             var reference = this.UseElementRef<ItemsView>();
+            // WinUI starts the Expander's collapse storyboard as IsExpanded changes, before the page
+            // re-renders. Keep the last expanded row's body mounted (hidden once collapsed) so that
+            // animation slides real content instead of an empty panel.
+            var shownKey = UseRef<string?>(null);
+            var retainedKey = UseRef<string?>(null);
+            var detailsKey = Props.Context.State.DetailsKey;
+            if (detailsKey != shownKey.Current)
+            {
+                retainedKey.Current = shownKey.Current;
+                shownKey.Current = detailsKey;
+            }
+            var retained = retainedKey.Current;
             UseEffect((Func<Action>)(() =>
             {
                 var view = reference.Current;
@@ -360,7 +372,7 @@ internal static class SessionsHubSessionsView
                 return () => view.Loaded -= Reveal;
             }), Array.Empty<object>());
             return (ItemsView(Props.Items, static item => item.Key,
-                    (item, _) => RosterContainer(Props.Context, item, Props.Titles)) with
+                    (item, _) => RosterContainer(Props.Context, item, Props.Titles, retained)) with
                 {
                     LayoutKind = ItemsViewLayoutKind.StackLayout,
                     SelectionMode = ItemsViewSelectionMode.None,
@@ -372,7 +384,8 @@ internal static class SessionsHubSessionsView
 
     private sealed record RosterItem(string Key, SessionRowGroup? Group, SessionInfo? Row, bool IsEmptyGroup = false);
 
-    private static Element RosterContainer(SessionsHubViewContext context, RosterItem item, IReadOnlyDictionary<string, string> titles)
+    private static Element RosterContainer(SessionsHubViewContext context, RosterItem item, IReadOnlyDictionary<string, string> titles,
+        string? retainedKey)
     {
         Element content;
         string name;
@@ -380,7 +393,7 @@ internal static class SessionsHubSessionsView
         {
             var title = titles.TryGetValue(row.Key, out var known) ? known : row.Key;
             name = RowAccessibleName(context, row, title);
-            content = Row(context, row, title, titles);
+            content = Row(context, row, title, titles, retainedKey);
         }
         else if (item.IsEmptyGroup)
         {
@@ -505,7 +518,8 @@ internal static class SessionsHubSessionsView
         _ => SessionsHubView.Glyph(FluentIconCatalog.Folder, 14, Theme.SecondaryText).VAlign(VerticalAlignment.Center),
     };
 
-    private static Element Row(SessionsHubViewContext context, SessionInfo row, string title, IReadOnlyDictionary<string, string> titles)
+    private static Element Row(SessionsHubViewContext context, SessionInfo row, string title, IReadOnlyDictionary<string, string> titles,
+        string? retainedKey)
     {
         var state = context.State;
         var controller = context.Controller;
@@ -614,21 +628,26 @@ internal static class SessionsHubSessionsView
         columns.Add(GridSize.Auto);
         cells.Add(HStack(2, actions.ToArray()).VAlign(VerticalAlignment.Center).Margin(0, 0, 8, 0).Grid(column: columns.Count - 1));
 
-        return (Expander("", selected ? SessionsHubDetailsView.Render(context, row, titles) : Empty(),
+        return (Expander("", selected || row.Key == retainedKey ? SessionsHubDetailsView.Render(context, row, titles) : Empty(),
                 selected, expanded =>
                 {
                     if (expanded && controller.State.DetailsKey != row.Key)
                         controller.OpenDetails(row.Key);
                     else if (!expanded && controller.State.DetailsKey == row.Key)
                         controller.CloseDetails();
-                }) with { HeaderTemplate = Grid(columns.ToArray(), [GridSize.Auto], cells.ToArray()) })
+                }) with
+                {
+                    // Archived rows in All are dimmed to tell them apart, but only in the header:
+                    // opacity on the Expander would also fade the editable body.
+                    HeaderTemplate = Grid(columns.ToArray(), [GridSize.Auto], cells.ToArray())
+                        .Opacity(row.Archived && state.Filters.Status == SessionArchiveFilter.All ? 0.75 : 1),
+                })
             .HAlign(HorizontalAlignment.Stretch)
             .HorizontalContentAlignment(HorizontalAlignment.Stretch)
             // Native settings-expander surfaces: the body sits one layer below the header card.
             .Background(Theme.Ref("CardBackgroundFillColorSecondaryBrush"))
             .WithBorder(Theme.CardStroke, 1)
             .CornerRadius(8)
-            .Opacity(row.Archived && state.Filters.Status == SessionArchiveFilter.All ? 0.75 : 1)
             .WithContextFlyout(menu)
             .AutomationName(RowAccessibleName(context, row, title))
             .HelpText(T("RowHelp"))
