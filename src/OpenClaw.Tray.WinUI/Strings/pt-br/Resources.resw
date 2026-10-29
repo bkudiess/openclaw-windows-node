@@ -8202,9 +8202,6 @@ Após a inscrição, volte para Configurações &gt; Windows Update e verifique 
   <data name="SessionsHub_ClearSelection" xml:space="preserve">
     <value>Limpar seleção</value>
   </data>
-  <data name="SessionsHub_CloseDetails" xml:space="preserve">
-    <value>Fechar detalhes</value>
-  </data>
   <data name="SessionsHub_CloseSearch" xml:space="preserve">
     <value>Fechar pesquisa</value>
   </data>
@@ -8728,7 +8725,7 @@ Após a inscrição, volte para Configurações &gt; Windows Update e verifique 
     <value>Você</value>
   </data>
   <data name="SessionsHub_RowHelp" xml:space="preserve">
-    <value>Mostra os detalhes da sessão</value>
+    <value>Expandir ou recolher os detalhes da sessão</value>
   </data>
   <data name="SessionsHub_RowsPerPage" xml:space="preserve">
     <value>{0} por página</value>

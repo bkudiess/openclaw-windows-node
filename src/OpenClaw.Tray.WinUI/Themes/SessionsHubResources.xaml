@@ -26,7 +26,6 @@
             <SolidColorBrush x:Key="SessionColorPinkTintBrush" Color="#E3008C" Opacity="0.26" />
             <SolidColorBrush x:Key="SessionColorCyanBrush" Color="#6EE7EF" />
             <SolidColorBrush x:Key="SessionColorCyanTintBrush" Color="#00B7C3" Opacity="0.24" />
-            <SolidColorBrush x:Key="SessionsHubSelectedFillBrush" Color="{ThemeResource SystemAccentColorLight2}" Opacity="0.14" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="Light">
             <SolidColorBrush x:Key="SessionColorRedBrush" Color="#B3261E" />
@@ -45,7 +44,6 @@
             <SolidColorBrush x:Key="SessionColorPinkTintBrush" Color="#E3008C" Opacity="0.12" />
             <SolidColorBrush x:Key="SessionColorCyanBrush" Color="#006777" />
             <SolidColorBrush x:Key="SessionColorCyanTintBrush" Color="#00B7C3" Opacity="0.16" />
-            <SolidColorBrush x:Key="SessionsHubSelectedFillBrush" Color="{ThemeResource SystemAccentColorDark1}" Opacity="0.08" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="HighContrast">
             <SolidColorBrush x:Key="SessionColorRedBrush" Color="{ThemeResource SystemColorHighlightColor}" />
@@ -64,7 +62,6 @@
             <SolidColorBrush x:Key="SessionColorPinkTintBrush" Color="{ThemeResource SystemColorWindowColor}" />
             <SolidColorBrush x:Key="SessionColorCyanBrush" Color="{ThemeResource SystemColorHighlightColor}" />
             <SolidColorBrush x:Key="SessionColorCyanTintBrush" Color="{ThemeResource SystemColorWindowColor}" />
-            <SolidColorBrush x:Key="SessionsHubSelectedFillBrush" Color="{ThemeResource SystemColorWindowColor}" />
         </ResourceDictionary>
     </ResourceDictionary.ThemeDictionaries>
 </ResourceDictionary>

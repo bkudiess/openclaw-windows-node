@@ -476,13 +476,7 @@ internal sealed class SessionsHubController
     public void SetSort(SessionsSortColumn column, bool descending) => Update(s => s with { SortColumn = column, SortDescending = descending });
     public void SetPageSize(int size) => Update(s => s with { PageSize = size, PageIndex = 0 });
     public void SetPage(int index) => Update(s => s with { PageIndex = Math.Max(0, index) });
-    /// <summary>Row click: toggles the details pane for <paramref name="key"/>.</summary>
-    public void ShowDetails(string? key) => Update(s => s with
-    {
-        DetailsKey = s.DetailsKey == key ? null : key,
-        LabelDraft = (null, "", null),
-    });
-    /// <summary>Always shows <paramref name="key"/>; used where a toggle would surprise (search results).</summary>
+    /// <summary>Expands <paramref name="key"/> in the roster without toggling an already open row.</summary>
     public void OpenDetails(string key) => Update(s => s with
     {
         DetailsKey = key,

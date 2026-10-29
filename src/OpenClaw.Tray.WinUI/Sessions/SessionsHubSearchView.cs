@@ -171,8 +171,7 @@ internal static class SessionsHubSearchView
                             onRoster
                                 ? Button(T("ShowDetails"), () =>
                                     {
-                                        context.Controller.SetTranscriptOpen(false);
-                                        context.Controller.OpenDetails(hit.SessionKey);
+                                        SessionsHubSessionsView.RevealDetails(context, hit.SessionKey);
                                     })
                                     .AutomationName(F("ShowDetailsNamed", title))
                                     .AutomationId($"SessionsHubTranscriptDetails:{index}")

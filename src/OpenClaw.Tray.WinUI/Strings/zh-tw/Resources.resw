@@ -8150,9 +8150,6 @@
   <data name="SessionsHub_ClearSelection" xml:space="preserve">
     <value>清除選取範圍</value>
   </data>
-  <data name="SessionsHub_CloseDetails" xml:space="preserve">
-    <value>關閉詳細資料</value>
-  </data>
   <data name="SessionsHub_CloseSearch" xml:space="preserve">
     <value>關閉搜尋</value>
   </data>
@@ -8676,7 +8673,7 @@
     <value>您</value>
   </data>
   <data name="SessionsHub_RowHelp" xml:space="preserve">
-    <value>顯示工作階段的詳細資料</value>
+    <value>展開或摺疊工作階段的詳細資料</value>
   </data>
   <data name="SessionsHub_RowsPerPage" xml:space="preserve">
     <value>每頁 {0} 項</value>

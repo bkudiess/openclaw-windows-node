@@ -8150,9 +8150,6 @@ Après votre inscription, revenez dans Paramètres &gt; Windows Update et recher
   <data name="SessionsHub_ClearSelection" xml:space="preserve">
     <value>Effacer la sélection</value>
   </data>
-  <data name="SessionsHub_CloseDetails" xml:space="preserve">
-    <value>Fermer les détails</value>
-  </data>
   <data name="SessionsHub_CloseSearch" xml:space="preserve">
     <value>Fermer la recherche</value>
   </data>
@@ -8676,7 +8673,7 @@ Après votre inscription, revenez dans Paramètres &gt; Windows Update et recher
     <value>Vous</value>
   </data>
   <data name="SessionsHub_RowHelp" xml:space="preserve">
-    <value>Affiche les détails de la session</value>
+    <value>Développer ou réduire les détails de la session</value>
   </data>
   <data name="SessionsHub_RowsPerPage" xml:space="preserve">
     <value>{0} par page</value>

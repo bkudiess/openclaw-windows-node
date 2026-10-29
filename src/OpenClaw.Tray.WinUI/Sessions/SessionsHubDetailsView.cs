@@ -26,84 +26,28 @@ internal static class SessionsHubDetailsView
         var state = context.State;
         var controller = context.Controller;
         var title = titles.TryGetValue(row.Key, out var known) ? known : row.Key;
-        var (statusLabel, tone) = SessionsHubPresentation.Status(row);
-        var kind = SessionsHubProjection.DisplayKind(row);
         var canWrite = state.Permissions.CanWrite && !state.IsBusy;
-        var mainState = controller.MainState(row);
 
-        var display = SessionDisplayResolver.Resolve(row);
-        var agent = display.AgentId is { } agentId ? state.Agents.FirstOrDefault(entry => entry.Id == agentId) : null;
-        var colorId = SessionAppearance.NormalizeColor(row.Color);
-        var heroColor = colorId ?? SessionAppearance.PaletteColor(agent?.Id ?? display.AgentId ?? row.Key);
-        var chips = new List<Element>
-        {
-            tone switch
-            {
-                SessionsHubPresentation.StatusTone.Working => SessionsHubView.Pill(statusLabel, "green", FluentIconCatalog.Sync),
-                SessionsHubPresentation.StatusTone.Attention => SessionsHubView.Pill(statusLabel, "red", FluentIconCatalog.StatusWarn),
-                _ => SessionsHubView.NeutralBadge(statusLabel),
-            },
-            SessionsHubPresentation.KindColor(kind) is { } kindColor
-                ? SessionsHubView.Pill(SessionsHubPresentation.KindLabel(kind), kindColor)
-                : SessionsHubView.NeutralBadge(SessionsHubPresentation.KindLabel(kind)),
-        };
-        if (row.Archived) chips.Add(SessionsHubView.NeutralBadge(T("Archived")));
-        if (row.Unread) chips.Add(SessionsHubView.Badge(T("Unread"), Theme.Accent, Theme.Ref("TextOnAccentFillColorPrimaryBrush")));
-
-        var header = Border(Grid([GridSize.Auto, GridSize.Star(), GridSize.Auto], [GridSize.Auto, GridSize.Auto],
-                    SessionsHubView.AgentAvatar(agent, display.AgentId ?? row.Key, 52)
-                        .VAlign(VerticalAlignment.Top).Grid(row: 0, column: 0, rowSpan: 2),
-                    TextBlock(title).FontSize(20).FontWeight(FontWeights.SemiBold).TextWrapping(TextWrapping.Wrap)
-                        .Margin(14, 0, 8, 0)
-                        .HeadingLevel(Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level2)
-                        .AutomationId("SessionsHubDetailsTitle").Grid(row: 0, column: 1),
-                    SessionsHubView.IconButton(FluentIconCatalog.Exit, T("CloseDetails"), () => controller.CloseDetails(),
-                        automationId: "SessionsHubCloseDetails").VAlign(VerticalAlignment.Top).Grid(row: 0, column: 2),
-                    HStack(6, chips.ToArray()).Margin(14, 6, 0, 0).Grid(row: 1, column: 1, columnSpan: 2)))
-            .Background(SessionsHubView.Tint(heroColor))
-            .CornerRadius(8)
-            .Padding(14);
-
-        var primaryActions = new List<Element>
-        {
-            SessionsHubView.CommandButton(FluentIconCatalog.Chat, T("OpenInChat"), () => controller.OpenInChat(row.Key),
-                row.Kind != "global", "SessionsHubDetailsOpen", accent: true),
-        };
-        if (row.Archived)
-            primaryActions.Add(SessionsHubView.CommandButton(FluentIconCatalog.Unarchive, T("Unarchive"),
-                () => _ = controller.UnarchiveAsync(row, title), canWrite, "SessionsHubDetailsUnarchive"));
-        else
-            primaryActions.Add(SessionsHubView.CommandButton(FluentIconCatalog.Archive, T("Archive"),
-                () => _ = controller.ArchiveAsync(row, title),
-                canWrite && WorkspaceSessionMenuCanArchive(mainState), "SessionsHubDetailsArchive"));
-        primaryActions.Add(SessionsHubView.IconButton(FluentIconCatalog.MoreOverflow, F("MoreNamed", title), () => { },
-                automationId: "SessionsHubDetailsMore")
-            .WithFlyout(MenuItems(SessionsHubMenus.SessionMenu(context, row, title))));
-
-        var sections = new List<Element>
-        {
-            header,
-            HStack(8, primaryActions.ToArray()),
-            Overrides(context, row, title, canWrite),
-            Appearance(context, row, title, canWrite),
-            Organization(context, row, title, canWrite),
-            Facts(context, row),
-        };
-        if (!string.IsNullOrWhiteSpace(row.LastRunError))
-            sections.Insert(2, (InfoBar(T("LastRunError"), row.LastRunError) with { IsOpen = true })
-                .Severity(InfoBarSeverity.Error).IsClosable(false));
+        // The expander header is the session's identity and action bar (name, status, chat,
+        // unarchive, full menu), so the body holds only what the header cannot show.
+        var editing = VStack(16, Overrides(context, row, title, canWrite), Appearance(context, row, title, canWrite));
+        var information = new List<Element> { Organization(context, row, title, canWrite), Facts(context, row) };
         if (SessionsHubProjection.IsCloudWorker(row))
-            sections.Add(CloudWorker(context, row, title, canWrite));
-
-        return SessionsHubView.Card(ScrollView(VStack(16, sections.ToArray()).Padding(12)))
-            .WithTransitions(new Microsoft.UI.Xaml.Media.Animation.EntranceThemeTransition { FromHorizontalOffset = 48 })
+            information.Add(CloudWorker(context, row, title, canWrite));
+        var facts = VStack(16, information.ToArray());
+        Element body = context.IsWide
+            ? Grid([GridSize.Star(), GridSize.Star()], [GridSize.Auto],
+                editing.Margin(0, 0, 20, 0).Grid(column: 0), facts.Margin(20, 0, 0, 0).Grid(column: 1))
+            : VStack(20, editing, facts);
+        var sections = new List<Element> { body };
+        if (!string.IsNullOrWhiteSpace(row.LastRunError))
+            sections.Insert(0, (InfoBar(T("LastRunError"), row.LastRunError) with { IsOpen = true })
+                .Severity(InfoBarSeverity.Error).IsClosable(false));
+        return Border(VStack(16, sections.ToArray())).Padding(4, 4, 4, 8)
             .AutomationName(F("DetailsFor", title))
             .Landmark(Microsoft.UI.Xaml.Automation.Peers.AutomationLandmarkType.Custom)
             .AutomationId("SessionsHubDetails");
     }
-
-    private static bool WorkspaceSessionMenuCanArchive(SessionMainState mainState) =>
-        OpenClawTray.Presentation.WorkspaceSessionMenu.CanArchiveOrDelete(mainState);
 
     private static Element Section(string title, params Element[] children) =>
         VStack(8, [TextBlock(title).FontSize(12).FontWeight(FontWeights.SemiBold).Foreground(Theme.SecondaryText)

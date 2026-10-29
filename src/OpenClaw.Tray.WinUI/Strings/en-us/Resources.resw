@@ -8217,9 +8217,6 @@ After enrolling, return to Settings &gt; Windows Update and check for updates. I
   <data name="SessionsHub_ClearSelection" xml:space="preserve">
     <value>Clear selection</value>
   </data>
-  <data name="SessionsHub_CloseDetails" xml:space="preserve">
-    <value>Close details</value>
-  </data>
   <data name="SessionsHub_CloseSearch" xml:space="preserve">
     <value>Close search</value>
   </data>
@@ -8743,7 +8740,7 @@ After enrolling, return to Settings &gt; Windows Update and check for updates. I
     <value>You</value>
   </data>
   <data name="SessionsHub_RowHelp" xml:space="preserve">
-    <value>Shows the session's details</value>
+    <value>Expand or collapse the session's details</value>
   </data>
   <data name="SessionsHub_RowsPerPage" xml:space="preserve">
     <value>{0} per page</value>

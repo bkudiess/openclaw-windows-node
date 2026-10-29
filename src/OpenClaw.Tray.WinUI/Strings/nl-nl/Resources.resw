@@ -8151,9 +8151,6 @@ Ga na inschrijving terug naar Instellingen &gt; Windows Update en controleer op 
   <data name="SessionsHub_ClearSelection" xml:space="preserve">
     <value>Selectie wissen</value>
   </data>
-  <data name="SessionsHub_CloseDetails" xml:space="preserve">
-    <value>Details sluiten</value>
-  </data>
   <data name="SessionsHub_CloseSearch" xml:space="preserve">
     <value>Zoeken sluiten</value>
   </data>
@@ -8677,7 +8674,7 @@ Ga na inschrijving terug naar Instellingen &gt; Windows Update en controleer op 
     <value>U</value>
   </data>
   <data name="SessionsHub_RowHelp" xml:space="preserve">
-    <value>Geeft de details van de sessie weer</value>
+    <value>De details van de sessie uitvouwen of samenvouwen</value>
   </data>
   <data name="SessionsHub_RowsPerPage" xml:space="preserve">
     <value>{0} per pagina</value>

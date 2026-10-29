@@ -1,5 +1,6 @@
 using Microsoft.UI.Reactor;
 using Microsoft.UI.Reactor.Core;
+using Microsoft.UI.Reactor.Hooks;
 using Microsoft.UI.Reactor.Layout;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
@@ -27,25 +28,44 @@ internal static class SessionsHubSessionsView
     {
         var state = context.State;
         var titles = SessionsHubPresentation.Titles(state.Rows);
-        var details = state.DetailsRow;
         var main = state.Transcript.IsOpen
             ? SessionsHubSearchView.Render(context, titles)
             : Roster(context, titles);
 
-        Element content;
-        if (details is null)
-            content = main;
-        else if (context.IsWide)
-            content = Grid([GridSize.Star(), GridSize.Px(380)], [GridSize.Star()],
-                main.Grid(column: 0),
-                SessionsHubDetailsView.Render(context, details, titles).Margin(16, 0, 0, 0).Grid(column: 1));
-        else
-            content = SessionsHubDetailsView.Render(context, details, titles);
-
         return Grid([GridSize.Star()], [GridSize.Auto, GridSize.Auto, GridSize.Star()],
             Toolbar(context).Grid(row: 0),
             SelectionBar(context).Grid(row: 1),
-            content.Grid(row: 2));
+            main.Grid(row: 2));
+    }
+
+    /// <summary>Reveals a loaded transcript hit in its roster page and group before expanding it.</summary>
+    public static void RevealDetails(SessionsHubViewContext context, string key)
+    {
+        var controller = context.Controller;
+        var state = controller.State;
+        var row = state.Rows.FirstOrDefault(row => row.Key == key);
+        if (row is null) return;
+        controller.SetFilters(state.Filters with
+        {
+            ShowCompleted = state.Filters.ShowCompleted
+                || (state.Filters.Status == SessionArchiveFilter.Active && SessionRunState.IsCompleted(row)),
+            ShowBackground = state.Filters.ShowBackground || SessionDisplayResolver.IsBackground(row),
+        });
+        controller.OpenDetails(key);
+        var current = context with { State = controller.State };
+        var ordered = Ordered(current);
+        var index = ordered.ToList().FindIndex(row => row.Key == key);
+        if (index >= 0)
+            controller.SetPage(index / current.State.PageSize);
+        var group = SessionsHubProjection.Group(ordered, current.State.GroupBy, controller.KnownGroups())
+            .FirstOrDefault(group => group.Rows.Any(row => row.Key == key));
+        if (group is not null && context.CollapsedGroups.Contains(group.Id))
+        {
+            var collapsed = new HashSet<string>(context.CollapsedGroups, StringComparer.Ordinal);
+            collapsed.Remove(group.Id);
+            context.SetCollapsedGroups(collapsed);
+        }
+        controller.SetTranscriptOpen(false);
     }
 
     // ── Toolbar ──
@@ -306,15 +326,48 @@ internal static class SessionsHubSessionsView
             items.AddRange(rows.Select(row => new RosterItem("row:" + row.Key, null, row)));
         }
 
-        var list = ItemsView(items, static item => item.Key, (item, _) => RosterContainer(context, item, titles)) with
-        {
-            LayoutKind = ItemsViewLayoutKind.StackLayout,
-            SelectionMode = ItemsViewSelectionMode.None,
-            IsItemInvokedEnabled = false,
-        };
         return Grid([GridSize.Star()], [GridSize.Star(), GridSize.Auto],
-            list.AutomationName(T("ListLabel")).AutomationId("SessionsHubList").Grid(row: 0),
+            Component<RosterList, RosterListProps>(new(context, items, titles)).Grid(row: 0),
             Pager(context, ordered.Count, pageIndex, pageCount).Grid(row: 1));
+    }
+
+    private sealed record RosterListProps(
+        SessionsHubViewContext Context, IReadOnlyList<RosterItem> Items, IReadOnlyDictionary<string, string> Titles);
+
+    private sealed class RosterList : Component<RosterListProps>
+    {
+        public override Element Render()
+        {
+            var reference = this.UseElementRef<ItemsView>();
+            UseEffect((Func<Action>)(() =>
+            {
+                var view = reference.Current;
+                if (view is null) return () => { };
+                void Reveal(object sender, RoutedEventArgs args)
+                {
+                    view.Loaded -= Reveal;
+                    var key = Props.Context.Controller.State.DetailsKey;
+                    var index = Props.Items.ToList().FindIndex(item => item.Row?.Key == key);
+                    if (key is not null && index >= 0)
+                        view.StartBringItemIntoView(index, new BringIntoViewOptions
+                        {
+                            AnimationDesired = false,
+                            VerticalAlignmentRatio = 0,
+                        });
+                }
+                if (view.IsLoaded) Reveal(view, new RoutedEventArgs());
+                else view.Loaded += Reveal;
+                return () => view.Loaded -= Reveal;
+            }), Array.Empty<object>());
+            return (ItemsView(Props.Items, static item => item.Key,
+                    (item, _) => RosterContainer(Props.Context, item, Props.Titles)) with
+                {
+                    LayoutKind = ItemsViewLayoutKind.StackLayout,
+                    SelectionMode = ItemsViewSelectionMode.None,
+                    IsItemInvokedEnabled = false,
+                })
+                .Ref(reference).AutomationName(T("ListLabel")).AutomationId("SessionsHubList");
+        }
     }
 
     private sealed record RosterItem(string Key, SessionRowGroup? Group, SessionInfo? Row, bool IsEmptyGroup = false);
@@ -327,7 +380,7 @@ internal static class SessionsHubSessionsView
         {
             var title = titles.TryGetValue(row.Key, out var known) ? known : row.Key;
             name = RowAccessibleName(context, row, title);
-            content = Row(context, row, title);
+            content = Row(context, row, title, titles);
         }
         else if (item.IsEmptyGroup)
         {
@@ -452,7 +505,7 @@ internal static class SessionsHubSessionsView
         _ => SessionsHubView.Glyph(FluentIconCatalog.Folder, 14, Theme.SecondaryText).VAlign(VerticalAlignment.Center),
     };
 
-    private static Element Row(SessionsHubViewContext context, SessionInfo row, string title)
+    private static Element Row(SessionsHubViewContext context, SessionInfo row, string title, IReadOnlyDictionary<string, string> titles)
     {
         var state = context.State;
         var controller = context.Controller;
@@ -512,21 +565,14 @@ internal static class SessionsHubSessionsView
         if (meta.Count == 0)
             AddMeta(null, statusLabel);
 
-        var primary = Button(
-                Grid([GridSize.Auto, GridSize.Star()], [GridSize.Auto],
+        var primary = Grid([GridSize.Auto, GridSize.Star()], [GridSize.Auto],
                     Leading(row, agent, display.AgentId ?? row.Key, tone).Grid(column: 0),
                     VStack(3,
                             HStack(8, titleLine.ToArray()),
                             HStack(6, meta.ToArray()))
-                        .VAlign(VerticalAlignment.Center).Margin(12, 0, 0, 0).Grid(column: 1)),
-                () => controller.ShowDetails(row.Key))
-            .SubtleButton()
+                        .VAlign(VerticalAlignment.Center).Margin(12, 0, 0, 0).Grid(column: 1))
             .HAlign(HorizontalAlignment.Stretch)
-            .HorizontalContentAlignment(HorizontalAlignment.Left)
-            .Padding(10, 8)
-            .AutomationName(F("ShowDetailsNamed", title))
-            .HelpText(T("RowHelp"))
-            .AutomationId("SessionsHubRow:" + row.Key);
+            .Padding(10, 8);
 
         var menu = MenuItems(SessionsHubMenus.SessionMenu(context, row, title));
         var actions = new List<Element>
@@ -568,12 +614,25 @@ internal static class SessionsHubSessionsView
         columns.Add(GridSize.Auto);
         cells.Add(HStack(2, actions.ToArray()).VAlign(VerticalAlignment.Center).Margin(0, 0, 8, 0).Grid(column: columns.Count - 1));
 
-        return Border(Grid(columns.ToArray(), [GridSize.Auto], cells.ToArray()))
-            .Background(selected ? Theme.Ref("SessionsHubSelectedFillBrush") : Theme.CardBackground)
-            .WithBorder(selected ? Theme.Accent : Theme.CardStroke, 1)
+        return (Expander("", selected ? SessionsHubDetailsView.Render(context, row, titles) : Empty(),
+                selected, expanded =>
+                {
+                    if (expanded && controller.State.DetailsKey != row.Key)
+                        controller.OpenDetails(row.Key);
+                    else if (!expanded && controller.State.DetailsKey == row.Key)
+                        controller.CloseDetails();
+                }) with { HeaderTemplate = Grid(columns.ToArray(), [GridSize.Auto], cells.ToArray()) })
+            .HAlign(HorizontalAlignment.Stretch)
+            .HorizontalContentAlignment(HorizontalAlignment.Stretch)
+            // Native settings-expander surfaces: the body sits one layer below the header card.
+            .Background(Theme.Ref("CardBackgroundFillColorSecondaryBrush"))
+            .WithBorder(Theme.CardStroke, 1)
             .CornerRadius(8)
             .Opacity(row.Archived && state.Filters.Status == SessionArchiveFilter.All ? 0.75 : 1)
-            .WithContextFlyout(menu);
+            .WithContextFlyout(menu)
+            .AutomationName(RowAccessibleName(context, row, title))
+            .HelpText(T("RowHelp"))
+            .AutomationId("SessionsHubRow:" + row.Key);
     }
 
     private const string CloudGlyph = "\uE753";

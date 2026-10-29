@@ -8150,9 +8150,6 @@
   <data name="SessionsHub_ClearSelection" xml:space="preserve">
     <value>清除选择</value>
   </data>
-  <data name="SessionsHub_CloseDetails" xml:space="preserve">
-    <value>关闭详细信息</value>
-  </data>
   <data name="SessionsHub_CloseSearch" xml:space="preserve">
     <value>关闭搜索</value>
   </data>
@@ -8676,7 +8673,7 @@
     <value>你</value>
   </data>
   <data name="SessionsHub_RowHelp" xml:space="preserve">
-    <value>显示会话的详细信息</value>
+    <value>展开或折叠会话的详细信息</value>
   </data>
   <data name="SessionsHub_RowsPerPage" xml:space="preserve">
     <value>每页 {0} 项</value>
