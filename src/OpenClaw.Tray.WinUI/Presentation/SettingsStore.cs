@@ -13,14 +13,12 @@ internal sealed class SettingsStore : ISettingsStore
 {
     private readonly SettingsManager _settings;
     private readonly IUiDispatcher _dispatcher;
-    private readonly object _updateGate = new();
     private readonly object _snapshotGate = new();
     private readonly object _originGate = new();
 
     private long _nextOriginId;
     private long _version;
-    private SettingsWriteOrigin? _activeOrigin;
-    private int _activeOriginThreadId;
+    private readonly Dictionary<int, SettingsWriteOrigin?> _activeOrigins = new();
     private bool _disposed;
 
     public SettingsStore(SettingsManager settings, IUiDispatcher dispatcher)
@@ -55,17 +53,16 @@ internal sealed class SettingsStore : ISettingsStore
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(edit);
 
-        lock (_updateGate)
+        // SettingsManager serializes edits and persistence. Do not retain another
+        // lock across Saved/Changed callbacks after it releases that serialization.
+        BeginSaveOrigin(origin);
+        try
         {
-            BeginSaveOrigin(origin);
-            try
-            {
-                _settings.UpdateAndSave(() => edit(new Editor(_settings)));
-            }
-            finally
-            {
-                EndSaveOrigin();
-            }
+            _settings.UpdateAndSave(() => edit(new Editor(_settings)));
+        }
+        finally
+        {
+            EndSaveOrigin();
         }
     }
 
@@ -104,8 +101,7 @@ internal sealed class SettingsStore : ISettingsStore
     {
         lock (_originGate)
         {
-            _activeOrigin = origin;
-            _activeOriginThreadId = Environment.CurrentManagedThreadId;
+            _activeOrigins[Environment.CurrentManagedThreadId] = origin;
         }
     }
 
@@ -113,8 +109,7 @@ internal sealed class SettingsStore : ISettingsStore
     {
         lock (_originGate)
         {
-            _activeOrigin = null;
-            _activeOriginThreadId = 0;
+            _activeOrigins.Remove(Environment.CurrentManagedThreadId);
         }
     }
 
@@ -122,15 +117,7 @@ internal sealed class SettingsStore : ISettingsStore
     {
         lock (_originGate)
         {
-            if (_activeOriginThreadId != Environment.CurrentManagedThreadId)
-            {
-                return null;
-            }
-
-            var origin = _activeOrigin;
-            _activeOrigin = null;
-            _activeOriginThreadId = 0;
-            return origin;
+            return _activeOrigins.Remove(Environment.CurrentManagedThreadId, out var origin) ? origin : null;
         }
     }
 

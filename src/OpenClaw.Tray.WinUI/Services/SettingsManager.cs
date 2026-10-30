@@ -6,6 +6,7 @@ using System.Text.Json;
 using OpenClaw.Shared;
 using OpenClaw.Shared.Audio;
 using OpenClaw.Shared.Capabilities;
+using OpenClaw.Shared.Mxc;
 
 namespace OpenClawTray.Services;
 
@@ -43,6 +44,7 @@ public class SettingsManager
 
     private readonly object _saveLock = new();
     private SettingsData _data = CreateDefaultData();
+    public NodeSandboxPolicyStore SandboxPolicies { get; } = new(CreateDefaultData());
     private volatile bool _persistedSystemRunEnabled;
     private string? _preservedElevenLabsCipher;
     private string? _preservedMiniMaxCipher;
@@ -246,6 +248,8 @@ public class SettingsManager
     }
     public int SandboxTimeoutMs { get => _data.SandboxTimeoutMs > 0 ? _data.SandboxTimeoutMs : 30_000; set => _data = _data with { SandboxTimeoutMs = value }; }
     public long SandboxMaxOutputBytes { get => _data.SandboxMaxOutputBytes > 0 ? _data.SandboxMaxOutputBytes : 4 * 1024 * 1024; set => _data = _data with { SandboxMaxOutputBytes = value }; }
+    public string? SandboxUploadStagingPath { get => _data.SandboxUploadStagingPath; set => _data = _data with { SandboxUploadStagingPath = value }; }
+    public long SandboxMaxTransferBytes { get => _data.SandboxMaxTransferBytes; set => _data = _data with { SandboxMaxTransferBytes = value }; }
 
     public SettingsManager() : this(GetDefaultSettingsDirectory())
     {
@@ -296,6 +300,7 @@ public class SettingsManager
                 }
             }
             _persistedSystemRunEnabled = _data.NodeSystemRunEnabled;
+            SandboxPolicies.Persist(_data, () => { });
             loadSucceeded = true;
         }
         catch (Exception ex)
@@ -442,6 +447,8 @@ public class SettingsManager
                     ? OpenClaw.Shared.SystemRunFilesystemScope.SelectedFolders : null,
             SandboxTimeoutMs = loaded.SandboxTimeoutMs > 0 ? loaded.SandboxTimeoutMs : defaults.SandboxTimeoutMs,
             SandboxMaxOutputBytes = loaded.SandboxMaxOutputBytes > 0 ? loaded.SandboxMaxOutputBytes : defaults.SandboxMaxOutputBytes,
+            SandboxMaxTransferBytes = loaded.SandboxMaxTransferBytes is > 0 and <= OpenClaw.Shared.FileTransfer.FileLimits.MaximumTransferBytes
+                ? loaded.SandboxMaxTransferBytes : defaults.SandboxMaxTransferBytes,
             McpOnlyMode = null
         };
 
@@ -598,6 +605,8 @@ public class SettingsManager
         SandboxCustomFolders = SandboxCustomFolders.Count == 0 ? null : CloneSandboxCustomFolders(SandboxCustomFolders),
         SandboxTimeoutMs = SandboxTimeoutMs,
         SandboxMaxOutputBytes = SandboxMaxOutputBytes,
+        SandboxUploadStagingPath = SandboxUploadStagingPath,
+        SandboxMaxTransferBytes = SandboxMaxTransferBytes,
         McpOnlyMode = null
     };
 
@@ -627,29 +636,48 @@ public class SettingsManager
 
     internal void SaveOrThrow()
     {
-        lock (_saveLock)
-        {
-            try
-            {
-                SaveCore();
-                SetPersistenceConflict(false);
-            }
-            catch (SettingsPersistenceConflictException)
-            {
-                SetPersistenceConflict(true);
-                throw;
-            }
-        }
+        PersistAndNotify(null);
     }
 
-    private void SetPersistenceConflict(bool conflict)
+    private void PersistAndNotify(Action? edit)
     {
+        Exception? failure = null;
+        var notifyConflict = false;
         lock (_saveLock)
         {
-            if (!conflict && !_hasPersistenceConflict) return;
-            _hasPersistenceConflict = conflict;
+            var before = edit is null ? null : ToSettingsData();
+            var hadPersistedGatewayUrl = HasPersistedGatewayUrl;
+            try
+            {
+                edit?.Invoke();
+                SaveCore();
+                notifyConflict = _hasPersistenceConflict;
+                _hasPersistenceConflict = false;
+            }
+            catch (Exception ex)
+            {
+                if (before is not null)
+                {
+                    _data = before;
+                    HasPersistedGatewayUrl = hadPersistedGatewayUrl && !string.IsNullOrWhiteSpace(before.GatewayUrl);
+                }
+                if (ex is SettingsPersistenceConflictException)
+                {
+                    _hasPersistenceConflict = true;
+                    notifyConflict = true;
+                }
+                failure = ex;
+            }
         }
-        NotifyPersistenceStateChanged();
+        // Persistence and policy publication precede every external notification.
+        if (notifyConflict) NotifyPersistenceStateChanged();
+        if (failure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+        Logger.Info("Settings saved");
+        try { Saved?.Invoke(this, EventArgs.Empty); }
+        catch (Exception ex)
+        {
+            Logger.Warn($"Settings saved, but a notification subscriber failed: {ex.Message}");
+        }
     }
 
     private void NotifyPersistenceStateChanged()
@@ -678,6 +706,7 @@ public class SettingsManager
             OpenClaw.Shared.Mcp.McpAuthToken.TryRestrictDataDirectoryAcl(_settingsDirectory);
 
             var data = ToSettingsData();
+            var sandboxSnapshot = MxcRequestBuilder.Snapshot(data);
             // Apply DPAPI protection to the API key for on-disk storage only.
             // A failed decrypt keeps the original ciphertext so this save cannot
             // replace it with null.
@@ -714,9 +743,12 @@ public class SettingsManager
             try
             {
                 File.WriteAllText(temp, json);
-                File.Move(temp, _settingsFilePath, overwrite: true);
-                _persistedJson = json;
-                _persistedSystemRunEnabled = data.NodeSystemRunEnabled;
+                SandboxPolicies.Persist(sandboxSnapshot, () =>
+                {
+                    File.Move(temp, _settingsFilePath, overwrite: true);
+                    _persistedJson = json;
+                    _persistedSystemRunEnabled = data.NodeSystemRunEnabled;
+                });
             }
             finally
             {
@@ -724,41 +756,13 @@ public class SettingsManager
             }
             }
 
-            Logger.Info("Settings saved");
-            try
-            {
-                Saved?.Invoke(this, EventArgs.Empty);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"Settings saved, but a notification subscriber failed: {ex.Message}");
-            }
         }
 
     }
 
     internal void UpdateAndSave(Action edit)
     {
-        lock (_saveLock)
-        {
-            var before = ToSettingsData();
-            var hadPersistedGatewayUrl = HasPersistedGatewayUrl;
-            try
-            {
-                edit();
-                SaveOrThrow();
-            }
-            catch
-            {
-                // The GatewayUrl setter stores explicit-target provenance beside
-                // SettingsData. Restoring the record alone leaves that flag set,
-                // and the getter then presents the setup default as a saved gateway.
-                _data = before;
-                HasPersistedGatewayUrl = hadPersistedGatewayUrl &&
-                    !string.IsNullOrWhiteSpace(before.GatewayUrl);
-                throw;
-            }
-        }
+        PersistAndNotify(edit);
     }
 
     private readonly record struct LoadedSettingSecret(string? Plaintext, string? Preserved);

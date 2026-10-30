@@ -491,11 +491,13 @@ jobs:
             'src/OpenClaw.Connection/OpenClaw.Connection.csproj',
             'src/OpenClaw.Cli/OpenClaw.Cli.csproj',
             'src/OpenClaw.WinNode.Cli/OpenClaw.WinNode.Cli.csproj',
+            'src/OpenClaw.FileWorker/OpenClaw.FileWorker.csproj',
             'tests/OpenClaw.TestSupport/OpenClaw.TestSupport.csproj',
             'tests/OpenClaw.Shared.TestHost/OpenClaw.Shared.TestHost.csproj',
             'tests/OpenClaw.Shared.Tests/OpenClaw.Shared.Tests.csproj',
             'tests/OpenClaw.Connection.Tests/OpenClaw.Connection.Tests.csproj',
-            'tests/OpenClaw.WinNode.Cli.Tests/OpenClaw.WinNode.Cli.Tests.csproj'
+            'tests/OpenClaw.WinNode.Cli.Tests/OpenClaw.WinNode.Cli.Tests.csproj',
+            'tests/OpenClaw.FileWorker.Tests/OpenClaw.FileWorker.Tests.csproj'
           ) }}
 
     - name: Restore core test projects
@@ -503,6 +505,7 @@ jobs:
         dotnet restore tests/OpenClaw.Shared.Tests
         dotnet restore tests/OpenClaw.Connection.Tests
         dotnet restore tests/OpenClaw.WinNode.Cli.Tests
+        dotnet restore tests/OpenClaw.FileWorker.Tests
 
     - name: Install dotnet-coverage
       if: ${{ github.event_name != 'pull_request' }}
@@ -513,6 +516,7 @@ jobs:
         dotnet build tests/OpenClaw.Shared.Tests -c Debug --no-restore
         dotnet build tests/OpenClaw.Connection.Tests -c Debug --no-restore
         dotnet build tests/OpenClaw.WinNode.Cli.Tests -c Debug --no-restore
+        dotnet build tests/OpenClaw.FileWorker.Tests -c Debug --no-restore
 
     - name: Run Shared Tests
       timeout-minutes: 15
@@ -538,6 +542,13 @@ jobs:
         -Project tests/OpenClaw.WinNode.Cli.Tests
         -ResultsDirectory TestResults\WinNodeCli
         -TrxFileName OpenClaw.WinNode.Cli.Tests.trx
+
+    - name: Run File Worker Tests
+      run: >
+        ./scripts/Invoke-CiTest.ps1
+        -Project tests/OpenClaw.FileWorker.Tests
+        -ResultsDirectory TestResults\FileWorker
+        -TrxFileName OpenClaw.FileWorker.Tests.trx
 
     - name: Upload Test Results
       if: always()

@@ -8279,4 +8279,12 @@ After enrolling, return to Settings &gt; Windows Update and check for updates. I
   <data name="Chat_Run_ElapsedSeconds" xml:space="preserve"><value>{2}s</value></data>
   <data name="Chat_Questions_Resolving" xml:space="preserve"><value>This question is being resolved. Refresh to check its status.</value></data>
   <data name="Chat_Questions_InvalidAnswer" xml:space="preserve"><value>Choose a valid answer for each question.</value></data>
+  <data name="SandboxPage_SharedFilePolicy.Text" xml:space="preserve"><value>File actions and system.run use these same saved Sandbox settings. Changes apply to new operations; running operations keep their original settings. On unsupported Windows, neither is contained.</value></data>
+  <data name="SandboxPage_UploadStorage.Header" xml:space="preserve"><value>Upload storage location</value></data>
+  <data name="SandboxPage_UploadStorageHelp.Text" xml:space="preserve"><value>Choose a parent folder for OpenClaw-upload-staging. Choosing a location grants no access. When Sandbox is active, grant read/write access below. Uploads are retained for 24 hours, up to 64 folders or 256 MiB. Removing access can block cleanup.</value></data>
+  <data name="SandboxPage_ChooseUploadParent.Content" xml:space="preserve"><value>Choose parent folder…</value></data>
+  <data name="SandboxPage_TransferBudget.Description" xml:space="preserve"><value>Maximum bytes per file transfer, in MiB (1 to 1024; default 50). Individual commands may have lower limits.</value></data>
+  <data name="SandboxPage_TransferBudgetLabel.Text" xml:space="preserve"><value>File transfer budget (MiB)</value></data>
+  <data name="SandboxPage_UploadCleanupWarning.Title" xml:space="preserve"><value>Upload cleanup is blocked</value></data>
+  <data name="SandboxPage_UploadCleanupWarning.Message" xml:space="preserve"><value>Review folder access and private-state permissions. Old uploads may remain until cleanup is restored. Do not retry completed uploads automatically.</value></data>
 </root>
