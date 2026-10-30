@@ -80,6 +80,43 @@ public sealed class AccessibilityScanTests
 
     [Fact]
     [Trait("Category", "Accessibility")]
+    public async Task SandboxExpanders_ExposeNamesWhenExpandedAndCollapsed()
+    {
+        await _app.NavigateAsync("sandbox", "SandboxPage", "SandboxPageMarker");
+        var hub = AutomationElement.FromHandle(_app.HubWindowHandle);
+        var expanders = hub.FindAll(
+            TreeScope.Descendants,
+            new PropertyCondition(
+                AutomationElement.ClassNameProperty,
+                "Microsoft.UI.Xaml.Controls.Expander"));
+
+        Assert.Equal(5, expanders.Count);
+        foreach (AutomationElement expander in expanders)
+        {
+            var pattern = (ExpandCollapsePattern)expander.GetCurrentPattern(
+                ExpandCollapsePattern.Pattern);
+            var originalState = pattern.Current.ExpandCollapseState;
+            try
+            {
+                pattern.Collapse();
+                Assert.False(string.IsNullOrWhiteSpace(expander.Current.Name),
+                    "Collapsed Sandbox Expander must expose its localized header as its accessible name.");
+                pattern.Expand();
+                Assert.False(string.IsNullOrWhiteSpace(expander.Current.Name),
+                    "Expanded Sandbox Expander must expose its localized header as its accessible name.");
+            }
+            finally
+            {
+                if (originalState == ExpandCollapseState.Collapsed)
+                    pattern.Collapse();
+                else
+                    pattern.Expand();
+            }
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Accessibility")]
     public async Task ChatComposerControls_ExposeOnscreenLayoutThroughUia()
     {
         await _app.NavigateAsync(
