@@ -253,7 +253,8 @@
             <!-- Only confirmed unsupported Windows disables saved sandbox controls. -->
             <ContentControl x:Name="SandboxPermissionsControls" HorizontalContentAlignment="Stretch">
             <StackPanel x:Name="SandboxControlsContainer" Spacing="16">
-                <Expander AutomationProperties.LabeledBy="{Binding ElementName=FoldersExpanderLabel}"
+                <Expander AutomationProperties.AutomationId="SandboxFoldersExpander"
+                          AutomationProperties.LabeledBy="{Binding ElementName=FoldersExpanderLabel}"
                           IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                     <Expander.Header>
                         <StackPanel Orientation="Horizontal" Spacing="8">
@@ -322,7 +323,8 @@
                 </Expander>
 
                 <!-- Clipboard -->
-                <Expander AutomationProperties.LabeledBy="{Binding ElementName=ClipboardExpanderLabel}"
+                <Expander AutomationProperties.AutomationId="SandboxClipboardExpander"
+                          AutomationProperties.LabeledBy="{Binding ElementName=ClipboardExpanderLabel}"
                           IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                     <Expander.Header>
                         <TextBlock x:Uid="SandboxPage_Clipboard" x:Name="ClipboardExpanderLabel" Text="📋 Clipboard" Style="{StaticResource BodyStrongTextBlockStyle}"/>
@@ -339,7 +341,8 @@
                 </Expander>
 
                 <!-- Network -->
-                <Expander AutomationProperties.LabeledBy="{Binding ElementName=NetworkExpanderLabel}"
+                <Expander AutomationProperties.AutomationId="SandboxNetworkExpander"
+                          AutomationProperties.LabeledBy="{Binding ElementName=NetworkExpanderLabel}"
                           IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                     <Expander.Header>
                         <TextBlock x:Uid="SandboxPage_Network" x:Name="NetworkExpanderLabel" Text="📡 Network" Style="{StaticResource BodyStrongTextBlockStyle}"/>
@@ -362,7 +365,8 @@
                 </Expander>
 
                 <!-- Limits -->
-                <Expander AutomationProperties.LabeledBy="{Binding ElementName=LimitsExpanderLabel}"
+                <Expander AutomationProperties.AutomationId="SandboxLimitsExpander"
+                          AutomationProperties.LabeledBy="{Binding ElementName=LimitsExpanderLabel}"
                           IsExpanded="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                     <Expander.Header>
                         <TextBlock x:Uid="SandboxPage_Limits" x:Name="LimitsExpanderLabel" Text="⏱ Limits" Style="{StaticResource BodyStrongTextBlockStyle}"/>
