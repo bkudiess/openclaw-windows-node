@@ -501,15 +501,19 @@ public sealed class ChatTimelinePresentationTests
     }
 
     [Fact]
-    public void TailReflowCorrection_StreamingGrowthUsesOneCorrectionPerContentRevision()
+    public void TailReflowCorrection_StreamingGrowthUsesABoundedBudgetPerContentRevision()
     {
         var correction = new TailReflowCorrection();
         var revision = new object();
         correction.ContentChanged(revision);
         Assert.False(correction.TryConsume(following: true, nearBottom: false, initialPending: false));
 
-        correction.ArmForExtentGrowth(following: true, atBottom: false, initialPending: false, readerOwnsAnchor: false);
-        Assert.True(correction.TryConsume(following: true, nearBottom: false, initialPending: false));
+        for (var attempt = 0; attempt < TailReflowCorrection.MaxGrowthCorrections; attempt++)
+        {
+            correction.ArmForExtentGrowth(following: true, atBottom: false, initialPending: false, readerOwnsAnchor: false);
+            Assert.True(correction.TryConsume(following: true, nearBottom: false, initialPending: false));
+        }
+        // Remeasurement and same-revision rerenders cannot replenish the budget.
         correction.ContentChanged(revision);
         correction.ArmForExtentGrowth(following: true, atBottom: false, initialPending: false, readerOwnsAnchor: false);
         Assert.False(correction.TryConsume(following: true, nearBottom: false, initialPending: false));
@@ -518,6 +522,84 @@ public sealed class ChatTimelinePresentationTests
         correction.ArmForExtentGrowth(following: true, atBottom: false, initialPending: false, readerOwnsAnchor: false);
         Assert.True(correction.TryConsume(following: true, nearBottom: false, initialPending: false));
         Assert.False(correction.TryConsume(following: true, nearBottom: false, initialPending: false));
+    }
+
+    // Rows realize over several frames while one correction waits for layout, rendering and an idle
+    // view; that correction reads the newest extent when it dispatches. Growth seen meanwhile must
+    // not drain the budget, or the final remeasure finds no credit left and the tail stays short.
+    [Fact]
+    public void TailReflowCorrection_GrowthWhileACorrectionIsPendingSpendsNoCredit()
+    {
+        var correction = new TailReflowCorrection();
+        correction.ContentChanged(new object());
+        correction.ArmForExtentGrowth(following: true, atBottom: false, initialPending: false, readerOwnsAnchor: false);
+        Assert.True(correction.TryConsume(following: true, nearBottom: false, initialPending: false));
+        for (var attempt = 0; attempt < 3 * TailReflowCorrection.MaxGrowthCorrections; attempt++)
+        {
+            correction.ArmForExtentGrowth(following: true, atBottom: false, initialPending: false, readerOwnsAnchor: false, correctionPending: true);
+            Assert.False(correction.TryConsume(following: true, nearBottom: false, initialPending: false));
+        }
+
+        for (var attempt = 1; attempt < TailReflowCorrection.MaxGrowthCorrections; attempt++)
+        {
+            correction.ArmForExtentGrowth(following: true, atBottom: false, initialPending: false, readerOwnsAnchor: false);
+            Assert.True(correction.TryConsume(following: true, nearBottom: false, initialPending: false));
+        }
+        correction.ArmForExtentGrowth(following: true, atBottom: false, initialPending: false, readerOwnsAnchor: false);
+        Assert.False(correction.TryConsume(following: true, nearBottom: false, initialPending: false));
+    }
+
+    // GatewayFixtureUiTests.SidebarSwitchesRealHistoriesAndShowsMessage240AtBothWidths: after a resize
+    // and a UI Automation scroll to the end at a wide width, rows keep realizing taller than estimated
+    // with no new content revision. One credit per resize left the final message short of the end.
+    [Fact]
+    public void TailReflowCorrection_ResizeGrantsTheBoundedBudgetWithoutANewRevision()
+    {
+        var correction = new TailReflowCorrection();
+        var revision = new object();
+        correction.ContentChanged(revision);
+        for (var attempt = 0; attempt < TailReflowCorrection.MaxGrowthCorrections; attempt++)
+        {
+            correction.ArmForExtentGrowth(following: true, atBottom: false, initialPending: false, readerOwnsAnchor: false);
+            correction.TryConsume(following: true, nearBottom: false, initialPending: false);
+        }
+        correction.ContentChanged(revision);
+        correction.ArmForExtentGrowth(following: true, atBottom: false, initialPending: false, readerOwnsAnchor: false);
+        Assert.False(correction.TryConsume(following: true, nearBottom: false, initialPending: false));
+
+        // A resize grants its own correction and the same bounded growth budget.
+        correction.ViewportResized();
+        Assert.True(correction.TryConsume(following: true, nearBottom: false, initialPending: false));
+        // A reader who left the tail is never pulled back, whatever the budget.
+        correction.ArmForExtentGrowth(following: false, atBottom: false, initialPending: false, readerOwnsAnchor: false);
+        Assert.False(correction.TryConsume(following: false, nearBottom: false, initialPending: false));
+        for (var attempt = 0; attempt < TailReflowCorrection.MaxGrowthCorrections; attempt++)
+        {
+            correction.ArmForExtentGrowth(following: true, atBottom: false, initialPending: false, readerOwnsAnchor: false);
+            Assert.True(correction.TryConsume(following: true, nearBottom: false, initialPending: false));
+        }
+        correction.ArmForExtentGrowth(following: true, atBottom: false, initialPending: false, readerOwnsAnchor: false);
+        Assert.False(correction.TryConsume(following: true, nearBottom: false, initialPending: false));
+
+        correction.ViewportResized();
+        correction.Clear();
+        correction.ArmForExtentGrowth(following: true, atBottom: false, initialPending: false, readerOwnsAnchor: false);
+        Assert.False(correction.TryConsume(following: true, nearBottom: false, initialPending: false));
+    }
+
+    // Native trace (900 DIP): a correction targeted 44519.4, anchoring followed +57 DIP of growth,
+    // then the view returned to 44519.4 with the end at 44576.6 and no further extent change.
+    [Theory]
+    [InlineData(44519.4, 44519.4, 44576.6, true)]   // back at the stale target, end moved on
+    [InlineData(44519.9, 44519.4, 44576.6, true)]   // within the 1 DIP tolerance of the target
+    [InlineData(44576.6, 44519.4, 44576.6, false)]  // at the true end
+    [InlineData(44519.4, 44519.4, 44520.0, false)]  // the end did not move beyond tolerance
+    [InlineData(44500.0, 44519.4, 44576.6, false)]  // a reader elsewhere, not at the target
+    [InlineData(44519.4, 44519.4, 44480.0, true)]   // the end shrank below the target (overshoot)
+    public void TailNavigationPolicy_RecognizesAStaleReflowLanding(
+        double offset, double target, double scrollableHeight, bool stale)
+    {
+        Assert.Equal(stale, TailNavigationPolicy.IsStaleReflowLanding(offset, target, scrollableHeight));
     }
 
     [Theory]

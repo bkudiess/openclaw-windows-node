@@ -611,20 +611,42 @@ rows moves the extent away from a followed tail. This correction waits for
 layout, a rendering boundary, and an idle scroll view. It adjusts the offset to
 the current extent without synchronously realizing another item. Initial,
 new-message and explicit jump navigation retain index-based brings.
-Streaming extent growth can also arm one correction per immutable transcript
-content revision while following more than one DIP away from the exact bottom.
+Streaming extent growth can also arm a bounded number of corrections
+(`TailReflowCorrection.MaxGrowthCorrections`) per viewport resize or immutable
+transcript content revision while following more than one DIP away from the exact bottom.
+Rows realized by a UI Automation scroll back to the end can keep remeasuring
+taller with no new revision, so one correction is not always enough. Growth
+seen while a correction waits for layout or rendering spends no credit, because
+that correction reads the newest extent when it dispatches. In native runs,
+after anchoring followed later growth, the view returned to a correction's
+absolute target and stayed short with no extent change. A view that is still
+following (within the follow threshold) when it reaches such a stale target arms
+one more correction from the same budget; a larger gap ends follow and shows
+**Jump to latest** instead. The target is cleared by reader input, a new tail
+request, leaving follow, or detaching. A UI Automation move that lands within
+one DIP of that old target while still following can therefore be pulled back
+to the end, part of the same limitation below.
+UI Automation raises no input event, so a screen reader's scroll away from the
+tail can still be undone by initial tail confirmation or by a growth correction
+already queued when it arrives. Up to `MaxGrowthCorrections` queued corrections
+per revision or resize (one before this budget) can race such a departure, so
+repeated departures in one revision have more chances to be undone. The single
+scroll policy in draft PR #2126 is the structural fix.
+The budget comes from a content revision or resize after the last tail request
+or reader input; a newly selected session has none until one of those arrives.
 It cannot arm while a disclosure, keyboard reader, or pending reader bring owns
 the native anchor, even when the reader remains within the follow threshold.
 Typing and tail-visibility rerenders retain that revision. Correction-induced
 remeasurement cannot replenish its budget, and reader input clears unused credit.
 Resizing does not itself start a bring, and this is not a continuous extent-follow loop. A correction does
 not start while initial positioning is still pending, so it cannot impose its
-follow requirement on that initial request. A reader who has scrolled up is not
-pulled back down. Pointer, keyboard, touch, and scrollbar interaction cancel
+follow requirement on that initial request. A reader who has scrolled up by
+pointer, keyboard, touch or scrollbar is not pulled back down. Pointer, keyboard, touch, and scrollbar interaction cancel
 pending navigation; follow state is then taken from the current position, so a
 click or key press at the tail keeps following new replies. The correction
-rechecks follow eligibility at dispatch so a newer UI Automation scroll-away also
-takes precedence. Session replacement, unload, and disposal fence late callbacks.
+rechecks follow eligibility at dispatch, so a UI Automation scroll-away already
+observed by then also takes precedence; one reported after a queued correction
+dispatches does not (see the limitation above). Session replacement, unload, and disposal fence late callbacks.
 Initial landing confirmation waits for the current tail item's native bring to
 complete and its layout to settle before retrying; missing events remain bounded.
 It schedules retries after the rendering callback returns and fences them against
@@ -651,7 +673,7 @@ restores bottom anchoring.
 Actual tail visibility is tracked separately from follow eligibility. The
 landing predicate uses absolute distance to the current bottom, so an offset
 beyond a reduced extent does not count as landed. The wider follow-intent
-threshold and the existing correction budget remain unchanged.
+threshold is unchanged; the correction budget is bounded as described above.
 **Jump to latest** button stays mounted as an overlay, so showing it does not
 shrink the transcript viewport or move the composer.
 It is a 32-pixel circular native button with a 16-pixel Fluent down arrow,

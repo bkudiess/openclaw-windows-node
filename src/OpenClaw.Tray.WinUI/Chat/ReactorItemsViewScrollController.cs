@@ -160,6 +160,8 @@ file sealed class InitialTailPositioner : IDisposable
     private WinUIScrollView? _scrollView;
     private double _extentHeight;
     private bool _following;
+    // The offset our last reflow correction requested, until it is re-armed or follow ends.
+    private double? _reflowTarget;
     private bool _initialPending;
     private bool _explicitJumpPending;
     private bool _awaitingInitialRows;
@@ -202,6 +204,7 @@ file sealed class InitialTailPositioner : IDisposable
         _requestKey = requestKey;
         _version++;
         _reflowCorrection.Clear();
+        _reflowTarget = null;
         DetachLayout();
         _tailIndex = tailIndex;
         _itemCount = itemCount;
@@ -379,6 +382,7 @@ file sealed class InitialTailPositioner : IDisposable
                 {
                     // Reflow needs an offset correction, not another synchronous item realization.
                     RestoreTailAnchor();
+                    _reflowTarget = scrollView.ScrollableHeight;
                     scrollView.ScrollTo(scrollView.HorizontalOffset, scrollView.ScrollableHeight,
                         new ScrollingScrollOptions(ScrollingAnimationMode.Disabled, ScrollingSnapPointsMode.Ignore));
                 }
@@ -596,7 +600,7 @@ file sealed class InitialTailPositioner : IDisposable
                 && args.NewSize.Height == args.PreviousSize.Height))
             return;
 
-        _reflowCorrection.Arm();
+        _reflowCorrection.ViewportResized();
         if (_scrollView is { } scrollView)
             ObserveGeometry(scrollView);
     }
@@ -606,12 +610,17 @@ file sealed class InitialTailPositioner : IDisposable
         HistoryNavigation.Refresh();
         var extentHeight = sender.ExtentHeight;
         if (extentHeight > _extentHeight)
-            _reflowCorrection.ArmForExtentGrowth(
-                _following, IsAtBottom(sender), _initialPending,
-                _disclosureAnchored || _readerAnchored || _readerBringCorrelationId is not null);
+            ArmForExtentGrowth(sender);
         _extentHeight = extentHeight;
         ObserveGeometry(sender);
     }
+
+    private void ArmForExtentGrowth(WinUIScrollView sender) =>
+        _reflowCorrection.ArmForExtentGrowth(
+            _following, IsAtBottom(sender), _initialPending,
+            _disclosureAnchored || _readerAnchored || _readerBringCorrelationId is not null,
+            // Only the waits AwaitLayout coalesces into; an idle wait still lets growth start a cycle.
+            correctionPending: _awaitingLayout || _awaitingScrollView is not null || _rendering is not null);
 
     private void ObserveGeometry(WinUIScrollView scrollView)
     {
@@ -840,6 +849,7 @@ file sealed class InitialTailPositioner : IDisposable
         _following = _scrollView is { } scrollView && IsNearBottom(scrollView);
         ReportTailVisibility(_scrollView is { } currentScrollView && IsAtBottom(currentScrollView));
         _reflowCorrection.Clear();
+        _reflowTarget = null;
         _tailNavigationQueue.Clear();
         DetachLayout();
     }
@@ -854,6 +864,19 @@ file sealed class InitialTailPositioner : IDisposable
         {
             try { _confirmation.ObserveOffset(sender.VerticalOffset); }
             catch (Exception) { }
+        }
+        else if (_reflowTarget is { } target && ReferenceEquals(sender, _scrollView))
+        {
+            if (!_following)
+                _reflowTarget = null;
+            else if (TailNavigationPolicy.IsStaleReflowLanding(sender.VerticalOffset, target, sender.ScrollableHeight))
+            {
+                // Observed natively: after anchoring followed later growth, the view returned to a
+                // correction's absolute target, short of the end with no extent change to re-arm.
+                _reflowTarget = null;
+                ArmForExtentGrowth(sender);
+                ObserveGeometry(sender);
+            }
         }
     }
 
@@ -911,6 +934,7 @@ file sealed class InitialTailPositioner : IDisposable
 
     private bool StartTailRequest(TailNavigationRequest request, bool history = false)
     {
+        _reflowTarget = null;
         if (itemsView.ScrollView is not { IsLoaded: true } scrollView)
             return false;
 
@@ -1127,6 +1151,7 @@ file sealed class InitialTailPositioner : IDisposable
         }
 
         _scrollView = null;
+        _reflowTarget = null;
         _disclosureAnchored = false;
         _readerAnchored = false;
         _readerBringCorrelationId = null;

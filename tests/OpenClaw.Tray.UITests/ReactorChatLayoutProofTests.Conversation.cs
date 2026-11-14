@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Reflection;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -5,6 +6,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.UI.Reactor.Hosting;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
+using Microsoft.UI.Xaml.Automation.Provider;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Input;
@@ -887,6 +891,142 @@ public sealed partial class ReactorChatLayoutProofTests
             await SettleAsync();
             await AwaitInitialTailAsync(surface, "proof", state.Entries.Last().Id);
         }, interactiveKeyboard: true);
+    }
+
+    // GatewayFixtureUiTests.SidebarSwitchesRealHistoriesAndShowsMessage240AtBothWidths in process:
+    // a UI Automation (screen reader) scroll leaves the tail, then a scroll to 100% at a wide width
+    // realizes rows taller than estimated with no new content revision. The actual final message
+    // must still reach the viewport without Jump to latest. Repeated: the remeasure races the scroll.
+    [Theory]
+    [InlineData(1300, 1)]
+    [InlineData(1300, 2)]
+    [InlineData(1300, 3)]
+    [InlineData(900, 1)]
+    [InlineData(900, 2)]
+    public async Task ConversationScroll_ScreenReaderScrollToTheEndReachesTheTrueEndAfterRowsRemeasure(int width, int attempt)
+    {
+        _ = attempt;
+        await WithChatAsync(width, async (surface, _, _, provider) =>
+        {
+            var snapshot = await provider.LoadAsync();
+            var entries = ImmutableList.CreateBuilder<ChatTimelineItem>();
+            for (var n = 1; n <= 240; n++)
+                entries.Add(new ChatTimelineItem($"m{n:D3}",
+                    n % 2 == 1 && n != 240 ? ChatTimelineItemKind.User : ChatTimelineItemKind.Assistant, FixtureLongMessage(n)));
+            var state = ChatTimelineState.Initial() with { HistoryLoaded = true, Entries = entries.ToImmutable() };
+            await ui.RunOnUIAsync(() =>
+            {
+                surface.Height = 870;
+                provider.Publish(snapshot with
+                {
+                    Timelines = new Dictionary<string, ChatTimelineState> { ["proof"] = state },
+                    CurrentHistoryThreads = new HashSet<string> { "proof" },
+                });
+            });
+            await AwaitInitialTailAsync(surface, "proof", "m240");
+
+            ScrollView Scroll() => Assert.Single(FindDescendants<ItemsView>(surface)).ScrollView;
+            double JumpOpacity() => FindControl<Button>(surface, "ChatJumpLatest").Opacity;
+            string Describe() => $"offset={Scroll().VerticalOffset}; maximum={Scroll().ScrollableHeight}; " +
+                $"viewport={Scroll().ViewportHeight}; state={Scroll().State}; jump={JumpOpacity()}";
+            // Counts distinct rendered frames on which the condition holds consecutively; polling
+            // between frames does not count.
+            Task AwaitHeldAsync(string phase, Func<ScrollView, bool> condition, int frames) => ui.RunOnUIAsync(async () =>
+            {
+                var rendered = 0;
+                EventHandler<object> onFrame = (_, _) => rendered++;
+                CompositionTarget.Rendering += onFrame;
+                try
+                {
+                    var sampled = rendered;
+                    var held = 0;
+                    await WaitForRenderedConditionAsync(() =>
+                    {
+                        if (rendered == sampled)
+                            return false;
+                        sampled = rendered;
+                        held = condition(Scroll()) ? held + 1 : 0;
+                        return held >= frames;
+                    }, $"{phase} for {frames} rendered frames", Describe);
+                }
+                finally
+                {
+                    CompositionTarget.Rendering -= onFrame;
+                }
+            });
+            bool AtExactTail(ScrollView scroll)
+            {
+                var repeater = (ItemsRepeater)scroll.Content;
+                var tail = repeater.TryGetElement(repeater.ItemsSourceView.Count - 1) as ItemContainer;
+                var content = tail?.Child is Border row ? row.Child as FrameworkElement : null;
+                var bottom = content?.TransformToVisual(scroll).TransformBounds(
+                    new Rect(0, 0, content.ActualWidth, content.ActualHeight)).Bottom;
+                return scroll.State == ScrollingInteractionState.Idle && JumpOpacity() == 0
+                    && Math.Abs(scroll.ScrollableHeight - scroll.VerticalOffset) <= 1
+                    && bottom is { } b && b > 0 && b <= scroll.ViewportHeight + 1;
+            }
+
+            IScrollProvider? scrollProvider = null;
+            await ui.RunOnUIAsync(() =>
+            {
+                var items = Assert.Single(FindDescendants<ItemsView>(surface));
+                foreach (var element in new UIElement[] { items }.Concat(FindDescendants<UIElement>(items)))
+                {
+                    var peer = FrameworkElementAutomationPeer.FromElement(element)
+                        ?? (element is FrameworkElement fe ? FrameworkElementAutomationPeer.CreatePeerForElement(fe) : null);
+                    if (peer?.GetPattern(PatternInterface.Scroll) is IScrollProvider found)
+                    {
+                        scrollProvider = found;
+                        break;
+                    }
+                }
+                Assert.NotNull(scrollProvider);
+            });
+
+            // A screen reader scroll cycle (0% then 100%). On main a correction queued in the same
+            // frame usually returns the view to the tail before the 100% request; honoring the
+            // departure belongs to the ChatScrollPolicy refactor (#2126). Either way, tail corrections
+            // must then reach the true end as rows remeasure. The surface height change above
+            // supplies the growth budget, as the resize does in the Gateway fixture test.
+            var leftTail = false;
+            TypedEventHandler<ScrollView, object> onView = (s, _) =>
+                leftTail |= s.ScrollableHeight - s.VerticalOffset > s.ViewportHeight;
+            await ui.RunOnUIAsync(() =>
+            {
+                Scroll().ViewChanged += onView;
+                scrollProvider!.SetScrollPercent(-1, 0);
+            });
+            try
+            {
+                await ui.RunOnUIAsync(() => WaitForRenderedConditionAsync(
+                    () => leftTail && Scroll().State == ScrollingInteractionState.Idle,
+                    $"{width}: screen reader scroll to the top left the tail", Describe));
+            }
+            finally
+            {
+                await ui.RunOnUIAsync(() => Scroll().ViewChanged -= onView);
+            }
+            var before = "";
+            await ui.RunOnUIAsync(() => before = AtExactTail(Scroll()) ? "returned to the tail" : "still away");
+            await ui.RunOnUIAsync(() => scrollProvider!.SetScrollPercent(-1, 100));
+            await AwaitHeldAsync(
+                $"{width}: screen reader scroll to the end (view {before} before the request) reaches the actual final message",
+                AtExactTail, 4);
+        });
+    }
+
+    private static string FixtureLongMessage(int number)
+    {
+        if (number == 240) return "FIXTURE LONG FINAL MESSAGE 240\n\nThis is the actual last message, not a nearby row.\n\nFIXTURE LONG END 240";
+        var heading = $"Fixture long message {number:D3}";
+        return (number % 5) switch
+        {
+            0 => $"{heading}\n\n- First synthetic observation\n- Second observation with a longer explanation that wraps at narrow widths\n- Third observation\n\nNothing here invokes a provider.",
+            1 => $"{heading}\n\n```csharp\nvar fixture = \"inert text\";\nConsole.WriteLine(fixture);\n```\n\nThis code block is display-only.",
+            2 => $"{heading}\n\n| Item | State |\n| --- | --- |\n| Copper telescope | Parked |\n| Violet compass | Ready |\n\nA small synthetic table.",
+            3 => $"{heading}\n\nA longer paragraph for mixed-height virtualization. The quiet observatory has three windows and a copper telescope. All names and events are fictional.\n\nA second paragraph makes the narrow viewport wrap differently from the wide viewport.",
+            _ => $"{heading}: short synthetic reply."
+        };
     }
 
     [Fact]

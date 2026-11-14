@@ -30,6 +30,10 @@ internal static class TailNavigationPolicy
     public static bool IsAtBottom(double verticalOffset, double scrollableHeight) =>
         Math.Abs(scrollableHeight - verticalOffset) <= TailVisibilityTolerance;
 
+    // A view back at a tail correction's earlier target while the end has since moved away from it.
+    public static bool IsStaleReflowLanding(double verticalOffset, double correctionTarget, double scrollableHeight) =>
+        IsAtBottom(verticalOffset, correctionTarget) && !IsAtBottom(correctionTarget, scrollableHeight);
+
     public static bool TryCapture(
         int tailIndex,
         string? displayedTailKey,
@@ -325,11 +329,29 @@ internal sealed class InitialTailConfirmation
 
 internal sealed class TailReflowCorrection
 {
+    /// <summary>
+    /// Bounds the extent-growth corrections one content revision or one viewport resize may
+    /// start. Virtualized rows can keep remeasuring taller after a correction (for example after
+    /// a UI Automation scroll to the end at a wide width), so one credit is not always enough to
+    /// reach the true end; native remeasurement itself never grants more.
+    /// </summary>
+    public const int MaxGrowthCorrections = 8;
+
     private bool _available;
     private object? _contentRevision;
-    private bool _growthAvailable;
+    private int _growthCredits;
 
     public void Arm() => _available = true;
+
+    /// <summary>
+    /// The viewport changed size: one correction, plus the bounded growth budget, because rows
+    /// reflowed at the new width keep remeasuring after that first correction.
+    /// </summary>
+    public void ViewportResized()
+    {
+        Arm();
+        _growthCredits = MaxGrowthCorrections;
+    }
 
     public void ContentChanged(object revision)
     {
@@ -337,17 +359,20 @@ internal sealed class TailReflowCorrection
             return;
 
         _contentRevision = revision;
-        _growthAvailable = true;
+        _growthCredits = MaxGrowthCorrections;
     }
 
-    public void ArmForExtentGrowth(bool following, bool atBottom, bool initialPending, bool readerOwnsAnchor)
+    public void ArmForExtentGrowth(
+        bool following, bool atBottom, bool initialPending, bool readerOwnsAnchor, bool correctionPending = false)
     {
-        if (!_growthAvailable || !following || atBottom || initialPending || readerOwnsAnchor)
+        // A pending correction reads the newest extent when it dispatches, so further growth before
+        // then needs no credit: the budget counts corrections, not native extent events.
+        if (_growthCredits <= 0 || !following || atBottom || initialPending || readerOwnsAnchor || correctionPending)
             return;
 
-        // A correction can itself remeasure virtual rows. Only another content
-        // revision, not another native extent event, grants a new growth budget.
-        _growthAvailable = false;
+        // A correction can itself remeasure virtual rows. Only another content revision or
+        // viewport resize, not another native extent event, refills the bounded budget.
+        _growthCredits--;
         Arm();
     }
 
@@ -365,6 +390,6 @@ internal sealed class TailReflowCorrection
     public void Clear()
     {
         _available = false;
-        _growthAvailable = false;
+        _growthCredits = 0;
     }
 }
