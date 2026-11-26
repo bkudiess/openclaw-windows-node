@@ -1,0 +1,76 @@
+{
+  "sourceHead": "3859098e3b59123f5fbe01de7794ca29f165db10",
+  "dirtyCorrectionCommittedAs": "7afbe726851054115205b055fdde591ff5d90c4f",
+  "cases": [
+    {
+      "configuration": "debug",
+      "test": "OpenClaw.Tray.UITests.ReactorToolActivityProofTests.FinalRegression_UnknownAggregateDoesNotMaskKnownIndividualRowResult(result: Success, expected: \"Done\")",
+      "outcome": "Passed",
+      "started": "2026-11-25T09:29:22.2166140-08:00",
+      "duration": "00:00:00.0047467"
+    },
+    {
+      "configuration": "debug",
+      "test": "OpenClaw.Tray.UITests.ReactorToolActivityProofTests.FinalRegression_UnknownAggregateDoesNotMaskKnownIndividualRowResult(result: Error, expected: \"failed\")",
+      "outcome": "Passed",
+      "started": "2026-11-25T09:29:22.2232482-08:00",
+      "duration": "00:00:00.0028904"
+    },
+    {
+      "configuration": "debug",
+      "test": "OpenClaw.Tray.UITests.ReactorToolActivityProofTests.ShimmerLifetime_NativeParentRetainsCleanupAcrossManagedWrapperCollection",
+      "outcome": "Passed",
+      "started": "2026-11-25T09:29:26.1062442-08:00",
+      "duration": "00:00:00.0217001"
+    },
+    {
+      "configuration": "debug",
+      "test": "OpenClaw.Tray.UITests.ReactorToolActivityProofTests.RunningTool_UnmountStopsShimmerBeforeItsTextControlCanBeReused",
+      "outcome": "Passed",
+      "started": "2026-11-25T09:29:28.1213724-08:00",
+      "duration": "00:00:00.0077474"
+    },
+    {
+      "configuration": "debug",
+      "test": "OpenClaw.Tray.UITests.ReactorToolActivityProofTests.ShimmerLifetime_RowUnmountAfterCollectionRestoresEveryLabel",
+      "outcome": "Passed",
+      "started": "2026-11-25T09:29:26.0468401-08:00",
+      "duration": "00:00:00.0374465"
+    },
+    {
+      "configuration": "release",
+      "test": "OpenClaw.Tray.UITests.ReactorToolActivityProofTests.ShimmerLifetime_RowUnmountAfterCollectionRestoresEveryLabel",
+      "outcome": "Passed",
+      "started": "2026-11-25T09:32:13.2969798-08:00",
+      "duration": "00:00:00.0291522"
+    },
+    {
+      "configuration": "release",
+      "test": "OpenClaw.Tray.UITests.ReactorToolActivityProofTests.ShimmerLifetime_NativeParentRetainsCleanupAcrossManagedWrapperCollection",
+      "outcome": "Passed",
+      "started": "2026-11-25T09:32:13.3439942-08:00",
+      "duration": "00:00:00.0223952"
+    },
+    {
+      "configuration": "release",
+      "test": "OpenClaw.Tray.UITests.ReactorToolActivityProofTests.FinalRegression_UnknownAggregateDoesNotMaskKnownIndividualRowResult(result: Error, expected: \"failed\")",
+      "outcome": "Passed",
+      "started": "2026-11-25T09:32:09.2346050-08:00",
+      "duration": "00:00:00.0028823"
+    },
+    {
+      "configuration": "release",
+      "test": "OpenClaw.Tray.UITests.ReactorToolActivityProofTests.FinalRegression_UnknownAggregateDoesNotMaskKnownIndividualRowResult(result: Success, expected: \"Done\")",
+      "outcome": "Passed",
+      "started": "2026-11-25T09:32:09.2294298-08:00",
+      "duration": "00:00:00.0041095"
+    },
+    {
+      "configuration": "release",
+      "test": "OpenClaw.Tray.UITests.ReactorToolActivityProofTests.RunningTool_UnmountStopsShimmerBeforeItsTextControlCanBeReused",
+      "outcome": "Passed",
+      "started": "2026-11-25T09:32:15.3731855-08:00",
+      "duration": "00:00:00.0060702"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+ASSERTED NATIVE COLLECTION / RESULT PROOF
+Source: 7afbe726 + exact one-line collection assertion (file SHA256 above)
+Native: ARM64; nonce d1f57f8b7dc747fbb82a648e35e4afee
+Shimmer original wrapper collected: True
+Passed: OpenClaw.Tray.UITests.ReactorToolActivityProofTests.ShimmerLifetime_NativeParentRetainsCleanupAcrossManagedWrapperCollection
+Passed: OpenClaw.Tray.UITests.ReactorToolActivityProofTests.ShimmerLifetime_RowUnmountAfterCollectionRestoresEveryLabel
+Passed: OpenClaw.Tray.UITests.ReactorToolActivityProofTests.FinalRegression_UnknownAggregateDoesNotMaskKnownIndividualRowResult(result: Success, expected: "Done")
+Passed: OpenClaw.Tray.UITests.ReactorToolActivityProofTests.FinalRegression_UnknownAggregateDoesNotMaskKnownIndividualRowResult(result: Error, expected: "failed")
+Executed=4; Passed=4; Failed=0; Skipped=0
+The collection precondition is asserted before native-parent reacquisition.
+A passing collection case also asserts gradient presence under enabled animation,
+TextShimmer(false), restored non-gradient foreground, and retained text.
+Its outer finally stops surviving labels and clears the native parent even on failure.
+The matching owned scheduled task was removed after this focused execution.
+This is not a global process-cleanup claim while the subsequent full suite runs.

@@ -1,0 +1,12 @@
+[
+  {
+    "test": "OpenClaw.Tray.UITests.ReactorToolActivityProofTests.ShimmerLifetime_RowUnmountAfterCollectionRestoresEveryLabel",
+    "outcome": "Failed",
+    "message": "Assert.All() Failure: 1 out of 4 items in the collection did not pass.\r\n[1]: Item:  TextBlock { AccessKey = \"\", AccessKeyScopeOwner = null, ActualHeight = 0, ActualOffset = <0, 0, 0>, ActualSize = <0, 0>, \u00b7\u00b7\u00b7 }\r\n     Error: Assert.IsNotType() Failure: Value is the exact type\r\n            Expected: typeof(Microsoft.UI.Xaml.Media.LinearGradientBrush)\r\n            Actual:   typeof(Microsoft.UI.Xaml.Media.LinearGradientBrush)"
+  },
+  {
+    "test": "OpenClaw.Tray.UITests.ReactorToolActivityProofTests.ShimmerLifetime_NativeParentRetainsCleanupAcrossManagedWrapperCollection",
+    "outcome": "Failed",
+    "message": "Assert.IsNotType() Failure: Value is the exact type\r\nExpected: typeof(Microsoft.UI.Xaml.Media.LinearGradientBrush)\r\nActual:   typeof(Microsoft.UI.Xaml.Media.LinearGradientBrush)"
+  }
+]

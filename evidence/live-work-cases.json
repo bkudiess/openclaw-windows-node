@@ -1,0 +1,15 @@
+{
+  "passed": "2",
+  "failed": "0",
+  "executed": "2",
+  "cases": [
+    {
+      "test": "OpenClaw.Tray.UITests.ReactorChatLayoutProofTests.LiveWork_KeepsRunningRowsAndProgressOnTheReadingColumn(width: 480)",
+      "outcome": "Passed"
+    },
+    {
+      "test": "OpenClaw.Tray.UITests.ReactorChatLayoutProofTests.LiveWork_KeepsRunningRowsAndProgressOnTheReadingColumn(width: 1100)",
+      "outcome": "Passed"
+    }
+  ]
+}
