@@ -1,13 +1,18 @@
 [
   {
     "path": "README.md",
-    "bytes": 5564,
-    "sha256": "6d9ebb375ec5abc94c6d176eb90f8a1ce146727dd58ab906a869f530223cfc90"
+    "bytes": 6088,
+    "sha256": "0fade0f6f147eb250e286617f8dc0f03ab358d7276b6e551f4e8d33b646277b6"
   },
   {
     "path": "evidence/asserted-collection-and-results.json",
     "bytes": 2017,
     "sha256": "009048ce07eff3090673a047585e3f37b72dff334e4ac8db6f75c240880e0e45"
+  },
+  {
+    "path": "evidence/assertion-bearing-source-manifest.json",
+    "bytes": 7450,
+    "sha256": "07ef4313ed2e2726fa7e2056805e98ed5c228cc31088545c66f9cf646e3a85de"
   },
   {
     "path": "evidence/capture-source-manifest.json",
@@ -16,8 +21,13 @@
   },
   {
     "path": "evidence/cleanup-trace.txt",
-    "bytes": 1323,
-    "sha256": "4f68206036b99e0cc81358ca5469bd3911d8d93045d6bf790b08a410f7a4128f"
+    "bytes": 1724,
+    "sha256": "e6ad4cbc254a10f6bcd8d55f2b9b5f4bbaf32a7058fe9f39d2328888783fd428"
+  },
+  {
+    "path": "evidence/final-asserted-native-proof.json",
+    "bytes": 2968,
+    "sha256": "02e7aa45eefd8bdc6c6ab357919451ed053b0cc0ad8d3910759c0b99deb36ca9"
   },
   {
     "path": "evidence/gc-before.json",

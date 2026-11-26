@@ -13,3 +13,11 @@ TextShimmer(false), restored non-gradient foreground, and retained text.
 Its outer finally stops surviving labels and clears the native parent even on failure.
 The matching owned scheduled task was removed after this focused execution.
 This is not a global process-cleanup claim while the subsequent full suite runs.
+
+FINAL ASSERTION-BEARING CLOSEOUT
+Commit: 51438fac7b2e139f76bdae90e19077531dd7435a
+Full native selection: 77/77 Debug; 77/77 Release; zero skipped.
+Collection sentinel recorded True in both runs; required assertion passed.
+All43 recorded source hashes match this committed source.
+Final owned app/test processes: []; parity scheduled tasks: [].
+Cleanup observed: 2026-11-26T02:07:06.6784938Z.

@@ -1,0 +1,101 @@
+{
+  "commit": "51438fac7b2e139f76bdae90e19077531dd7435a",
+  "testedBase": "7afbe726851054115205b055fdde591ff5d90c4f",
+  "testedSource": "base plus exact one-line sentinel assertion; committed bytes match all43 runtime-source hashes",
+  "nativeArchitecture": "ARM64",
+  "runId": "run_b437bce6deac8d68f805ab6798a9b65f",
+  "counters": [
+    {
+      "configuration": "debug",
+      "total": "77",
+      "executed": "77",
+      "passed": "77",
+      "failed": "0",
+      "error": "0",
+      "timeout": "0",
+      "aborted": "0",
+      "inconclusive": "0",
+      "passedButRunAborted": "0",
+      "notRunnable": "0",
+      "notExecuted": "0",
+      "disconnected": "0",
+      "warning": "0",
+      "completed": "0",
+      "inProgress": "0",
+      "pending": "0"
+    },
+    {
+      "configuration": "release",
+      "total": "77",
+      "executed": "77",
+      "passed": "77",
+      "failed": "0",
+      "error": "0",
+      "timeout": "0",
+      "aborted": "0",
+      "inconclusive": "0",
+      "passedButRunAborted": "0",
+      "notRunnable": "0",
+      "notExecuted": "0",
+      "disconnected": "0",
+      "warning": "0",
+      "completed": "0",
+      "inProgress": "0",
+      "pending": "0"
+    }
+  ],
+  "collectionAndCleanup": [
+    {
+      "configuration": "debug",
+      "lines": [
+        "Shimmer original wrapper collected: True"
+      ]
+    },
+    {
+      "configuration": "debug",
+      "test": "OpenClaw.Tray.UITests.ReactorToolActivityProofTests.ShimmerLifetime_RowUnmountAfterCollectionRestoresEveryLabel",
+      "outcome": "Passed",
+      "startTime": "2026-11-25T18:02:41.9445289-08:00"
+    },
+    {
+      "configuration": "debug",
+      "test": "OpenClaw.Tray.UITests.ReactorToolActivityProofTests.ShimmerLifetime_NativeParentRetainsCleanupAcrossManagedWrapperCollection",
+      "outcome": "Passed",
+      "startTime": "2026-11-25T18:02:41.9949439-08:00"
+    },
+    {
+      "configuration": "release",
+      "lines": [
+        "Shimmer original wrapper collected: True"
+      ]
+    },
+    {
+      "configuration": "release",
+      "test": "OpenClaw.Tray.UITests.ReactorToolActivityProofTests.ShimmerLifetime_RowUnmountAfterCollectionRestoresEveryLabel",
+      "outcome": "Passed",
+      "startTime": "2026-11-25T18:05:46.2183291-08:00"
+    },
+    {
+      "configuration": "release",
+      "test": "OpenClaw.Tray.UITests.ReactorToolActivityProofTests.ShimmerLifetime_NativeParentRetainsCleanupAcrossManagedWrapperCollection",
+      "outcome": "Passed",
+      "startTime": "2026-11-25T18:05:46.2765584-08:00"
+    }
+  ],
+  "sourceFileCount": 43,
+  "sourceMismatches": 0,
+  "finalOwnedAppOrTestProcesses": [],
+  "finalParityTasks": [],
+  "cleanupObservedUtc": "2026-11-26T02:07:06.6784938Z",
+  "fullBuild": "passed",
+  "shared": {
+    "passed": 5981,
+    "skipped": 28,
+    "failed": 0
+  },
+  "tray": {
+    "passed": 7009,
+    "skipped": 0,
+    "failed": 0
+  }
+}
