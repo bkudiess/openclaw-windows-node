@@ -1,0 +1,14 @@
+{
+  "file": "tests/OpenClaw.Tray.UITests/ReactorToolActivityProofTests.cs",
+  "commit": "51438fac7b2e139f76bdae90e19077531dd7435a",
+  "recordedRuntimeRawSha256": "2CB437A716343DE920C32A313ECE7ABDBF1724863593840ECA1165EBCBFBB307",
+  "currentWorkingTreeRawSha256": "2CB437A716343DE920C32A313ECE7ABDBF1724863593840ECA1165EBCBFBB307",
+  "committedLfBlobSha256": "846f82e443b9d038b4dd10263d3ae2e5fdda1bc5c95f703e81ef3d128d4ae386",
+  "committedGitBlobId": "bcca110085c52eb180603cb0f41656e6c50f3a02",
+  "workingTreeAfterGitCleanBlobId": "bcca110085c52eb180603cb0f41656e6c50f3a02",
+  "rawRuntimeMatch": true,
+  "canonicalGitBlobMatch": true,
+  "lfContentMatches": true,
+  "rawCRLFCount": 2183,
+  "rawBareLFCount": 2
+}

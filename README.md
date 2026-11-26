@@ -54,3 +54,7 @@ Source: Release fixture nonce `045dc02856f24232b58505d7dd8b6ae0`, `completed-run
 The broad native accessibility category is not signed off: fresh merged-source runs had Debug 39/41 and Release 38/41 passing. Remaining failures are the unchanged native Dashboard ButtonShouldHavePatterns rule, a Sessions action-name mismatch, and a Release foreign-foreground clipboard refusal. The merged Dashboard E2E desktop-viewport fix does not establish repair of that different native rule. No foreground guard, tolerance or accessibility assertion was bypassed.
 
 This package supports the changed chat/activity/footer and native lifetime boundaries only. It is not full cross-client pixel equivalence or completion of an entire proof pool. The PR stays a draft unless its owner separately changes that state.
+
+## Native test digest normalization
+
+The runtime test file has mixed line endings (2,183 CRLF and two bare LF). Its recorded raw SHA256 is `2CB437A716343DE920C32A313ECE7ABDBF1724863593840ECA1165EBCBFBB307`. The committed LF-normalized blob SHA256 is `846f82e443b9d038b4dd10263d3ae2e5fdda1bc5c95f703e81ef3d128d4ae386`; the committed Git blob ID and the runtime working tree after Git clean both equal `bcca110085c52eb180603cb0f41656e6c50f3a02`. [Exact raw/canonical hash mapping](evidence/native-test-digest-correspondence.json). This resolves the source-correspondence qualification without pretending the raw Windows bytes equal the Git blob bytes. No source or runtime result was changed.

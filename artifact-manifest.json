@@ -3,8 +3,8 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 6088,
-      "sha256": "0fade0f6f147eb250e286617f8dc0f03ab358d7276b6e551f4e8d33b646277b6"
+      "bytes": 6780,
+      "sha256": "57f14a85bc11f76543031189e7d91b34e108057d933a9f977ce14c1213dc6fdc"
     },
     {
       "path": "evidence/asserted-collection-and-results.json",
@@ -45,6 +45,11 @@
       "path": "evidence/native-77-counts.json",
       "bytes": 786,
       "sha256": "2282af55824ea13ecac96c56e32a9f77def608d58fbb113f5a5b9e3325ddd34a"
+    },
+    {
+      "path": "evidence/native-test-digest-correspondence.json",
+      "bytes": 709,
+      "sha256": "4637280ccc3689746ccfe33e5be259e7c43b3a3649632046b612cfb224dc2922"
     },
     {
       "path": "evidence/result-and-cleanup-cases.json",
